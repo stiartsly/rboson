@@ -1,0 +1,14 @@
+[package]
+name = "rustPhoton"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "boson"
+path = "src/core/id.rs"
+
+[[bin]]
+name = "boson"
+path = "main.rs"
+
+[dependencies]

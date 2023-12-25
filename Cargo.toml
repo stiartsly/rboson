@@ -1,14 +1,54 @@
 [package]
-name = "rustPhoton"
+name = "rphoton"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+opt-level = 0
+debug = true
+
 [lib]
 name = "boson"
-path = "src/core/id.rs"
+path = "src/core/lib.rs"
+
+[[test]]
+name = "apitests"
+path = "tests/apitests/mod.rs"
 
 [[bin]]
-name = "boson"
-path = "main.rs"
+name = "shell"
+path = "apps/shell/main.rs"
+
+[[bin]]
+name = "target"
+path = "apps/target/main.rs"
+
+[features]
+devp = []
+inspect = ["devp"]
 
 [dependencies]
+log     = "0.4.20"
+bs58    = "0.5.0"
+hex     = "0.4"
+libc    = "0.2.151"
+sha2    = "0.10.8"
+rbtree  = "0.2.0"
+
+diesel  = { version = "2.2.3", features = ["sqlite"] }
+tokio   = { version = "1.35.1", features = ["full"] }
+
+ciborium                = "0.2.1"
+ciborium-io             = "0.2.1"
+serde                   = "1.0"
+serde_json              = "1.0"
+libsodium-sys-stable    = "1.20.4"
+static_assertions       = "1.1.0"
+unicode-normalization   = "0.1.22"
+get_if_addrs            = "0.5.3"
+
+[dev-dependencies]
+serial_test = "2.0"
+
+#[package.metadata.test]
+#threads = 1

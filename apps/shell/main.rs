@@ -3,7 +3,7 @@ use tokio::time::Duration;
 
 use boson::{
     Node,
-    default_configuration as cfg
+    configuration as cfg
 };
 
 #[tokio::main]

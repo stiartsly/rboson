@@ -9,22 +9,25 @@ use std::collections::LinkedList;
 use core::ops::Deref;
 use serial_test::serial;
 
+use crate::unitests::{
+    create_random_bytes,
+    working_path,
+    remove_working_path
+};
+
 use crate::{
+    local_addr,
     signature,
-    default_configuration as config,
-    cryptobox::CryptoBox,
+    NodeInfo,
+    CryptoBox,
+    LookupOption,
+    configuration as config,
+};
+
+use crate::core::{
     node_runner::NodeRunner,
     bootstrap_channel::BootstrapChannel,
-    future::Command,
-};
-use crate::{
-    create_random_bytes,
-    local_addr,
-    working_path,
-    remove_working_path,
-    NodeInfo,
-    LookupOption,
-    future::FindNodeCmd,
+    future::{Command, FindNodeCmd}
 };
 
 static mut PATH1: Option<String> = None;

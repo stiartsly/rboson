@@ -9,7 +9,7 @@ debug = true
 
 [lib]
 name = "boson"
-path = "src/core/lib.rs"
+path = "src/lib.rs"
 
 [[test]]
 name = "apitests"

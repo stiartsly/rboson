@@ -9,9 +9,12 @@ use log::debug;
 use crate::{
     addr_family,
     NodeInfo,
+    Error
+};
+
+use crate::core::{
     rpccall::{RpcCall, State as CallState},
     dht::DHT,
-    error::Error,
     msg::msg::Msg,
 };
 

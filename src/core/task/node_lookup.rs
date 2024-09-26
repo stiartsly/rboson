@@ -4,17 +4,20 @@ use std::cell::RefCell;
 use log::error;
 
 use crate::{
-    constants,
-    id::MAX_ID,
     Id,
-    NodeInfo,
+    id::MAX_ID,
     Network,
+    NodeInfo
+};
+
+use crate::core::{
+    constants,
     rpccall::RpcCall,
     dht::DHT,
     kclosest_nodes::KClosestNodes,
 };
 
-use crate::msg::{
+use crate::core::msg::{
     find_node_req as req,
     find_node_rsp as rsp,
     msg::{Method, Kind, Msg},

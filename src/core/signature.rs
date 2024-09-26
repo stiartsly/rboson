@@ -22,8 +22,12 @@ use libsodium_sys::{
 
 use crate::{
     as_uchar_ptr,
-    as_uchar_ptr_mut,
-    error::{Error, Result},
+    as_uchar_ptr_mut
+};
+
+use crate::{
+    Error,
+    error::Result,
 };
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);

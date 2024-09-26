@@ -1,4 +1,4 @@
-use crate::node_info::NodeInfo;
+use crate::core::node_info::NodeInfo;
 
 pub(crate) struct BootstrapChannel {
     nodes: Vec<NodeInfo>,

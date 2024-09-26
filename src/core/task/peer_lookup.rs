@@ -4,16 +4,19 @@ use std::cell::RefCell;
 use log::error;
 
 use crate::{
-    constants,
     Id,
     Network,
-    PeerInfo,
+    PeerInfo
+};
+
+use crate::core::{
+    constants,
     dht::DHT,
     rpccall::RpcCall,
     kclosest_nodes::KClosestNodes,
 };
 
-use crate::msg::{
+use crate::core::msg::{
     find_peer_req as req,
     find_peer_rsp as rsp,
     msg::{Method, Kind, Msg},

@@ -4,12 +4,16 @@ use std::any::Any;
 use ciborium::Value as CVal;
 
 use crate::{
-    version,
     Id,
     Value,
     cryptobox::Nonce,
-    value::PackBuilder,
-    error::{Error, Result},
+    Error,
+    error::Result
+};
+
+use crate::core::{
+    version,
+    value::PackBuilder
 };
 
 use super::msg::{

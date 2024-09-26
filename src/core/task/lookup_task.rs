@@ -3,15 +3,18 @@ use std::cell::RefCell;
 
 use crate::{
     is_bogon_addr,
-    constants,
     Id,
-    NodeInfo,
+    NodeInfo
+};
+
+use crate::core::{
+    constants,
     node_info::Reachable,
     rpccall::RpcCall,
     dht::DHT,
 };
 
-use crate::msg::lookup_rsp::{
+use crate::core::msg::lookup_rsp::{
     Msg as LookupResponse,
 };
 

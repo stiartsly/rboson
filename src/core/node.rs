@@ -9,25 +9,29 @@ use std::sync::{Arc, Mutex};
 use log::{error, info};
 
 use crate::{
-    constants,
-    logger,
-    signature,
-    cryptobox,
     create_dirs,
-    id::MIN_ID,
     Id,
+    id::MIN_ID,
     Config,
-    error::{Error, Result},
+    Error,
+    error::Result,
     NodeInfo,
     NodeStatus,
-    Value,
     PeerInfo,
-    signature::KeyPair,
+    Value,
+    signature,
+    cryptobox,
     cryptobox::Nonce,
     LookupOption,
     JointResult,
+};
+
+use crate::core::{
+    constants,
+    logger,
+    node_runner,
+    node_runner::NodeRunner,
     bootstrap_channel::BootstrapChannel,
-    node_runner::{self, NodeRunner},
     future::{
         Cmd,
         Command,
@@ -546,7 +550,7 @@ impl Node {
     }
 }
 
-fn get_keypair(path: &str) -> Result<KeyPair> {
+fn get_keypair(path: &str) -> Result<signature::KeyPair> {
     create_dirs(path).map_err(|e| {
         return Error::State(format!("Checking persistence error: {}", e));
     }).ok().unwrap();
@@ -567,7 +571,7 @@ fn get_keypair(path: &str) -> Result<KeyPair> {
         },
         Err(_) => {
             // otherwise, generate a fresh keypair
-            keypair = KeyPair::random();
+            keypair = signature::KeyPair::random();
             store_key(&keypath, &keypair)
                 .map_err(|e|return e)
                 .ok()
@@ -578,7 +582,7 @@ fn get_keypair(path: &str) -> Result<KeyPair> {
     Ok(keypair)
 }
 
-fn load_key(path: &str) -> Result<KeyPair> {
+fn load_key(path: &str) -> Result<signature::KeyPair> {
     let mut fp = match File::open(path) {
         Ok(v) => v,
         Err(e) => return Err(Error::Io(
@@ -595,10 +599,10 @@ fn load_key(path: &str) -> Result<KeyPair> {
             "Incorrect key size {}", buf.len())));
     }
 
-    KeyPair::try_from(buf.as_slice())
+    signature::KeyPair::try_from(buf.as_slice())
 }
 
-fn store_key(path: &str, keypair: &KeyPair) -> Result<()> {
+fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
     let mut fp = match File::create(path) {
         Ok(v) => v,
         Err(e) => return Err(Error::Io(

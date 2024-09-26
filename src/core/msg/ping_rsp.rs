@@ -2,7 +2,7 @@ use std::fmt;
 use std::any::Any;
 use ciborium::Value as CVal;
 
-use crate::{
+use crate::core::{
     version,
     error::{Error, Result},
 };

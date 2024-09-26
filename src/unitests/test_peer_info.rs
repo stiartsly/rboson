@@ -1,7 +1,13 @@
+use crate::unitests::{
+    create_random_bytes
+};
+
 use crate::{
-    create_random_bytes,
-    id::Id,
-    PeerInfo,
+    Id,
+    PeerInfo
+};
+
+use crate::core::{
     peer_info::PackBuilder
 };
 

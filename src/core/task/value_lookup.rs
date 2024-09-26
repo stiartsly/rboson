@@ -4,10 +4,13 @@ use std::cell::RefCell;
 use log::{warn, error};
 
 use crate::{
-    constants,
     Id,
     Value,
-    Network,
+    Network
+};
+
+use crate::core::{
+    constants,
     dht::DHT,
     rpccall::RpcCall,
     kclosest_nodes::KClosestNodes,
@@ -15,7 +18,7 @@ use crate::{
     msg::find_value_rsp as rsp,
 };
 
-use crate::msg::{
+use crate::core::msg::{
     msg::{Method, Kind, Msg},
     lookup_req::{Msg as LookupRequest},
     lookup_rsp::{Msg as LookupResponse},

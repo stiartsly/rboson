@@ -4,14 +4,14 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use log::{error, debug};
 
-use crate::{
+use crate::core::{
     kbucket::KBucket,
     kbucket_entry::KBucketEntry,
     rpccall::RpcCall,
     dht::DHT,
 };
 
-use crate::msg::{
+use crate::core::msg::{
     ping_req::Message,
     msg::Msg,
 };

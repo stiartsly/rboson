@@ -4,12 +4,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use log::error;
 
-use crate::{
-    Value,
-    dht::DHT
-};
-
-use crate::msg::{
+use crate::Value;
+use crate::core::dht::DHT;
+use crate::core::msg::{
     store_value_req as req,
     msg::Msg
 };

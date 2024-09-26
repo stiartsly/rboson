@@ -4,7 +4,7 @@ use tokio::time::sleep;
 use serial_test::serial;
 
 use boson::{
-    default_configuration as cfg,
+    configuration as cfg,
     Id,
     NodeInfo,
     Node,
@@ -438,6 +438,251 @@ async fn test_find_peer() {
                 assert_eq!(v[0].is_delegated(), false);
             },
             Err(e) => panic!("Find peer error: {}", e),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_get_value() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+
+        assert_eq!(node1.is_running(), true);
+
+        let data = create_random_bytes(32);
+        let value = ValueBuilder::new(&data)
+            .build()
+            .expect("Failed to build immutable value");
+
+        match node1.store_value(&value, None).await {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+
+        let value_id = value.id();
+        let result = node1.value(&value_id).await;
+        match result {
+            Ok(Some(v)) => {
+                assert_eq!(v.id(), value_id);
+                assert_eq!(v, value);
+            },
+            Ok(None) => {
+                assert!(false);
+                panic!("Should have found the value");
+            },
+            Err(e) => panic!("get value error: {}", e),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_get_peer() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+        assert_eq!(node1.is_running(), true);
+
+        let peer = PeerBuilder::new(node1.id())
+            .with_port(65534)
+            .with_alternative_url("http://example.com")
+            .build();
+
+        match node1.announce_peer(&peer, None).await {
+            Ok(_) => assert!(true),
+            Err(e) => panic!("Announce value error: {}", e)
+        }
+
+        let peer_id = peer.id();
+        let result = node1.peer(peer_id).await;
+        match result {
+            Ok(Some(v)) => {
+                assert_eq!(v.id(), peer_id);
+                assert_eq!(v, peer);
+            },
+            Ok(None) => {
+                assert!(false);
+                panic!("Should have found the peer");
+            },
+            Err(e) => panic!("get peer error: {}", e),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_remove_value() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+
+        assert_eq!(node1.is_running(), true);
+
+        let data = create_random_bytes(32);
+        let value = ValueBuilder::new(&data)
+            .build()
+            .expect("Failed to build immutable value");
+
+        match node1.store_value(&value, None).await {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+
+        let value_id = value.id();
+        let result = node1.remove_value(&value_id).await;
+        match result {
+            Ok(_) => assert!(true),
+            Err(e) => panic!("remove value error: {}", e),
+        }
+
+        let result = node1.value(&value_id).await;
+        match result {
+            Ok(Some(_)) => assert!(false),
+            Ok(None) => assert!(true),
+            Err(e) => panic!("get value error: {}", e),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_remove_peer() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+
+        let peer = PeerBuilder::new(node1.id())
+            .with_port(65534)
+            .with_alternative_url("http://example.com")
+            .build();
+
+        match node1.announce_peer(&peer, None).await {
+            Ok(_) => assert!(true),
+            Err(e) => panic!("Announce value error: {}", e)
+        }
+
+        let peer_id = peer.id();
+        let result = node1.remove_peer(&peer_id).await;
+        match result {
+            Ok(_) => assert!(true),
+            Err(e) => panic!("remove peer error: {}", e),
+        }
+
+        let result = node1.peer(&peer_id).await;
+        match result {
+            Ok(Some(_)) => assert!(false),
+            Ok(None) => assert!(true),
+            Err(e) => panic!("get peer error: {}", e),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_get_value_ids() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+        assert_eq!(node1.is_running(), true);
+
+        let data1 = create_random_bytes(32);
+        let value1 = ValueBuilder::new(&data1)
+            .build()
+            .unwrap();
+
+        let data2 = create_random_bytes(32);
+        let value2 = ValueBuilder::new(&data2)
+            .build()
+            .unwrap();
+
+        let result = tokio::join!(
+            node1.store_value(&value1, None),
+            node1.store_value(&value2, None)
+        );
+
+        match result.0 {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+        match result.1 {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+
+        let result = node1.value_ids().await;
+        match result {
+            Ok(ids) => {
+                assert_eq!(ids.len(), 2);
+                assert_ne!(ids[0], ids[1]);
+                assert_eq!(ids[0].clone() == value1.id() || ids[1].clone() == value1.id(), true);
+                assert_eq!(ids[0].clone() == value2.id() || ids[1].clone() == value2.id(), true);
+            },
+            Err(_) => panic!("testcase failed"),
+        }
+    }
+    teardown()
+}
+
+#[tokio::test]
+#[serial]
+async fn test_get_peer_ids() {
+    setup();
+    sleep(Duration::from_secs(2)).await;
+
+    unsafe {
+        let node1 = NODE1.as_mut().unwrap();
+        assert_eq!(node1.is_running(), true);
+
+        let peer1 = PeerBuilder::new(node1.id())
+            .with_port(65534)
+            .with_alternative_url("http://example1.com")
+            .build();
+
+        let peer2 = PeerBuilder::new(node1.id())
+            .with_port(65535)
+            .with_alternative_url("http://example2.com")
+            .build();
+
+        let result = tokio::join!(
+            node1.announce_peer(&peer1, None),
+            node1.announce_peer(&peer2, None)
+        );
+
+        match result.0 {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+        match result.1 {
+            Ok(_) => assert!(true),
+            Err(_) => panic!("testcase failed")
+        }
+
+        let result = node1.peer_ids().await;
+        match result {
+            Ok(ids) => {
+                assert_eq!(ids.len(), 2);
+                assert_ne!(ids[0], ids[1]);
+                assert_eq!(ids[0] == peer1.id().clone() || ids[1] == peer1.id().clone(), true);
+                assert_eq!(ids[0] == peer2.id().clone() || ids[1] == peer2.id().clone(), true);
+            },
+            Err(_) => panic!("testcase failed"),
         }
     }
     teardown()

@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use crate::node_info::NodeInfo;
+use crate::core::node_info::NodeInfo;
 
 pub trait Config: Send + Sync {
     fn addr4(&self) -> Option<&SocketAddr>;

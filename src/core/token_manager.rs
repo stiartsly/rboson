@@ -1,44 +1,38 @@
+use std::mem;
 use std::net::{IpAddr, SocketAddr};
+use std::cell::RefCell;
 use std::time::SystemTime;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    as_millis,
+    randomize_bytes,
     Id,
 };
 
-#[allow(dead_code)]
 const TOKEN_TIMEOUT: u128 = 5 * 60 * 1000; // 5 minutes
 
-#[allow(dead_code)]
 pub(crate) struct TokenManager {
     session_secret: [u8; 32],
-    timestamp: SystemTime,
-    previous_timestamp: SystemTime,
+    timestamp: RefCell<SystemTime>,
+    previous_timestamp: RefCell<SystemTime>,
 }
 
-#[allow(dead_code)]
 impl TokenManager {
     pub(crate) fn new() -> Self {
         let mut seed = [0u8; 32];
-        unsafe {
-            libsodium_sys::randombytes_buf(
-                seed.as_mut_ptr() as *mut libc::c_void,
-                32
-            );
-        }
+        randomize_bytes(&mut seed);
+
         TokenManager {
             session_secret: seed,
-            timestamp: SystemTime::now(),
-            previous_timestamp: SystemTime::UNIX_EPOCH,
+            timestamp: RefCell::new(SystemTime::now()),
+            previous_timestamp: RefCell::new(SystemTime::now()),
         }
     }
 
-    fn update_token_timestamp(&mut self) {
-        while self.timestamp.elapsed().unwrap().as_millis() > TOKEN_TIMEOUT {
-            self.previous_timestamp = self.timestamp;
-            self.timestamp = SystemTime::now();
-            break;
+    fn update_token_timestamp(&self) {
+        if self.timestamp.borrow().elapsed().unwrap().as_millis() > TOKEN_TIMEOUT {
+            *self.previous_timestamp.borrow_mut() = *self.timestamp.borrow();
+            *self.timestamp.borrow_mut() = SystemTime::now();
         }
     }
 
@@ -51,16 +45,13 @@ impl TokenManager {
         generate_token(nodeid, addr, target, &self.timestamp, &self.session_secret)
     }
 
-    pub(crate) fn verify_token(
-        &mut self,
-        _token: i32,
-        _nodeid: &Id,
-        _addr: &SocketAddr,
-        _target: &Id,
+    pub(crate) fn verify_token(&self,
+        token: i32,
+        nodeid: &Id,
+        addr: &SocketAddr,
+        target: &Id,
     ) -> bool {
-/*
         self.update_token_timestamp();
-
         if token == generate_token(
             nodeid,
             addr,
@@ -77,10 +68,7 @@ impl TokenManager {
             target,
             &self.previous_timestamp,
             &self.session_secret,
-        );
-*/
-        // TODO:
-        true
+        )
     }
 }
 
@@ -88,38 +76,40 @@ fn generate_token(
     nodeid: &Id,
     addr: &SocketAddr,
     target: &Id,
-    timestamp: &SystemTime,
+    timestamp: &RefCell<SystemTime>,
     secret: &[u8],
 ) -> i32 {
-    let mut input = Vec::with_capacity(2 // port size
+    let mut input: Vec<u8> = Vec::with_capacity(
+        mem::size_of::<u16>()   // port size
         + nodeid.as_bytes().len()
         + target.as_bytes().len()
         + match addr.ip() {
             IpAddr::V4(_) => 4,  // 4bytes for IPv4
             IpAddr::V6(_) => 16, // 6bytes for IPv6
         }
-        + 8  // timestamp in milliseconds (assuming u64)
+        + mem::size_of::<u64>() // timestamp in milliseconds (assuming u64)
         + secret.len()
     );
 
-    input.extend_from_slice(nodeid.as_bytes());
-    input.extend_from_slice(&addr.port().to_le_bytes());
-    input.extend_from_slice(target.as_bytes());
+    let duration = timestamp.borrow().duration_since(SystemTime::UNIX_EPOCH).unwrap();
 
+    // nodeId + ip + port + targetId + timestamp + sessionSecret
+    input.extend_from_slice(nodeid.as_bytes());
     match addr.ip() {
         IpAddr::V4(ipv4) => input.extend_from_slice(&ipv4.octets()),
         IpAddr::V6(ipv6) => input.extend_from_slice(&ipv6.octets()),
     };
-
-    input.extend_from_slice(&(as_millis!(timestamp) as u64).to_le_bytes());
+    input.extend_from_slice(&addr.port().to_le_bytes());
+    input.extend_from_slice(target.as_bytes());
+    input.extend_from_slice(&(duration.as_millis() as u64).to_le_bytes());
     input.extend_from_slice(secret);
 
     let digest = Sha256::digest(input);
-    let pos = (digest[0] & 0xff) & 0x1f; // mod 32
-    let token = ((digest[pos as usize] as u32) << 24)
-        | ((digest[(pos as usize + 1) & 0x1f] as u32) << 16)
-        | ((digest[(pos as usize + 2) & 0x1f] as u32) << 8)
-        |  (digest[(pos as usize + 3) & 0x1f] as u32);
 
-    token as i32
+    let pos = ((digest[0] & 0xff) & 0x1f) as u8; // mod 32
+    ((((digest[pos as usize] & 0xff) as u32) << 24) |
+        (((digest[(pos as usize + 1) & 0x1f] & 0xff) as u32) << 16)|
+        (((digest[(pos as usize + 2) & 0x1f] & 0xff) as u32) << 8) |
+        ((digest[(pos as usize + 3) & 0x1f] & 0xff) as u32))
+    as i32
 }

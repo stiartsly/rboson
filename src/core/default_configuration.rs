@@ -10,12 +10,16 @@ use std::fs;
 use serde::Deserialize;
 
 use crate::{
-    constants,
     local_addr,
     Id,
     NodeInfo,
-    config::Config,
-    error::{Error, Result},
+    Config,
+    Error,
+    error::Result
+};
+
+use crate::core::{
+    constants
 };
 
 #[derive(Deserialize)]

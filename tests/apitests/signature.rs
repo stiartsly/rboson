@@ -1,7 +1,7 @@
 use boson::{
     Id,
+    signature,
     signature::{
-        self,
         PrivateKey,
         PublicKey,
         KeyPair,

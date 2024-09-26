@@ -4,12 +4,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use log::error;
 
-use crate::{
-    PeerInfo,
-    dht::DHT
-};
-
-use crate::msg::{
+use crate::PeerInfo;
+use crate::core::dht::DHT;
+use crate::core::msg::{
     msg::Msg,
     announce_peer_req as req,
 };

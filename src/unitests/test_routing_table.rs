@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
-use crate::{
+use crate::core::{
     id::Id,
     kbucket_entry::KBucketEntry,
     routing_table::RoutingTable,

@@ -2,9 +2,9 @@ use std::time::SystemTime;
 
 use crate::{
     Id,
-    PeerInfo,
     Value,
-    error::Result,
+    PeerInfo,
+    error::Result
 };
 
 pub(crate) trait DataStorage {

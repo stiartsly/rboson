@@ -1,6 +1,14 @@
-use boson::id::Id;
-use boson::NodeInfo;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{
+    IpAddr,
+    Ipv4Addr,
+    Ipv6Addr,
+    SocketAddr
+};
+
+use boson::{
+    Id,
+    NodeInfo
+};
 
 /*
  * APIs for testcase
@@ -62,33 +70,32 @@ fn test_matches_with_same_addr() {
     let id1 = Id::random();
     let id2 = Id::random();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-    let node1 = NodeInfo::new(id1.clone(), addr.clone());
-    let node2 = NodeInfo::new(id2.clone(), addr.clone());
-    assert_eq!(node1.matches(&node2), true);
-    assert_ne!(node1.id(), node2.id());
-    assert_eq!(node1.socket_addr(), node2.socket_addr());
-    assert_eq!(node1.version(), node2.version());
+    let ni1 = NodeInfo::new(id1.clone(), addr.clone());
+    let ni2 = NodeInfo::new(id2.clone(), addr.clone());
+    assert_eq!(ni1.matches(&ni2), true);
+    assert_ne!(ni1.id(), ni2.id());
+    assert_eq!(ni1.socket_addr(), ni2.socket_addr());
+    assert_eq!(ni1.version(), ni2.version());
 }
 
 #[test]
 fn test_version() {
     let id = Id::random();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-    let mut node = NodeInfo::new(id.clone(), addr.clone());
-    node.set_version(5);
-    assert_eq!(node.id(), &id);
-    assert_eq!(node.socket_addr(), &addr);
-    assert_eq!(node.version(), 5);
+    let ni = NodeInfo::with_version(id.clone(), addr.clone(), 5);
+    assert_eq!(ni.id(), &id);
+    assert_eq!(ni.socket_addr(), &addr);
+    assert_eq!(ni.version(), 5);
 }
 
 #[test]
 fn test_equal() {
     let id = Id::random();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-    let node1 = NodeInfo::new(id.clone(), addr.clone());
-    let node2 = NodeInfo::new(id.clone(), addr.clone());
-    assert_eq!(node1, node2);
-    assert_eq!(node1.id(), node2.id());
-    assert_eq!(node1.socket_addr(), node2.socket_addr());
-    assert_eq!(node1.version(), node2.version());
+    let ni1 = NodeInfo::new(id.clone(), addr.clone());
+    let ni2 = NodeInfo::new(id.clone(), addr.clone());
+    assert_eq!(ni1, ni2);
+    assert_eq!(ni1.id(), ni2.id());
+    assert_eq!(ni1.socket_addr(), ni2.socket_addr());
+    assert_eq!(ni1.version(), ni2.version());
 }

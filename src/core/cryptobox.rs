@@ -25,6 +25,9 @@ use crate::{
     as_uchar_ptr,
     as_uchar_ptr_mut,
     randomize_bytes,
+};
+
+use crate::core::{
     signature,
     error::{Error, Result}
 };

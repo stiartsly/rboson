@@ -7,10 +7,8 @@ use std::net::{
 };
 use ciborium::Value;
 
-use crate::{
-    version,
-    Id,
-};
+use crate::Id;
+use crate::core::version;
 
 pub(crate) trait Reachable {
     fn reachable(&self) -> bool;
@@ -29,6 +27,11 @@ impl NodeInfo {
     pub fn new(id: Id, addr: SocketAddr) -> Self {
         Self {id, addr, ver: 0}
     }
+
+    pub fn with_version(id: Id, addr: SocketAddr, ver: i32) -> Self {
+        Self {id, addr, ver}
+    }
+
     pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
         let map = input.as_array()?;
         let id  = Id::from_cbor(map.get(0)?)?;
@@ -68,10 +71,6 @@ impl NodeInfo {
 
     pub const fn version(&self) -> i32 {
         self.ver
-    }
-
-    pub fn set_version(&mut self, version: i32) {
-        self.ver = version
     }
 
     pub fn version_str(&self) -> String {

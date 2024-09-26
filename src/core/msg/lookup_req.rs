@@ -1,10 +1,8 @@
 use std::rc::Rc;
 use ciborium::Value as CVal;
 
-use crate::{
-    unwrap,
-    Id
-};
+use crate::unwrap;
+use crate::Id;
 
 pub(crate) struct Data {
     target: Option<Rc<Id>>,

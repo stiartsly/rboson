@@ -7,10 +7,13 @@ use std::collections::HashSet;
 use std::collections::HashMap;
 
 use crate::{
-    distance,
+    id::distance,
     id::MAX_ID,
     Id,
-    NodeInfo,
+    NodeInfo
+};
+
+use crate::core::{
     task::candidate_node::CandidateNode
 };
 

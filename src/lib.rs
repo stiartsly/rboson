@@ -1,0 +1,99 @@
+pub mod core;
+pub mod activeproxy;
+
+#[cfg(test)]
+mod unitests;
+
+pub use {
+    core::id,
+    core::id::Id,
+    core::node::Node,
+    core::error::Error,
+    core::error,
+    core::config::Config,
+    core::prefix::Prefix,
+    core::node_info::NodeInfo,
+    core::peer_info::{
+        PeerInfo,
+        PeerBuilder
+    },
+    core::value::{
+        Value,
+        ValueBuilder,
+        SignedBuilder,
+        EncryptedBuilder
+    },
+    core::network::Network,
+    core::node_status::NodeStatus,
+    core::lookup_option::LookupOption,
+    core::joint_result::JointResult,
+    core::default_configuration as configuration,
+    core::signature,
+    core::signature::Signature,
+    core::cryptobox,
+    core::cryptobox::CryptoBox,
+};
+
+#[macro_export]
+macro_rules! is_bogon_addr {
+    ($val:expr) => {{
+        // TODO:
+        false
+    }};
+}
+
+#[macro_export]
+macro_rules! as_millis {
+    ($time:expr) => {{
+        $time.elapsed().unwrap().as_millis()
+    }};
+}
+
+#[macro_export]
+macro_rules! unwrap {
+    ($val:expr) => {{
+        $val.as_ref().unwrap()
+    }};
+}
+
+use std::fs;
+use std::net::IpAddr;
+use std::path::Path;
+use get_if_addrs::get_if_addrs;
+
+fn local_addr(ipv4: bool) -> Option<IpAddr>{
+    let if_addrs = match get_if_addrs() {
+        Ok(v) => v,
+        _ => return None
+    };
+
+    for iface in if_addrs {
+        let ip = iface.ip();
+        if !ip.is_loopback() &&
+            ((ipv4 && ip.is_ipv4()) ||
+            (!ipv4 && ip.is_ipv6())) {
+            return Some(ip)
+        }
+    }
+    None
+}
+
+fn create_dirs(input: &str) -> Result<(), Error> {
+    let path = Path::new(input);
+    if path.exists() {
+        return Ok(())
+    }
+
+    fs::create_dir_all(path).map_err(|e|
+         Error::Io(format!("Creating directory path {} error: {}", input, e))
+    )
+}
+
+fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
+    unsafe {
+        libsodium_sys::randombytes_buf(
+            array.as_mut_ptr() as *mut libc::c_void,
+            N
+        );
+    }
+}

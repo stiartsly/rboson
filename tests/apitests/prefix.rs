@@ -1,5 +1,5 @@
 use boson::{
-    id::self,
+    id,
     Id,
     Prefix,
 };

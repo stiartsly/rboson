@@ -8,10 +8,13 @@ use ciborium::value::Value;
 
 use crate::{
     as_millis,
+    Id,
+    NodeInfo
+};
+
+use crate::core::{
     constants,
     version,
-    Id,
-    NodeInfo,
     node_info::Reachable,
 };
 
@@ -38,11 +41,7 @@ impl KBucketEntry {
     }
 
     pub(crate) fn with_ver(id: Id, addr: SocketAddr, ver: i32) -> Self {
-        Self::from({
-            let mut ni = NodeInfo::new(id, addr);
-            ni.set_version(ver);
-            ni
-        })
+        Self::from(NodeInfo::with_version(id, addr, ver))
     }
 
     pub(crate) fn from(ni: NodeInfo) -> Self {
@@ -117,17 +116,14 @@ impl KBucketEntry {
             }
         }
 
-        let ni = {
-            let mut ni = NodeInfo::new(
-                entry_id.unwrap(),
-                entry_addr.unwrap()
-            );
-            ni.set_version(ver);
-            ni
-        };
+        let ni = Rc::new(NodeInfo::with_version(
+            entry_id.unwrap(),
+            entry_addr.unwrap(),
+            ver,
+        ));
 
         Some(Self {
-            ni: Rc::new(ni),
+            ni,
             created,
             last_seen,
             last_sent,

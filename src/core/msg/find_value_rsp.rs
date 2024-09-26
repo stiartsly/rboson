@@ -8,8 +8,12 @@ use crate::{
     Id,
     NodeInfo,
     Value,
-    value::PackBuilder,
-    error::{Error, Result},
+    Error,
+    error::Result
+};
+
+use crate::core::{
+    value::PackBuilder
 };
 
 use super::{

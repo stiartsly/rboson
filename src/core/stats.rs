@@ -1,5 +1,5 @@
 use std::fmt;
-use crate::msg::msg;
+use crate::core::msg::msg;
 
 pub(crate) struct Stats {
     // TODO;

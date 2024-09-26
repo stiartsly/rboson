@@ -6,9 +6,12 @@ use libsodium_sys::randombytes_uniform;
 
 use crate::{
     unwrap,
-    constants,
     Id,
-    NodeInfo,
+    NodeInfo
+};
+
+use crate::core::{
+    constants,
     dht::DHT,
     scheduler::Scheduler,
     msg::msg::{self, Msg}

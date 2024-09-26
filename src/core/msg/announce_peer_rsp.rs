@@ -3,10 +3,10 @@ use std::any::Any;
 use ciborium::Value as CVal;
 
 use crate::{
-    version,
-    error::{Error, Result}
+    Error,
+    error::Result
 };
-
+use crate::core::version;
 use super::msg::{
     Kind, Method, Msg,
     Data as MsgData

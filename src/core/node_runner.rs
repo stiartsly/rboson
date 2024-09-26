@@ -10,9 +10,6 @@ use std::ops::Deref;
 use log::{debug, info, warn, error};
 
 use crate::{
-    constants,
-    signature,
-    cryptobox::KeyPair,
     Id,
     Value,
     Network,
@@ -20,17 +17,24 @@ use crate::{
     PeerInfo,
     JointResult,
     LookupOption,
-    dht::DHT,
-    error::Error,
-    config::Config,
-    sqlite::SqliteStorage,
-    token::TokenManager,
-    server::{self, Server},
-    crypto::CryptoCache,
-    bootstr::BootstrapChannel,
-    storage::DataStorage,
+    signature,
+    cryptobox::KeyPair,
+    Error,
+    Config
 };
-use crate::future::{
+
+use crate::core::{
+    constants,
+    dht::DHT,
+    sqlite_storage::SqliteStorage,
+    token_manager::TokenManager,
+    server::{self, Server},
+    crypto_cache::CryptoCache,
+    bootstrap_channel::BootstrapChannel,
+    data_storage::DataStorage
+};
+
+use crate::core::future::{
     Cmd,
     Command,
     FindNodeCmd,
@@ -563,6 +567,7 @@ impl NodeRunner {
             }).map_err(|e| {
                 locked.complete(Err(e))
             }).ok();
+
     }
 
     fn remove_value(&self, cmd: Arc<Mutex<RemoveValueCmd>>) {
@@ -588,8 +593,8 @@ impl NodeRunner {
     fn get_peer(&self, cmd: Arc<Mutex<GetPeerCmd>>) {
         let mut locked = cmd.lock().unwrap();
         self.storage.borrow_mut().peer(locked.peer_id(), &self.id())
-            .map(|peers| {
-                locked.complete(Ok(peers))
+            .map(|peer| {
+                locked.complete(Ok(peer))
             }).map_err(|e| {
                 locked.complete(Err(e))
             }).ok();

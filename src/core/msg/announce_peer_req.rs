@@ -4,10 +4,14 @@ use std::any::Any;
 use ciborium::Value as CVal;
 
 use crate::{
-    version,
     Id,
     PeerInfo,
-    error::{Error, Result},
+    Error,
+    error::Result
+};
+
+use crate::core::{
+    version,
     peer_info::PackBuilder,
 };
 

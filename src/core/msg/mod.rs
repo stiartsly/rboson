@@ -30,7 +30,7 @@ use ciborium::Value as CVal;
 
 use cbor::{Reader, Writer};
 use msg::{Msg, Kind, Method};
-use crate::error::{
+use crate::core::error::{
     Error,
     Result
 };

@@ -1,5 +1,9 @@
 use std::cmp::Ordering;
-use crate::id::{self, Id, ID_BITS};
+use crate::{
+    id,
+    Id,
+    id::ID_BITS,
+};
 
 #[test]
 fn test_three_way_compare() {

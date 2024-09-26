@@ -1,7 +1,7 @@
 use boson::{
     Id,
     id::ID_BYTES,
-    distance,
+    id::distance,
     signature,
     cryptobox,
 };

@@ -7,7 +7,7 @@ use get_if_addrs::get_if_addrs;
 
 use boson::{
     Node,
-    default_configuration as cfg
+    configuration as cfg
 };
 
 fn get_storage_path(input: &str) -> String {

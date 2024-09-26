@@ -14,32 +14,38 @@ use crate::{
     is_bogon_addr,
     addr_family,
     as_millis,
-    constants,
-    version,
+};
+
+use crate::{
     Id,
     Network,
     NodeInfo,
     PeerInfo,
     Value,
+    Error
+};
+
+use crate::core::{
+    constants,
+    version,
     rpccall,
     rpccall::RpcCall,
-    error::Error,
     server::Server,
-    token::TokenManager,
-    storage::DataStorage,
+    token_manager::TokenManager,
+    data_storage::DataStorage,
     lookup_option::LookupOption,
     routing_table::RoutingTable,
     kclosest_nodes::KClosestNodes,
     kbucket_entry::KBucketEntry,
 };
 
-use crate::msg::{
+use crate::core::msg::{
     lookup_req::Msg as LookupRequest,
     lookup_rsp::Msg as LookupResponse,
     msg::{Msg, Kind, Method},
 };
 
-use crate::task::{
+use crate::core::task::{
     task::{State, Task},
     lookup_task::LookupTask,
     node_lookup::NodeLookupTask,
@@ -179,7 +185,7 @@ impl DHT {
 
         for item in bootstr_nodes.iter() {
             let req = Rc::new(RefCell::new({
-                use crate::msg::find_node_req as req;
+                use crate::core::msg::find_node_req as req;
                 let mut msg = Box::new(req::Message::new());
 
                 msg.set_remote(item.id(), item.socket_addr());
@@ -211,7 +217,7 @@ impl DHT {
 
                 // Process the closest nodes found in the response message.
                 _call.rsp().map(|msg| {
-                    use crate::msg::find_node_rsp as rsp;
+                    use crate::core::msg::find_node_rsp as rsp;
                     msg.borrow().as_any().downcast_ref::<rsp::Message>().map(|downcasted| {
                         downcasted.nodes4().map(|nodes| {
                             nodes.iter().for_each(|ni| {
@@ -304,7 +310,7 @@ impl DHT {
         };
 
         let call = Rc::new(RefCell::new({
-            use crate::msg::ping_req as req;
+            use crate::core::msg::ping_req as req;
             RpcCall::new(ni, self.dht(), Rc::new(RefCell::new(
                 Box::new(req::Message::new()) as Box<dyn Msg>
             )))
@@ -470,7 +476,7 @@ impl DHT {
                 entry.merge_request_time(call.borrow().sent_time().clone());
             } else if !found {
                 let call = {
-                    use crate::msg::ping_req as req;
+                    use crate::core::msg::ping_req as req;
                     let msg = Box::new(req::Message::new());
                     Rc::new(RefCell::new(RpcCall::new(
                         entry.ni(),
@@ -505,7 +511,7 @@ impl DHT {
     fn on_error(&mut self, msg: Rc<RefCell<Box<dyn Msg>>>) {
         let borrowed = msg.borrow();
         let downcasted = {
-            use crate::msg::error_msg::Message;
+            use crate::core::msg::error_msg::Message;
             borrowed.as_any().downcast_ref::<Message>()
         }.unwrap();
 
@@ -520,7 +526,7 @@ impl DHT {
 
     fn send_err(&mut self, msg: &Box<dyn Msg>, code: i32, str: &str) {
         let msg = Rc::new(RefCell::new({
-            use crate::msg::error_msg::Message as Message;
+            use crate::core::msg::error_msg::Message as Message;
             let mut err = Box::new(Message::new(msg.method(), msg.txid()));
             err.set_remote(msg.id(), msg.origin());
             err.set_ver(version::ver());
@@ -535,7 +541,7 @@ impl DHT {
 
     fn on_ping(&mut self, msg: &Box<dyn Msg>) {
         let msg = Rc::new(RefCell::new({
-            use crate::msg::ping_rsp::Message as Message;
+            use crate::core::msg::ping_rsp::Message as Message;
             let mut rsp = Box::new(Message::new());
             rsp.set_txid(msg.txid());
             rsp.set_remote(msg.id(), msg.origin());
@@ -545,7 +551,7 @@ impl DHT {
     }
 
     fn on_find_node(&mut self, msg: &Box<dyn Msg>) {
-        use crate::msg::{
+        use crate::core::msg::{
             find_node_req as req,
             find_node_rsp as rsp
         };
@@ -598,7 +604,7 @@ impl DHT {
     }
 
     fn on_find_value(&mut self, msg: &Box<dyn Msg>) {
-        use crate::msg::{
+        use crate::core::msg::{
             find_value_req as req,
             find_value_rsp as rsp
         };
@@ -668,7 +674,7 @@ impl DHT {
     }
 
     fn on_store_value(&mut self, msg: &Box<dyn Msg>) {
-        use crate::msg::{
+        use crate::core::msg::{
             store_value_req as req,
             store_value_rsp as rsp
         };
@@ -679,7 +685,7 @@ impl DHT {
 
         let tokman = unwrap!(self.tokman);
         let _valid = {
-            tokman.borrow_mut().verify_token(
+            tokman.borrow().verify_token(
                 req.token(),
                 req.id(),
                 req.origin(),
@@ -716,7 +722,7 @@ impl DHT {
     }
 
     fn on_find_peers(&mut self, msg: &Box<dyn Msg>) {
-        use crate::msg::{
+        use crate::core::msg::{
             find_peer_req as req,
             find_peer_rsp as rsp
         };
@@ -782,7 +788,7 @@ impl DHT {
     }
 
     fn on_announce_peer(&mut self, msg: &Box<dyn Msg>) {
-        use crate::msg::{
+        use crate::core::msg::{
             announce_peer_req as req,
             announce_peer_rsp as rsp
         };
@@ -797,7 +803,7 @@ impl DHT {
         let tokman = unwrap!(self.tokman);
         let peer = req.peer();
         let _valid = {
-            tokman.borrow_mut().verify_token(
+            tokman.borrow().verify_token(
                 req.token(),
                 req.id(),
                 req.origin(),

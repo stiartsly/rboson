@@ -6,7 +6,8 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     Id,
     id::ID_BYTES,
-    signature::{self, KeyPair, PrivateKey}
+    signature,
+    signature::{KeyPair, PrivateKey}
 };
 
 // No signature field here, which would be calculated during creation.
@@ -223,7 +224,7 @@ impl PeerInfo {
         ).is_ok()
     }
 
-    fn serialize_signature_data(&self) -> Vec<u8> {
+    pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
         let len = {
             let mut sz = 0;
             sz += ID_BYTES * 2;            // nodeid and origin.

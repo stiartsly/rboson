@@ -1,4 +1,4 @@
-use boson::{
+use boson::core::{
     signature,
     cryptobox::{
         PrivateKey,
@@ -305,7 +305,7 @@ fn test_encryption() {
     let nonce = Nonce::random();
     let plain = create_random_bytes(32);
     let mut cipher = vec![0u8; 1024];
-    let result = boson::cryptobox::encrypt(
+    let result = boson::core::cryptobox::encrypt(
         &mut cipher.as_mut(),
         &plain,
         &nonce,
@@ -317,7 +317,7 @@ fn test_encryption() {
     assert_eq!(cipher_len, plain.len() + CryptoBox::MAC_BYTES);
 
     let mut decrypted = vec![0u8; 1024];
-    let result = boson::cryptobox::decrypt(
+    let result = boson::core::cryptobox::decrypt(
         &mut decrypted.as_mut(),
         &cipher[..cipher_len],
         &nonce,
@@ -336,7 +336,7 @@ fn test_encryption_into() {
     let kp = KeyPair::random();
     let nonce = Nonce::random();
     let plain = create_random_bytes(32);
-    let result = boson::cryptobox::encrypt_into(
+    let result = boson::core::cryptobox::encrypt_into(
         &plain,
         &nonce,
         kp.public_key(),
@@ -346,7 +346,7 @@ fn test_encryption_into() {
     let cipher = result.unwrap();
     assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES);
 
-    let result = boson::cryptobox::decrypt_into(
+    let result = boson::core::cryptobox::decrypt_into(
         &cipher,
         &nonce,
         kp.public_key(),

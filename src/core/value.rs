@@ -1,8 +1,8 @@
 use std::fmt;
 use sha2::{Digest, Sha256};
 
-use crate::{
-    unwrap,
+use crate::unwrap;
+use crate::core::{
     cryptobox,
     signature,
     id::{Id, ID_BYTES},
@@ -359,7 +359,7 @@ impl Value {
         ).is_ok()
     }
 
-    fn serialize_signature_data(&self) -> Vec<u8> {
+    pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
         let mut len = 0;
 
         len += match self.is_encrypted() {

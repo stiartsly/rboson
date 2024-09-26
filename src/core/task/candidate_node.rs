@@ -3,7 +3,10 @@ use std::time::SystemTime;
 
 use crate::{
     Id,
-    NodeInfo,
+    NodeInfo
+};
+
+use crate::core::{
     node_info::Reachable,
 };
 

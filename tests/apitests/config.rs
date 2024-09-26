@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 use boson::{
     Config,
-    default_configuration
+    configuration
 };
 
 /**
@@ -31,7 +31,7 @@ fn test_build_cfg() {
     let port = 32222;
     let cfg: Box<dyn Config>;
 
-    cfg = default_configuration::Builder::new()
+    cfg = configuration::Builder::new()
         .with_listening_port(port)
         .with_ipv4(ipv4_str)
         .with_storage_path("tests")
@@ -58,7 +58,7 @@ fn test_load_cfg() {
         Ok(_) => "apitests.conf",
         Err(_) => "tests/apitests/apitests.conf",
     };
-    let cfg = default_configuration::Builder::new()
+    let cfg = configuration::Builder::new()
         .load(path)
         .map_err(|_| assert!(false))
         .unwrap()

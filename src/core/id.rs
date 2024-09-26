@@ -8,8 +8,8 @@ use crate::{
     randomize_bytes,
     cryptobox,
     signature,
-    error,
-    error::{Error, Result},
+    Error,
+    error::Result
 };
 
 pub const ID_BYTES: usize = 32;
@@ -159,7 +159,7 @@ impl TryFrom<&[u8]> for Id {
 
 // Create Id from a base58 string
 impl TryFrom<&str> for Id {
-    type Error = error::Error;
+    type Error = Error;
     fn try_from(base58: &str) -> Result<Self> {
         Self::try_from_base58(base58)
     }
@@ -230,4 +230,8 @@ impl fmt::Display for Id {
 
         Ok(())
     }
+}
+
+pub fn distance(a: &Id, b: &Id) -> Id {
+    a.distance(b)
 }

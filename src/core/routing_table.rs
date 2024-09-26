@@ -12,9 +12,12 @@ use log::{info, warn};
 
 use crate::{
     as_millis,
-    constants,
     Id,
-    Prefix,
+    Prefix
+};
+
+use crate::core::{
+    constants,
     dht::DHT,
     node_info::Reachable,
     kbucket::KBucket,

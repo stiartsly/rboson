@@ -7,13 +7,13 @@ use super::task::{
     State
 };
 
+const MAX_ACTIVE_TASKS: usize = 16;
+
 pub(crate) struct TaskManager {
     queued:     LinkedList<Rc<RefCell<Box<dyn Task>>>>,
     running:    LinkedList<Rc<RefCell<Box<dyn Task>>>>,
     canceling: bool,
 }
-
-const MAX_ACTIVE_TASKS: usize = 16;
 
 impl TaskManager {
     pub(crate) fn new() -> Self {

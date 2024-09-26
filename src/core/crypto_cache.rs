@@ -5,13 +5,13 @@ use std::time::SystemTime;
 use crate::{
     as_millis,
     Id,
+    Error,
     cryptobox::{
         CryptoBox,
         KeyPair,
         PublicKey,
         Nonce,
-    },
-    error::Error,
+    }
 };
 
 pub(crate) const EXPIRED_CHECK_INTERVAL: u64 = 60 * 1000;

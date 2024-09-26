@@ -9,11 +9,14 @@ use log::info;
 
 use crate::{
     as_millis,
-    constants,
     Id,
-    Prefix,
+    Prefix
+};
+
+use crate::core::{
+    constants,
     node_info::Reachable,
-    kbucket_entry::KBucketEntry,
+    kbucket_entry::KBucketEntry
 };
 
 /**

@@ -4,10 +4,13 @@ use std::cmp::Ordering;
 
 use crate::{
     Id,
-    NodeInfo,
+    NodeInfo
+};
+
+use crate::core::{
     kbucket::KBucket,
     kbucket_entry::KBucketEntry,
-    routing_table::RoutingTable,
+    routing_table::RoutingTable
 };
 
 pub(crate) struct KClosestNodes {

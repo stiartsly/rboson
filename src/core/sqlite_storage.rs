@@ -4,10 +4,13 @@ use log::{debug, warn};
 
 use crate::{
     as_millis,
-    constants,
     Id,
     PeerInfo,
     Value,
+};
+
+use crate::core::{
+    constants,
     value::PackBuilder as ValuePackBuilder,
     peer_info::PackBuilder as PeerPackBuilder,
     signature::PrivateKey,
@@ -17,7 +20,7 @@ use crate::{
 
 };
 
-use crate::sqlite3::{
+use crate::core::sqlite3::{
     models::NewValore,
     models::NewPeer,
     user_version,

@@ -1,4 +1,5 @@
 
+#[allow(dead_code)]
 pub(crate) enum State {
     Initializing = 0,
     Authenticating,

@@ -11,7 +11,7 @@
 #[cfg(test)] use std::fs;
 #[cfg(test)] use libsodium_sys::randombytes_buf;
 
-//#[cfg(test)]
+#[cfg(test)]
 fn create_random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(len);
     unsafe {
@@ -24,7 +24,7 @@ fn create_random_bytes(len: usize) -> Vec<u8> {
     bytes
 }
 
-//#[cfg(test)]
+#[cfg(test)]
 fn working_path(input: &str) -> String {
     let path = env::current_dir().unwrap().join(input);
     if !fs::metadata(&path).is_ok() {
@@ -38,7 +38,7 @@ fn working_path(input: &str) -> String {
     path.display().to_string()
 }
 
-//#[cfg(test)]
+#[cfg(test)]
 fn remove_working_path(input: &str) {
     if fs::metadata(&input).is_ok() {
         match fs::remove_dir_all(&input) {

@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use boson::{
     Id,
     id::ID_BYTES,
@@ -29,6 +30,7 @@ use crate::{
  - Id::try_from(&[u8])
  - Id::try_from(&str)
  - Id::from(signature::PublicKey)
+ - Id::from_str(&str)
  - Eq
  - PartialEq
  */
@@ -145,6 +147,22 @@ fn test_trait_try_from_base58() {
     assert_eq!(id_into.is_ok(), true);
     assert_eq!(id_into.as_ref().unwrap().to_base58(), base58);
     assert_eq!(id_from.unwrap(), id_into.unwrap());
+}
+
+#[test]
+fn test_trait_from_str() {
+    let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
+    let id_from = Id::from_str(base58);
+    let id_parsed1: Result<Id, _> = base58.parse();
+    let id_parsed2 = base58.parse::<Id>();
+    assert_eq!(id_from.is_ok(), true);
+    assert_eq!(id_from.as_ref().unwrap().to_base58(), base58);
+    assert_eq!(id_parsed1.is_ok(), true);
+    assert_eq!(id_parsed2.is_ok(), true);
+    assert_eq!(id_parsed1.as_ref().unwrap().to_base58(), base58);
+    assert_eq!(id_parsed2.as_ref().unwrap().to_base58(), base58);
+    assert_eq!(id_from.as_ref().unwrap().clone(), id_parsed1.unwrap());
+    assert_eq!(id_from.unwrap(), id_parsed2.unwrap());
 }
 
 #[test]

@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::str::FromStr;
+use core::result;
 use bs58::decode;
 use hex::FromHexError;
 use ciborium::value::Value;
@@ -154,6 +156,13 @@ impl TryFrom<&[u8]> for Id {
             )));
         }
         Ok(Id(input.try_into().unwrap()))
+    }
+}
+
+impl FromStr for Id {
+    type Err = Error;
+    fn from_str(base58: &str) -> result::Result<Self, Self::Err> {
+        Self::try_from_base58(base58)
     }
 }
 

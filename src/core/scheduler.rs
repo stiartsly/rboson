@@ -102,7 +102,7 @@ impl Scheduler {
     }
 
     pub(crate) fn cancel(&mut self) {
-        //TODO:
+        self.timers.clear();
     }
 }
 

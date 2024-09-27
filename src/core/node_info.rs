@@ -74,7 +74,7 @@ impl NodeInfo {
     }
 
     pub fn version_str(&self) -> String {
-        version::formatted_version(self.ver)
+        version::normailized_version(self.ver)
     }
 
     pub fn is_ipv4(&self) -> bool {

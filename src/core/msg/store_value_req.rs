@@ -286,7 +286,7 @@ impl fmt::Display for Message {
         write!(f, "tok:{}", self.token as u32)?;
         write!(f,
             "}},v:{}",
-            version::formatted_version(self.ver())
+            version::normailized_version(self.ver())
         )?;
         Ok(())
     }

@@ -8,7 +8,6 @@ mod msg;
 mod server;
 mod rpccall;
 mod task;
-mod version;
 mod scheduler;
 mod sqlite3;
 
@@ -19,6 +18,7 @@ pub(crate) mod sqlite_storage;
 pub(crate) mod token_manager;
 pub(crate) mod node_runner;
 pub(crate) mod bootstrap_channel;
+pub(crate) mod version;
 pub(crate) mod future;
 
 pub mod id;

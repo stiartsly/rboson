@@ -517,7 +517,7 @@ impl DHT {
 
         warn!("Error from {}/{} - {}:{}, txid {}",
             downcasted.origin(),
-            version::formatted_version(downcasted.ver()),
+            version::normailized_version(downcasted.ver()),
             downcasted.code(),
             downcasted.msg(),
             downcasted.txid()

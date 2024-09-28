@@ -60,3 +60,89 @@ macro_rules! addr_family {
         }
     }};
 }
+
+use std::net::{
+    SocketAddr,
+    IpAddr
+};
+
+fn is_broadcast(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_broadcast(),
+        IpAddr::V6(_) => false
+    }
+}
+
+fn is_linklocal(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            let v = &v6.octets();
+            v[0] == 0xfe && v[1] == 0x80
+        }
+    }
+}
+
+fn is_sitelocal(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            if !v4.is_private() {
+                return false;
+            }
+
+            let v = &v4.octets();
+            let b1 = v[0];
+            let b2 = v[1];
+
+            // 10.0.0.0/8
+            if b1 == 10 {
+                return true;
+            }
+
+            // 172.16.0.0/12
+            if (b1 == 172) && (b2 >= 16) && (b2 <= 31) {
+                return true;
+            }
+
+            // 192.168.0.0/16
+            if (b1 == 192) && (b2 == 168) {
+                return true;
+            }
+            false
+        },
+        IpAddr::V6(v6) => {
+            let v = &v6.octets();
+            v[0] == 0xfc || v[0] == 0xfd
+        }
+    }
+}
+
+fn is_mapped_ipv4(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(_) => return false,
+        IpAddr::V6(v6) => {
+            let mapped_ipv4_prefix = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
+            let octets = v6.octets().to_vec();
+            octets == mapped_ipv4_prefix
+        }
+    }
+}
+
+pub(crate) fn is_global_unicast(ip: &IpAddr) -> bool {
+    !(ip.is_loopback() ||
+        ip.is_multicast() ||
+        ip.is_unspecified() ||
+        is_broadcast(ip) ||
+        is_linklocal(ip) ||
+        is_sitelocal(ip) ||
+        is_mapped_ipv4(ip))
+}
+
+pub(crate) fn is_any_unicast(ip: &IpAddr) -> bool {
+    is_global_unicast(ip) || is_sitelocal(ip)
+}
+
+pub(crate) fn is_bogon(addr: &SocketAddr) -> bool {
+   !(addr.port() > 0 &&
+     addr.port() < 0xFFFF && is_global_unicast(&addr.ip()))
+}

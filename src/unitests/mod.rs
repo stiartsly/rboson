@@ -7,6 +7,7 @@
 #[cfg(test)] mod test_routing_table;
 #[cfg(test)] mod test_node_runner;
 #[cfg(test)] mod test_version;
+#[cfg(test)] mod test_addr;
 
 #[cfg(test)] use std::env;
 #[cfg(test)] use std::fs;

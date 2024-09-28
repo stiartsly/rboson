@@ -85,7 +85,7 @@ impl fmt::Display for Message {
             self.kind(),
             self.method(),
             self.txid() as u32,
-            version::normailized_version(self.ver())
+            version::canonical_version(self.ver())
         )?;
         Ok(())
     }

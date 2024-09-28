@@ -11,12 +11,8 @@ use log::{debug, info, warn, error, trace};
 
 use crate::{
     unwrap,
-    is_bogon_addr,
     addr_family,
     as_millis,
-};
-
-use crate::{
     Id,
     Network,
     NodeInfo,
@@ -26,6 +22,8 @@ use crate::{
 };
 
 use crate::core::{
+    is_any_unicast,
+    is_bogon,
     constants,
     version,
     rpccall,
@@ -398,6 +396,18 @@ impl DHT {
     }
 
     pub(crate) fn on_message(&mut self, msg: Rc<RefCell<Box<dyn Msg>>>) {
+        let from  = msg.borrow().origin().clone();
+        let bogon = if cfg!(feature = "devp") {
+            !is_any_unicast(&from.ip())
+        } else {
+            is_bogon(&from)
+        };
+        if bogon {
+            info!("Received a message from bogon address {}, ignored the potential
+                  routing table operation", from);
+            return;
+        }
+
         match msg.borrow().kind() {
             Kind::Error    => self.on_error(msg.clone()),
             Kind::Request  => self.on_request(msg.clone()),
@@ -410,12 +420,6 @@ impl DHT {
         let borrowed = msg.borrow();
         let from_id  = borrowed.id();
         let from_addr= borrowed.origin();
-
-        if is_bogon_addr!(from_addr) {
-            info!("Received a message from bogon address {}, ignored the potential
-                  routing table operation", from_addr);
-            return;
-        }
 
         let call = borrowed.associated_call();
         if let Some(call) = call.as_ref() {
@@ -517,7 +521,7 @@ impl DHT {
 
         warn!("Error from {}/{} - {}:{}, txid {}",
             downcasted.origin(),
-            version::normailized_version(downcasted.ver()),
+            version::canonical_version(downcasted.ver()),
             downcasted.code(),
             downcasted.msg(),
             downcasted.txid()
@@ -794,12 +798,6 @@ impl DHT {
         };
 
         let req = msg.as_any().downcast_ref::<req::Message>().unwrap();
-        if is_bogon_addr!(msg.origin()) {
-            info!("Received an announce peer request from bogon address {}, ignored ",
-                msg.origin()
-            );
-        }
-
         let tokman = unwrap!(self.tokman);
         let peer = req.peer();
         let _valid = {

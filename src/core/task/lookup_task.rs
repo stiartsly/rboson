@@ -2,12 +2,13 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use crate::{
-    is_bogon_addr,
     Id,
     NodeInfo
 };
 
 use crate::core::{
+    is_any_unicast,
+    is_bogon,
     constants,
     node_info::Reachable,
     rpccall::RpcCall,
@@ -63,8 +64,13 @@ pub(crate) trait LookupTask {
         let dht = self.dht();
 
         for item in nodes.iter() {
-            if is_bogon_addr!(item.socket_addr()) ||
-                dht.borrow().id() == item.id() ||
+            let bogon = if cfg!(feature = "devp") {
+                !is_any_unicast(&item.ip())
+            } else {
+                is_bogon(&&item.socket_addr())
+            };
+
+            if bogon || dht.borrow().id() == item.id() ||
                 dht.borrow().addr() == item.socket_addr() ||
                 self.data().closest_set.borrow().contains(item.id()) {
                 continue;

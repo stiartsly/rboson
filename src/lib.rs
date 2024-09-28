@@ -35,14 +35,6 @@ pub use {
 };
 
 #[macro_export]
-macro_rules! is_bogon_addr {
-    ($val:expr) => {{
-        // TODO:
-        false
-    }};
-}
-
-#[macro_export]
 macro_rules! as_millis {
     ($time:expr) => {{
         $time.elapsed().unwrap().as_millis()

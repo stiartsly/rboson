@@ -132,7 +132,7 @@ impl fmt::Display for Message {
             self.txid(),
             self.code(),
             self.msg(),
-            version::normailized_version(self.ver())
+            version::canonical_version(self.ver())
         )?;
         Ok(())
     }

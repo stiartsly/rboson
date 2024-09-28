@@ -26,6 +26,7 @@ path = "apps/target/main.rs"
 [features]
 devp = []
 inspect = ["devp"]
+default = ["devp"]
 
 [dependencies]
 log     = "0.4.20"

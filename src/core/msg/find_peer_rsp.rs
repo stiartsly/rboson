@@ -275,7 +275,7 @@ impl fmt::Display for Message {
 
         write!(f,
             "}},v:{}",
-            version::normailized_version(self.ver())
+            version::canonical_version(self.ver())
         )?;
         Ok(())
     }

@@ -330,13 +330,17 @@ impl RoutingTable {
         // TODO:
     }
 
-    pub(crate) fn try_ping_maintenance(&mut self, options: PingOption, bucket: Rc<RefCell<KBucket>>, name: &str) {
+    pub(crate) fn try_ping_maintenance(&mut self,
+        options: PingOption,
+        bucket: Rc<RefCell<KBucket>>,
+        name: &str
+    ) {
         if self.maintenance_tasks.contains_key(bucket.borrow().prefix()) {
             return
         }
 
         let task = Rc::new(RefCell::new({
-            let mut task = Box::new(PingRefreshTask::new(self.dht(), bucket.clone(), options)); // TODO:
+            let mut task = Box::new(PingRefreshTask::new(self.dht(), bucket.clone(), options));
             task.set_name(name);
             task.add_listener(Box::new(|_| {}));
             task as Box<dyn Task>

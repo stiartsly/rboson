@@ -171,7 +171,7 @@ impl KBucketEntry {
     /*
     pub(crate) const fn is_eligible_for_local_lookup(&self) -> bool {
         // allow implicit initial ping during lookups
-        // TODO: make this work now that we don't keep unverified entries
+        // TO~DO: make this work now that we don't keep unverified entries
         // in the main bucket
         (self.reachable && self.failed_requests <= 3) ||
             self.failed_requests <= 0

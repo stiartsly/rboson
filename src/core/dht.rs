@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use std::ops::Deref;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use log::{debug, info, warn, error, trace};
@@ -263,7 +263,7 @@ impl DHT {
             task.inject_candidates(&nodes);
             task.set_name("NodeLookup: Filling home bucket");
             task.add_listener(Box::new(move |_| {
-                // TODO:
+                // TODO: connections status.
             }));
             task as Box<dyn Task>
         }));
@@ -353,7 +353,9 @@ impl DHT {
         }, 500, constants::DHT_UPDATE_INTERVAL);
 
         // fix the first time to persist the routing table: 2 min
-        // TODO: self.last_saved = SystemTime::now() - Duration::from_millis(constants::ROUTING_TABLE_PERSIST_INTERVAL + (120 * 1000));
+        self.last_saved = self.last_saved.checked_sub(
+            Duration::from_millis(constants::ROUTING_TABLE_PERSIST_INTERVAL + (120 * 1000))
+        ).unwrap();
 
         self.rt().borrow_mut().set_dht(self.dht());
         // Regular dht update.
@@ -688,7 +690,7 @@ impl DHT {
         let value_id = value.id();
 
         let tokman = unwrap!(self.tokman);
-        let _valid = {
+        let valid = {
             tokman.borrow().verify_token(
                 req.token(),
                 req.id(),
@@ -697,7 +699,6 @@ impl DHT {
             )
         };
 
-        let valid = true; //TODO:
         if !valid {
             warn!("Received a store value request with invalid token from {}", req.origin());
             self.send_err(msg, 203, "Invalid token for store value request");
@@ -800,7 +801,7 @@ impl DHT {
         let req = msg.as_any().downcast_ref::<req::Message>().unwrap();
         let tokman = unwrap!(self.tokman);
         let peer = req.peer();
-        let _valid = {
+        let valid = {
             tokman.borrow().verify_token(
                 req.token(),
                 req.id(),
@@ -809,7 +810,6 @@ impl DHT {
             )
         };
 
-        let valid = true; //TODO:
         if !valid {
             warn!("Received an announce peer request with invalid token from {}", req.origin());
             self.send_err(msg, 203,"Invalid token for ANNOUNCE PEER request");

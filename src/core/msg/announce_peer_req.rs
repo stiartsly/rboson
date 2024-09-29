@@ -179,6 +179,7 @@ impl TryFrom<CVal> for Box<Message> {
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let peer = self.peer.as_ref().unwrap();
         write!(f,
             "y:{},m:{},t:{},q: {{",
             self.kind(),
@@ -186,7 +187,19 @@ impl fmt::Display for Message {
             self.txid()
         )?;
 
-        // TODO:
+        write!(f, "t:{},n:{},p:{}",
+            peer.id(),
+            peer.nodeid(),
+            peer.port()
+        )?;
+
+        if let Some(url) = peer.alternative_url() {
+            write!(f, ",alt:{}", url)?;
+        }
+        write!(f, ",sig:{},tok:{}",
+            hex::encode(peer.signature()),
+            self.token as u32
+        )?;
 
         write!(f,
             "}},v:{}",

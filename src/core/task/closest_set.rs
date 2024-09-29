@@ -51,7 +51,7 @@ impl ClosestSet {
 
         if self.closest.len() > self.capacity {
             let last = self.closest.iter().last().unwrap();
-            if last.0 == &input_id { // TODO: check
+            if last.0 == &input_id {
                 self.insert_attempt_since_tail_modification += 1;
             } else {
                 self.insert_attempt_since_tail_modification = 0;

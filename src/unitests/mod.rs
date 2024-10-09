@@ -11,20 +11,10 @@
 
 #[cfg(test)] use std::env;
 #[cfg(test)] use std::fs;
-#[cfg(test)] use libsodium_sys::randombytes_buf;
 
 #[cfg(test)]
-fn create_random_bytes(len: usize) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(len);
-    unsafe {
-        randombytes_buf(
-            bytes.as_mut_ptr() as *mut libc::c_void,
-            len
-        );
-        bytes.set_len(len);
-    };
-    bytes
-}
+#[allow(non_upper_case_globals)]
+static create_random_bytes: fn(usize) -> Vec<u8> = crate::random_bytes;
 
 #[cfg(test)]
 fn working_path(input: &str) -> String {

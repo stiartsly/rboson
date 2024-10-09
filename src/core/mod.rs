@@ -86,29 +86,7 @@ fn is_linklocal(ip: &IpAddr) -> bool {
 fn is_sitelocal(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            if !v4.is_private() {
-                return false;
-            }
-
-            let v = &v4.octets();
-            let b1 = v[0];
-            let b2 = v[1];
-
-            // 10.0.0.0/8
-            if b1 == 10 {
-                return true;
-            }
-
-            // 172.16.0.0/12
-            if (b1 == 172) && (b2 >= 16) && (b2 <= 31) {
-                return true;
-            }
-
-            // 192.168.0.0/16
-            if (b1 == 192) && (b2 == 168) {
-                return true;
-            }
-            false
+            v4.is_private()
         },
         IpAddr::V6(v6) => {
             let v = &v6.octets();

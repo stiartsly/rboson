@@ -12,6 +12,7 @@ pub enum Error {
     Protocol(String),
     Crypto(String),
     Db(String),
+    Permission(String),
 }
 
 impl fmt::Display for Error {
@@ -24,6 +25,7 @@ impl fmt::Display for Error {
             Error::Protocol(msg)    => write!(f, "{}", msg),
             Error::Crypto(msg)      => write!(f, "{}", msg),
             Error::Db(msg)          => write!(f, "{}", msg),
+            Error::Permission(msg)  => write!(f, "{}", msg),
         }
     }
 }

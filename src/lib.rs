@@ -52,6 +52,7 @@ use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use get_if_addrs::get_if_addrs;
+use libsodium_sys::randombytes_buf;
 
 fn local_addr(ipv4: bool) -> Option<IpAddr>{
     let if_addrs = match get_if_addrs() {
@@ -88,4 +89,16 @@ fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
             N
         );
     }
+}
+
+fn random_bytes(len: usize) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(len);
+    unsafe {
+        randombytes_buf(
+            bytes.as_mut_ptr() as *mut libc::c_void,
+            len
+        );
+        bytes.set_len(len);
+    };
+    bytes
 }

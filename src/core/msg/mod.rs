@@ -1,7 +1,4 @@
-// CBOR and Message handling
-pub(crate) mod cbor;
 pub(crate) mod msg;
-
 pub(crate) mod error_msg;
 
 pub(crate) mod lookup_req;
@@ -28,15 +25,14 @@ use std::cell::RefCell;
 use ciborium;
 use ciborium::Value as CVal;
 
-use cbor::{Reader, Writer};
 use msg::{Msg, Kind, Method};
-use crate::core::error::{
-    Error,
-    Result
+use crate::core::{
+    cbor,
+    error::{Error, Result},
 };
 
 pub(crate) fn deser(buf: &[u8]) -> Result<Rc<RefCell<Box<dyn Msg>>>> {
-    let reader = Reader::new(buf);
+    let reader = cbor::Reader::new(buf);
     let value: CVal = ciborium::de::from_reader(reader)
         .map_err(|e|
             return Error::Protocol(format!("Reading cobor error: {}", e))
@@ -97,7 +93,7 @@ pub(crate) fn serialize(msg: Rc<RefCell<Box<dyn Msg>>>) -> Vec<u8> {
 
     ciborium::ser::into_writer(
         &mut val,
-        Writer::new(&mut buf)
+        cbor::Writer::new(&mut buf)
     ).unwrap();
 
     buf

@@ -18,11 +18,11 @@ use crate::{
 
 use crate::core::{
     constants,
+    cbor,
     dht::DHT,
     node_info::Reachable,
     kbucket::KBucket,
     kbucket_entry::KBucketEntry,
-    msg::cbor,
     task::{
         ping_refresh::PingOption,
         ping_refresh::PingRefreshTask,

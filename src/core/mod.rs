@@ -11,6 +11,7 @@ mod task;
 mod scheduler;
 mod sqlite3;
 
+pub(crate) mod cbor;
 pub(crate) mod data_storage;
 pub(crate) mod kbucket_entry;
 pub(crate) mod routing_table;

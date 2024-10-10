@@ -62,36 +62,36 @@ impl<'a> Builder<'a> {
         }
     }
 
-    pub fn with_auto_ipv4(mut self) -> Self {
+    pub fn with_auto_ipv4(&mut self) -> &mut Self {
         self.auto_ipv4 = true;
         self.ipv4 = None;
         self
     }
 
-    pub fn with_auto_ipv6(mut self) -> Self {
+    pub fn with_auto_ipv6(&mut self) -> &mut Self {
         self.auto_ipv6 = true;
         self.ipv6 = None;
         self
     }
 
-    pub fn with_ipv4(mut self, input: &'a str) -> Self {
+    pub fn with_ipv4(&mut self, input: &'a str) -> &mut Self {
         self.auto_ipv4 = false;
         self.ipv4 = Some(input);
         self
     }
 
-    pub fn with_ipv6(mut self, input: &'a str) -> Self {
+    pub fn with_ipv6(&mut self, input: &'a str) -> &mut Self {
         self.auto_ipv6 = false;
         self.ipv6 = Some(input);
         self
     }
 
-    pub fn with_listening_port(mut self, port: u16) -> Self {
+    pub fn with_listening_port(&mut self, port: u16) -> &mut Self {
         self.port = port;
         self
     }
 
-    pub fn with_storage_path(mut self, input: &'a str) -> Self {
+    pub fn with_storage_path(&mut self, input: &'a str) -> &mut Self {
         if input.starts_with("~") {
             self.data_dir += &input[1..];
         } else {
@@ -100,19 +100,19 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn add_bootstrap_node(mut self, node: &NodeInfo) -> Self {
+    pub fn add_bootstrap_node(&mut self, node: &NodeInfo) -> &mut Self {
         self.bootstrap_nodes.push(node.clone());
         self
     }
 
-    pub fn add_bootstrap_nodes(mut self, nodes: &[NodeInfo]) -> Self {
+    pub fn add_bootstrap_nodes(&mut self, nodes: &[NodeInfo]) ->&mut Self {
         for item in nodes.iter() {
             self.bootstrap_nodes.push(item.clone())
         }
         self
     }
 
-    pub fn load(mut self, input: &str) -> Result<Self> {
+    pub fn load(&mut self, input: &str) -> Result<&mut Self> {
         let data = match fs::read_to_string(input) {
             Ok(v) => v,
             Err(e) => return Err(Error::Io(

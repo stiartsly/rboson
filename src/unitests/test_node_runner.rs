@@ -47,17 +47,19 @@ fn setup() {
         PATH1 = Some(working_path("node_runner1/"));
         PATH2 = Some(working_path("node_runner1/"));
 
-        let b1 = config::Builder::new()
+        let cfg1 = config::Builder::new()
             .with_listening_port(32222)
             .with_ipv4(&ip_str)
-            .with_storage_path(PATH1.as_ref().unwrap().as_str());
-        let cfg1 = b1.build().unwrap();
+            .with_storage_path(PATH1.as_ref().unwrap().as_str())
+            .build()
+            .unwrap();
 
-        let b2 = config::Builder::new()
+        let cfg2 = config::Builder::new()
             .with_listening_port(32224)
             .with_ipv4(&ip_str)
-            .with_storage_path(PATH2.as_ref().unwrap().as_str());
-        let cfg2 = b2.build().unwrap();
+            .with_storage_path(PATH2.as_ref().unwrap().as_str())
+            .build()
+            .unwrap();
 
         BOOTSTR_CHANNEL = Some(Arc::new(Mutex::new(BootstrapChannel::new())));
         COMMAND_CHANNEL = Some(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));

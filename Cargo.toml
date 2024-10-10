@@ -20,8 +20,8 @@ name = "shell"
 path = "apps/shell/main.rs"
 
 [[bin]]
-name = "target"
-path = "apps/target/main.rs"
+name = "launcher"
+path = "apps/launcher/main.rs"
 
 [features]
 devp = []
@@ -36,8 +36,9 @@ libc    = "0.2.151"
 sha2    = "0.10.8"
 rbtree  = "0.2.0"
 
-diesel  = { version = "2.2.3", features = ["sqlite"] }
-tokio   = { version = "1.35.1", features = ["full"] }
+diesel  = { version = "2.2.3",  features = ["sqlite"]   }
+tokio   = { version = "1.35.1", features = ["full"]     }
+clap    = { version = "4.0",    features = ["derive"]   }
 
 ciborium                = "0.2.1"
 ciborium-io             = "0.2.1"

@@ -91,6 +91,7 @@ fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     }
 }
 
+#[allow(dead_code)]
 fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(len);
     unsafe {

@@ -1,22 +1,33 @@
 use std::thread;
 use tokio::time::Duration;
+use clap::Parser;
 
 use boson::{
     Node,
     configuration as cfg
 };
 
+#[derive(Parser, Debug)]
+#[command(about = "Boson Shell", long_about = None)]
+struct Options {
+    /// The configuration file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
+    let opts = Options::parse();
     let cfg = cfg::Builder::new()
-        .load("default.conf")
-        .map_err(|e| println!("{}", e))
+        .load(opts.config.as_ref().map_or("default.conf", |v|&v))
+        .map_err(|e| eprintln!("{e}"))
         .unwrap()
         .build()
         .unwrap();
 
-    #[cfg(feature = "inspect")]
-    cfg.dump();
+    #[cfg(feature = "inspect")] {
+        cfg.dump();
+    }
 
     let node = Node::new(cfg).unwrap();
     let _ = node.start();

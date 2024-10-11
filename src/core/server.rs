@@ -281,8 +281,8 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
 
     #[cfg(debug_assertions)]
     {
-        use log::info;
-        info!("Received message: {}/{} from {}:[size: {}] - {}",
+        use log::debug;
+        debug!("Received message: {}/{} from {}:[size: {}] - {}",
             msg.borrow().method(),
             msg.borrow().kind(),
             from,

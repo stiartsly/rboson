@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex};
-use std::io::{self, Write};
+use std::io::{self, Write, IoSlice};
 use std::fs::{File, OpenOptions};
 use log::{
-    Level,
     LevelFilter,
     Metadata,
     Record
@@ -22,7 +21,7 @@ struct  Logger {
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
+        metadata.level() <= self.max_level
     }
 
     fn log(&self, record: &Record) {
@@ -34,7 +33,10 @@ impl log::Log for Logger {
             );
 
             if let Some(fp) = self.fp.as_ref() {
-                _ = fp.lock().unwrap().write(log.as_bytes());
+                _ = fp.lock().unwrap().write_vectored(
+                    &[IoSlice::new(log.as_bytes())]
+                );
+                _ = fp.lock().unwrap().write(b"\n");
             }
 
             if self.console_output_enabled {
@@ -56,10 +58,10 @@ impl Logger {
         };
 
         if let Some(file) = logfile {
-            logger.fp = match OpenOptions::new().append(true).open(file) {
+            logger.fp = match OpenOptions::new().append(true).create(true).open(file) {
                 Ok(fp) => Some(Arc::new(Mutex::new(fp))),
                 Err(e) => {
-                    eprintln!("Failed to open log file {e}. Unable to log output to file.");
+                    println!("Failed to open log file {e}. Unable to log output to file.");
                     None
                 }
             }

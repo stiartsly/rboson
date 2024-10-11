@@ -1,6 +1,9 @@
 /target
 /Cargo.lock
 
+*.log
+*_data
+
 # Visual Code
 .vscode
 

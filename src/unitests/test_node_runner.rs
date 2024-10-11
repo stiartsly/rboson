@@ -18,10 +18,12 @@ use crate::unitests::{
 use crate::{
     local_addr,
     signature,
+    Network,
     NodeInfo,
     CryptoBox,
     LookupOption,
     configuration as config,
+    JointResult
 };
 
 use crate::core::{
@@ -61,6 +63,22 @@ fn setup() {
             .build()
             .unwrap();
 
+        let mut addrs1: JointResult<SocketAddr> = JointResult::new();
+        if let Some(addr4) = cfg1.addr4() {
+            addrs1.set_value(Network::IPv4, addr4.clone());
+        }
+        if let Some(addr6) = cfg1.addr6() {
+            addrs1.set_value(Network::IPv6, addr6.clone());
+        }
+
+        let mut addrs2: JointResult<SocketAddr> = JointResult::new();
+        if let Some(addr4) = cfg2.addr4() {
+            addrs2.set_value(Network::IPv4, addr4.clone());
+        }
+        if let Some(addr6) = cfg2.addr6() {
+            addrs2.set_value(Network::IPv6, addr6.clone());
+        }
+
         BOOTSTR_CHANNEL = Some(Arc::new(Mutex::new(BootstrapChannel::new())));
         COMMAND_CHANNEL = Some(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));
 
@@ -68,7 +86,7 @@ fn setup() {
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg1.storage_path().to_string(),
                 signature::KeyPair::random(),
-                Arc::new(Mutex::new(cfg1))
+                addrs1
             )));
             nr.borrow_mut().set_field(BOOTSTR_CHANNEL.as_ref().unwrap().clone());
             nr.borrow_mut().set_field(COMMAND_CHANNEL.as_ref().unwrap().clone());
@@ -80,7 +98,7 @@ fn setup() {
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg2.storage_path().to_string(),
                 signature::KeyPair::random(),
-                Arc::new(Mutex::new(cfg2))
+                addrs2
             )));
             nr.borrow_mut().set_field(Arc::new(Mutex::new(BootstrapChannel::new())));
             nr.borrow_mut().set_field(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));

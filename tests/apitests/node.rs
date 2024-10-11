@@ -65,9 +65,9 @@ fn setup() {
             .build()
             .unwrap();
 
-        NODE1 = Some(Node::new(cfg1).unwrap());
-        NODE2 = Some(Node::new(cfg2).unwrap());
-        NODE3 = Some(Node::new(cfg3).unwrap());
+        NODE1 = Some(Node::new(&cfg1).unwrap());
+        NODE2 = Some(Node::new(&cfg2).unwrap());
+        NODE3 = Some(Node::new(&cfg3).unwrap());
 
         NODE1.as_mut().unwrap().start();
         NODE2.as_mut().unwrap().start();

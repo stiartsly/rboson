@@ -49,7 +49,7 @@ fn main() {
     }
 
     let cfg  = b.build().unwrap();
-    let node = Node::new(cfg).unwrap();
+    let node = Node::new(&cfg).unwrap();
     let _ = node.start();
 
     thread::sleep(Duration::from_secs(60*100));

@@ -29,7 +29,7 @@ async fn main() {
         cfg.dump();
     }
 
-    let node = Node::new(cfg).unwrap();
+    let node = Node::new(&cfg).unwrap();
     let _ = node.start();
 
     thread::sleep(Duration::from_secs(1));

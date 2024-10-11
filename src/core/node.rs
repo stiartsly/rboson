@@ -2,6 +2,7 @@ use std::ptr;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::Read;
+use std::net::SocketAddr;
 use std::collections::LinkedList;
 use std::thread::{self, JoinHandle};
 use std::{fs, fs::File, io::Write};
@@ -19,6 +20,7 @@ use crate::{
     NodeStatus,
     PeerInfo,
     Value,
+    Network,
     signature,
     cryptobox,
     cryptobox::Nonce,
@@ -66,11 +68,13 @@ pub struct Node {
 
     thread: RefCell<Option<JoinHandle<()>>>,    // working thread.
     quit: RefCell<Arc<Mutex<bool>>>,            // notification handle to quit from working thread.
-    cfg : Arc<Mutex<Box<dyn Config>>>,          //config for this node.
+    // cfg : Arc<Mutex<Box<dyn Config>>>,          //config for this node.
+
+    addrs: JointResult<SocketAddr>,
 }
 
 impl Node {
-    pub fn new(cfg: Box<dyn Config>) -> Result<Self> {
+    pub fn new(cfg: &Box<dyn Config>) -> Result<Self> {
         logger::setup(cfg.log_level(), cfg.log_file());
 
         #[cfg(feature = "devp")]
@@ -113,11 +117,22 @@ impl Node {
             }
         };
 
+        let mut addrs = JointResult::new();
+        if let Some(addr4) = cfg.addr4() {
+            addrs.set_value(Network::IPv4, addr4.clone());
+        }
+        if let Some(addr6) = cfg.addr6() {
+            addrs.set_value(Network::IPv6, addr6.clone());
+        }
+
+        let mut bootstrap_channel = BootstrapChannel::new();
+        bootstrap_channel.push_nodes(cfg.bootstrap_nodes());
+
         Ok(Node {
             nodeid,
             port,
 
-            bootstr_channel: RefCell::new(Arc::new(Mutex::new(BootstrapChannel::new()))),
+            bootstr_channel: RefCell::new(Arc::new(Mutex::new(bootstrap_channel))),
             command_channel: Arc::new(Mutex::new(LinkedList::new())),
 
             signature_keypair: keypair.clone(),
@@ -129,7 +144,7 @@ impl Node {
 
             thread: RefCell::new(None),
             quit: RefCell::new(Arc::new(Mutex::new(false))),
-            cfg : Arc::new(Mutex::new(cfg)),
+            addrs,
         })
     }
 
@@ -147,16 +162,9 @@ impl Node {
 
         info!("DHT node <{}> is starting...", self.nodeid);
 
-        self.bootstrap_nodes(self.cfg
-            .clone()
-            .lock()
-            .expect("Lock failure")
-            .bootstrap_nodes()
-        );
-
         let path    = self.storage_path.clone();
         let keypair = self.signature_keypair.clone();
-        let config  = self.cfg.clone();
+        let addrs   = self.addrs.clone();
         let bootstr = self.bootstr_channel.clone();
         let cmds    = self.command_channel.clone();
         let quit    = self.quit.clone();
@@ -164,7 +172,7 @@ impl Node {
             let runner = Rc::new(RefCell::new(NodeRunner::new(
                 path,
                 keypair,
-                config
+                addrs,
             )));
 
             runner.borrow_mut()

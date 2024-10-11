@@ -5,6 +5,7 @@ use std::any::{Any, TypeId};
 use std::sync::{Arc, Mutex};
 use std::collections::LinkedList;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Deref;
 use log::{debug, info, warn, error};
@@ -20,7 +21,6 @@ use crate::{
     signature,
     cryptobox::KeyPair,
     Error,
-    Config
 };
 
 use crate::core::{
@@ -74,27 +74,24 @@ impl NodeRunner {
     pub(crate) fn new(
         data_dir: String,
         keypair: signature::KeyPair,
-        config: Arc<Mutex<Box<dyn Config>>>
+        addrs: JointResult<SocketAddr>
     ) -> Self {
         let nodeid = Rc::new(Id::from(keypair.to_public_key()));
         let keypair= KeyPair::try_from(&keypair).unwrap();
-        let cfg = config.lock().unwrap();
 
         let mut dht_num = 0;
-        let dht4 = cfg.addr4().map(|addr| {
+        let dht4 = addrs.v4().map(|addr| {
             let mut dht = DHT::new(nodeid.clone(), addr.clone());
             dht.enable_persistence(data_dir.clone() + "dht4.cache");
             dht_num += 1;
             dht
         });
-        let dht6 = cfg.addr6().map(|addr| {
+        let dht6 = addrs.v6().map(|addr| {
             let mut dht = DHT::new(nodeid.clone(), addr.clone());
             dht.enable_persistence(data_dir.clone() + "dht6.cache");
             dht_num += 1;
             dht
         });
-
-        drop(cfg);
 
         Self {
             nodeid: nodeid.clone(),

@@ -8,6 +8,7 @@ use std::net::{
 };
 use std::fs;
 use serde::Deserialize;
+use log::LevelFilter;
 
 use crate::{
     local_addr,
@@ -19,7 +20,8 @@ use crate::{
 };
 
 use crate::core::{
-    constants
+    constants,
+    logger,
 };
 
 #[derive(Deserialize)]
@@ -31,11 +33,20 @@ struct CfgNode {
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
+struct Logger {
+    level: String,
+    logFile: String,
+    // pattern: String
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
 struct Cfg {
     ipv4: bool,
     ipv6: bool,
     port: u16,
     dataDir: String,
+    logger: Option<Logger>,
     bootstraps: Vec<CfgNode>,
 }
 
@@ -46,18 +57,24 @@ pub struct Builder<'a> {
     ipv6: Option<&'a str>,
     port: u16,
     data_dir: String,
+
+    log_level: LevelFilter,
+    log_file: Option<String>,
+
     bootstrap_nodes: Vec<NodeInfo>,
 }
 
 impl<'a> Builder<'a> {
     pub fn new() -> Builder<'a> {
         Self {
-            auto_ipv4: false,
-            auto_ipv6: false,
-            ipv4: None,
-            ipv6: None,
-            port: constants::DEFAULT_DHT_PORT,
-            data_dir: env::var("HOME").unwrap_or_else(|_| String::from(".")),
+            auto_ipv4:  false,
+            auto_ipv6:  false,
+            ipv4:       None,
+            ipv6:       None,
+            port:       constants::DEFAULT_DHT_PORT,
+            data_dir:   env::var("HOME").unwrap_or_else(|_| String::from(".")),
+            log_level:  LevelFilter::Info,
+            log_file:   None,
             bootstrap_nodes: Vec::new(),
         }
     }
@@ -135,6 +152,11 @@ impl<'a> Builder<'a> {
         }
 
         self.data_dir = cfg.dataDir.clone();
+        if let Some(logger) = cfg.logger {
+            self.log_level = logger::convert_loglevel(&logger.level);
+            self.log_file = Some(logger.logFile);
+        }
+
         for item in cfg.bootstraps {
             let id = match Id::try_from_base58(&item.id) {
                 Ok(id) => id,
@@ -190,6 +212,9 @@ pub struct DefaultConfiguration {
 
     port: u16,
 
+    log_level: LevelFilter,
+    log_file: Option<String>,
+
     storage_path: String,
     bootstrap_nodes: Vec<NodeInfo>,
 }
@@ -228,6 +253,8 @@ impl DefaultConfiguration {
             addr4,
             addr6,
             port: b.port,
+            log_level: b.log_level,
+            log_file: b.log_file.clone(),
             storage_path: b.data_dir.to_string(),
             bootstrap_nodes: b.bootstrap_nodes.clone(),
         }
@@ -253,6 +280,14 @@ impl Config for DefaultConfiguration {
 
     fn bootstrap_nodes(&self) -> &[NodeInfo] {
         &self.bootstrap_nodes
+    }
+
+    fn log_level(&self) -> LevelFilter {
+        self.log_level
+    }
+
+    fn log_file(&self) -> Option<&str> {
+        self.log_file.as_ref().map(|v|v.as_str())
     }
 
     #[cfg(feature = "inspect")]

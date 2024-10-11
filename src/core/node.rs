@@ -71,7 +71,7 @@ pub struct Node {
 
 impl Node {
     pub fn new(cfg: Box<dyn Config>) -> Result<Self> {
-        logger::setup();
+        logger::setup(cfg.log_level(), cfg.log_file());
 
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");

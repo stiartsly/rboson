@@ -3,7 +3,6 @@ mod crypto_cache;
 mod dht;
 mod kbucket;
 mod kclosest_nodes;
-mod logger;
 mod msg;
 mod server;
 mod rpccall;
@@ -12,6 +11,7 @@ mod scheduler;
 mod sqlite3;
 
 pub(crate) mod cbor;
+pub(crate) mod logger;
 pub(crate) mod data_storage;
 pub(crate) mod kbucket_entry;
 pub(crate) mod routing_table;

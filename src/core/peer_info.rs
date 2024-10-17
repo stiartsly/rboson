@@ -236,7 +236,7 @@ impl PeerInfo {
         let mut data = vec![0u8; len];
         data.extend_from_slice(self.nodeid.as_bytes());
         data.extend_from_slice(self.origin().as_bytes());
-        data.extend_from_slice(self.port.to_le_bytes().as_ref());
+        data.extend_from_slice(self.port.to_be_bytes().as_ref());
 
         if let Some(url) = self.url.as_ref() {
             data.extend_from_slice(url.as_ref());
@@ -249,7 +249,7 @@ impl Hash for PeerInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.pk.hash(state);
         self.nodeid.hash(state);
-        self.origin.hash(state);
+        self.origin().hash(state);
         self.port.hash(state);
         self.url.hash(state);
         self.sig.hash(state);

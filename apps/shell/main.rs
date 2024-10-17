@@ -3,6 +3,7 @@ use tokio::time::Duration;
 use clap::Parser;
 
 use boson::{
+    Id,
     Node,
     configuration as cfg
 };
@@ -34,12 +35,31 @@ async fn main() {
 
     thread::sleep(Duration::from_secs(1));
 
-    let target = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ".try_into().unwrap();
-    println!("Try to find node with id: {}", target);
+    let target: Id = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ".try_into().unwrap();
+    println!("Attemp finding node with id: {} ...", target);
     match node.find_node(&target, None).await {
         Ok(val) => match val.v4() {
             Some(node) => println!("Found node: {}", node.to_string()),
             None => println!("Not found !!!!"),
+        },
+        Err(e) => println!("error: {}", e),
+    }
+
+    thread::sleep(Duration::from_secs(2));
+    let peerid: Id = "5vVM1nrCwFh3QqAgbvF3bRgYQL5a2vpFjngwxkiS8Ja6".try_into().unwrap();
+    println!("Attemp finding peers with id: {} ...", peerid);
+    match node.find_peer(&peerid, None, None).await {
+        Ok(val) => {
+            if val.is_empty() {
+                println!("Found no peers, try to lookup it later !!!")
+            } else {
+                println!("Found {} peers, listed below: ", val.len());
+                let mut i = 0;
+                for item in val.iter() {
+                    println!("peer [{}]: {}", i, item);
+                    i+=1;
+                }
+            }
         },
         Err(e) => println!("error: {}", e),
     }

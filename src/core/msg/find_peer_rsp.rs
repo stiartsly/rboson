@@ -96,7 +96,10 @@ impl Msg for Message {
                                     } else if item.is_array() {
                                         let v = item.as_array()?;
                                         let id = Id::from_cbor(v.get(0)?)?;
-                                        let origin = Id::from_cbor(&v[1]).map_or(None, |v| Some(v));
+                                        let origin = match v.get(1)?.is_null() {
+                                            true => None,
+                                            false => Id::from_cbor(v.get(1)?)
+                                        };
                                         let port = v.get(2)?.as_integer()?.try_into().unwrap();
                                         let alt = v.get(3)?.as_text();
                                         let sig = v.get(4)?.as_bytes()?;

@@ -3,13 +3,13 @@ mod crypto_cache;
 mod dht;
 mod kbucket;
 mod kclosest_nodes;
-mod msg;
 mod server;
 mod rpccall;
 mod task;
 mod scheduler;
 mod sqlite3;
 
+pub(crate) mod msg;
 pub(crate) mod cbor;
 pub(crate) mod logger;
 pub(crate) mod data_storage;

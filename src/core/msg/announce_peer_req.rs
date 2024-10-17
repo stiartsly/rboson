@@ -76,7 +76,7 @@ impl Msg for Message {
             }
         }
 
-        let peer = PackBuilder::new(nodeid.unwrap())
+        let peer = PackBuilder::new(nodeid.unwrap())    // TODO: `Option::unwrap()` on a `None` value
             .with_peerid(peerid)
             .with_origin(None)
             .with_port(port)

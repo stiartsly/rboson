@@ -98,14 +98,14 @@ impl Msg for Message {
                                         let id = Id::from_cbor(v.get(0)?)?;
                                         let origin = Id::from_cbor(&v[1]).map_or(None, |v| Some(v));
                                         let port = v.get(2)?.as_integer()?.try_into().unwrap();
-                                        let alt = v.get(3)?.as_text()?;
+                                        let alt = v.get(3)?.as_text();
                                         let sig = v.get(4)?.as_bytes()?;
 
                                         let peer = PackBuilder::new(id)
                                             .with_peerid(Some(peer_id.clone()))
                                             .with_origin(origin)
                                             .with_port(port)
-                                            .with_url(Some(alt.to_string()))
+                                            .with_url(alt.map(|v|v.to_string()))
                                             .with_sig(Some(sig.to_vec()))
                                             .build();
 

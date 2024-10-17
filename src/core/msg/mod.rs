@@ -20,12 +20,13 @@ pub(crate) mod find_value_rsp;
 pub(crate) mod store_value_req;
 pub(crate) mod store_value_rsp;
 
+pub(crate) use msg::{Msg, Kind, Method};
+
 use std::rc::Rc;
 use std::cell::RefCell;
 use ciborium;
 use ciborium::Value as CVal;
 
-use msg::{Msg, Kind, Method};
 use crate::core::{
     cbor,
     error::{Error, Result},

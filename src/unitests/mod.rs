@@ -10,6 +10,11 @@
 #[cfg(test)] mod test_addr;
 #[cfg(test)] mod test_logger;
 
+#[cfg(test)] mod test_find_node_req;
+#[cfg(test)] mod test_find_node_rsp;
+#[cfg(test)] mod test_find_peer_req;
+#[cfg(test)] mod test_find_peer_rsp;
+
 #[cfg(test)] use std::env;
 #[cfg(test)] use std::fs;
 

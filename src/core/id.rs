@@ -17,8 +17,8 @@ use crate::{
 pub const ID_BYTES: usize = 32;
 pub const ID_BITS:  usize = 256;
 
-pub const MIN_ID: Id = Id::max();
-pub const MAX_ID: Id = Id::min();
+pub const MIN_ID: Id = Id::min();
+pub const MAX_ID: Id = Id::max();
 
 #[derive(Default, Clone, PartialOrd, PartialEq, Ord, Eq, Debug, Hash)]
 pub struct Id([u8; ID_BYTES]);

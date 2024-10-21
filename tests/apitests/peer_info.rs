@@ -28,7 +28,7 @@ fn test_with_keypair() {
     let nodeid = Id::random();
     let keypair = signature::KeyPair::random();
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
+        .with_keypair(Some(&keypair))
         .with_port(65534)
         .build();
 
@@ -52,7 +52,7 @@ fn test_with_proxy() {
     let nodeid = Id::random();
     let origin = Id::random();
     let peer = PeerBuilder::new(&nodeid)
-        .with_origin(&origin)
+        .with_origin(Some(&origin))
         .with_port(65534)
         .build();
 
@@ -74,8 +74,8 @@ fn test_with_keypair_and_proxy() {
     let nodeid = Id::random();
     let origin = Id::random();
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
         .build();
 
@@ -98,7 +98,7 @@ fn test_with_url() {
     let url = "https://testing.example.com";
     let peer = PeerBuilder::new(&nodeid)
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     assert_eq!(peer.has_private_key(), true);
@@ -121,9 +121,9 @@ fn test_with_keypair_and_url() {
     let nodeid = Id::random();
     let url = "https://testing.example.com";
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
+        .with_keypair(Some(&keypair))
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     assert_eq!(peer.id(), &Id::from(keypair.to_public_key()));
@@ -148,9 +148,9 @@ fn test_with_proxy_and_url() {
     let origin = Id::random();
     let url = "https://testing.example.com";
     let peer = PeerBuilder::new(&nodeid)
-        .with_origin(&origin)
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     assert_eq!(peer.has_private_key(), true);
@@ -173,10 +173,10 @@ fn test_with_keypair_proxy_and_url() {
     let origin = Id::random();
     let url = "https://testing.example.com";
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     assert_eq!(peer.id(), &Id::from(keypair.to_public_key()));
@@ -202,10 +202,10 @@ fn test_equal() {
     let url = "https://testing.example.com";
 
     let mut b1 = PeerBuilder::new(&nodeid);
-    b1.with_keypair(&keypair)
-        .with_origin(&origin)
+    b1.with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url);
+        .with_alternative_url(Some(url));
 
     let peer1 = b1.build();
     let peer2 = b1.build();
@@ -227,16 +227,16 @@ fn test_peerid() {
 
     let nodeid = Id::random();
     let peer1  = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url1)
+        .with_alternative_url(Some(url1))
         .build();
 
     let nodeid = Id::random();
     let peer2  = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
         .build();
 

@@ -320,7 +320,7 @@ async fn test_announce_peer() {
         let nodeid = Id::random();
         let peer = PeerBuilder::new(&nodeid)
             .with_port(65534)
-            .with_alternative_url("http://announce.com")
+            .with_alternative_url(Some("http://announce.com"))
             .build();
 
         match node.announce_peer(&peer, None).await {
@@ -405,7 +405,7 @@ async fn test_find_peer() {
 
         let peer = PeerBuilder::new(node1.id())
             .with_port(65534)
-            .with_alternative_url("http://example.com")
+            .with_alternative_url(Some("http://example.com"))
             .build();
 
         match node1.announce_peer(&peer, None).await {
@@ -493,7 +493,7 @@ async fn test_get_peer() {
 
         let peer = PeerBuilder::new(node1.id())
             .with_port(65534)
-            .with_alternative_url("http://example.com")
+            .with_alternative_url(Some("http://example.com"))
             .build();
 
         match node1.announce_peer(&peer, None).await {
@@ -567,7 +567,7 @@ async fn test_remove_peer() {
 
         let peer = PeerBuilder::new(node1.id())
             .with_port(65534)
-            .with_alternative_url("http://example.com")
+            .with_alternative_url(Some("http://example.com"))
             .build();
 
         match node1.announce_peer(&peer, None).await {
@@ -652,12 +652,12 @@ async fn test_get_peer_ids() {
 
         let peer1 = PeerBuilder::new(node1.id())
             .with_port(65534)
-            .with_alternative_url("http://example1.com")
+            .with_alternative_url(Some("http://example1.com"))
             .build();
 
         let peer2 = PeerBuilder::new(node1.id())
             .with_port(65535)
-            .with_alternative_url("http://example2.com")
+            .with_alternative_url(Some("http://example2.com"))
             .build();
 
         let result = tokio::join!(

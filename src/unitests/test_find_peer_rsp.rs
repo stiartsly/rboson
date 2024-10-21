@@ -15,8 +15,8 @@ fn test_cbor() {
     let nodeid = Id::random();
     let origin = Id::random();
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
         .build();
 
@@ -48,10 +48,10 @@ fn test_cbor_with_url() {
     let origin = Id::random();
     let url = "https://testing.example.com";
     let peer = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     let mut msg = Message::new();
@@ -75,18 +75,18 @@ fn test_cbor_with_more_peers() {
     let nodeid = Id::random();
     let origin = Id::random();
     let peer1 = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
         .build();
 
     let nodeid = Id::random();
     let url = "https://testing2.example.com";
     let peer2 = PeerBuilder::new(&nodeid)
-        .with_keypair(&keypair)
-        .with_origin(&origin)
+        .with_keypair(Some(&keypair))
+        .with_origin(Some(&origin))
         .with_port(65534)
-        .with_alternative_url(url)
+        .with_alternative_url(Some(url))
         .build();
 
     let mut msg = Message::new();

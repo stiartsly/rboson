@@ -31,18 +31,13 @@ impl<'a> PeerBuilder<'a> {
         }
     }
 
-    pub fn with_keypair(&mut self, keypair: &'a KeyPair) -> &mut Self {
-        self.keypair = Some(keypair);
+    pub fn with_keypair(&mut self, keypair: Option<&'a KeyPair>) -> &mut Self {
+        self.keypair = keypair;
         self
     }
 
-    pub fn with_nodeid(&mut self, nodeid: &'a Id) -> &mut Self {
-        self.nodeid = nodeid;
-        self
-    }
-
-    pub fn with_origin(&mut self, origin: &'a Id) -> &mut Self {
-        self.origin = Some(origin);
+    pub fn with_origin(&mut self, origin: Option<&'a Id>) -> &mut Self {
+        self.origin = origin;
         self
     }
 
@@ -51,8 +46,8 @@ impl<'a> PeerBuilder<'a> {
         self
     }
 
-    pub fn with_alternative_url(&mut self, alternative_url: &'a str) -> &mut Self {
-        self.url = Some(alternative_url);
+    pub fn with_alternative_url(&mut self, alternative_url: Option<&'a str>) -> &mut Self {
+        self.url = alternative_url;
         self
     }
 

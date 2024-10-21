@@ -278,7 +278,7 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
 
     msg.borrow_mut().set_id(&from_id);
     msg.borrow_mut().set_origin(&from);
-
+/*
     #[cfg(debug_assertions)]
     {
         use log::debug;
@@ -289,7 +289,7 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
             len,
             msg.borrow());
     }
-
+*/
     // txid should not be zero if it's not Error message.
     if msg.borrow().kind() != msg::Kind::Error && msg.borrow().txid() == 0 {
         warn!("Received a message with invalid txid, discarded it");

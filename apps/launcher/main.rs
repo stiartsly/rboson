@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
 use clap::Parser;
@@ -5,6 +6,7 @@ use clap::Parser;
 use boson::{
     Node,
     configuration as cfg,
+    ActiveProxyClient as ActiveProxy,
 };
 
 #[derive(Parser, Debug)]
@@ -49,9 +51,28 @@ fn main() {
     }
 
     let cfg  = b.build().unwrap();
-    let node = Node::new(&cfg).unwrap();
-    let _ = node.start();
+    let result = Node::new(&cfg);
+    if let Err(e) = result {
+        panic!("Creating Node instance error: {e}")
+    }
+
+    let node = Arc::new(Mutex::new(result.unwrap()));
+    let _ = node.lock()
+        .unwrap()
+        .start();
+
+    thread::sleep(Duration::from_secs(2));
+
+    let result = ActiveProxy::new(node.clone(), &cfg);
+    if let Err(e) = result {
+        panic!("Creating ActiveProxy client error: {e}")
+    }
+
+    let ap = result.unwrap();
+    let _ = ap.start();
 
     thread::sleep(Duration::from_secs(60*100));
-    node.stop();
+    let _ = node.lock()
+        .unwrap()
+        .stop();
 }

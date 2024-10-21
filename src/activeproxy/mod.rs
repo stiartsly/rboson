@@ -1,2 +1,8 @@
-pub(crate) mod connection;
-pub(crate) mod client;
+mod packet;
+mod connection;
+mod worker;
+pub mod client;
+
+pub use {
+    client::ProxyClient as ActiveProxyClient,
+};

@@ -33,6 +33,8 @@ pub use {
     core::signature::Signature,
     core::cryptobox,
     core::cryptobox::CryptoBox,
+
+    activeproxy::ActiveProxyClient,
 };
 
 #[macro_export]

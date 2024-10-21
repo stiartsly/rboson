@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::time::SystemTime;
 use std::collections::HashMap;
-use log::debug;
+use log::trace;
 
 use crate::{
     addr_family,
@@ -278,7 +278,7 @@ pub(crate) trait Task {
         (cb)(call.clone());
         self.data_mut().inflights.insert(call.borrow().txid(), call.clone());
 
-        debug!("Task#{} sending call to {}{}",
+        trace!("Task#{} sending call to {}@{}",
             self.taskid(),
             self.data().dht.borrow().id(),
             self.data().dht.borrow().addr()

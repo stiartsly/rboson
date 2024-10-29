@@ -1,12 +1,12 @@
 use std::env;
 use std::fmt;
+use std::fs;
 use std::net::{
     IpAddr,
     Ipv4Addr,
     Ipv6Addr,
     SocketAddr
 };
-use std::fs;
 use serde::Deserialize;
 use log::LevelFilter;
 
@@ -14,6 +14,7 @@ use crate::{
     local_addr,
     Id,
     NodeInfo,
+    config,
     Config,
     Error,
     error::Result
@@ -35,8 +36,18 @@ struct CfgNode {
 #[allow(non_snake_case)]
 struct Logger {
     level: String,
-    logFile: String,
+    logFile: Option<String>,
     // pattern: String
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct ActiveProxyItem {
+    serverPeerId: String,
+    peerPrivateKey: Option<String>,
+    domainName: Option<String>,
+    upstreamHost: String,
+    upstreamPort: u16
 }
 
 #[derive(Deserialize)]
@@ -48,58 +59,67 @@ struct Cfg {
     dataDir: String,
     logger: Option<Logger>,
     bootstraps: Vec<CfgNode>,
+    activeproxy: Option<ActiveProxyItem>
 }
 
 pub struct Builder<'a> {
-    auto_ipv4: bool,
-    auto_ipv6: bool,
-    ipv4: Option<&'a str>,
-    ipv6: Option<&'a str>,
-    port: u16,
-    data_dir: String,
+    auto_ipv4:      bool,
+    auto_ipv6:      bool,
+    ipv4_str:       Option<&'a str>,
+    ipv6_str:       Option<&'a str>,
 
-    log_level: LevelFilter,
-    log_file: Option<String>,
+    ipv4_addr:      Option<IpAddr>,
+    ipv6_addr:      Option<IpAddr>,
 
-    bootstrap_nodes: Vec<NodeInfo>,
+    port:           u16,
+    data_dir:       String,
+
+    log_level:      LevelFilter,
+    log_file:       Option<String>,
+
+    bootstrap_nodes:Vec<NodeInfo>,
+    activeproxy: Option<ActiveProxyItem>,
 }
 
 impl<'a> Builder<'a> {
     pub fn new() -> Builder<'a> {
         Self {
-            auto_ipv4:  false,
-            auto_ipv6:  false,
-            ipv4:       None,
-            ipv6:       None,
-            port:       constants::DEFAULT_DHT_PORT,
-            data_dir:   env::var("HOME").unwrap_or_else(|_| String::from(".")),
-            log_level:  LevelFilter::Info,
-            log_file:   None,
-            bootstrap_nodes: Vec::new(),
+            auto_ipv4:      false,
+            auto_ipv6:      false,
+            ipv4_str:       None,
+            ipv6_str:       None,
+            ipv4_addr:      None,
+            ipv6_addr:      None,
+            port:           constants::DEFAULT_DHT_PORT,
+            data_dir:       env::var("HOME").unwrap_or_else(|_| String::from(".")),
+            log_level:      LevelFilter::Info,
+            log_file:       None,
+            activeproxy:    None,
+            bootstrap_nodes:Vec::new(),
         }
     }
 
     pub fn with_auto_ipv4(&mut self) -> &mut Self {
         self.auto_ipv4 = true;
-        self.ipv4 = None;
+        self.ipv4_str = None;
         self
     }
 
     pub fn with_auto_ipv6(&mut self) -> &mut Self {
         self.auto_ipv6 = true;
-        self.ipv6 = None;
+        self.ipv6_str = None;
         self
     }
 
     pub fn with_ipv4(&mut self, input: &'a str) -> &mut Self {
         self.auto_ipv4 = false;
-        self.ipv4 = Some(input);
+        self.ipv4_str = Some(input);
         self
     }
 
     pub fn with_ipv6(&mut self, input: &'a str) -> &mut Self {
         self.auto_ipv6 = false;
-        self.ipv6 = Some(input);
+        self.ipv6_str = Some(input);
         self
     }
 
@@ -108,7 +128,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn with_storage_path(&mut self, input: &'a str) -> &mut Self {
+    pub fn with_storage_path(&mut self, input: &str) -> &mut Self {
         if input.starts_with("~") {
             self.data_dir += &input[1..];
         } else {
@@ -152,10 +172,6 @@ impl<'a> Builder<'a> {
         }
 
         self.data_dir = cfg.dataDir.clone();
-        if let Some(logger) = cfg.logger {
-            self.log_level = logger::convert_loglevel(&logger.level);
-            self.log_file = Some(logger.logFile);
-        }
 
         for item in cfg.bootstraps {
             let id = match Id::try_from_base58(&item.id) {
@@ -170,43 +186,84 @@ impl<'a> Builder<'a> {
                 NodeInfo::new(id, SocketAddr::new(ip, item.port))
             )
         }
+
+        if let Some(logger) = cfg.logger {
+            self.log_level = logger::convert_loglevel(&logger.level);
+            self.log_file = logger.logFile;
+        }
+
+        self.activeproxy = cfg.activeproxy;
         Ok(self)
     }
 
-    pub(crate) fn check_valid(&self) -> Result<()> {
-        if self.port == 0 {
-            return Err(Error::Argument(format!("error: port can't be 0")));
+    pub fn build(&mut self) -> Result<Box<dyn Config>> {
+        if let Some(addr) = self.ipv4_str.as_ref() {
+            self.ipv4_addr = Some(IpAddr::V4(addr.parse::<Ipv4Addr>()?));
+        }
+        if let Some(addr) = self.ipv6_str.as_ref() {
+            self.ipv6_addr = Some(IpAddr::V6(addr.parse::<Ipv6Addr>()?));
         }
 
-        self.ipv4.as_ref().map(|addr| {
-            addr.parse::<Ipv4Addr>().map_err(|e| {
-                return Error::Argument(format!("error: {}", e));
-            }).ok();
-        });
-        self.ipv6.as_ref().map(|addr| {
-            addr.parse::<Ipv4Addr>().map_err(|e| {
-                return Error::Argument(format!("error: {}", e));
-            }).ok();
-        });
+        if self.auto_ipv4 {
+            self.ipv4_addr = Some(local_addr(true)?);
+        }
+        if self.auto_ipv6 {
+            self.ipv6_addr = Some(local_addr(false)?);
+        }
 
-        if self.ipv4.is_none() && self.ipv6.is_none() &&
-            !self.auto_ipv4 && !self.auto_ipv6 {
+        if self.ipv4_addr.is_none() && self.ipv6_addr.is_none() {
             return Err(Error::Argument(format!(
                 "No valid IPv4 or IPv6 address was specified."
             )));
         }
 
-        Ok(())
-    }
-
-    pub fn build(&self) -> Result<Box<dyn Config>> {
-        self.check_valid()?;
-
         Ok(Box::new(DefaultConfiguration::new(self)))
     }
 }
 
-pub struct DefaultConfiguration {
+pub(crate) struct ActiveProxyConfiguration {
+    server_peerid: String,
+    peer_sk: Option<String>,
+    domain_name: Option<String>,
+    upstream_host: String,
+    upstream_port: u16
+}
+
+impl config::ActiveProxyConfig for ActiveProxyConfiguration {
+    fn server_peerid(&self) -> &str {
+        &self.server_peerid
+    }
+
+    fn peer_private_key(&self) -> Option<&str> {
+        self.peer_sk.as_ref().map(|v|v.as_str())
+    }
+
+    fn domain_name(&self) -> Option<&str> {
+        self.domain_name.as_ref().map(|v|v.as_str())
+    }
+
+    fn upstream_host(&self) -> &str {
+        &self.upstream_host
+    }
+
+    fn upstream_port(&self) -> u16 {
+        self.upstream_port
+    }
+}
+
+impl ActiveProxyConfiguration {
+    fn new(b: &ActiveProxyItem) -> Self {
+        Self {
+            server_peerid:  b.serverPeerId.clone(),
+            peer_sk:        b.peerPrivateKey.clone(),
+            domain_name:    b.domainName.clone(),
+            upstream_host:  b.upstreamHost.clone(),
+            upstream_port:  b.upstreamPort
+        }
+    }
+}
+
+pub(crate) struct DefaultConfiguration {
     addr4: Option<SocketAddr>,
     addr6: Option<SocketAddr>,
 
@@ -217,36 +274,23 @@ pub struct DefaultConfiguration {
 
     storage_path: String,
     bootstrap_nodes: Vec<NodeInfo>,
+
+    activeproxy: Option<Box<dyn config::ActiveProxyConfig>>,
 }
 
 impl DefaultConfiguration {
     fn new(b: &Builder) -> Self {
-        let addr4 = if b.auto_ipv4 {
-            Some(SocketAddr::new(
-                local_addr(true).unwrap(),
-                b.port
-            ))
-        } else {
-            b.ipv4.as_ref().map(|addr| {
-                SocketAddr::new(
-                    IpAddr::V4(addr.parse::<Ipv4Addr>().unwrap()),
-                    b.port
-                )
-            })
-        };
+        let addr4 = b.ipv4_addr.as_ref().map(|ip| {
+            SocketAddr::new(ip.clone(), b.port)
+        });
 
-        let addr6 = if b.auto_ipv6 {
-            Some(SocketAddr::new(
-                local_addr(false).unwrap(),
-                b.port
-            ))
-        } else {
-            b.ipv6.as_ref().map(|addr| {
-                SocketAddr::new(
-                    IpAddr::V6(addr.parse::<Ipv6Addr>().unwrap()),
-                    b.port
-                )
-            })
+        let addr6 = b.ipv6_addr.as_ref().map(|ip| {
+            SocketAddr::new(ip.clone(), b.port)
+        });
+
+        let activeproxy = match b.activeproxy.as_ref() {
+            Some(ap) => Some(Box::new(ActiveProxyConfiguration::new(ap))),
+            None => None
         };
 
         Self {
@@ -257,6 +301,7 @@ impl DefaultConfiguration {
             log_file: b.log_file.clone(),
             storage_path: b.data_dir.to_string(),
             bootstrap_nodes: b.bootstrap_nodes.clone(),
+            activeproxy: activeproxy.map(|v| v as Box<dyn config::ActiveProxyConfig>)
         }
     }
 }
@@ -288,6 +333,10 @@ impl Config for DefaultConfiguration {
 
     fn log_file(&self) -> Option<&str> {
         self.log_file.as_ref().map(|v|v.as_str())
+    }
+
+    fn activeproxy(&self) -> Option<&Box<dyn config::ActiveProxyConfig>> {
+        self.activeproxy.as_ref()
     }
 
     #[cfg(feature = "inspect")]

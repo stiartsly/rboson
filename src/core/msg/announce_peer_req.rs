@@ -4,6 +4,7 @@ use std::any::Any;
 use ciborium::Value as CVal;
 
 use crate::{
+    unwrap,
     Id,
     PeerInfo,
     Error,
@@ -25,7 +26,11 @@ pub(crate) struct Message {
     base_data: MsgData,
 
     token: i32,
-    peer: Option<Rc<PeerInfo>>, // Must cantain a value.
+    peerid: Option<Id>,
+    origin: Option<Id>,  // Optional, only for the delegated peer
+    port: Option<u16>,
+    url: Option<String>,
+    sig: Option<Vec<u8>>
 }
 
 impl Msg for Message {
@@ -38,12 +43,6 @@ impl Msg for Message {
     }
 
     fn from_cbor(&mut self, input: &CVal)-> Option<()> {
-        let mut peerid = None;
-        let mut nodeid = None;
-        let mut port = 0u16;
-        let mut alt = None;
-        let mut sig = None;
-
         let root = input.as_map()?;
         for (k,v) in root {
             let k = k.as_text()?;
@@ -62,11 +61,11 @@ impl Msg for Message {
                     for (k,v) in map {
                         let k = k.as_text()?;
                         match k {
-                            "t" => peerid = Some(Id::from_cbor(v)?),
-                            "x" => nodeid = Some(Id::from_cbor(v)?),
-                            "p" => port = v.as_integer()?.try_into().unwrap(),
-                            "alt" => alt = Some(v.as_text()?),
-                            "sig" => sig = Some(v.as_bytes()?.clone()),
+                            "t" => self.peerid = Some(Id::from_cbor(v)?),
+                            "x" => self.origin = Id::from_cbor(v),
+                            "p" => self.port = Some(v.as_integer()?.try_into().unwrap()),
+                            "alt" => self.url = v.as_text().map(|v|v.to_string()),
+                            "sig" => self.sig = Some(v.as_bytes()?.clone()),
                             "tok" => self.token = v.as_integer()?.try_into().unwrap(),
                             _ => return None,
                         }
@@ -76,15 +75,9 @@ impl Msg for Message {
             }
         }
 
-        let peer = PackBuilder::new(nodeid.unwrap())    // TODO: `Option::unwrap()` on a `None` value
-            .with_peerid(peerid)
-            .with_origin(None)
-            .with_port(port)
-            .with_url(alt.map(|v| v.to_string()))
-            .with_sig(sig)
-            .build();
-
-        self.peer = Some(Rc::new(peer));
+        if self.peerid.is_none() || self.port.is_none() || self.sig.is_none() {
+            return None;
+        }
         Some(())
     }
 
@@ -92,7 +85,7 @@ impl Msg for Message {
         let mut req = vec![
             (
                 CVal::Text(String::from("t")),
-                self.peer().id().to_cbor(),
+                unwrap!(self.peerid).to_cbor(),
             ),
             (
                 CVal::Text(String::from("tok")),
@@ -100,17 +93,20 @@ impl Msg for Message {
             ),
             (
                 CVal::Text(String::from("p")),
-                CVal::Integer(self.peer().port().into()),
+                CVal::Integer(self.port.unwrap().into())
             ),
             (
                 CVal::Text(String::from("sig")),
-                CVal::Bytes(self.peer().signature().to_vec()),
-            ),
-            (
-                CVal::Text(String::from("x")),
-                self.peer().nodeid().to_cbor(),
+                CVal::Bytes(unwrap!(self.sig).to_vec()),
             )
         ];
+
+        if let Some(origin) = self.origin.as_ref() {
+            req.push((
+                CVal::Text(String::from("x")),
+                origin.to_cbor(),
+            ))
+        }
 
         self.peer().alternative_url().map(|url| req.push((
             CVal::Text(String::from("alt")),
@@ -139,8 +135,12 @@ impl Message {
                 Method::AnnouncePeer,
                 0
             ),
-            token: 0,
-            peer: None,
+            token:  0,
+            peerid: None,
+            origin: None,
+            port:   None,
+            url:    None,
+            sig:    None,
         }
     }
 
@@ -149,7 +149,13 @@ impl Message {
     }
 
     pub(crate) fn peer(&self) -> Rc<PeerInfo> {
-        self.peer.as_ref().unwrap().clone()
+        Rc::new(PackBuilder::new(self.id().clone())
+            .with_peerid(self.peerid.as_ref().map(|v|v.clone()))
+            .with_origin(self.origin.as_ref().map(|v|v.clone()))
+            .with_port(self.port.unwrap())
+            .with_url(self.url.as_ref().map(|v|v.to_string()))
+            .with_sig(self.sig.as_ref().map(|v|v.to_vec()))
+            .build())
     }
 
     pub(crate) fn with_token(&mut self, token: i32) {
@@ -157,11 +163,18 @@ impl Message {
     }
 
     pub(crate) fn with_peer(&mut self, peer: Rc<PeerInfo>) {
-        self.peer = Some(peer)
+        self.peerid = Some(peer.id().clone());
+        self.origin = match peer.is_delegated() {
+            true => Some(peer.origin().clone()),
+            false => None,
+        };
+        self.port = Some(peer.port());
+        self.url = peer.alternative_url().map(|v|v.to_string());
+        self.sig = Some(peer.signature().to_vec());
     }
 
     pub(crate) fn target(&self) -> &Id {
-        self.peer.as_ref().unwrap().id()
+        unwrap!(self.peerid)
     }
 }
 
@@ -179,7 +192,6 @@ impl TryFrom<CVal> for Box<Message> {
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let peer = self.peer.as_ref().unwrap();
         write!(f,
             "y:{},m:{},t:{},q: {{",
             self.kind(),
@@ -188,16 +200,17 @@ impl fmt::Display for Message {
         )?;
 
         write!(f, "t:{},n:{},p:{}",
-            peer.id(),
-            peer.nodeid(),
-            peer.port()
+            unwrap!(self.peerid),
+            self.id(),
+            unwrap!(self.port)
         )?;
 
-        if let Some(url) = peer.alternative_url() {
+        if let Some(url) = self.url.as_ref() {
             write!(f, ",alt:{}", url)?;
         }
+
         write!(f, ",sig:{},tok:{}",
-            hex::encode(peer.signature()),
+            hex::encode(unwrap!(self.sig)),
             self.token as u32
         )?;
 

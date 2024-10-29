@@ -228,7 +228,7 @@ impl PeerInfo {
             sz
         };
 
-        let mut data = vec![0u8; len];
+        let mut data = Vec::with_capacity(len);
         data.extend_from_slice(self.nodeid.as_bytes());
         data.extend_from_slice(self.origin().as_bytes());
         data.extend_from_slice(self.port.to_be_bytes().as_ref());

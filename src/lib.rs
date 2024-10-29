@@ -10,6 +10,7 @@ pub use {
     core::node::Node,
     core::error::Error,
     core::error,
+    core::config,
     core::config::Config,
     core::prefix::Prefix,
     core::node_info::NodeInfo,
@@ -54,10 +55,10 @@ use std::path::Path;
 use get_if_addrs::get_if_addrs;
 use libsodium_sys::randombytes_buf;
 
-fn local_addr(ipv4: bool) -> Option<IpAddr>{
+fn local_addr(ipv4: bool) -> Result<IpAddr, Error>{
     let if_addrs = match get_if_addrs() {
         Ok(v) => v,
-        _ => return None
+        Err(e) => return Err(Error::from(e))
     };
 
     for iface in if_addrs {
@@ -65,10 +66,10 @@ fn local_addr(ipv4: bool) -> Option<IpAddr>{
         if !ip.is_loopback() &&
             ((ipv4 && ip.is_ipv4()) ||
             (!ipv4 && ip.is_ipv6())) {
-            return Some(ip)
+            return Ok(ip)
         }
     }
-    None
+    Err(Error::Network(format!("No working network interfaces")))
 }
 
 fn create_dirs(input: &str) -> Result<(), Error> {

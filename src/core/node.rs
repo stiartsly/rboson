@@ -520,8 +520,8 @@ impl Node {
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
-        cryptobox::encrypt(cipher,
-            plain,
+        cryptobox::encrypt(plain,
+            cipher,
             &nonce,
             &recipient.to_encryption_key(),
             self.encryption_keypair.private_key()
@@ -534,8 +534,8 @@ impl Node {
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
-        cryptobox::decrypt(plain,
-            cipher,
+        cryptobox::decrypt(cipher,
+            plain,
             &nonce,
             &sender.to_encryption_key(),
             self.encryption_keypair.private_key()

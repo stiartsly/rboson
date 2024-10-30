@@ -497,8 +497,8 @@ impl Drop for CryptoBox {
     }
 }
 
-pub fn encrypt(cipher: &mut [u8],
-    plain: &[u8],
+pub fn encrypt(plain: &[u8],
+    cipher: &mut [u8],
     nonce: &Nonce,
     pk: &PublicKey,
     sk: &PrivateKey,
@@ -531,11 +531,11 @@ pub fn encrypt_into(plain: &[u8],
     sk: &PrivateKey
 ) -> Result<Vec<u8>> {
     let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES];
-    encrypt(cipher.as_mut(), plain, nonce, pk, sk).map(|_| cipher)
+    encrypt(plain, cipher.as_mut(), nonce, pk, sk).map(|_| cipher)
 }
 
-pub fn decrypt(plain: &mut [u8],
-    cipher: &[u8],
+pub fn decrypt(cipher: &[u8],
+    plain: &mut [u8],
     nonce: &Nonce,
     pk: &PublicKey,
     sk: &PrivateKey,
@@ -568,5 +568,5 @@ pub fn decrypt_into(cipher: &[u8],
     sk: &PrivateKey
 ) -> Result<Vec<u8>> {
     let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES];
-    decrypt(plain.as_mut(), cipher, nonce, pk, sk).map(|_| plain)
+    decrypt(cipher, plain.as_mut(), nonce, pk, sk).map(|_| plain)
 }

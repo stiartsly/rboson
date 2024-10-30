@@ -489,33 +489,45 @@ impl Node {
     }
 
     pub fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let distance = Id::distance(&self.nodeid, &recipient);
+        let pk = recipient.to_encryption_key();
+        let receiver = Id::try_from(pk.as_bytes()).unwrap();
+        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
+
+        let distance = Id::distance(&receiver, &sender);
         let nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
         cryptobox::encrypt_into(plain,
             &nonce,
-            &recipient.to_encryption_key(),
+            &pk,
             self.encryption_keypair.private_key()
         )
     }
 
     pub fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let distance = Id::distance(&self.nodeid, &sender);
+        let pk = sender.to_encryption_key();
+        let receiver = Id::try_from(pk.as_bytes()).unwrap();
+        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
+
+        let distance = Id::distance(&receiver, &sender);
         let nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
         cryptobox::decrypt_into(cipher,
             &nonce,
-            &sender.to_encryption_key(),
+            &pk,
             self.encryption_keypair.private_key()
         )
     }
 
     pub fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let distance = Id::distance(&self.nodeid, &recipient);
+        let pk = recipient.to_encryption_key();
+        let receiver = Id::try_from(pk.as_bytes()).unwrap();
+        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
+
+        let distance = Id::distance(&receiver, &sender);
         let nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
@@ -523,13 +535,17 @@ impl Node {
         cryptobox::encrypt(plain,
             cipher,
             &nonce,
-            &recipient.to_encryption_key(),
+            &pk,
             self.encryption_keypair.private_key()
         )
     }
 
     pub fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let distance = Id::distance(&self.nodeid, &sender);
+        let pk = sender.to_encryption_key();
+        let receiver = Id::try_from(pk.as_bytes()).unwrap();
+        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
+
+        let distance = Id::distance(&receiver, &sender);
         let nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
@@ -537,7 +553,7 @@ impl Node {
         cryptobox::decrypt(cipher,
             plain,
             &nonce,
-            &sender.to_encryption_key(),
+            &pk,
             self.encryption_keypair.private_key()
         )
     }

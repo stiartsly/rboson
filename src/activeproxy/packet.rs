@@ -118,8 +118,8 @@ fn create_packet_on_err<T: Default>(ack: bool,
 ) -> Result<Packet> {
 
     match ack {
-        true => Ok(with_ack(T::default())),
-        false => Err(no_ack_err)
+        false => Ok(with_ack(T::default())),
+        true => Err(no_ack_err)
     }
 }
 
@@ -137,9 +137,11 @@ impl Packet {
                                     => create_packet::<ConnType>(ack, Packet::ConnectAck, Packet::Connect),
             DISCONNECT_MIN..=DISCONNECT_MAX
                                     => create_packet::<DisconnType>(ack, Packet::DisconnectAck, Packet::Disconnect),
-            DATA_MIN..=DATA_MAX     => create_packet_on_err::<DataType>(ack, Packet::Data,
-                Error::State(format!("Should never happen: Data type should not be with ack"))
-            ),
+            DATA_MIN..=DATA_MAX     => {
+                create_packet_on_err::<DataType>(ack, Packet::Data,
+                    Error::State(format!("Should never happen: Data type should not be with ack"))
+                )
+            },
             ERROR_MIN..=ERROR_MAX   => create_packet_on_err::<ErrType>(ack, Packet::Error,
                 Error::State(format!("Should never happen: Error type should not be with ack"))
             ),

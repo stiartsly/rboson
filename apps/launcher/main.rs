@@ -69,7 +69,10 @@ fn main() {
     }
 
     let ap = result.unwrap();
-    let _ = ap.start();
+    match ap.start() {
+        Ok(_) => {},
+        Err(e) => panic!("{e}")
+    }
 
     thread::sleep(Duration::from_secs(60*100));
     let _ = node.lock()

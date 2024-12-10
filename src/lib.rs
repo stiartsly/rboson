@@ -49,6 +49,13 @@ macro_rules! unwrap {
     }};
 }
 
+#[macro_export]
+macro_rules! unwrap_mut {
+    ($val:expr) => {{
+        $val.as_mut().unwrap()
+    }};
+}
+
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;

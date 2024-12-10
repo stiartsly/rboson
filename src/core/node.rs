@@ -325,7 +325,7 @@ impl Node {
             return Err(Error::State(format!("DHT node {} is not running", self.nodeid)))
         }
 
-        let borrowed_option = self.option.borrow();
+        let borrowed_option = *self.option.borrow();
         let opt = option.unwrap_or(&borrowed_option);
         let seq = expected_seq.unwrap_or(0);
         let arc = Arc::new(Mutex::new(FindPeerCmd::new(

@@ -1,7 +1,9 @@
 use std::fmt;
 use std::mem;
 use std::hash::{Hash, Hasher};
+
 use unicode_normalization::UnicodeNormalization;
+use ciborium::Value;
 
 use crate::{
     Id,
@@ -163,6 +165,44 @@ impl PeerInfo {
         }
     }
 
+    pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
+        let mut pk: Option<Id> = None;
+        let mut nodeid: Option<Id> = None;
+        let mut url: Option<String> = None;
+        let mut sig: Option<Vec<u8>> = None;
+        let mut port = 0;
+
+        let root = input.as_map()?;
+        for (k,v) in root {
+            let k = k.as_text()?;
+            match k {
+                "id" => pk = Some(Id::from_cbor(v)?),
+                "nodeid" => nodeid = Some(Id::from_cbor(v)?),
+                "port" => port = v.as_integer()?.try_into().unwrap(),
+                "url" => url = v.as_text().map(|v|v.to_string()),
+                "sig" => sig = Some(v.as_bytes()?.to_vec()),
+                _ => return None,
+            }
+        }
+
+        let Some(nodeid) = nodeid else {
+            return None;
+        };
+        let Some(pk) = pk else {
+            return None;
+        };
+        let Some(sig) = sig else {
+            return None;
+        };
+
+        Some(PackBuilder::new(nodeid)
+            .with_peerid(Some(pk))
+            .with_port(port)
+            .with_url(url.map(|v|v.to_string()))
+            .with_sig(Some(sig.to_vec()))
+            .build())
+    }
+
     pub const fn id(&self) -> &Id {
         &self.pk
     }
@@ -237,6 +277,34 @@ impl PeerInfo {
             data.extend_from_slice(url.as_ref());
         }
         data
+    }
+
+    pub(crate) fn to_cbor(&self) -> Value {
+        Value::Map(vec![
+            (
+                Value::Text(String::from("id")),
+                self.id().to_cbor(),
+            ),
+            (
+                Value::Text(String::from("nodeid")),
+                self.nodeid().to_cbor(),
+            ),
+            (
+                Value::Text(String::from("port")),
+                Value::Integer(self.port().into()),
+            ),
+            (
+                Value::Text(String::from("url")),
+                self.alternative_url().map_or(
+                    Value::Null,
+                    |url| Value::Text(url.to_string())
+                ),
+            ),
+            (
+                Value::Text(String::from("sig")),
+                Value::Bytes(self.signature().to_vec())
+            )
+        ])
     }
 }
 

@@ -56,19 +56,18 @@ pub struct Node {
     nodeid: Id,
     port: u16,
 
-    bootstr_channel: RefCell<Arc<Mutex<BootstrapChannel>>>,
+    bootstr_channel: Arc<Mutex<BootstrapChannel>>,
     command_channel: Arc<Mutex<LinkedList<Command>>>,
 
     signature_keypair : signature::KeyPair,
     encryption_keypair: cryptobox::KeyPair,
 
-    option: RefCell<LookupOption>,
-    status: RefCell<NodeStatus>,
+    option: Mutex<LookupOption>,
+    status: Mutex<NodeStatus>,
     storage_path: String,
 
-    thread: RefCell<Option<JoinHandle<()>>>,    // working thread.
-    quit: RefCell<Arc<Mutex<bool>>>,            // notification handle to quit from working thread.
-    // cfg : Arc<Mutex<Box<dyn Config>>>,          //config for this node.
+    thread: Mutex<Option<JoinHandle<()>>>,    // working thread.
+    quit: Arc<Mutex<bool>>,            // notification handle to quit from working thread.
 
     addrs: JointResult<SocketAddr>,
 }
@@ -132,24 +131,24 @@ impl Node {
             nodeid,
             port,
 
-            bootstr_channel: RefCell::new(Arc::new(Mutex::new(bootstrap_channel))),
+            bootstr_channel: Arc::new(Mutex::new(bootstrap_channel)),
             command_channel: Arc::new(Mutex::new(LinkedList::new())),
 
             signature_keypair: keypair.clone(),
             encryption_keypair: cryptobox::KeyPair::try_from(&keypair).unwrap(),
 
-            status: RefCell::new(NodeStatus::Stopped),
-            option: RefCell::new(LookupOption::Conservative),
+            status: Mutex::new(NodeStatus::Stopped),
+            option: Mutex::new(LookupOption::Conservative),
             storage_path: path,
 
-            thread: RefCell::new(None),
-            quit: RefCell::new(Arc::new(Mutex::new(false))),
+            thread: Mutex::new(None),
+            quit: Arc::new(Mutex::new(false)),
             addrs,
         })
     }
 
     pub fn start(&self) {
-        let status_ptr: *mut NodeStatus = &mut (*self.status.borrow_mut());
+        let status_ptr: *mut NodeStatus = &mut *(self.status.lock().unwrap());
         unsafe {
             if ptr::read_volatile(status_ptr)
                 != NodeStatus::Stopped {
@@ -177,17 +176,17 @@ impl Node {
 
             runner.borrow_mut()
                 .set_field(runner.clone())
-                .set_field(bootstr.into_inner())
+                .set_field(bootstr.clone())
                 .set_field(cmds)
                 .cloned();
 
             node_runner::run_loop(
                 runner,
-                quit.borrow_mut().clone()
+                quit.clone()
             );
         });
 
-        *self.thread.borrow_mut() = Some(thread);
+        *self.thread.lock().unwrap() = Some(thread);
         unsafe {
             ptr::write_volatile(status_ptr,
                 NodeStatus::Running
@@ -196,7 +195,7 @@ impl Node {
     }
 
     pub fn stop(&self) {
-        let status_ptr: *mut NodeStatus = &mut (*self.status.borrow_mut());
+        let status_ptr: *mut NodeStatus = &mut (*self.status.lock().unwrap());
         unsafe {
             if ptr::read_volatile(status_ptr)
                 == NodeStatus::Stopped {
@@ -212,37 +211,34 @@ impl Node {
 
         // Check for abnormal termination in the spawned thread.
         // If the thread is still running, then notify it to abort.
-        let borrowed_quit = self.quit.borrow_mut();
-        let mut quit = borrowed_quit.lock().unwrap();
+        let mut quit = self.quit.lock().unwrap();
         if !*quit {
             *quit = true;
         }
         drop(quit);
 
-        self.thread.take().unwrap().join().expect("Join thread error");
-        *self.thread.borrow_mut() = None;
+        self.thread.lock().unwrap().take().unwrap().join().expect("Join thread error");
+        *self.thread.lock().unwrap() = None;
 
         info!("DHT node {} stopped", self.nodeid);
         logger::teardown();
     }
 
     pub fn is_running(&self) -> bool {
-        let status_ptr: *const NodeStatus = &(*self.status.borrow());
+        let status_ptr: *const NodeStatus = &(*self.status.lock().unwrap());
         unsafe {
             ptr::read_volatile(status_ptr) == NodeStatus::Running
         }
     }
 
     pub fn bootstrap(&self, node: &NodeInfo) {
-        self.bootstr_channel.borrow_mut()
-            .lock()
+        self.bootstr_channel.lock()
             .expect("Locking failure")
             .push(node);
     }
 
     pub fn bootstrap_nodes(&self, nodes: &[NodeInfo]) {
-        self.bootstr_channel.borrow_mut()
-            .lock()
+        self.bootstr_channel.lock()
             .expect("Locking failure")
             .push_nodes(nodes);
     }
@@ -260,11 +256,11 @@ impl Node {
     }
 
     pub fn set_lookup_option(&self, option: LookupOption) {
-        *self.option.borrow_mut() = option;
+        *self.option.lock().unwrap() = option;
     }
 
     pub fn lookup_option(&self) -> LookupOption {
-        *self.option.borrow()
+        self.option.lock().unwrap().clone()
     }
 
     pub async fn find_node(&self,
@@ -278,8 +274,8 @@ impl Node {
             return Err(Error::State(format!("DHT node {} is not running", self.nodeid)))
         }
 
-        let borrowed_option = self.option.borrow();
-        let opt = option.unwrap_or(&borrowed_option);
+        let default_opt = self.option.lock().unwrap();
+        let opt = option.unwrap_or(&default_opt);
         let arc = Arc::new(Mutex::new(FindNodeCmd::new(target, opt)));
         let cmd = Command::FindNode(arc.clone());
 
@@ -301,8 +297,8 @@ impl Node {
             return Err(Error::State(format!("DHT node {} is not running", self.nodeid)))
         }
 
-        let borrowed_option = self.option.borrow();
-        let opt = option.unwrap_or(&borrowed_option);
+        let default_opt = self.option.lock().unwrap();
+        let opt = option.unwrap_or(&default_opt);
         let arc = Arc::new(Mutex::new(FindValueCmd::new(value_id, opt)));
         let cmd = Command::FindValue(arc.clone());
 
@@ -325,8 +321,8 @@ impl Node {
             return Err(Error::State(format!("DHT node {} is not running", self.nodeid)))
         }
 
-        let borrowed_option = *self.option.borrow();
-        let opt = option.unwrap_or(&borrowed_option);
+        let default_opt = *self.option.lock().unwrap();
+        let opt = option.unwrap_or(&default_opt);
         let seq = expected_seq.unwrap_or(0);
         let arc = Arc::new(Mutex::new(FindPeerCmd::new(
             peer_id,

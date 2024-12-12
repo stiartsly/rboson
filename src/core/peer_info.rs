@@ -165,6 +165,7 @@ impl PeerInfo {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
         let mut pk: Option<Id> = None;
         let mut nodeid: Option<Id> = None;
@@ -279,6 +280,7 @@ impl PeerInfo {
         data
     }
 
+    #[allow(dead_code)]
     pub(crate) fn to_cbor(&self) -> Value {
         Value::Map(vec![
             (

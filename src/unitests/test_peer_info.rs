@@ -4,7 +4,8 @@ use crate::unitests::{
 
 use crate::{
     Id,
-    PeerInfo
+    PeerInfo,
+    PeerBuilder,
 };
 
 use crate::core::{
@@ -41,4 +42,28 @@ fn test_pack_builder() {
     assert_eq!(peer.signature(), bytes);
     assert_eq!(peer.is_delegated(), true);
     assert_eq!(peer.is_valid(), false);
+}
+
+#[test]
+fn test_from_cbor() {
+    let nodeid = Id::random();
+    let port = 65535;
+    let url = "https:://testing.example.com";
+    let peer = PeerBuilder::new(&nodeid)
+        .with_port(port)
+        .with_alternative_url(Some(url))
+        .build();
+
+    let cbor = peer.to_cbor();
+    let result = PeerInfo::from_cbor(&cbor);
+    assert_eq!(result.is_some(), true);
+
+    let parsed = result.unwrap();
+    assert_eq!(peer.nodeid(), parsed.nodeid());
+    assert_eq!(peer.nodeid(), &nodeid);
+    assert_eq!(peer.id(), parsed.id());
+    assert_eq!(peer.port(), parsed.port());
+    assert_eq!(peer.port(), port);
+    assert_eq!(parsed.has_alternative_url(), true);
+    assert_eq!(peer.alternative_url(), parsed.alternative_url());
 }

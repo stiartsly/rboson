@@ -28,16 +28,14 @@ pub(crate) enum State {
 }
 
 impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let str = match self {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match *self {
             State::Initial => "INITIAL",
             State::Queued => "QUEUED",
             State::Running => "RUNNING",
             State::Finished => "FINISHED",
             State::Canceled => "CANCELED",
-        };
-        write!(f, "{}", str)?;
-        Ok(())
+        })
     }
 }
 

@@ -4,6 +4,7 @@ use std::any::Any;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::net::SocketAddr;
+
 use ciborium;
 use ciborium::Value as CVal;
 
@@ -24,16 +25,6 @@ pub(crate) enum Kind {
 
 impl Kind {
     const MASK: i32 = 0xE0;
-    pub(crate) fn from(_type: i32) -> Kind {
-        let kind = _type & Self::MASK;
-        match kind {
-            0x00 => Kind::Error,
-            0x20 => Kind::Request,
-            0x40 => Kind::Response,
-            _ => panic!("invalid msg kind: {}", kind)
-        }
-    }
-
     pub(crate) fn is_valid(_type: i32) -> bool {
         match _type & Self::MASK {
             0x00 => true,
@@ -52,15 +43,25 @@ impl Kind {
     }
 }
 
+impl From<i32> for Kind {
+    fn from(_type: i32) -> Kind {
+        let kind = _type & Self::MASK;
+        match kind {
+            0x00 => Kind::Error,
+            0x20 => Kind::Request,
+            0x40 => Kind::Response,
+            _ => panic!("invalid msg kind: {}", kind)
+        }
+    }
+}
+
 impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let str = match self {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match *self {
             Kind::Error => "e",
             Kind::Request => "q",
             Kind::Response => "r",
-        };
-        write!(f, "{}", str)?;
-        Ok(())
+        })
     }
 }
 
@@ -77,7 +78,14 @@ pub(crate) enum Method {
 
 impl Method {
     const MASK: i32 = 0x1F;
-    pub(crate) fn from(_type: i32) -> Self {
+    pub(crate) fn is_valid(_type: i32) -> bool {
+        let method = _type & Self::MASK;
+        method >= 0 && method <= 0x06
+    }
+}
+
+impl From<i32> for Method {
+    fn from(_type: i32) -> Self {
         let method = _type & Self::MASK;
         match _type & Self::MASK {
             0x00 => Method::Unknown,
@@ -90,16 +98,11 @@ impl Method {
             _ => panic!("invalid msg method: {}", method)
         }
     }
-
-    pub(crate) fn is_valid(_type: i32) -> bool {
-        let method = _type & Self::MASK;
-        method >= 0 && method <= 0x06
-    }
 }
 
 impl fmt::Display for Method {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let str = match self {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match *self  {
             Method::Unknown => "unknown",
             Method::Ping => "ping",
             Method::FindNode => "find_node",
@@ -107,9 +110,7 @@ impl fmt::Display for Method {
             Method::FindPeer => "find_peer",
             Method::StoreValue => "store_value",
             Method::FindValue => "find_value",
-        };
-        write!(f, "{}", str)?;
-        Ok(())
+        })
     }
 }
 

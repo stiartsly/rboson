@@ -1,6 +1,7 @@
 use std::fmt;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LookupOption {
     Local,
     Arbitrary,
@@ -9,13 +10,12 @@ pub enum LookupOption {
 }
 
 impl fmt::Display for LookupOption {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let str = match self {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match *self {
             LookupOption::Local => "Local",
             LookupOption::Arbitrary => "Arbitrary",
             LookupOption::Optimistic => "Optimistic",
             LookupOption::Conservative => "Conservative",
-        };
-        write!(f, "{}", str)
+        })
     }
 }

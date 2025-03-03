@@ -23,6 +23,10 @@ path = "apps/shell/main.rs"
 name = "launcher"
 path = "apps/launcher/main.rs"
 
+[[bin]]
+name = "im"
+path = "apps/im/main.rs"
+
 [features]
 devp = []
 inspect = ["devp"]

@@ -25,7 +25,7 @@ impl Database {
             // TODO:
         }
 
-        let exist = fs::metadata(path).map_err(|e| {
+        let _ = fs::metadata(path).map_err(|e| {
             error!("{e}");
             Error::Argument(format!("Internal error: {e}"))
         });

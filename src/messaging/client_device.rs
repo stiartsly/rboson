@@ -4,16 +4,14 @@ use serde::{
 	Serialize,
 };
 
-use crate::Id;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct ClientDevice {
-	#[serde(rename = "id")]
-	device_id: Id,
+	//#[serde(rename = "id")]
+	//device_id: Id,
 
-	#[serde(rename = "clientId")]
-	client_id: String,
+	//#[serde(rename = "clientId")]
+	//client_id: String,
 
 	#[serde(rename = "name")]
 	device_name: String,
@@ -37,13 +35,13 @@ pub struct ClientDevice {
 impl ClientDevice {
 	// TODO: for new function.
 
-	pub fn client_id(&self) -> &str {
-		&self.client_id
-	}
+	//pub fn client_id(&self) -> &str {
+	//	&self.client_id
+	//}
 
-	pub fn device_id(&self) -> &Id {
-		&self.device_id
-	}
+	//pub fn device_id(&self) -> &Id {
+	//	&self.device_id
+	//}
 
 	pub fn device_name(&self) -> &str {
 		&self.device_name
@@ -71,7 +69,8 @@ impl ClientDevice {
 }
 
 impl PartialEq for ClientDevice {
-    fn eq(&self, other: &Self) -> bool {
-		self.device_id == other.device_id
+    fn eq(&self, _: &Self) -> bool {
+		//self.device_id == other.device_id
+		false
     }
 }

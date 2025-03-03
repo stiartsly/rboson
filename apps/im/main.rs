@@ -6,7 +6,6 @@ use clap::Parser;
 use boson::{
     Node,
     configuration as cfg,
-    ActiveProxyClient as ActiveProxy,
 };
 
 #[derive(Parser, Debug)]

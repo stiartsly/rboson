@@ -7,10 +7,6 @@ use log::{
     Record
 };
 
-use crate::{
-    unwrap,
-};
-
 static mut MY_LOGGER: Option<Logger> = None;
 
 struct  Logger {
@@ -85,8 +81,10 @@ impl log::Log for NullLogger {
 pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     unsafe {
         MY_LOGGER = Some(Logger::new(max_level, logfile));
-        _ = log::set_logger(unwrap!(MY_LOGGER));
-        _ = log::set_max_level(unwrap!(MY_LOGGER).max_level);
+        if let Some(ref mut v) = MY_LOGGER {
+            _ = log::set_logger(v);
+            _ = log::set_max_level(v.max_level);
+        }
     }
 }
 
@@ -97,7 +95,9 @@ pub(crate) fn teardown() {
 #[allow(dead_code)]
 pub(crate) fn revert_console_output() {
     unsafe {
-        MY_LOGGER.as_mut().map(|v| v.revert_console_output());
+        if let Some(ref mut v) = MY_LOGGER {
+            v.revert_console_output();
+        }
     }
 }
 

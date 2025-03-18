@@ -38,6 +38,9 @@ pub mod node;
 pub mod signature;
 pub mod value;
 
+#[cfg(test)]
+mod unitests;
+
 #[macro_export]
 macro_rules! as_uchar_ptr {
     ($val:expr) => {{

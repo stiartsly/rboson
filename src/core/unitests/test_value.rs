@@ -1,6 +1,4 @@
-use crate::unitests::{
-    create_random_bytes
-};
+use super::create_random_bytes;
 use crate::{
     signature,
     cryptobox,

@@ -1,5 +1,6 @@
 pub mod core;
 pub mod activeproxy;
+pub mod messaging;
 
 #[cfg(test)]
 mod unitests;

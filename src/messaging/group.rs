@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use crate::{
     Id,
-    Identity,
     signature,
     cryptobox,
     error::Result,
 };
 
 use super::{
+    crypto_identity::Identity,
     group_permission::GroupPermission,
     group_member::GroupMember,
     group_role::GroupRole,
@@ -80,7 +80,7 @@ impl Group {
         unimplemented!()
     }
 
-    
+
 
     pub fn size(&self) -> usize {
         self.members.len()
@@ -137,19 +137,19 @@ impl Identity for Group {
         unimplemented!()
     }
 
-    fn sign(&self, _data: &[u8]) -> Vec<u8> {
+    fn sign_into(&self, _data: &[u8]) -> Result<Vec<u8>> {
         unimplemented!()
     }
 
-    fn verify(&self, _data: &[u8], _signature: &[u8]) -> bool {
+    fn verify(&self, _data: &[u8], _signature: &[u8]) -> Result<()> {
         unimplemented!()
     }
 
-    fn encrypt(&self, _recipient: &Id, _data: &[u8]) -> Vec<u8> {
+    fn encrypt_into(&self, _recipient: &Id, _data: &[u8]) -> Result<Vec<u8>> {
         unimplemented!()
     }
 
-    fn decrypt(&self, _sender: &Id, _data: &[u8]) -> Vec<u8> {
+    fn decrypt_into(&self, _sender: &Id, _data: &[u8]) -> Result<Vec<u8>> {
         unimplemented!()
     }
 }

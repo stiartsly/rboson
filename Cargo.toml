@@ -41,6 +41,7 @@ sha2    = "0.10.8"
 rbtree  = "0.2.0"
 rand    = "0.8"
 futures = "0.3"
+url     = "2.5.4"
 
 diesel  = { version = "2.2.3",  features = ["sqlite"]   }
 tokio   = { version = "1.35.1", features = ["full"]     }

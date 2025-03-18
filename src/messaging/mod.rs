@@ -1,8 +1,8 @@
+pub mod contact_listener;
 
 pub mod persistence;
 pub mod contact;
 pub mod contact_manager;
-pub mod contact_listener;
 
 pub mod group;
 pub mod group_member;
@@ -13,8 +13,10 @@ pub mod group_identity;
 
 pub mod invite_ticket;
 pub mod message;
-pub mod message_client
+pub mod messaging_client;
+pub mod message_listener;
 pub mod connection_listener;
+pub mod channel_listener;
 pub mod config_adapter;
 pub mod conversation;
 
@@ -25,3 +27,4 @@ pub(crate) mod rpc;
 pub mod user_agent;
 
 pub mod crypto_identity;
+pub mod client;

@@ -1,6 +1,9 @@
 use crate::{
     Id,
-    Identity,
+};
+
+use super::{
+    crypto_identity::Identity,
 };
 
 pub trait GroupIdentity: Identity {

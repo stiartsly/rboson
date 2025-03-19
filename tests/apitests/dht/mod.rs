@@ -1,0 +1,9 @@
+#[cfg(test)] mod config;
+#[cfg(test)] mod id;
+#[cfg(test)] mod prefix;
+#[cfg(test)] mod node_info;
+#[cfg(test)] mod peer_info;
+#[cfg(test)] mod value;
+#[cfg(test)] mod signature;
+#[cfg(test)] mod cryptobox;
+#[cfg(test)] mod node;

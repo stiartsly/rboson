@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 [[test]]
 name = "apitests"
-path = "tests/apitests/mod.rs"
+path = "tests/apitests/lib.rs"
 
 [[bin]]
 name = "shell"

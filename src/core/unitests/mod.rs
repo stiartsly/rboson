@@ -15,8 +15,6 @@
 #[cfg(test)] mod test_find_peer_req;
 #[cfg(test)] mod test_find_peer_rsp;
 
-//#[cfg(test)] mod test_activeproxy;
-
 #[cfg(test)] use std::env;
 #[cfg(test)] use std::fs;
 

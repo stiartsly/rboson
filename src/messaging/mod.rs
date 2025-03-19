@@ -28,3 +28,6 @@ pub mod user_agent;
 
 pub mod crypto_identity;
 pub mod client;
+
+#[cfg(test)]
+mod unitests;

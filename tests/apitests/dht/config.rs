@@ -57,7 +57,7 @@ fn test_build_cfg() {
 fn test_load_cfg() {
     let path = match std::fs::metadata("apitests1.conf") {
         Ok(_) => "apitests1.conf",
-        Err(_) => "tests/apitests/apitests1.conf",
+        Err(_) => "tests/apitests/dht/apitests1.conf",
     };
     let cfg = configuration::Builder::new()
         .load(path)
@@ -107,7 +107,7 @@ fn test_load_cfg() {
 fn test_load_cfg_for_log() {
     let path = match std::fs::metadata("apitests2.conf") {
         Ok(_) => "apitests2.conf",
-        Err(_) => "tests/apitests/apitests2.conf",
+        Err(_) => "tests/apitests/dht/apitests2.conf",
     };
     let cfg = configuration::Builder::new()
         .load(path)
@@ -141,7 +141,7 @@ fn test_load_cfg_for_log() {
 fn test_load_cfg_for_activeproxy() {
     let path = match std::fs::metadata("apitests2.conf") {
         Ok(_) => "apitests2.conf",
-        Err(_) => "tests/apitests/apitests2.conf",
+        Err(_) => "tests/apitests/dht/apitests2.conf",
     };
     let cfg = configuration::Builder::new()
         .load(path)

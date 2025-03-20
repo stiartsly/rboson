@@ -33,6 +33,8 @@ pub use {
     core::cryptobox::CryptoBox,
 
     activeproxy::ActiveProxyClient,
+
+    messaging::client_device::ClientDevice
 };
 
 #[macro_export]

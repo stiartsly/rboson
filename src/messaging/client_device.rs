@@ -10,10 +10,11 @@ use crate::Id;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 #[allow(dead_code)]
 pub struct ClientDevice {
-	//#[serde(rename = "id")]
-	//id: Id,
+	#[serde(rename = "id")]
+	id: Id,
 
-	//client_id: String,
+	#[serde(skip)]
+	_client_id: String,
 
 	#[serde(rename = "n")]
 	name: String,
@@ -33,19 +34,21 @@ pub struct ClientDevice {
 
 #[allow(dead_code)]
 impl ClientDevice {
-	pub(crate) fn new(_id: &Id, device_name: String, app_name: String,
+	pub(crate) fn new(id: &Id, device_name: String, app_name: String,
 		created: u64, last_seen: u64, last_address: String) -> Self {
 		Self {
+			id: id.clone(),
 			name: device_name,
 			app: app_name,
 			created,
 			last_seen,
 			last_address,
+			_client_id: "TODO".to_string()
 		}
 	}
 
 	pub fn id(&self) -> &Id {
-		unimplemented!()
+		&self.id
 	}
 
 	pub fn client_id(&self) -> &str {

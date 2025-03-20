@@ -6,6 +6,9 @@ use bs58::decode;
 use hex::FromHexError;
 use ciborium::value::Value;
 
+use serde::{Serialize, Deserialize};
+use serde_with::serde_as;
+
 use crate::{
     randomize_bytes,
     cryptobox,
@@ -20,8 +23,12 @@ pub const ID_BITS:  usize = 256;
 pub const MIN_ID: Id = Id::min();
 pub const MAX_ID: Id = Id::max();
 
-#[derive(Default, Clone, PartialOrd, PartialEq, Ord, Eq, Debug, Hash)]
-pub struct Id([u8; ID_BYTES]);
+#[serde_as]
+#[derive(Default, Serialize, Deserialize, Clone, PartialOrd, PartialEq, Ord, Eq, Debug, Hash)]
+pub struct Id(
+    #[serde_as(as = "serde_with::Bytes")] // Serialize as bytes
+    [u8; ID_BYTES]
+);
 
 impl Id {
     pub fn random() -> Self {

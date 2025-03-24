@@ -254,7 +254,7 @@ fn test_cryptbox_encryption() {
 
     let bx2 = bx2.unwrap();
     let mut decrypted = vec![0u8; 1024];
-    let result = bx2.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice(), &nonce);
+    let result = bx2.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice());
     assert_eq!(result.is_ok(), true);
     let decrypted_len = result.unwrap();
     assert_eq!(decrypted_len, cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES);
@@ -280,7 +280,7 @@ fn test_cryptbox_encryption_into() {
     assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES);
 
     let bx = bx2.unwrap();
-    let result = bx.decrypt_into(&cipher, &nonce);
+    let result = bx.decrypt_into(&cipher);
     assert_eq!(result.is_ok(), true);
     let decrypted = result.unwrap();
     assert_eq!(decrypted.len(), cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES);
@@ -329,7 +329,6 @@ fn test_encryption() {
     let result = boson::cryptobox::decrypt(
         &cipher[..cipher_len],
         &mut decrypted.as_mut(),
-        &nonce,
         kp2.public_key(),
         kp1.private_key()
     );
@@ -358,7 +357,6 @@ fn test_encryption_into() {
 
     let result = boson::cryptobox::decrypt_into(
         &cipher,
-        &nonce,
         kp2.public_key(),
         kp1.private_key()
     );
@@ -393,7 +391,7 @@ fn test_cryptobox_crossways1() {
     let bx = result.unwrap();
 
     let mut decrypted = vec![0u8; 1024];
-    let result = bx.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice(), &nonce);
+    let result = bx.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice());
     assert_eq!(result.is_ok(), true);
     let decrypted_len = result.unwrap();
     assert_eq!(decrypted_len, cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES);
@@ -422,7 +420,6 @@ fn test_cryptobox_crossways2() {
     let result = boson::cryptobox::decrypt(
         &cipher[..cipher_len],
         &mut decrypted.as_mut(),
-        &nonce,
         kp2.public_key(),
         kp1.private_key()
     );

@@ -507,12 +507,11 @@ impl Node {
         let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
 
         let distance = Id::distance(&receiver, &sender);
-        let nonce = Nonce::try_from(
+        let _nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
         cryptobox::decrypt_into(cipher,
-            &nonce,
             &pk,
             self.encryption_keypair.private_key()
         )
@@ -542,13 +541,12 @@ impl Node {
         let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
 
         let distance = Id::distance(&receiver, &sender);
-        let nonce = Nonce::try_from(
+        let _nonce = Nonce::try_from(
             &distance.as_bytes()[..Nonce::BYTES]
         ).unwrap();
 
         cryptobox::decrypt(cipher,
             plain,
-            &nonce,
             &pk,
             self.encryption_keypair.private_key()
         )

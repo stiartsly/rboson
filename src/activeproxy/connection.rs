@@ -513,8 +513,7 @@ impl ProxyConnection {
             let mut plain = vec![0u8; len];
             _ = enbox!(self.inners).decrypt(
                 &input[PACKET_HEADER_BYTES..],
-                &mut plain[..],
-                &self.nonce
+                &mut plain[..]
             ).map_err(|e| {
                 error!("Connection {} decrypt packet from server {} error {e}",
                     self.id(),
@@ -707,8 +706,7 @@ impl ProxyConnection {
         let mut plain = vec![0u8; plain_len];
         _ = enbox!(self.inners).decrypt(
             &input[PACKET_HEADER_BYTES..Self::CONNECT_REQ_SIZE],
-            &mut plain[..],
-            &self.nonce
+            &mut plain[..]
         ).map_err(|e| {
             error!("Connection {} decrypt CONNECT request packet from server {} error: {e}",
                 self.id(),
@@ -762,8 +760,7 @@ impl ProxyConnection {
 
         _ = enbox!(self.inners).decrypt(
             &input[PACKET_HEADER_BYTES..],
-            &mut data[..],
-            &self.nonce,
+            &mut data[..]
         ).map_err(|e| {
             error!("Connection {} decrypt DATA packet from server {} error : {e}",
                 self.id(),

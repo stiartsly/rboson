@@ -459,8 +459,7 @@ impl CryptoBox {
 
     pub fn decrypt(&self,
         cipher: &[u8],
-        plain: &mut [u8],
-        _nonce: &Nonce
+        plain: &mut [u8]
     ) -> Result<usize> {
         let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
         if plain.len() < expected_len {
@@ -486,11 +485,10 @@ impl CryptoBox {
     }
 
     pub fn decrypt_into(&self,
-        cipher: &[u8],
-        nonce: &Nonce
+        cipher: &[u8]
     ) -> Result<Vec<u8>> {
         let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
-        self.decrypt(cipher, plain.as_mut(), nonce).map(|_| plain)
+        self.decrypt(cipher, plain.as_mut()).map(|_| plain)
     }
 }
 
@@ -539,7 +537,6 @@ pub fn encrypt_into(plain: &[u8],
 
 pub fn decrypt(cipher: &[u8],
     plain: &mut [u8],
-    _nonce: &Nonce,
     pk: &PublicKey,
     sk: &PrivateKey,
 ) -> Result<usize> {
@@ -568,10 +565,9 @@ pub fn decrypt(cipher: &[u8],
 }
 
 pub fn decrypt_into(cipher: &[u8],
-    nonce: &Nonce,
     pk: &PublicKey,
     sk: &PrivateKey
 ) -> Result<Vec<u8>> {
     let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
-    decrypt(cipher, plain.as_mut(), nonce, pk, sk).map(|_| plain)
+    decrypt(cipher, plain.as_mut(), pk, sk).map(|_| plain)
 }

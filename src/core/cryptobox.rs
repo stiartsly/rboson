@@ -438,7 +438,7 @@ impl CryptoBox {
                 as_uchar_ptr_mut!(cipher[Nonce::BYTES..expected_len]),
                 as_uchar_ptr!(plain),
                 plain.len() as libc::c_ulonglong,
-                as_uchar_ptr!(nonce.as_bytes()),
+                as_uchar_ptr!(cipher[..Nonce::BYTES]),
                 as_uchar_ptr!(self.0),
             )
         };
@@ -460,7 +460,7 @@ impl CryptoBox {
     pub fn decrypt(&self,
         cipher: &[u8],
         plain: &mut [u8],
-        nonce: &Nonce
+        _nonce: &Nonce
     ) -> Result<usize> {
         let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
         if plain.len() < expected_len {
@@ -474,7 +474,7 @@ impl CryptoBox {
                 as_uchar_ptr_mut!(plain[.. expected_len]),
                 as_uchar_ptr!(cipher[Nonce::BYTES..]),
                 cipher_len as libc::c_ulonglong,
-                as_uchar_ptr!(nonce.as_bytes()),
+                as_uchar_ptr!(cipher[..Nonce::BYTES]),
                 as_uchar_ptr!(self.0),
             )
         };
@@ -517,7 +517,7 @@ pub fn encrypt(plain: &[u8],
             as_uchar_ptr_mut!(cipher[Nonce::BYTES.. expected_len]),
             as_uchar_ptr!(plain),
             plain.len() as libc::c_ulonglong,
-            as_uchar_ptr!(nonce.as_bytes()),
+            as_uchar_ptr!(cipher[..Nonce::BYTES]),
             as_uchar_ptr!(pk.as_bytes()),
             as_uchar_ptr!(sk.as_bytes()),
         )
@@ -539,7 +539,7 @@ pub fn encrypt_into(plain: &[u8],
 
 pub fn decrypt(cipher: &[u8],
     plain: &mut [u8],
-    nonce: &Nonce,
+    _nonce: &Nonce,
     pk: &PublicKey,
     sk: &PrivateKey,
 ) -> Result<usize> {
@@ -555,7 +555,7 @@ pub fn decrypt(cipher: &[u8],
             as_uchar_ptr_mut!(plain[..expected_len]),
             as_uchar_ptr!(cipher[Nonce::BYTES..]),
             cipher_len as libc::c_ulonglong,
-            as_uchar_ptr!(nonce.as_bytes()),
+            as_uchar_ptr!(cipher[..Nonce::BYTES]),
             as_uchar_ptr!(pk.as_bytes()),
             as_uchar_ptr!(sk.as_bytes()),
         )

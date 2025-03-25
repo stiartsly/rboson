@@ -4,14 +4,12 @@ use std::time::SystemTime;
 
 use crate::{
     as_millis,
-    Id,
-    Error,
-    cryptobox::{
-        CryptoBox,
-        KeyPair,
-        PublicKey,
-        Nonce,
-    }
+    Id
+};
+
+use crate::core::{
+    cryptobox::KeyPair,
+    crypto_context::CryptoContext,
 };
 
 pub(crate) const EXPIRED_CHECK_INTERVAL: u64 = 60 * 1000;
@@ -53,8 +51,8 @@ impl CryptoCache {
 
     fn load(&self, key: &Id) -> Box<CryptoContext> {
         Box::new(CryptoContext::new(
-            &key.to_encryption_key(),
-            &self.keypair
+            key,
+            self.keypair.private_key()
         ))
     }
 }
@@ -74,6 +72,7 @@ impl Entry {
     }
 }
 
+/*
 pub(crate) struct CryptoContext {
     box_: CryptoBox,
     nonce: Nonce,
@@ -106,3 +105,4 @@ impl Drop for CryptoContext {
         self.nonce.clear();
     }
 }
+*/

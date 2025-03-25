@@ -12,6 +12,7 @@ mod sqlite3;
 pub(crate) mod msg;
 pub(crate) mod cbor;
 pub(crate) mod logger;
+pub(crate) mod crypto_context;
 pub(crate) mod data_storage;
 pub(crate) mod kbucket_entry;
 pub(crate) mod routing_table;

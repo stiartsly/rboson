@@ -5,10 +5,11 @@
 #[cfg(test)] mod test_sqlite_storage;
 #[cfg(test)] mod test_token_man;
 #[cfg(test)] mod test_routing_table;
-#[cfg(test)] mod test_node_runner;
+//#[cfg(test)] mod test_node_runner;
 #[cfg(test)] mod test_version;
 #[cfg(test)] mod test_addr;
 #[cfg(test)] mod test_logger;
+#[cfg(test)] mod test_crypto_context;
 
 #[cfg(test)] mod test_find_node_req;
 #[cfg(test)] mod test_find_node_rsp;

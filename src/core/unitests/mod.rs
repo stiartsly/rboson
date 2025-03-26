@@ -10,6 +10,7 @@
 #[cfg(test)] mod test_addr;
 #[cfg(test)] mod test_logger;
 #[cfg(test)] mod test_crypto_context;
+#[cfg(test)] mod test_crypto_identity;
 
 #[cfg(test)] mod test_find_node_req;
 #[cfg(test)] mod test_find_node_rsp;

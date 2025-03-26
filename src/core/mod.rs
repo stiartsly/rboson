@@ -13,6 +13,8 @@ pub(crate) mod msg;
 pub(crate) mod cbor;
 pub(crate) mod logger;
 pub(crate) mod crypto_context;
+pub(crate) mod crypto_identity;
+pub(crate) mod identity;
 pub(crate) mod data_storage;
 pub(crate) mod kbucket_entry;
 pub(crate) mod routing_table;
@@ -24,6 +26,7 @@ pub(crate) mod version;
 pub(crate) mod future;
 
 pub mod id;
+
 pub mod config;
 pub mod cryptobox;
 pub mod default_configuration;

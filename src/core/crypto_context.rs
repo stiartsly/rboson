@@ -7,32 +7,33 @@ use crate::{
 };
 
 #[allow(dead_code)]
-pub(crate) struct CryptoContext {
+pub struct CryptoContext {
     id  : Id,
     box_: CryptoBox,
 
-    next_nonce : RefCell<Nonce>,
+    next_nonce: RefCell<Nonce>,
+    last_peer_nonce: Option<Nonce>,
 }
 
 #[allow(dead_code)]
 impl CryptoContext {
-    pub fn new(id: &Id, private_key: &PrivateKey) -> CryptoContext {
+    pub(crate) fn new(id: &Id, private_key: &PrivateKey) -> CryptoContext {
         let encryption_key = id.to_encryption_key();
 
         Self {
-            id  : id.clone(),
+            id: id.clone(),
             box_: CryptoBox::try_from((&encryption_key, private_key)).ok().unwrap(),
-
-            next_nonce      : RefCell::new(Nonce::random())
+            next_nonce: RefCell::new(Nonce::random()),
+            last_peer_nonce: None
         }
     }
 
-    pub fn from_cryptobox(id: &Id, box_: CryptoBox) -> CryptoContext {
+    pub(crate) fn from_cryptobox(id: &Id, box_: CryptoBox) -> CryptoContext {
         Self {
-            id  : id.clone(),
+            id: id.clone(),
             box_,
-
-            next_nonce      : RefCell::new(Nonce::random())
+            next_nonce: RefCell::new(Nonce::random()),
+            last_peer_nonce: None
         }
     }
 
@@ -49,14 +50,16 @@ impl CryptoContext {
     pub fn encrypt_into(&self, plain: &[u8]) -> Result<Vec<u8>, Error> {
         let nonce = self.increment_nonce();
         let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
-        if let Err(e) =  self.box_.encrypt(plain,  &mut cipher, &nonce) {
-            return Err(e);
-        }
-        Ok(cipher)
+        self.box_.encrypt(plain,  &mut cipher, &nonce).map(|_| cipher)
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>, Error> {
-        //let nonce = Nonce::try_from(&cipher[0..Nonce::BYTES]).unwrap();
+        let nonce = &cipher[..Nonce::BYTES];
+        if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
+            if last_nonce.as_bytes() != nonce {
+                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".to_string()));
+            }
+        }
         self.box_.decrypt_into(&cipher)
     }
 }

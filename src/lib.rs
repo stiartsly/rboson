@@ -31,6 +31,8 @@ pub use {
     core::signature::Signature,
     core::cryptobox,
     core::cryptobox::CryptoBox,
+    core::crypto_context::CryptoContext,
+    core::identity::Identity,
 
     activeproxy::ActiveProxyClient,
 

@@ -1,7 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::time::{Duration, SystemTime};
-use std::any::{Any, TypeId};
 use std::sync::{Arc, Mutex};
 use std::collections::LinkedList;
 use std::collections::HashSet;
@@ -19,7 +18,6 @@ use crate::{
     JointResult,
     LookupOption,
     signature,
-    cryptobox::KeyPair,
     Error,
 };
 
@@ -54,10 +52,10 @@ pub(crate) struct NodeRunner {
     nodeid: Rc<Id>,
 
     data_dir: String,
-    encryption_ctx: Rc<RefCell<CryptoCache>>,
 
-    command_channel: Option<Arc<Mutex<LinkedList<Command>>>>,
-    bootstr_channel: Option<Arc<Mutex<BootstrapChannel>>>,
+    encryption_ctx: Arc<Mutex<CryptoCache>>,
+    command_channel: Arc<Mutex<LinkedList<Command>>>,
+    bootstr_channel: Arc<Mutex<BootstrapChannel>>,
 
     dht4: Option<Rc<RefCell<DHT>>>,
     dht6: Option<Rc<RefCell<DHT>>>,
@@ -74,10 +72,12 @@ impl NodeRunner {
     pub(crate) fn new(
         data_dir: String,
         keypair: signature::KeyPair,
-        addrs: JointResult<SocketAddr>
+        addrs: JointResult<SocketAddr>,
+        command_channel: Arc<Mutex<LinkedList<Command>>>,
+        bootstr_channel: Arc<Mutex<BootstrapChannel>>,
+        crypto_context: Arc<Mutex<CryptoCache>>
     ) -> Self {
         let nodeid = Rc::new(Id::from(keypair.to_public_key()));
-        let keypair= KeyPair::try_from(&keypair).unwrap();
 
         let mut dht_num = 0;
         let dht4 = addrs.v4().map(|addr| {
@@ -97,10 +97,10 @@ impl NodeRunner {
             nodeid: nodeid.clone(),
 
             data_dir,
-            encryption_ctx: Rc::new(RefCell::new(CryptoCache::new(keypair))),
+            encryption_ctx: crypto_context,
 
-            command_channel: None,
-            bootstr_channel: None,
+            command_channel,
+            bootstr_channel,
 
             dht4: dht4.map(|v| Rc::new(RefCell::new(v))),
             dht6: dht6.map(|v| Rc::new(RefCell::new(v))),
@@ -114,21 +114,8 @@ impl NodeRunner {
         }
     }
 
-    pub(crate) fn set_field<T: 'static>(&mut self, field: T) -> &mut Self {
-        let typid = TypeId::of::<T>();
-        let field = Box::new(field) as Box<dyn Any>;
-
-        if typid == TypeId::of::<Rc<RefCell<NodeRunner>>>() {
-            let rc = field.downcast::<Rc<RefCell<NodeRunner>>>().unwrap();
-            self.cloned = Some(rc.deref().clone());
-        } else if typid == TypeId::of::<Arc<Mutex<LinkedList<Command>>>>() {
-            let rc = field.downcast::<Arc<Mutex<LinkedList<_>>>>().unwrap();
-            self.command_channel = Some(rc.deref().clone());
-        } else if typid == TypeId::of::<Arc<Mutex<BootstrapChannel>>>() {
-            let rc = field.downcast::<Arc<Mutex<BootstrapChannel>>>().unwrap();
-            self.bootstr_channel = Some(rc.deref().clone());
-        }
-        self
+    pub(crate) fn set_cloned(&mut self, runner: Rc<RefCell<NodeRunner>>) {
+        self.cloned = Some(runner);
     }
 
     pub(crate) fn id(&self) -> Rc<Id> {
@@ -220,9 +207,9 @@ impl NodeRunner {
         let scheduler = self.server.borrow().scheduler();
 
         // Handle encryption context expiration.
-        let ctxts = self.encryption_ctx.clone();
+        let ctx = self.encryption_ctx.clone();
         scheduler.borrow_mut().add(move || {
-            ctxts.borrow_mut().expire();
+            ctx.lock().unwrap().expire();
         }, 2000, constants::EXPIRED_CHECK_INTERVAL);
 
         // Handle SQlite storage expiration.
@@ -237,7 +224,7 @@ impl NodeRunner {
         }, 1000, constants::RE_ANNOUNCE_INTERVAL);
 
         // Check incomming bootstrap nodes.
-        let chan = self.bootstr_channel.as_ref().unwrap().clone();
+        let chan = self.bootstr_channel.clone();
         let dht4 = self.dht4.as_ref().map(|v| v.clone());
         let dht6 = self.dht6.as_ref().map(|v| v.clone());
 
@@ -255,7 +242,7 @@ impl NodeRunner {
         }, 100, constants::DHT_UPDATE_INTERVAL);
 
         // Check incomming commands from outer Node.
-        let chan = self.command_channel.as_ref().unwrap().clone();
+        let chan = self.command_channel.clone();
         let node = self.cloned();
         scheduler.borrow_mut().add(move || {
             let mut channel = chan.lock().unwrap();
@@ -621,16 +608,16 @@ impl NodeRunner {
         recipient: &Id,
         plain: &[u8]
     ) -> Result<Vec<u8>, Error> {
-        self.encryption_ctx.borrow_mut().get(recipient).ctx()
-            .encrypt_into(plain)
+        let mut ctx = self.encryption_ctx.lock().unwrap();
+        ctx.get(recipient).lock().unwrap().ctx_mut().encrypt_into(plain)
     }
 
     pub(crate) fn decrypt_into(&self,
         sender: &Id,
         cipher: &[u8]
     ) -> Result<Vec<u8>, Error> {
-        self.encryption_ctx.borrow_mut().get(sender).ctx()
-            .decrypt_into(cipher)
+        let mut ctx = self.encryption_ctx.lock().unwrap();
+        ctx.get(sender).lock().unwrap().ctx_mut().decrypt_into(cipher)
     }
 }
 

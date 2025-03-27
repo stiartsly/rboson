@@ -1,6 +1,6 @@
 use crate::{
     Id,
-    cryptobox,
+    cryptobox::{self, Nonce},
     signature,
     Identity,
     core::crypto_context::CryptoContext,
@@ -38,6 +38,10 @@ impl Identity for CryptoIdentity {
         &self.id
     }
 
+    fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
+        signature::sign(data, signature, self.signature_keypair.private_key())
+    }
+
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
         signature::sign_into(data, self.signature_keypair.private_key())
     }
@@ -46,8 +50,21 @@ impl Identity for CryptoIdentity {
         signature::verify(data, signature, self.signature_keypair.public_key())
     }
 
+    fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        let nonce = Nonce::random();
+        let pk = recipient.to_encryption_key();
+        let sk = self.keypair.private_key();
+        cryptobox::encrypt(plain, cipher, &nonce, &pk, sk)
+    }
+
+    fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
+        let pk = sender.to_encryption_key();
+        let sk = self.keypair.private_key();
+        cryptobox::decrypt(cipher, plain, &pk, sk)
+    }
+
     fn encrypt_into(&self, recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = cryptobox::Nonce::random();
+        let nonce = Nonce::random();
         let pk = recipient.to_encryption_key();
         let sk = self.keypair.private_key();
         cryptobox::encrypt_into(data, &nonce, &pk, sk)

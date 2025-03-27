@@ -39,7 +39,8 @@ use crate::{
     error::Result,
     cryptobox, CryptoBox,
     Signature,
-    PeerBuilder
+    PeerBuilder,
+    Identity,
 };
 
 use crate::activeproxy::{

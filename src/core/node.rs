@@ -23,9 +23,10 @@ use crate::{
     Network,
     signature,
     cryptobox,
-    cryptobox::Nonce,
     LookupOption,
     JointResult,
+    Identity,
+    CryptoContext,
 };
 
 use crate::core::{
@@ -33,6 +34,7 @@ use crate::core::{
     logger,
     node_runner,
     node_runner::NodeRunner,
+    crypto_cache::CryptoCache,
     bootstrap_channel::BootstrapChannel,
     future::{
         Cmd,
@@ -56,6 +58,7 @@ pub struct Node {
     nodeid: Id,
     port: u16,
 
+    crypto_context: Arc<Mutex<CryptoCache>>,
     bootstr_channel: Arc<Mutex<BootstrapChannel>>,
     command_channel: Arc<Mutex<LinkedList<Command>>>,
 
@@ -90,15 +93,16 @@ impl Node {
             path
         };
 
-        let keypair = {
+        let signature_keypair = {
             get_keypair(&path).map_err(|e| {
                 error!("Acquire keypair from {} for DHT node error: {}", path, e);
                 return e;
             }).ok().unwrap()
         };
+        let encryption_keypair = cryptobox::KeyPair::try_from(&signature_keypair).unwrap();
 
         let nodeid = {
-            let id = Id::from(keypair.to_public_key());
+            let id = Id::from(signature_keypair.to_public_key());
             let id_path = path.clone() + "id";
             store_nodeid(&id_path, &id).map_err(|e| {
                 error!("Persisting node Id data error {}", e);
@@ -131,11 +135,12 @@ impl Node {
             nodeid,
             port,
 
+            crypto_context: Arc::new(Mutex::new(CryptoCache::new(encryption_keypair.clone()))),
             bootstr_channel: Arc::new(Mutex::new(bootstrap_channel)),
             command_channel: Arc::new(Mutex::new(LinkedList::new())),
 
-            signature_keypair: keypair.clone(),
-            encryption_keypair: cryptobox::KeyPair::try_from(&keypair).unwrap(),
+            signature_keypair,
+            encryption_keypair,
 
             status: Mutex::new(NodeStatus::Stopped),
             option: Mutex::new(LookupOption::Conservative),
@@ -166,20 +171,19 @@ impl Node {
         let addrs   = self.addrs.clone();
         let bootstr = self.bootstr_channel.clone();
         let cmds    = self.command_channel.clone();
+        let ctx     = self.crypto_context.clone();
         let quit    = self.quit.clone();
         let thread  = thread::spawn(move || {
             let runner = Rc::new(RefCell::new(NodeRunner::new(
                 path,
                 keypair,
                 addrs,
+                cmds,
+                bootstr,
+                ctx
             )));
 
-            runner.borrow_mut()
-                .set_field(runner.clone())
-                .set_field(bootstr.clone())
-                .set_field(cmds)
-                .cloned();
-
+            runner.borrow_mut().set_cloned(runner.clone());
             node_runner::run_loop(
                 runner,
                 quit.clone()
@@ -483,89 +487,6 @@ impl Node {
             Err(e) => Err(e)
         }
     }
-
-    pub fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let pk = recipient.to_encryption_key();
-        let receiver = Id::try_from(pk.as_bytes()).unwrap();
-        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
-
-        let distance = Id::distance(&receiver, &sender);
-        let nonce = Nonce::try_from(
-            &distance.as_bytes()[..Nonce::BYTES]
-        ).unwrap();
-
-        cryptobox::encrypt_into(plain,
-            &nonce,
-            &pk,
-            self.encryption_keypair.private_key()
-        )
-    }
-
-    pub fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let pk = sender.to_encryption_key();
-        let receiver = Id::try_from(pk.as_bytes()).unwrap();
-        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
-
-        let distance = Id::distance(&receiver, &sender);
-        let _nonce = Nonce::try_from(
-            &distance.as_bytes()[..Nonce::BYTES]
-        ).unwrap();
-
-        cryptobox::decrypt_into(cipher,
-            &pk,
-            self.encryption_keypair.private_key()
-        )
-    }
-
-    pub fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let pk = recipient.to_encryption_key();
-        let receiver = Id::try_from(pk.as_bytes()).unwrap();
-        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
-
-        let distance = Id::distance(&receiver, &sender);
-        let nonce = Nonce::try_from(
-            &distance.as_bytes()[..Nonce::BYTES]
-        ).unwrap();
-
-        cryptobox::encrypt(plain,
-            cipher,
-            &nonce,
-            &pk,
-            self.encryption_keypair.private_key()
-        )
-    }
-
-    pub fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let pk = sender.to_encryption_key();
-        let receiver = Id::try_from(pk.as_bytes()).unwrap();
-        let sender   = Id::try_from(self.encryption_keypair.public_key().as_bytes()).unwrap();
-
-        let distance = Id::distance(&receiver, &sender);
-        let _nonce = Nonce::try_from(
-            &distance.as_bytes()[..Nonce::BYTES]
-        ).unwrap();
-
-        cryptobox::decrypt(cipher,
-            plain,
-            &pk,
-            self.encryption_keypair.private_key()
-        )
-    }
-
-    pub fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        self.signature_keypair.private_key()
-            .sign_into(data)
-    }
-
-    pub fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
-        self.signature_keypair.private_key()
-            .sign(data, signature)
-    }
-
-    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
-        self.signature_keypair.public_key()
-            .verify(data, signature)
-    }
 }
 
 fn get_keypair(path: &str) -> Result<signature::KeyPair> {
@@ -598,6 +519,51 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
     };
 
     Ok(keypair)
+}
+
+impl Identity for Node {
+    fn id(&self) -> &Id {
+        &self.nodeid
+    }
+
+    fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
+        signature::sign(data, signature, self.signature_keypair.private_key())
+    }
+
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        signature::sign_into(data, self.signature_keypair.private_key())
+    }
+
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        signature::verify(data, signature, self.signature_keypair.public_key())
+    }
+
+    fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        let mut cache = self.crypto_context.lock().unwrap();
+        cache.get(recipient).lock().unwrap().ctx_mut().encrypt(plain, cipher)
+    }
+
+    fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        let mut cache = self.crypto_context.lock().unwrap();
+        cache.get(recipient).lock().unwrap().ctx_mut().encrypt_into(plain)
+    }
+
+    fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
+        let mut cache = self.crypto_context.lock().unwrap();
+        cache.get(sender).lock().unwrap().ctx_mut().decrypt(cipher, plain)
+    }
+
+    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        let mut cache = self.crypto_context.lock().unwrap();
+        cache.get(sender).lock().unwrap().ctx_mut().decrypt_into(cipher)
+    }
+
+    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
+        Ok(CryptoContext::new(
+            _id,
+            self.encryption_keypair.private_key()
+        ))
+    }
 }
 
 fn load_key(path: &str) -> Result<signature::KeyPair> {

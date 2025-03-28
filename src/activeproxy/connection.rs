@@ -34,6 +34,7 @@ use crate::{
     unwrap,
     random_bytes,
     id,
+    Id,
     Node,
     Error,
     error::Result,
@@ -510,7 +511,7 @@ impl ProxyConnection {
             self.id(), srv_endp!(self.inners), packet, packet.ack(), input.len());
 
         if matches!(packet, Packet::Error(_)) {
-            let len = input.len() - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;
+            let len = input.len() - PACKET_HEADER_BYTES;
             let mut plain = vec![0u8; len];
             _ = enbox!(self.inners).decrypt(
                 &input[PACKET_HEADER_BYTES..],
@@ -575,10 +576,11 @@ impl ProxyConnection {
 
         // Sign the challenge, send auth or attach with siguature
         let sig = self.sign_into_with_node(input)?;
+        // TODO: device signature
         if self.inners.lock().unwrap().is_authenticated() {
             self.send_attach_request(&sig).await
         } else {
-            self.send_authenticate_request(&sig).await
+            self.send_authenticate_request(&sig, &sig).await
         }
     }
 
@@ -843,24 +845,22 @@ impl ProxyConnection {
     *   - plain
     *     - padding
     */
-    async fn send_attach_request(&mut self, input: &[u8]) -> Result<()> {
-        assert!(input.len() == Signature::BYTES);
+    async fn send_attach_request(&mut self, dev_sig: &[u8]) -> Result<()> {
+        assert!(dev_sig.len() == Signature::BYTES);
         if self.state == State::Closed {
             return Ok(())
         }
 
         self.state = State::Attaching;
 
-        let len = cryptobox::PublicKey::BYTES       // publickey
-            + cryptobox::Nonce::BYTES               // nonce.
-            + Signature::BYTES;                     // signature of challenge.
-
+        let len = Signature::BYTES;                 // signature of challenge.
         let mut plain:Vec<u8> = Vec::with_capacity(len);
-        plain.extend_from_slice(session_keypair!(self.inners).public_key().as_bytes());
-        plain.extend_from_slice(self.nonce.as_bytes());  // session nonce.
-        plain.extend_from_slice(input);             // signature of challenge.
+        plain.extend_from_slice(dev_sig);           // signature of challenge.
 
-        let len = id::ID_BYTES + CryptoBox::MAC_BYTES + plain.len();
+        let len = id::ID_BYTES                      // plain device id
+            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
+            + plain.len();
+
         let mut payload =vec![0u8;len];
         payload[..id::ID_BYTES].copy_from_slice(self.node.lock().unwrap().id().as_bytes());
         self.encrypt_with_node(
@@ -877,8 +877,10 @@ impl ProxyConnection {
         ).await
     }
 
-    async fn send_authenticate_request(&mut self, input: &[u8]) -> Result<()> {
-        debug_assert!(input.len() == Signature::BYTES);
+    async fn send_authenticate_request(&mut self, user_sig: &[u8], dev_sig: &[u8]) -> Result<()> {
+        assert!(user_sig.len() == Signature::BYTES);
+        assert!(dev_sig.len() == Signature::BYTES);
+
         if self.state == State::Closed {
             return Ok(())
         }
@@ -888,26 +890,28 @@ impl ProxyConnection {
         let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
         let padding_sz = (random_padding() % 256) as usize;
 
-        let len = cryptobox::PublicKey::BYTES   // session key.
-            + cryptobox::Nonce::BYTES           // nonce.
-            + Signature::BYTES                  // signature of challenge.
+        let len = id::ID_BYTES                      // client user id.
+            + cryptobox::PublicKey::BYTES       // client public key.
+            + Signature::BYTES                  // signature of challenge from user client.
+            + Signature::BYTES                  // signature of challenge from device node.
             + mem::size_of::<u8>()              // the value to domain length.
             + domain_len                        // domain string.
             + padding_sz;
 
         let mut plain = Vec::with_capacity(len);
-        plain.extend_from_slice(session_keypair!(self.inners).public_key().as_bytes());
-        plain.extend_from_slice(self.nonce.as_bytes());
-        plain.extend_from_slice(input);
-        plain.extend_from_slice(&[domain_len as u8]);
-        if domain_len > 0 {
-            plain.extend_from_slice(
-                unwrap!(self.inners.lock().unwrap().peer_domain).as_bytes()
-            )
-        }
-        plain.extend_from_slice(&random_bytes(padding_sz));
 
-        let len = id::ID_BYTES + CryptoBox::MAC_BYTES + plain.len();
+        plain.extend_from_slice(Id::random().as_bytes());     // userid
+        plain.extend_from_slice(session_keypair!(self.inners).public_key().as_bytes());// client public key
+        // TODO: input signature of challenge.
+        plain.extend_from_slice(&[false as u8]);                // boolean for domain DNS
+        // TODO: domain.
+        plain.extend_from_slice(user_sig);              // signature of challenge.
+        plain.extend_from_slice(dev_sig);               // signature of challenge.
+        // TODO: Random padding
+
+        let len = id::ID_BYTES                          // plain device id
+            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
+            + plain.len();                              // encyption payload
 
         let mut payload =vec![0u8;len];
         payload[..id::ID_BYTES].copy_from_slice(self.node.lock().unwrap().id().as_bytes());
@@ -1051,7 +1055,11 @@ impl ProxyConnection {
     }
 
     pub(crate) async fn on_upstream_data(&mut self, input: &[u8]) -> Result<()> {
-        let mut cipher = vec![0u8; input.len() + cryptobox::CryptoBox::MAC_BYTES];
+        let len = id::ID_BYTES                          // plain device id
+            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
+            + input.len();
+
+        let mut cipher = vec![0u8; len];
         _ = enbox!(self.inners).encrypt(
             &input[..],
             &mut cipher[..],

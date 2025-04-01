@@ -6,4 +6,4 @@
 #[cfg(test)] mod value;
 #[cfg(test)] mod signature;
 #[cfg(test)] mod cryptobox;
-//#[cfg(test)] mod node;
+#[cfg(test)] mod node;

@@ -10,8 +10,9 @@ use boson::{
     Node,
     ValueBuilder,
     PeerBuilder,
-    cryptobox::CryptoBox,
+    cryptobox::{Nonce, CryptoBox},
     signature::Signature,
+    Identity,
 };
 use crate::{
     create_random_bytes,
@@ -113,7 +114,7 @@ fn test_encryption_into() {
         let cipher = match result {
             Ok(cipher) => {
                 assert!(true);
-                assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES);
+                assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES);
                 cipher
             },
             Err(_) => {
@@ -126,7 +127,7 @@ fn test_encryption_into() {
         match result {
             Ok(decrypted) => {
                 assert!(true);
-                assert_eq!(decrypted.len() +  CryptoBox::MAC_BYTES, cipher.len());
+                assert_eq!(decrypted.len() +  CryptoBox::MAC_BYTES + Nonce::BYTES, cipher.len());
                 assert_eq!(plain.len(), decrypted.len());
                 assert_eq!(plain, decrypted);
             }
@@ -153,7 +154,7 @@ fn test_encryption() {
         let cipher_len = match result {
             Ok(cipher_len) => {
                 assert!(true);
-                assert_eq!(cipher_len, plain.len() + CryptoBox::MAC_BYTES);
+                assert_eq!(cipher_len, plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES);
                 cipher_len
             },
             Err(_) => {
@@ -167,7 +168,7 @@ fn test_encryption() {
         match result {
             Ok(decrypted_len) => {
                 assert!(true);
-                assert_eq!(decrypted_len +  CryptoBox::MAC_BYTES, cipher_len);
+                assert_eq!(decrypted_len +  CryptoBox::MAC_BYTES + Nonce::BYTES, cipher_len);
                 assert_eq!(decrypted_len, plain.len());
                 assert_eq!(plain, decrypted[..decrypted_len]);
             }

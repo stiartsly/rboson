@@ -146,8 +146,8 @@ async fn run_connection(mut conn: ProxyConnection) {
         let res1 = tokio::select! {
             res = read_stream(relay.as_mut(), &mut relay_data), if relay.is_some() => {
                 match res {
-                    Err(e)  => error!("Connection {} read relay stream error: {e}.", conn.id()),
-                    Ok(0)   => info!("Connection {} read EOF from relay stream.", conn.id()),
+                    Err(e)  => error!("Connection {} read relay stream error: {e}.", conn.cid()),
+                    Ok(0)   => info!("Connection {} read EOF from relay stream.", conn.cid()),
                     Ok(len) => {
                         if let Err(e) = conn.on_relay_data(&relay_data[..len]).await {
                             error!("{e}");
@@ -168,8 +168,8 @@ async fn run_connection(mut conn: ProxyConnection) {
             }
             res = read_stream(upstream.as_mut(), &mut upstream_data), if upstream.is_some() => {
                 match res {
-                    Err(e)  => error!("Connection {} read upstream stream error: {e}.", conn.id()),
-                    Ok(0)   => info!("Connection {} read EOF from upstream.", conn.id()),
+                    Err(e)  => error!("Connection {} read upstream stream error: {e}.", conn.cid()),
+                    Ok(0)   => info!("Connection {} read EOF from upstream.", conn.cid()),
                     Ok(len) => {
                         if let Ok(_) = conn.on_upstream_data(&upstream_data[..len]).await {
                             conn.put_relay_reader(relay);

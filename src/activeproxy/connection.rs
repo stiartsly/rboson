@@ -1,7 +1,7 @@
-
 use std::mem;
 use std::fmt;
 use std::str;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::net::{
@@ -26,7 +26,7 @@ use crate::{
     as_millis,
     srv_endp,
     srv_addr,
-    srv_nodeid,
+    srv_peer,
     ups_endp,
     ups_addr,
     session_keypair,
@@ -39,9 +39,11 @@ use crate::{
     Error,
     error::Result,
     cryptobox, CryptoBox,
+    signature,
     Signature,
     PeerBuilder,
     Identity,
+    CryptoContext
 };
 
 use crate::activeproxy::{
@@ -87,6 +89,10 @@ pub(crate) struct ProxyConnection {
     stickybuf:          Option<Vec<u8>>,
     nonce:              cryptobox::Nonce,
 
+    deviceid:           Id,
+    signature_keypair:  signature::KeyPair,
+    crypto_context:     RefCell<CryptoContext>,
+
     authorized_cb:      Box<dyn Fn(&ProxyConnection, &cryptobox::PublicKey, u16, bool) + Send>,
     opened_cb:          Box<dyn Fn(&ProxyConnection) + Send>,
     open_failed_cb:     Box<dyn Fn(&ProxyConnection) + Send>,
@@ -95,8 +101,56 @@ pub(crate) struct ProxyConnection {
     idle_cb:            Box<dyn Fn(&ProxyConnection) + Send>,
 }
 
+impl Identity for ProxyConnection {
+    fn id(&self) -> &Id {
+        &self.deviceid
+    }
+
+    fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
+        signature::sign(data, signature, self.signature_keypair.private_key())
+    }
+
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        signature::sign_into(data, self.signature_keypair.private_key())
+    }
+
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        signature::verify(data, signature, self.signature_keypair.public_key())
+    }
+
+    fn encrypt(&self, _recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        self.crypto_context.borrow_mut().encrypt(
+            plain,
+            cipher
+        )
+    }
+
+    fn decrypt(&self, _sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
+        self.crypto_context.borrow_mut().decrypt(
+            cipher,
+            plain
+        )
+    }
+
+    fn encrypt_into(&self, _recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        self.crypto_context.borrow_mut().encrypt_into(data)
+    }
+
+    fn decrypt_into(&self, _sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        self.crypto_context.borrow_mut().decrypt_into(cipher)
+    }
+
+    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
+        unimplemented!()
+    }
+
+}
+
 impl ProxyConnection {
     pub(crate) fn new(node: Arc<Mutex<Node>>, inners: Arc<Mutex<ManagedFields>>) -> Self {
+        let keypair = signature::KeyPair::random();
+        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
+
         let mut connection = Self {
             node,
             inners:             inners.clone(),
@@ -113,6 +167,13 @@ impl ProxyConnection {
 
             stickybuf:          Some(Vec::with_capacity(4*1024)),
             nonce:              cryptobox::Nonce::random(),
+
+            deviceid:           Id::from(keypair.to_public_key()),
+            signature_keypair:  keypair,
+            crypto_context:     RefCell::new(CryptoContext::new(
+                srv_peer!(inners).lock().unwrap().id(),
+                encryption_keypair.private_key()
+            )),
 
             authorized_cb:      Box::new(|_,_,_,_|{}),
             opened_cb:          Box::new(|_|{}),
@@ -193,7 +254,7 @@ impl ProxyConnection {
         connection
     }
 
-    pub(crate) fn id(&self) -> i32 {
+    pub(crate) fn cid(&self) -> i32 {
         self.conn_id
     }
 
@@ -223,26 +284,6 @@ impl ProxyConnection {
 
     fn stickybuf(&self) -> &[u8] {
         self.stickybuf.as_ref().unwrap()
-    }
-
-    fn encrypt_with_node(&self, plain: &[u8], cipher: &mut [u8]) -> Result<()> {
-        self.node.lock().unwrap().encrypt(
-            srv_nodeid!(self.inners),
-            plain,
-            cipher
-        ).map(|_|())
-    }
-
-    fn decrypt_with_node(&self, cipher: &[u8], plain: &mut [u8]) -> Result<()> {
-        self.node.lock().unwrap().decrypt(
-            srv_nodeid!(self.inners),
-            cipher,
-            plain
-        ).map(|_|())
-    }
-
-    fn sign_into_with_node(&self, data: &[u8]) -> Result<Vec<u8>> {
-        self.node.lock().unwrap().sign_into(data)
     }
 
     fn allow(&self, _: &SocketAddr) -> bool {
@@ -281,7 +322,7 @@ impl ProxyConnection {
         let old_state = self.state.clone();
         self.state = State::Closed;
 
-        info!("Connection {} is closing...", self.id());
+        info!("Connection {} is closing...", self.cid());
 
         if old_state <= State::Attaching {
             self.on_open_failed();
@@ -317,25 +358,25 @@ impl ProxyConnection {
 
         self.on_closed();
 
-        info!("Connection {} is closed...", self.id());
+        info!("Connection {} is closed...", self.cid());
         Ok(())
     }
 
     async fn open_upstream(&mut self) -> Result<()> {
-        debug!("Connection {} connecting to upstream {}...", self.id(), ups_endp!(self.inners));
+        debug!("Connection {} connecting to upstream {}...", self.cid(), ups_endp!(self.inners));
 
         let raddr = ups_addr!(self.inners).clone();
         let socket = TcpSocket::new_v4()?;  // TODO: ip v4 addr?;
         let result = socket.connect(raddr).await;
         match result {
             Ok(stream) => {
-                info!("Connection {} has connected to upstream {}", self.id(), ups_endp!(self.inners));
+                info!("Connection {} has connected to upstream {}", self.cid(), ups_endp!(self.inners));
                 let (reader, writer) = split(stream);
                 self.upstream_reader = Some(reader);
                 self.upstream_writer = Some(writer);
             },
             Err(e) => {
-                error!("Connection {} connect to upstream {} failed: {}", self.id(), ups_endp!(self.inners), e);
+                error!("Connection {} connect to upstream {} failed: {}", self.cid(), ups_endp!(self.inners), e);
                 self.close_upstream2().await?;
                 self.state = State::Idling;
                 self.on_idle();
@@ -367,7 +408,7 @@ impl ProxyConnection {
             }).await
         }
 
-        info!("Connection {} closed upstream {}", self.id(), ups_endp!(self.inners));
+        info!("Connection {} closed upstream {}", self.cid(), ups_endp!(self.inners));
         Ok(())
     }
 
@@ -377,7 +418,7 @@ impl ProxyConnection {
             return Ok(())
         }
 
-        info!("Connection {} closing upstream {}", self.id(), ups_endp!(self.inners));
+        info!("Connection {} closing upstream {}", self.cid(), ups_endp!(self.inners));
 
         self.state = State::Disconnecting;
 
@@ -393,8 +434,8 @@ impl ProxyConnection {
         }
 
         if as_millis!(self.keepalive) > MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
-            warn!("Connection {} is dead and should be obsolete.", self.id());
-            return Err(Error::State(format!("Connection {} is dead", self.id())));
+            warn!("Connection {} is dead and should be obsolete.", self.cid());
+            return Err(Error::State(format!("Connection {} is dead", self.cid())));
         }
 
         // keepalive check.
@@ -407,14 +448,14 @@ impl ProxyConnection {
     }
 
     pub(crate) async fn connect_server(&mut self) -> Result<()> {
-        info!("Connection {} is connecting to the server {}...", self.id(), srv_endp!(self.inners));
+        info!("Connection {} is connecting to the server {}...", self.cid(), srv_endp!(self.inners));
 
         let raddr = srv_addr!(self.inners).clone();
         let socket = TcpSocket::new_v4()?;  // TODO: ip v4 addr?;
         let result = socket.connect(raddr).await;
         match result {
             Ok(stream) => {
-                info!("Connection {} has connected to server {}", self.id(), srv_endp!(self.inners));
+                info!("Connection {} has connected to server {}", self.cid(), srv_endp!(self.inners));
 
                 let (reader, writer) = split(stream);
                 self.relay_reader = Some(reader);
@@ -422,7 +463,7 @@ impl ProxyConnection {
                 Ok(())
             },
             Err(e) => {
-                error!("Connection {} connect to server {} failed: {}", self.id(), srv_endp!(self.inners), e);
+                error!("Connection {} connect to server {} failed: {}", self.cid(), srv_endp!(self.inners), e);
                 Err(Error::from(e))
             }
         }
@@ -508,7 +549,7 @@ impl ProxyConnection {
 
         let packet = result.unwrap();
         debug!("Connection {} got packet from server {}: type={}, ack={}, size={}",
-            self.id(), srv_endp!(self.inners), packet, packet.ack(), input.len());
+            self.cid(), srv_endp!(self.inners), packet, packet.ack(), input.len());
 
         if matches!(packet, Packet::Error(_)) {
             let len = input.len() - PACKET_HEADER_BYTES;
@@ -518,7 +559,7 @@ impl ProxyConnection {
                 &mut plain[..]
             ).map_err(|e| {
                 error!("Connection {} decrypt packet from server {} error {e}",
-                    self.id(),
+                    self.cid(),
                     srv_endp!(self.inners)
                 ); e
             })?;
@@ -532,13 +573,13 @@ impl ProxyConnection {
             let errstr = str::from_utf8(data).unwrap().to_string();
 
             error!("Connection {} got ERR response from the server {}, error:{}:{}",
-                self.id(), srv_endp!(self.inners), ecode, errstr);
+                self.cid(), srv_endp!(self.inners), ecode, errstr);
 
             return Err(Error::Protocol(format!("Packet error")));
         }
 
         if !self.state.accept(&packet) {
-            error!("Connection {} is not allowed for {} packet at {} state", self.id(), packet, self.state);
+            error!("Connection {} is not allowed for {} packet at {} state", self.cid(), packet, self.state);
             return Err(Error::Permission(format!("Permission denied")));
         }
 
@@ -551,7 +592,7 @@ impl ProxyConnection {
             Packet::Disconnect(_)   => self.on_disconnect_request(input).await,
             Packet::DisconnectAck(_)=> self.on_disconnect_response(input),
             _ => {
-                error!("INTERNAL ERROR: Connection {} got wrong {} packet in {} state", self.id(), packet, self.state);
+                error!("INTERNAL ERROR: Connection {} got wrong {} packet in {} state", self.cid(), packet, self.state);
                 Err(Error::Protocol(format!("Wrong expected packet {} received", packet)))
             }
         }
@@ -565,17 +606,18 @@ impl ProxyConnection {
     async fn on_challenge(&mut self, input: &[u8]) -> Result<()> {
         if input.len() < 32 || input.len() > 256 {
             error!("Connection {} got invalid challenge from server {}, expected range {}:{}, acutal length:{}!",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners),
                 32,
                 256,
+
                 input.len()
             );
             return Ok(())
         }
 
         // Sign the challenge, send auth or attach with siguature
-        let sig = self.sign_into_with_node(input)?;
+        let sig = self.sign_into(input)?;
         // TODO: device signature
         if self.inners.lock().unwrap().is_authenticated() {
             self.send_attach_request(&sig).await
@@ -601,7 +643,7 @@ impl ProxyConnection {
     fn on_authenticate_response(&mut self, input: &[u8]) -> Result<()> {
         if input.len() < Self::AUTH_ACK_SIZE {
             error!("Connection {} got invalid AUTH ACK from server {}, expected minimum length {}, actual found: {}",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners),
                 Self::AUTH_ACK_SIZE,
                 input.len()
@@ -609,17 +651,18 @@ impl ProxyConnection {
             return Err(Error::Protocol(format!("Invalid AUTH ACK packet")));
         }
 
-        debug!("Connection {} got AUTH ACK from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got AUTH ACK from server {}", self.cid(), srv_endp!(self.inners));
 
         let plain_len = Self::AUTH_ACK_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;
         let mut plain = vec![0u8; plain_len];
 
-        _ = self.decrypt_with_node(
+        _ = self.decrypt(
+            srv_peer!(self.inners).lock().unwrap().id(),
             &input[PACKET_HEADER_BYTES..Self::AUTH_ACK_SIZE],
             &mut plain[..]
         ).map_err(|e| {
             error!("Connection {} decrypt AUTH ACK from server {} error {e}.",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners())
             ); e
         })?;
@@ -651,7 +694,7 @@ impl ProxyConnection {
 
         self.state = State::Idling;
         self.on_opened();
-        info!("Connection {} opened.", self.id());
+        info!("Connection {} opened.", self.cid());
         Ok(())
     }
 
@@ -659,10 +702,10 @@ impl ProxyConnection {
      * No Payload.
      */
     fn on_attach_reponse(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got ATTACH ACK from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got ATTACH ACK from server {}", self.cid(), srv_endp!(self.inners));
         self.state = State::Idling;
         self.on_opened();
-        info!("Connection {} opened.", self.id());
+        info!("Connection {} opened.", self.cid());
         Ok(())
     }
 
@@ -670,7 +713,7 @@ impl ProxyConnection {
      * No Payload.
      */
     fn on_ping_response(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got PING ACK from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got PING ACK from server {}", self.cid(), srv_endp!(self.inners));
         // ignore the random padding payload.
         // keep-alive time stamp already update when we got the server data.
         // so nothing to do here.
@@ -693,7 +736,7 @@ impl ProxyConnection {
     async fn on_connect_request(&mut self, input: &[u8]) -> Result<()> {
         if input.len() < Self::CONNECT_REQ_SIZE {
             error!("Connection {} got invalid CONNECT request from server {}, expected length: {}, acutal length:{}",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners),
                 Self::CONNECT_REQ_SIZE,
                 input.len()
@@ -701,7 +744,7 @@ impl ProxyConnection {
             return Err(Error::Protocol(format!("Invalid CONNECT packet")));
         }
 
-        debug!("Connection {} got CONNECT from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got CONNECT from server {}", self.cid(), srv_endp!(self.inners));
         self.state = State::Relaying;
         self.on_busy();
 
@@ -712,7 +755,7 @@ impl ProxyConnection {
             &mut plain[..]
         ).map_err(|e| {
             error!("Connection {} decrypt CONNECT request packet from server {} error: {e}",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners)
             ); e
         })?;
@@ -756,7 +799,7 @@ impl ProxyConnection {
      *   - data
      */
     async fn on_data_request(&mut self, input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DATA({}) from server {}", self.id(), input.len(), srv_endp!(self.inners));
+        debug!("Connection {} got DATA({}) from server {}", self.cid(), input.len(), srv_endp!(self.inners));
 
         let plain_len = input.len() - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;
         let mut data = Box::new(vec![0u8; plain_len]);
@@ -766,13 +809,13 @@ impl ProxyConnection {
             &mut data[..]
         ).map_err(|e| {
             error!("Connection {} decrypt DATA packet from server {} error : {e}",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners)
             ); e
         })?;
 
         trace!("Connection {} sending {} bytes data to upstream {}",
-            self.id(),
+            self.cid(),
             data.len(),
             ups_endp!(self.inners)
         );
@@ -783,7 +826,7 @@ impl ProxyConnection {
                 Ok(len) => len,
                 Err(e) => {
                     error!("Connection {} send DATA to upstream {} error: {e}",
-                        self.id(),
+                        self.cid(),
                         srv_endp!(self.inners)
                     );
                     return Err(Error::from(e))
@@ -793,7 +836,7 @@ impl ProxyConnection {
         }
 
         debug!("Connection {} sended DATA (len:{}) to upstream {}.",
-            self.id(),
+            self.cid(),
             data.len(),
             ups_endp!(self.inners)
         );
@@ -805,7 +848,7 @@ impl ProxyConnection {
      * No payload
      */
     async fn on_disconnect_request(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DISCONNECT from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got DISCONNECT from server {}", self.cid(), srv_endp!(self.inners));
 
         _ = self.close_upstream();
         _ = self.send_disconnect_response().await?;
@@ -823,7 +866,7 @@ impl ProxyConnection {
     * No payload
     */
     fn on_disconnect_response(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DISCONNECT_ACK from server {}", self.id(), srv_endp!(self.inners));
+        debug!("Connection {} got DISCONNECT_ACK from server {}", self.cid(), srv_endp!(self.inners));
 
         self.disconnect_confirms += 1;
         if self.disconnect_confirms == 2 {
@@ -863,11 +906,12 @@ impl ProxyConnection {
 
         let mut payload =vec![0u8;len];
         payload[..id::ID_BYTES].copy_from_slice(self.node.lock().unwrap().id().as_bytes());
-        self.encrypt_with_node(
+        self.encrypt(
+            srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
             &mut payload[id::ID_BYTES..]
         ).map_err(|e| {
-            error!("Connection {} failed to encrypt attach request: {e}", self.id());
+            error!("Connection {} failed to encrypt attach request: {e}", self.cid());
             e
         })?;
 
@@ -877,6 +921,17 @@ impl ProxyConnection {
         ).await
     }
 
+
+    /*  PACKET_HEADER_BYTES                 // header.
+        ID BYTES                            // device id.
+        cryptobox::Nonce::BYTES             // nonce.
+        cryptobox::CryptoBox::MAC_BYTES     // MAC BYTES.
+        ID BYTES                            // client user id.
+        cryptobox::PublicKey::BYTES         // session public key
+        mem::size_of::<8>()                 // domain size.
+        Signature::BYTES                    // signature of challenge from user client.
+        Signature::BYTES                    // signature of challenge from device node.
+    */
     async fn send_authenticate_request(&mut self, user_sig: &[u8], dev_sig: &[u8]) -> Result<()> {
         assert!(user_sig.len() == Signature::BYTES);
         assert!(dev_sig.len() == Signature::BYTES);
@@ -887,24 +942,22 @@ impl ProxyConnection {
 
         self.state = State::Authenticating;
 
-        let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
-        let padding_sz = (random_padding() % 256) as usize;
+        //let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
+        //let padding_sz = (random_padding() % 256) as usize;
 
-        let len = id::ID_BYTES                      // client user id.
+        let len = id::ID_BYTES                  // client user id.
             + cryptobox::PublicKey::BYTES       // client public key.
             + Signature::BYTES                  // signature of challenge from user client.
             + Signature::BYTES                  // signature of challenge from device node.
-            + mem::size_of::<u8>()              // the value to domain length.
-            + domain_len                        // domain string.
-            + padding_sz;
+            + mem::size_of::<u8>();              // the value to domain length.
+           // + domain_len                        // domain string.
+           // + padding_sz;
 
         let mut plain = Vec::with_capacity(len);
 
         plain.extend_from_slice(Id::random().as_bytes());     // userid
         plain.extend_from_slice(session_keypair!(self.inners).public_key().as_bytes());// client public key
-        // TODO: input signature of challenge.
         plain.extend_from_slice(&[false as u8]);                // boolean for domain DNS
-        // TODO: domain.
         plain.extend_from_slice(user_sig);              // signature of challenge.
         plain.extend_from_slice(dev_sig);               // signature of challenge.
         // TODO: Random padding
@@ -914,12 +967,13 @@ impl ProxyConnection {
             + plain.len();                              // encyption payload
 
         let mut payload =vec![0u8;len];
-        payload[..id::ID_BYTES].copy_from_slice(self.node.lock().unwrap().id().as_bytes());
-        self.encrypt_with_node(
+        payload[..id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
+        self.encrypt(
+            srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
             &mut payload[id::ID_BYTES..]
         ).map_err(|e| {
-            error!("Connection {} failed to encrypt authentication request: {e}", self.id());
+            error!("Connection {} failed to encrypt authentication request: {e}", self.cid());
             e
         })?;
 
@@ -996,7 +1050,7 @@ impl ProxyConnection {
         input: Option<&[u8]>
     ) -> Result<()> {
         if self.state == State::Closed {
-            warn!("Connection {} is already closed, but still try to send {} to upstream.", self.id(), pkt);
+            warn!("Connection {} is already closed, but still try to send {} to upstream.", self.cid(), pkt);
             return Ok(());
         }
 
@@ -1035,7 +1089,7 @@ impl ProxyConnection {
                 Ok(len) => len,
                 Err(e) => {
                     error!("Connection {} failed to send {} to server {} with error: {e}",
-                        self.id(),
+                        self.cid(),
                         pkt,
                         srv_endp!(self.inners)
                     );
@@ -1046,7 +1100,7 @@ impl ProxyConnection {
         };
 
         debug!("Connection {} send {}(len:{}) to server {}. ",
-            self.id(),
+            self.cid(),
             pkt,
             data.len(),
             srv_endp!(self.inners)
@@ -1066,7 +1120,7 @@ impl ProxyConnection {
             &self.nonce
         ).map_err(|e| {
             error!("Connection {} encrypt DATA packet to server {} error: {e}",
-                self.id(),
+                self.cid(),
                 srv_endp!(self.inners)
             ); e
         })?;
@@ -1082,7 +1136,7 @@ impl ProxyConnection {
 
 impl fmt::Display for ProxyConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Connection[{}]: state={}", self.id(), self.state)?;
+        write!(f, "Connection[{}]: state={}", self.cid(), self.state)?;
         Ok(())
     }
 }

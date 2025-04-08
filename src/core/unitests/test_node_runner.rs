@@ -18,12 +18,14 @@ use super::{
 use crate::{
     local_addr,
     signature,
+    cryptobox,
     Network,
     NodeInfo,
     CryptoBox,
     LookupOption,
     configuration as config,
-    JointResult
+    JointResult,
+    core::crypto_cache::CryptoCache,
 };
 
 use crate::core::{
@@ -40,6 +42,8 @@ static mut NODE2: Option<Rc<RefCell<NodeRunner>>> = None;
 
 static mut BOOTSTR_CHANNEL:Option<Arc<Mutex<BootstrapChannel>>> = None;
 static mut COMMAND_CHANNEL:Option<Arc<Mutex<LinkedList<Command>>>> = None;
+static mut CRYPTO_CACHE1:Option<Arc<Mutex<CryptoCache>>> = None;
+static mut CRYPTO_CACHE2:Option<Arc<Mutex<CryptoCache>>> = None;
 
 fn setup() {
     unsafe {
@@ -82,27 +86,37 @@ fn setup() {
         BOOTSTR_CHANNEL = Some(Arc::new(Mutex::new(BootstrapChannel::new())));
         COMMAND_CHANNEL = Some(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));
 
+        let keypair = signature::KeyPair::random();
+        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
+        CRYPTO_CACHE1 = Some(Arc::new(Mutex::new(CryptoCache::new(encryption_keypair))));
+
         NODE1 = Some({
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg1.storage_path().to_string(),
-                signature::KeyPair::random(),
-                addrs1
+                keypair,
+                addrs1,
+                COMMAND_CHANNEL.as_ref().unwrap().clone(),
+                BOOTSTR_CHANNEL.as_ref().unwrap().clone(),
+                CRYPTO_CACHE1.as_ref().unwrap().clone()
             )));
-            nr.borrow_mut().set_field(BOOTSTR_CHANNEL.as_ref().unwrap().clone());
-            nr.borrow_mut().set_field(COMMAND_CHANNEL.as_ref().unwrap().clone());
-            nr.borrow_mut().set_field(nr.clone());
+            nr.borrow_mut().set_cloned(nr.clone());
             nr
         });
+
+        let keypair = signature::KeyPair::random();
+        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
+        CRYPTO_CACHE2 = Some(Arc::new(Mutex::new(CryptoCache::new(encryption_keypair))));
 
         NODE2 = Some({
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg2.storage_path().to_string(),
-                signature::KeyPair::random(),
-                addrs2
+                keypair,
+                addrs2,
+                COMMAND_CHANNEL.as_ref().unwrap().clone(),
+                BOOTSTR_CHANNEL.as_ref().unwrap().clone(),
+                CRYPTO_CACHE2.as_ref().unwrap().clone()
             )));
-            nr.borrow_mut().set_field(Arc::new(Mutex::new(BootstrapChannel::new())));
-            nr.borrow_mut().set_field(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));
-            nr.borrow_mut().set_field(nr.clone());
+            nr.borrow_mut().set_cloned(nr.clone());
             nr
         });
         let _ = NODE1.as_mut().unwrap().borrow_mut().start();
@@ -144,13 +158,13 @@ fn test_encrypt_into() {
         let result = node1.borrow_mut().encrypt_into(&node2.borrow().id(), &plain);
         assert_eq!(result.is_ok(), true);
         let cipher = result.ok().unwrap();
-        assert_eq!(plain.len() + CryptoBox::MAC_BYTES, cipher.len());
+        assert_eq!(plain.len() + CryptoBox::MAC_BYTES + cryptobox::Nonce::BYTES, cipher.len());
 
         let result = node2.borrow_mut().decrypt_into(&node1.borrow().id(), &cipher);
         assert_eq!(result.is_ok(), true);
 
         let decrypted = result.ok().unwrap();
-        assert_eq!(cipher.len() - CryptoBox::MAC_BYTES, decrypted.len());
+        assert_eq!(cipher.len() - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES, decrypted.len());
         assert_eq!(plain.len(), decrypted.len());
         assert_eq!(plain, decrypted);
     }

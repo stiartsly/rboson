@@ -29,7 +29,6 @@ use crate::{
     srv_peer,
     ups_endp,
     ups_addr,
-    session_keypair,
     enbox,
     unwrap,
     random_bytes,
@@ -72,7 +71,6 @@ fn next_connection_id() -> i32 {
 }
 
 pub(crate) struct ProxyConnection {
-    node:               Arc<Mutex<Node>>,
     conn_id:            i32,
     state:              State,
     keepalive:          SystemTime,
@@ -87,7 +85,6 @@ pub(crate) struct ProxyConnection {
     upstream_writer:    Option<WriteHalf<TcpStream>>,
 
     stickybuf:          Option<Vec<u8>>,
-    nonce:              cryptobox::Nonce,
 
     deviceid:           Id,
     signature_keypair:  signature::KeyPair,
@@ -106,10 +103,6 @@ impl Identity for ProxyConnection {
         &self.deviceid
     }
 
-    fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
-        signature::sign(data, signature, self.signature_keypair.private_key())
-    }
-
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
         signature::sign_into(data, self.signature_keypair.private_key())
     }
@@ -119,40 +112,19 @@ impl Identity for ProxyConnection {
     }
 
     fn encrypt(&self, _recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        self.crypto_context.borrow_mut().encrypt(
-            plain,
-            cipher
-        )
+        self.crypto_context.borrow_mut().encrypt(plain, cipher)
     }
 
     fn decrypt(&self, _sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        self.crypto_context.borrow_mut().decrypt(
-            cipher,
-            plain
-        )
+        self.crypto_context.borrow_mut().decrypt(cipher, plain)
     }
-
-    fn encrypt_into(&self, _recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
-        self.crypto_context.borrow_mut().encrypt_into(data)
-    }
-
-    fn decrypt_into(&self, _sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        self.crypto_context.borrow_mut().decrypt_into(cipher)
-    }
-
-    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
-        unimplemented!()
-    }
-
 }
 
 impl ProxyConnection {
-    pub(crate) fn new(node: Arc<Mutex<Node>>, inners: Arc<Mutex<ManagedFields>>) -> Self {
-        let keypair = signature::KeyPair::random();
-        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
+    pub(crate) fn new(inners: Arc<Mutex<ManagedFields>>, keypair: &signature::KeyPair) -> Self {
+        let encryption_keypair = cryptobox::KeyPair::from(keypair);
 
         let mut connection = Self {
-            node,
             inners:             inners.clone(),
 
             conn_id:            next_connection_id(),
@@ -166,10 +138,9 @@ impl ProxyConnection {
             upstream_writer:    None,
 
             stickybuf:          Some(Vec::with_capacity(4*1024)),
-            nonce:              cryptobox::Nonce::random(),
 
             deviceid:           Id::from(keypair.to_public_key()),
-            signature_keypair:  keypair,
+            signature_keypair:  keypair.clone(),
             crypto_context:     RefCell::new(CryptoContext::new(
                 srv_peer!(inners).lock().unwrap().id(),
                 encryption_keypair.private_key()
@@ -185,10 +156,9 @@ impl ProxyConnection {
 
         connection.authorized_cb = Box::new(move |conn, pk, port, domain_enabled| {
             let mut inners = conn.inners.lock().unwrap();
-            let sk = unwrap!(inners.session_keypair).private_key().clone();
 
             inners.relay_port = Some(port);
-            inners.cryptobox  = cryptobox::CryptoBox::try_from((pk, &sk)).ok();
+            inners.cryptobox  = cryptobox::CryptoBox::try_from((pk, inners.session_keypair.private_key())).ok();
             inners.domain_enabled = domain_enabled;
 
             if inners.peer_keypair.is_none() {
@@ -622,7 +592,8 @@ impl ProxyConnection {
         if self.inners.lock().unwrap().is_authenticated() {
             self.send_attach_request(&sig).await
         } else {
-            self.send_authenticate_request(&sig, &sig).await
+            let user_sig = signature::sign_into(input, self.inners().lock().unwrap().keypair.private_key()).unwrap();
+            self.send_authenticate_request(&user_sig, &sig).await
         }
     }
 
@@ -634,6 +605,7 @@ impl ProxyConnection {
     *   - domainEnabled[uint8]
     */
     const AUTH_ACK_SIZE: usize = PACKET_HEADER_BYTES    // header.
+        + cryptobox::Nonce::BYTES                       // nonce.
         + cryptobox::CryptoBox::MAC_BYTES               // MAC BYTES.
         + cryptobox::PublicKey::BYTES                   // public key.
         + mem::size_of::<u16>()                         // port.
@@ -651,15 +623,14 @@ impl ProxyConnection {
             return Err(Error::Protocol(format!("Invalid AUTH ACK packet")));
         }
 
-        debug!("Connection {} got AUTH ACK from server {}", self.cid(), srv_endp!(self.inners));
-
-        let plain_len = Self::AUTH_ACK_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;
+        let plain_len = Self::AUTH_ACK_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
         let mut plain = vec![0u8; plain_len];
 
-        _ = self.decrypt(
-            srv_peer!(self.inners).lock().unwrap().id(),
+        let peerid = srv_peer!(self.inners).lock().unwrap().id().clone();
+        self.decrypt(
+            &peerid,
             &input[PACKET_HEADER_BYTES..Self::AUTH_ACK_SIZE],
-            &mut plain[..]
+            &mut plain
         ).map_err(|e| {
             error!("Connection {} decrypt AUTH ACK from server {} error {e}.",
                 self.cid(),
@@ -669,7 +640,7 @@ impl ProxyConnection {
 
         let mut pos = 0;
         let mut end = pos + cryptobox::PublicKey::BYTES;
-        let server_pk = cryptobox::PublicKey::try_from( // extract server public key.
+        let server_pk = cryptobox::PublicKey::try_from(     // extract server public key.
             &plain[pos..end]
         )?;
 
@@ -721,10 +692,11 @@ impl ProxyConnection {
     }
 
     const CONNECT_REQ_SIZE: usize = PACKET_HEADER_BYTES
+        + cryptobox::Nonce::BYTES
         + CryptoBox::MAC_BYTES
-        + mem::size_of::<u8>()
-        + 16
-        + mem::size_of::<u16>();
+        + mem::size_of::<u8>()      // address length
+        + 16                        // address (IPv4 or IPv6)
+        + mem::size_of::<u16>();    // port
 
     /*
      * CONNECT packet payload:
@@ -748,9 +720,10 @@ impl ProxyConnection {
         self.state = State::Relaying;
         self.on_busy();
 
-        let plain_len = Self::CONNECT_REQ_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;  // TODO:
+        let plain_len = Self::CONNECT_REQ_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
         let mut plain = vec![0u8; plain_len];
-        _ = enbox!(self.inners).decrypt(
+
+        let _ = enbox!(self.inners).decrypt(
             &input[PACKET_HEADER_BYTES..Self::CONNECT_REQ_SIZE],
             &mut plain[..]
         ).map_err(|e| {
@@ -801,14 +774,14 @@ impl ProxyConnection {
     async fn on_data_request(&mut self, input: &[u8]) -> Result<()> {
         debug!("Connection {} got DATA({}) from server {}", self.cid(), input.len(), srv_endp!(self.inners));
 
-        let plain_len = input.len() - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES;
+        let plain_len = input.len() - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
         let mut data = Box::new(vec![0u8; plain_len]);
 
         _ = enbox!(self.inners).decrypt(
             &input[PACKET_HEADER_BYTES..],
             &mut data[..]
         ).map_err(|e| {
-            error!("Connection {} decrypt DATA packet from server {} error : {e}",
+            error!("Connection {} decrypt CONNECT request packet from server {} error: {e}",
                 self.cid(),
                 srv_endp!(self.inners)
             ); e
@@ -900,16 +873,17 @@ impl ProxyConnection {
         let mut plain:Vec<u8> = Vec::with_capacity(len);
         plain.extend_from_slice(dev_sig);           // signature of challenge.
 
-        let len = id::ID_BYTES                      // plain device id
+        let len = PACKET_HEADER_BYTES
+            + id::ID_BYTES                          // plain device id
             + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
             + plain.len();
 
         let mut payload =vec![0u8;len];
-        payload[..id::ID_BYTES].copy_from_slice(self.node.lock().unwrap().id().as_bytes());
+        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
         self.encrypt(
             srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
-            &mut payload[id::ID_BYTES..]
+            &mut payload[PACKET_HEADER_BYTES + id::ID_BYTES..]
         ).map_err(|e| {
             error!("Connection {} failed to encrypt attach request: {e}", self.cid());
             e
@@ -917,7 +891,7 @@ impl ProxyConnection {
 
         self.send_relay_packet(
             Packet::Attach(AttachType),
-            Some(&payload)
+            payload
         ).await
     }
 
@@ -943,43 +917,49 @@ impl ProxyConnection {
         self.state = State::Authenticating;
 
         //let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
-        //let padding_sz = (random_padding() % 256) as usize;
-
-        let len = id::ID_BYTES                  // client user id.
+        let len = id::ID_BYTES                      // client user id.
             + cryptobox::PublicKey::BYTES       // client public key.
+            + mem::size_of::<u8>()              // the value to domain length.
             + Signature::BYTES                  // signature of challenge from user client.
-            + Signature::BYTES                  // signature of challenge from device node.
-            + mem::size_of::<u8>();              // the value to domain length.
-           // + domain_len                        // domain string.
-           // + padding_sz;
+            + Signature::BYTES;                 // signature of challenge from device node.
 
         let mut plain = Vec::with_capacity(len);
-
-        plain.extend_from_slice(Id::random().as_bytes());     // userid
-        plain.extend_from_slice(session_keypair!(self.inners).public_key().as_bytes());// client public key
-        plain.extend_from_slice(&[false as u8]);                // boolean for domain DNS
+        plain.extend_from_slice(self.inners().lock().unwrap().userid.as_bytes()); // userid
+        plain.extend_from_slice(self.inners().lock().unwrap().session_keypair.public_key().as_bytes()); // client session public key
+        plain.extend_from_slice(&[false as u8]);        // boolean for domain DNS
         plain.extend_from_slice(user_sig);              // signature of challenge.
         plain.extend_from_slice(dev_sig);               // signature of challenge.
-        // TODO: Random padding
 
-        let len = id::ID_BYTES                          // plain device id
+        let mut len = PACKET_HEADER_BYTES               // packet header.
+            + id::ID_BYTES                              // plain device id
             + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
             + plain.len();                              // encyption payload
 
+        let mut padding_sz = random_padding() as usize;
+        if padding_sz == 0 {
+            padding_sz += 1;
+        }
+        len += padding_sz;                              // padding size for randomness.
+
         let mut payload =vec![0u8;len];
-        payload[..id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
+        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
         self.encrypt(
             srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
-            &mut payload[id::ID_BYTES..]
+            &mut payload[PACKET_HEADER_BYTES + id::ID_BYTES..]
         ).map_err(|e| {
             error!("Connection {} failed to encrypt authentication request: {e}", self.cid());
             e
         })?;
 
+        if padding_sz > 0 {
+            let padding = random_bytes(padding_sz);     // padding
+            payload[len - padding_sz..].copy_from_slice(&padding);
+        }
+
         self.send_relay_packet(
             Packet::Auth(AuthType),
-            Some(&payload)
+            payload
         ).await
     }
 
@@ -993,9 +973,21 @@ impl ProxyConnection {
             return Ok(())
         }
 
+        let mut padding_sz = random_padding() as usize;
+        if padding_sz == 0 {
+            padding_sz += 1;
+        }
+
+        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
+        let mut payload = vec![0u8; len];
+        if padding_sz > 0 {
+            let padding = random_bytes(padding_sz); // padding
+            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
+        }
+
         self.send_relay_packet(
             Packet::Ping(PingType),
-            None
+            payload
         ).await
     }
 
@@ -1006,10 +998,22 @@ impl ProxyConnection {
      *   - padding
      */
     async fn send_connect_response(&mut self, success: bool) -> Result<()> {
-        let data = random_boolean(success);
+        let mut padding_sz = random_padding() as usize;
+        if padding_sz == 0 {
+            padding_sz += 1;
+        }
+
+        let len = PACKET_HEADER_BYTES + size_of::<u8>() + padding_sz;
+        let mut payload = vec![0u8; len];
+        payload[PACKET_HEADER_BYTES] = random_boolean(success);
+        if padding_sz > 0 {
+            let padding = random_bytes(padding_sz); // padding
+            payload[PACKET_HEADER_BYTES + size_of::<u8>()..].copy_from_slice(&padding);
+        }
+
         self.send_relay_packet(
             Packet::ConnectAck(ConnType),
-            Some(&[data])
+            payload
         ).await
     }
 
@@ -1023,9 +1027,21 @@ impl ProxyConnection {
             return Ok(())
         }
 
+        let mut padding_sz = random_padding() as usize;
+        if padding_sz == 0 {
+            padding_sz += 1;
+        }
+
+        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
+        let mut payload = vec![0u8; len];
+        if padding_sz > 0 {
+            let padding = random_bytes(padding_sz); // padding
+            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
+        }
+
         self.send_relay_packet(
             Packet::Disconnect(DisconnType),
-            None
+            payload
         ).await
     }
 
@@ -1039,53 +1055,41 @@ impl ProxyConnection {
             return Ok(())
         }
 
+        let mut padding_sz = random_padding() as usize;
+        if padding_sz == 0 {
+            padding_sz += 1;
+        }
+
+        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
+        let mut payload = vec![0u8; len];
+        if padding_sz > 0 {
+            let padding = random_bytes(padding_sz); // padding
+            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
+        }
+
         self.send_relay_packet(
             Packet::DisconnectAck(DisconnType),
-            None
+            payload
         ).await
     }
 
     async fn send_relay_packet(&mut self,
         pkt: Packet,
-        input: Option<&[u8]>
+        mut input: Vec<u8>
     ) -> Result<()> {
         if self.state == State::Closed {
             warn!("Connection {} is already closed, but still try to send {} to upstream.", self.cid(), pkt);
             return Ok(());
         }
 
-        let mut sz: u16 = (PACKET_HEADER_BYTES + input.map_or(0, |v|v.len())) as u16;
-        let mut padding_sz = 0;
-        if !(matches!(pkt, Packet::Auth(_)) ||
-            matches!(pkt, Packet::Data(_))  ||
-            matches!(pkt, Packet::Error(_))) {
-
-            padding_sz = random_padding() as usize;
-            if padding_sz == 0 {
-                padding_sz += 1;
-            }
-
-            sz += padding_sz as u16
-        }
-
-        let len = PACKET_HEADER_BYTES               // packet header.
-             + input.map_or(0, |v|v.len())          // packet payload.
-             + padding_sz as usize;                 // padding size for randomness.
-
-        let mut data = Vec::with_capacity(len);
-        data.extend_from_slice(&sz.to_be_bytes());   // packet size.
-        data.extend_from_slice(&[pkt.value()]);      // packet flag.
-        if let Some(payload) = input.as_ref() {
-            data.extend_from_slice(payload)          // packet payload
-        }
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz); // padding
-            data.extend_from_slice(&padding)
-        }
+        let len = input.len() as u16;
+        let pos = size_of::<u16>();
+        input[..pos].copy_from_slice(&len.to_be_bytes()); // packet size.
+        input[pos..pos+size_of::<u8>()].copy_from_slice(&[pkt.value()]); // packet flag.
 
         let mut written = 0;
-        while written < data.len() {
-            let slen = match self.relay_writer.as_mut().unwrap().write(&data[written..]).await {
+        while written < input.len() {
+            let slen = match self.relay_writer.as_mut().unwrap().write(&input[written..]).await {
                 Ok(len) => len,
                 Err(e) => {
                     error!("Connection {} failed to send {} to server {} with error: {e}",
@@ -1102,22 +1106,24 @@ impl ProxyConnection {
         debug!("Connection {} send {}(len:{}) to server {}. ",
             self.cid(),
             pkt,
-            data.len(),
+            input.len(),
             srv_endp!(self.inners)
         );
         Ok(())
     }
 
     pub(crate) async fn on_upstream_data(&mut self, input: &[u8]) -> Result<()> {
-        let len = id::ID_BYTES                          // plain device id
+        let len = PACKET_HEADER_BYTES
             + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
             + input.len();
 
-        let mut cipher = vec![0u8; len];
+        let mut payload = vec![0u8; len];
+        let nonce = cryptobox::Nonce::random();
+
         _ = enbox!(self.inners).encrypt(
             &input[..],
-            &mut cipher[..],
-            &self.nonce
+            &mut payload[PACKET_HEADER_BYTES..],
+            &nonce
         ).map_err(|e| {
             error!("Connection {} encrypt DATA packet to server {} error: {e}",
                 self.cid(),
@@ -1127,12 +1133,10 @@ impl ProxyConnection {
 
         self.send_relay_packet(
             Packet::Data(DataType),
-            Some(&cipher[..]),
+            payload
         ).await
     }
 }
-
-
 
 impl fmt::Display for ProxyConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

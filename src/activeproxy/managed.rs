@@ -7,6 +7,7 @@ use crate::{
     NodeInfo,
     cryptobox,
     signature,
+    Id,
 };
 
 #[macro_export]
@@ -73,7 +74,9 @@ macro_rules! enbox {
 }
 
 pub(crate) struct ManagedFields {
-    pub(crate) session_keypair:     Option<cryptobox::KeyPair>,
+    pub(crate) userid:              Id,
+    pub(crate) keypair:             signature::KeyPair,
+    pub(crate) session_keypair:     cryptobox::KeyPair,
     pub(crate) cryptobox:           Option<cryptobox::CryptoBox>,
 
     pub(crate) remote_peer:         Option<Arc<Mutex<PeerInfo>>>,
@@ -107,8 +110,13 @@ pub(crate) struct ManagedFields {
 
 impl ManagedFields {
     pub(crate) fn new() -> Self {
+        let keypair = signature::KeyPair::random();
+        let session_keypair = cryptobox::KeyPair::from(&keypair);
+
         Self {
-            session_keypair:    Some(cryptobox::KeyPair::random()),
+            userid:             Id::from(keypair.to_public_key()),
+            keypair,
+            session_keypair,
             cryptobox:          None,
 
             remote_node:        None,
@@ -139,7 +147,6 @@ impl ManagedFields {
     }
 
     fn reset(&mut self) {
-        self.session_keypair    = Some(cryptobox::KeyPair::random());
         self.cryptobox          = None;
 
         self.server_failures    = 0;

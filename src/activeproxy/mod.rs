@@ -12,7 +12,7 @@ pub use {
 pub(crate)
 fn random_padding() -> u32 {
     unsafe {
-        libsodium_sys::randombytes_random() % 256
+        libsodium_sys::randombytes_random() % 32
     }
 }
 

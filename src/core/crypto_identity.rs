@@ -43,7 +43,8 @@ impl Identity for CryptoIdentity {
     }
 
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        signature::sign_into(data, self.signature_keypair.private_key())
+        let mut signature = vec![0u8; signature::Signature::BYTES];
+        self.sign(data, &mut signature).map(|_| signature)
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
@@ -51,34 +52,39 @@ impl Identity for CryptoIdentity {
     }
 
     fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let nonce = Nonce::random();
-        let pk = recipient.to_encryption_key();
-        let sk = self.keypair.private_key();
-        cryptobox::encrypt(plain, cipher, &nonce, &pk, sk)
+        cryptobox::encrypt(
+            plain,
+            cipher,
+            &Nonce::random(),
+            &recipient.to_encryption_key(),
+            self.keypair.private_key()
+        )
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let pk = sender.to_encryption_key();
-        let sk = self.keypair.private_key();
-        cryptobox::decrypt(cipher, plain, &pk, sk)
+        cryptobox::decrypt(
+            cipher,
+            plain,
+            &sender.to_encryption_key(),
+            self.keypair.private_key()
+        )
     }
 
-    fn encrypt_into(&self, recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = Nonce::random();
-        let pk = recipient.to_encryption_key();
-        let sk = self.keypair.private_key();
-        cryptobox::encrypt_into(data, &nonce, &pk, sk)
+    fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        let mut cipher = vec![0u8; plain.len() + cryptobox::CryptoBox::MAC_BYTES + Nonce::BYTES];
+        self.encrypt(recipient, plain, &mut cipher).map(|_| cipher)
     }
 
     fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
-        let pk = sender.to_encryption_key();
-        let sk = self.keypair.private_key();
-        cryptobox::decrypt_into(data, &pk, sk)
+        let mut plain = vec![0u8; data.len() - cryptobox::CryptoBox::MAC_BYTES - Nonce::BYTES];
+        self.decrypt(sender, data, &mut plain).map(|_| plain)
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        let pk = id.to_encryption_key();
-        cryptobox::CryptoBox::try_from((&pk, self.keypair.private_key())).map(|box_| {
+        cryptobox::CryptoBox::try_from((
+            &id.to_encryption_key(),
+            self.keypair.private_key()
+        )).map(|box_| {
             CryptoContext::from_cryptobox(id, box_)
         })
     }

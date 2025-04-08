@@ -5,6 +5,7 @@ use std::result;
 
 #[derive(Debug)]
 pub enum Error {
+    NotImplemented(String),
     Io(String),
     Network(String),
     Argument(String),
@@ -18,6 +19,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::NotImplemented(msg) => write!(f, "{}", msg),
             Error::Argument(msg)    => write!(f, "{}", msg),
             Error::State(msg)       => write!(f, "{}", msg),
             Error::Io(msg)          => write!(f, "{}", msg),

@@ -20,7 +20,8 @@ use crate::{
     Id,
     Node,
     error::Result,
-    Error
+    Error,
+    signature
 };
 
 use super::{
@@ -104,15 +105,16 @@ pub(crate) async fn run_loop(
     let duration = Duration::from_millis(1000 as u64);
     let mut interval = time::interval_at(Instant::now() + duration, duration);
     let managed = worker.lock().unwrap().managed.clone();
-    let node = worker.lock().unwrap().node.clone();
+
+    let keypair = signature::KeyPair::random();
 
     loop {
         if managed.lock().unwrap().needs_new_connection() {
             debug!("ActiveProxy tried to create a new connectoin...");
 
             let mut conn = ProxyConnection::new(
-                node.clone(),
-                managed.clone()
+                managed.clone(),
+                &keypair
             );
 
             _ = conn.connect_server().await;

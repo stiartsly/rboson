@@ -34,7 +34,6 @@ use crate::{
     random_bytes,
     id,
     Id,
-    Node,
     Error,
     error::Result,
     cryptobox, CryptoBox,

@@ -8,6 +8,7 @@ use std::time::Duration;
 use std::collections::LinkedList;
 use core::ops::Deref;
 use serial_test::serial;
+use once_cell::sync::Lazy;
 
 use super::{
     create_random_bytes,
@@ -34,36 +35,49 @@ use crate::core::{
     future::{Command, FindNodeCmd}
 };
 
-static mut PATH1: Option<String> = None;
-static mut PATH2: Option<String> = None;
+static PATH1: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(working_path("node_runner1/")));
+static PATH2: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(working_path("node_runner2/")));
 
 static mut NODE1: Option<Rc<RefCell<NodeRunner>>> = None;
 static mut NODE2: Option<Rc<RefCell<NodeRunner>>> = None;
 
-static mut BOOTSTR_CHANNEL:Option<Arc<Mutex<BootstrapChannel>>> = None;
-static mut COMMAND_CHANNEL:Option<Arc<Mutex<LinkedList<Command>>>> = None;
-static mut CRYPTO_CACHE1:Option<Arc<Mutex<CryptoCache>>> = None;
-static mut CRYPTO_CACHE2:Option<Arc<Mutex<CryptoCache>>> = None;
+static BOOTSTR_CHANNEL: Lazy<Arc<Mutex<BootstrapChannel>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(BootstrapChannel::new()))
+});
+
+static COMMAND_CHANNEL: Lazy<Arc<Mutex<LinkedList<Command>>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>))
+});
+
+static KEYPAIR1: Lazy<signature::KeyPair> = Lazy::new(|| {
+    signature::KeyPair::random()
+});
+static CRYPTO_CACHE1:Lazy<Arc<Mutex<CryptoCache>>> = Lazy::new(||{
+    Arc::new(Mutex::new(CryptoCache::new(cryptobox::KeyPair::from(&KEYPAIR1.clone()))))
+});
+
+static KEYPAIR2: Lazy<signature::KeyPair> = Lazy::new(|| {
+    signature::KeyPair::random()
+});
+static CRYPTO_CACHE2:Lazy<Arc<Mutex<CryptoCache>>> = Lazy::new(||{
+    Arc::new(Mutex::new(CryptoCache::new(cryptobox::KeyPair::from(&KEYPAIR2.clone()))))
+});
 
 fn setup() {
     unsafe {
         let ip_addr = local_addr(true).unwrap();
         let ip_str = ip_addr.to_string();
-
-        PATH1 = Some(working_path("node_runner1/"));
-        PATH2 = Some(working_path("node_runner1/"));
-
         let cfg1 = config::Builder::new()
             .with_listening_port(32222)
             .with_ipv4(&ip_str)
-            .with_storage_path(PATH1.as_ref().unwrap().as_str())
+            .with_storage_path(&PATH1.lock().unwrap())
             .build()
             .unwrap();
 
         let cfg2 = config::Builder::new()
             .with_listening_port(32224)
             .with_ipv4(&ip_str)
-            .with_storage_path(PATH2.as_ref().unwrap().as_str())
+            .with_storage_path(&PATH2.lock().unwrap())
             .build()
             .unwrap();
 
@@ -83,38 +97,27 @@ fn setup() {
             addrs2.set_value(Network::IPv6, addr6.clone());
         }
 
-        BOOTSTR_CHANNEL = Some(Arc::new(Mutex::new(BootstrapChannel::new())));
-        COMMAND_CHANNEL = Some(Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)));
-
-        let keypair = signature::KeyPair::random();
-        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
-        CRYPTO_CACHE1 = Some(Arc::new(Mutex::new(CryptoCache::new(encryption_keypair))));
-
         NODE1 = Some({
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg1.storage_path().to_string(),
-                keypair,
+                KEYPAIR1.clone(),
                 addrs1,
-                COMMAND_CHANNEL.as_ref().unwrap().clone(),
-                BOOTSTR_CHANNEL.as_ref().unwrap().clone(),
-                CRYPTO_CACHE1.as_ref().unwrap().clone()
+                COMMAND_CHANNEL.clone(),
+                BOOTSTR_CHANNEL.clone(),
+                CRYPTO_CACHE1.clone()
             )));
             nr.borrow_mut().set_cloned(nr.clone());
             nr
         });
 
-        let keypair = signature::KeyPair::random();
-        let encryption_keypair = cryptobox::KeyPair::from(&keypair);
-        CRYPTO_CACHE2 = Some(Arc::new(Mutex::new(CryptoCache::new(encryption_keypair))));
-
         NODE2 = Some({
             let nr = Rc::new(RefCell::new(NodeRunner::new(
                 cfg2.storage_path().to_string(),
-                keypair,
+                KEYPAIR2.clone(),
                 addrs2,
-                COMMAND_CHANNEL.as_ref().unwrap().clone(),
-                BOOTSTR_CHANNEL.as_ref().unwrap().clone(),
-                CRYPTO_CACHE2.as_ref().unwrap().clone()
+                COMMAND_CHANNEL.clone(),
+                BOOTSTR_CHANNEL.clone(),
+                CRYPTO_CACHE2.clone()
             )));
             nr.borrow_mut().set_cloned(nr.clone());
             nr
@@ -132,11 +135,8 @@ fn teardown() {
         NODE1 = None;
         NODE2 = None;
 
-        remove_working_path(PATH1.as_ref().unwrap().as_str());
-        remove_working_path(PATH2.as_ref().unwrap().as_str());
-
-        PATH1 = None;
-        PATH2 = None;
+        remove_working_path(&PATH1.lock().unwrap());
+        remove_working_path(&PATH2.lock().unwrap());
     }
 }
 
@@ -180,7 +180,7 @@ fn test_find_node() {
         //let node1 = NODE1.as_ref().unwrap();
         let node2 = NODE2.as_ref().unwrap().clone();
 
-        let channel = BOOTSTR_CHANNEL.as_ref().unwrap().clone();
+        let channel = BOOTSTR_CHANNEL.clone();
         let node2id = node2.borrow().id().deref().clone();
         let ni2 = NodeInfo::new(
             node2id.clone(),
@@ -191,8 +191,7 @@ fn test_find_node() {
         let opt = LookupOption::Conservative;
         let arc = Arc::new(Mutex::new(FindNodeCmd::new(&node2id, &opt)));
         let cmd = Command::FindNode(arc.clone());
-        let channel = COMMAND_CHANNEL.as_ref().unwrap();
-        channel.lock().unwrap().push_back(cmd.clone());
+        COMMAND_CHANNEL.lock().unwrap().push_back(cmd.clone());
 
         while !cmd.is_completed() {
             thread::sleep(Duration::from_secs(1));

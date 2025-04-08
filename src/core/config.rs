@@ -10,6 +10,10 @@ pub trait ActiveProxyConfig: Send + Sync {
     fn upstream_port(&self) -> u16;
 }
 
+pub trait UserConfig: Send + Sync {
+    fn private_key(&self) -> Option<&str>;
+}
+
 pub trait Config: Send + Sync {
     fn addr4(&self) -> Option<&SocketAddr>;
     fn addr6(&self) -> Option<&SocketAddr>;
@@ -19,10 +23,11 @@ pub trait Config: Send + Sync {
     fn storage_path(&self) -> &str;
     fn bootstrap_nodes(&self) -> &[NodeInfo];
 
-    fn log_level(&self) -> LevelFilter;
-    fn log_file(&self) -> Option<&str>;
+    fn log_level(&self) -> LevelFilter { LevelFilter::Info }
+    fn log_file(&self) -> Option<&str> { None }
 
-    fn activeproxy(&self) -> Option<&Box<dyn ActiveProxyConfig>>;
+    fn activeproxy(&self) -> Option<&Box<dyn ActiveProxyConfig>> { None }
+    fn user(&self) -> Option<&Box<dyn UserConfig>> { None }
 
     #[cfg(feature = "inspect")]
     fn dump(&self);

@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use tokio::time::Duration;
 use tokio::time::sleep;
 use serial_test::serial;
+use once_cell::sync::Lazy;
 
 use boson::{
     configuration as cfg,
@@ -21,9 +22,9 @@ use crate::{
     remove_working_path,
 };
 
-static mut PATH1: Option<String> = None;
-static mut PATH2: Option<String> = None;
-static mut PATH3: Option<String> = None;
+static PATH1: Lazy<String> = Lazy::new(|| working_path("node1"));
+static PATH2: Lazy<String> = Lazy::new(|| working_path("node2"));
+static PATH3: Lazy<String> = Lazy::new(|| working_path("node3"));
 
 static mut NODE1: Option<Node> = None;
 static mut NODE2: Option<Node> = None;
@@ -36,33 +37,29 @@ fn setup() {
             None => panic!("Failed to fetch IP address!!!")
         };
 
-        PATH1 = Some(working_path("node1"));
-        PATH2 = Some(working_path("node2"));
-        PATH3 = Some(working_path("node3"));
-
-        remove_working_path(PATH1.as_ref().unwrap().as_str());
-        remove_working_path(PATH2.as_ref().unwrap().as_str());
-        remove_working_path(PATH3.as_ref().unwrap().as_str());
+        remove_working_path(&PATH1);
+        remove_working_path(&PATH2);
+        remove_working_path(&PATH3);
 
         let ipstr = ip.to_string();
         let cfg1 = cfg::Builder::new()
             .with_listening_port(32222)
             .with_ipv4(&ipstr)
-            .with_storage_path(&PATH1.as_ref().unwrap())
+            .with_storage_path(&PATH1)
             .build()
             .unwrap();
 
         let cfg2 = cfg::Builder::new()
             .with_listening_port(32224)
             .with_ipv4(&ipstr)
-            .with_storage_path(&PATH2.as_ref().unwrap())
+            .with_storage_path(&PATH2)
             .build()
             .unwrap();
 
         let cfg3 = cfg::Builder::new()
             .with_listening_port(32226)
             .with_ipv4(&ipstr)
-            .with_storage_path(PATH3.as_ref().unwrap())
+            .with_storage_path(&PATH3)
             .build()
             .unwrap();
 
@@ -95,9 +92,9 @@ fn teardown() {
         NODE2.take().unwrap().stop();
         NODE3.take().unwrap().stop();
 
-        remove_working_path(PATH1.take().unwrap().as_str());
-        remove_working_path(PATH2.take().unwrap().as_str());
-        remove_working_path(PATH3.take().unwrap().as_str());
+        remove_working_path(&PATH1);
+        remove_working_path(&PATH2);
+        remove_working_path(&PATH3);
     }
 }
 

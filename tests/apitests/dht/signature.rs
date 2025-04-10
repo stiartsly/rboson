@@ -6,13 +6,15 @@ use boson::{
         PublicKey,
         KeyPair,
         Signature
-    }
+    },
+    Error
 };
 
 use crate::create_random_bytes;
 
 /*
  # PrivateKey APIs.
+    - try_from(&str)
     - try_from(&[u8])
     - size()
     - as_bytes()
@@ -20,6 +22,16 @@ use crate::create_random_bytes;
     - sign(data, signature) -> Result(usize)
     - sign_into(data) -> Result<Vec<u8>>
  */
+
+#[test]
+fn test_sk_from_str() {
+    let sk: Result<PrivateKey, Error> = "a3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501".try_into();
+    assert_eq!(sk.is_ok(), true);
+    let sk = sk.unwrap();
+    assert_eq!(sk.size(), PrivateKey::BYTES);
+    assert_eq!(sk.as_bytes().len(), PrivateKey::BYTES);
+}
+
 #[test]
 fn test_sk_tryfrom_bytes() {
     let bytes = create_random_bytes(PrivateKey::BYTES);

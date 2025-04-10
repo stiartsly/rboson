@@ -52,6 +52,19 @@ impl TryFrom<&[u8]> for PrivateKey {
     }
 }
 
+impl TryFrom<&str> for PrivateKey {
+    type Error = Error;
+    fn try_from(input: &str) -> Result<Self> {
+        let mut bytes = vec![0u8; Self::BYTES];
+        _ = hex::decode_to_slice(input, &mut bytes[..]).map_err(|e|{
+            Error::Argument(format!(
+                "Invalid hexadecimal string as private key, error: {e}"
+
+        ))})?;
+        Ok(PrivateKey(bytes.try_into().unwrap()))
+    }
+}
+
 impl PrivateKey {
     pub const BYTES: usize = 64;
 

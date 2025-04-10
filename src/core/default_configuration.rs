@@ -26,76 +26,85 @@ use crate::core::{
 };
 
 #[derive(Deserialize)]
-struct CfgNode {
-    id: String,
-    address: String,
-    port: u16,
+struct NodeItem {
+    id      : String,
+    address : String,
+    port    : u16,
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
-struct Logger {
-    level: String,
-    logFile: Option<String>,
+struct LoggerItem {
+    level   : String,
+    logFile : Option<String>,
     // pattern: String
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct ActiveProxyItem {
-    serverPeerId: String,
-    peerPrivateKey: Option<String>,
-    domainName: Option<String>,
-    upstreamHost: String,
-    upstreamPort: u16
+    serverPeerId    : String,
+    peerPrivateKey  : Option<String>,
+    domainName      : Option<String>,
+    upstreamHost    : String,
+    upstreamPort    : u16
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct UserItem {
+    privateKey  : String,
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct Cfg {
-    ipv4: bool,
-    ipv6: bool,
-    port: u16,
-    dataDir: String,
-    logger: Option<Logger>,
-    bootstraps: Vec<CfgNode>,
-    activeproxy: Option<ActiveProxyItem>
+    ipv4        : bool,
+    ipv6        : bool,
+    port        : u16,
+    dataDir     : String,
+    logger      : Option<LoggerItem>,
+    bootstraps  : Vec<NodeItem>,
+    activeproxy : Option<ActiveProxyItem>,
+    user        : Option<UserItem>
 }
 
 pub struct Builder<'a> {
-    auto_ipv4:      bool,
-    auto_ipv6:      bool,
-    ipv4_str:       Option<&'a str>,
-    ipv6_str:       Option<&'a str>,
+    auto_ipv4   : bool,
+    auto_ipv6   : bool,
+    ipv4_str    : Option<&'a str>,
+    ipv6_str    : Option<&'a str>,
 
-    ipv4_addr:      Option<IpAddr>,
-    ipv6_addr:      Option<IpAddr>,
+    ipv4_addr   : Option<IpAddr>,
+    ipv6_addr   : Option<IpAddr>,
 
-    port:           u16,
-    data_dir:       String,
+    port        : u16,
+    data_dir    : String,
 
-    log_level:      LevelFilter,
-    log_file:       Option<String>,
+    log_level   : LevelFilter,
+    log_file    : Option<String>,
 
-    bootstrap_nodes:Vec<NodeInfo>,
-    activeproxy: Option<ActiveProxyItem>,
+    bootstrap_nodes : Vec<NodeInfo>,
+    activeproxy : Option<ActiveProxyItem>,
+    user        : Option<UserItem>,
 }
 
 impl<'a> Builder<'a> {
     pub fn new() -> Builder<'a> {
         Self {
-            auto_ipv4:      false,
-            auto_ipv6:      false,
-            ipv4_str:       None,
-            ipv6_str:       None,
-            ipv4_addr:      None,
-            ipv6_addr:      None,
-            port:           constants::DEFAULT_DHT_PORT,
-            data_dir:       env::var("HOME").unwrap_or_else(|_| String::from(".")),
-            log_level:      LevelFilter::Info,
-            log_file:       None,
-            activeproxy:    None,
-            bootstrap_nodes:Vec::new(),
+            auto_ipv4   : false,
+            auto_ipv6   : false,
+            ipv4_str    : None,
+            ipv6_str    : None,
+            ipv4_addr   : None,
+            ipv6_addr   : None,
+            port        : constants::DEFAULT_DHT_PORT,
+            data_dir    : env::var("HOME").unwrap_or_else(|_| String::from(".")),
+            log_level   : LevelFilter::Info,
+            log_file    : None,
+            activeproxy : None,
+            user        : None,
+            bootstrap_nodes : Vec::new(),
         }
     }
 
@@ -143,45 +152,33 @@ impl<'a> Builder<'a> {
     }
 
     pub fn add_bootstrap_nodes(&mut self, nodes: &[NodeInfo]) ->&mut Self {
-        for item in nodes.iter() {
+        _ = nodes.into_iter().map(|item| {
             self.bootstrap_nodes.push(item.clone())
-        }
+        });
         self
     }
 
     pub fn load(&mut self, input: &str) -> Result<&mut Self> {
-        let data = match fs::read_to_string(input) {
-            Ok(v) => v,
-            Err(e) => return Err(Error::Io(
-                format!("Reading config error: {}", e))),
-        };
+        let data = fs::read_to_string(input).map_err(|e| {
+            Error::Io(format!("Reading config error: {}", e))
+        })?;
 
-        let cfg: Cfg = match serde_json::from_str(&data) {
-            Ok(cfg) => cfg,
-            Err(e) => return Err(Error::Argument(format!("bad config, error: {}", e)))
-        };
+        let cfg: Cfg = serde_json::from_str(&data).map_err(|e| {
+            Error::Argument(format!("bad config, error: {}", e))
+        })?;
 
-        if cfg.port > 0 {
-            self.port = cfg.port;
-        }
-        if cfg.ipv4 {
-            self.auto_ipv4 = true;
-        }
-        if cfg.ipv6 {
-            self.auto_ipv6 = true;
-        }
-
+        self.auto_ipv4 = cfg.ipv4;
+        self.auto_ipv6 = cfg.ipv6;
+        self.port = if cfg.port > 0 { cfg.port } else { self.port};
         self.data_dir = cfg.dataDir.clone();
 
         for item in cfg.bootstraps {
-            let id = match Id::try_from_base58(&item.id) {
-                Ok(id) => id,
-                Err(e) => return Err(Error::Argument(format!("bad id {}, error: {}", item.id, e)))
-            };
-            let ip = match item.address.parse::<IpAddr>() {
-                Ok(ip) => ip,
-                Err(e) => return Err(Error::Argument(format!("bad address {}, error: {}", item.address, e)))
-            };
+            let id = Id::try_from_base58(&item.id).map_err(|e|{
+                Error::Argument(format!("bad node id {} with error {}", item.id, e))
+            })?;
+            let ip = item.address.parse::<IpAddr>().map_err(|e| {
+                Error::Argument(format!("bad address {}, error: {}", item.address, e))
+            })?;
             self.bootstrap_nodes.push(
                 NodeInfo::new(id, SocketAddr::new(ip, item.port))
             )
@@ -193,6 +190,7 @@ impl<'a> Builder<'a> {
         }
 
         self.activeproxy = cfg.activeproxy;
+        self.user = cfg.user;
         Ok(self)
     }
 
@@ -229,6 +227,18 @@ pub(crate) struct ActiveProxyConfiguration {
     upstream_port: u16
 }
 
+impl ActiveProxyConfiguration {
+    fn new(b: &ActiveProxyItem) -> Self {
+        Self {
+            server_peerid:  b.serverPeerId.clone(),
+            peer_sk:        b.peerPrivateKey.clone(),
+            domain_name:    b.domainName.clone(),
+            upstream_host:  b.upstreamHost.clone(),
+            upstream_port:  b.upstreamPort
+        }
+    }
+}
+
 impl config::ActiveProxyConfig for ActiveProxyConfiguration {
     fn server_peerid(&self) -> &str {
         &self.server_peerid
@@ -251,15 +261,21 @@ impl config::ActiveProxyConfig for ActiveProxyConfiguration {
     }
 }
 
-impl ActiveProxyConfiguration {
-    fn new(b: &ActiveProxyItem) -> Self {
+pub(crate) struct UserConfiguration {
+    sk: String,
+}
+
+impl UserConfiguration {
+    fn new(b: &UserItem) -> Self {
         Self {
-            server_peerid:  b.serverPeerId.clone(),
-            peer_sk:        b.peerPrivateKey.clone(),
-            domain_name:    b.domainName.clone(),
-            upstream_host:  b.upstreamHost.clone(),
-            upstream_port:  b.upstreamPort
+            sk: b.privateKey.clone()
         }
+    }
+}
+
+impl config::UserConfig for UserConfiguration {
+    fn private_key(&self) -> &str {
+        &self.sk
     }
 }
 
@@ -276,6 +292,7 @@ pub(crate) struct DefaultConfiguration {
     bootstrap_nodes: Vec<NodeInfo>,
 
     activeproxy: Option<Box<dyn config::ActiveProxyConfig>>,
+    user: Option<Box<dyn config::UserConfig>>
 }
 
 impl DefaultConfiguration {
@@ -293,15 +310,21 @@ impl DefaultConfiguration {
             None => None
         };
 
+        let user = match b.user.as_ref() {
+            Some(user) => Some(Box::new(UserConfiguration::new(user))),
+            None => None
+        };
+
         Self {
             addr4,
             addr6,
-            port: b.port,
-            log_level: b.log_level,
-            log_file: b.log_file.clone(),
+            port    : b.port,
+            log_level   : b.log_level,
+            log_file    : b.log_file.clone(),
             storage_path: b.data_dir.to_string(),
             bootstrap_nodes: b.bootstrap_nodes.clone(),
-            activeproxy: activeproxy.map(|v| v as Box<dyn config::ActiveProxyConfig>)
+            activeproxy : activeproxy.map(|v| v as Box<dyn config::ActiveProxyConfig>),
+            user    : user.map(|v| v as Box<dyn config::UserConfig>)
         }
     }
 }
@@ -337,6 +360,10 @@ impl Config for DefaultConfiguration {
 
     fn activeproxy(&self) -> Option<&Box<dyn config::ActiveProxyConfig>> {
         self.activeproxy.as_ref()
+    }
+
+    fn user(&self) -> Option<&Box<dyn config::UserConfig>> {
+        self.user.as_ref()
     }
 
     #[cfg(feature = "inspect")]

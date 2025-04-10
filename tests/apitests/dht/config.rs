@@ -2,7 +2,8 @@ use std::net::IpAddr;
 use log::LevelFilter;
 use boson::{
     Config,
-    configuration
+    configuration,
+    signature
 };
 
 /**
@@ -100,11 +101,14 @@ fn test_load_cfg() {
     assert_eq!(n4.ip().to_string(), "66.42.74.13");
     assert_eq!(n4.port(), 39001);
 
-
+    assert_eq!(cfg.log_level(), LevelFilter::Info);
+    assert_eq!(cfg.log_file(), None);
+    assert_eq!(cfg.activeproxy().is_none(), true);
+    assert_eq!(cfg.user().is_none(), true);
 }
 
 #[test]
-fn test_load_cfg_for_log() {
+fn test_load_cfg_full(){
     let path = match std::fs::metadata("apitests2.conf") {
         Ok(_) => "apitests2.conf",
         Err(_) => "tests/apitests/dht/apitests2.conf",
@@ -134,43 +138,23 @@ fn test_load_cfg_for_log() {
     assert_eq!(n1.port(), 39001);
 
     assert_eq!(cfg.log_level(), LevelFilter::Debug);
-    assert_eq!(cfg.log_file(), Some("apitests2.log"))
-}
+    assert_eq!(cfg.log_file(), Some("apitests2.log"));
 
-#[test]
-fn test_load_cfg_for_activeproxy() {
-    let path = match std::fs::metadata("apitests2.conf") {
-        Ok(_) => "apitests2.conf",
-        Err(_) => "tests/apitests/dht/apitests2.conf",
-    };
-    let cfg = configuration::Builder::new()
-        .load(path)
-        .map_err(|e| {println!("{e}"); assert!(false)})
-        .unwrap()
-        .build()
-        .map_err(|_| assert!(false))
-        .unwrap();
-
-    #[cfg(feature = "inspect")]
-    cfg.dump();
-
-    assert_eq!(cfg.addr4().is_some(), true);
-    assert_eq!(cfg.addr6().is_some(), false);
-    assert_eq!(cfg.listening_port(), 39004);
-    assert_eq!(cfg.bootstrap_nodes().len(), 1);
-    assert_eq!(cfg.storage_path(), "apitests2_data");
-    assert_eq!(cfg.activeproxy().is_some(), true);
-
-    let nodes = cfg.bootstrap_nodes();
-    let n1 = &nodes[0];
-    assert_eq!(n1.id().to_base58(), "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ");
-    assert_eq!(n1.ip().to_string(), "155.138.245.211");
-    assert_eq!(n1.port(), 39001);
-
-    let ap = cfg.activeproxy().unwrap();
+    let result = cfg.activeproxy();
+    assert!(result.is_some());
+    let ap = result.unwrap();
     assert_eq!(ap.server_peerid(), "FemkhMoaGnt8HUYANxX9zKgd5Ghy7tWxDkxqd1fe6kJT");
     assert_eq!(ap.peer_private_key().is_some(), true);
     assert_eq!(ap.domain_name().is_some(), false);
     assert_eq!(ap.upstream_host(), "127.0.0.1");
     assert_eq!(ap.upstream_port(), 8080);
+
+    let result = cfg.user();
+    assert!(result.is_some());
+    let user = result.unwrap();
+    assert_eq!(user.private_key(), "a3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501");
+    let result = signature::PrivateKey::try_from(user.private_key());
+    assert!(result.is_ok());
+    let sk = result.unwrap();
+    assert_eq!(sk.as_bytes().len(), signature::PrivateKey::BYTES);
 }

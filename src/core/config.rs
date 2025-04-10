@@ -11,13 +11,12 @@ pub trait ActiveProxyConfig: Send + Sync {
 }
 
 pub trait UserConfig: Send + Sync {
-    fn private_key(&self) -> Option<&str>;
+    fn private_key(&self) -> &str;
 }
 
 pub trait Config: Send + Sync {
-    fn addr4(&self) -> Option<&SocketAddr>;
-    fn addr6(&self) -> Option<&SocketAddr>;
-
+    fn addr4(&self) -> Option<&SocketAddr> { None }
+    fn addr6(&self) -> Option<&SocketAddr> { None }
     fn listening_port(&self) -> u16;
 
     fn storage_path(&self) -> &str;

@@ -104,8 +104,6 @@ impl ProxyClient {
             Error::Argument(format!("Invalid user private key"))
         })?;
 
-        println!(">>user_sk:{}", user_sk);
-
         let user_keypair = signature::KeyPair::try_from(user_sk.as_bytes())
         .map_err(|e| {
             error!("Failed to convert user private key to KeyPair, error: {e}");

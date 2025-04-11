@@ -566,6 +566,7 @@ impl Identity for Node {
     }
 }
 
+use std::str;
 fn load_key(path: &str) -> Result<signature::KeyPair> {
     let mut fp = match File::open(path) {
         Ok(v) => v,
@@ -578,12 +579,13 @@ fn load_key(path: &str) -> Result<signature::KeyPair> {
         return Err(Error::Io(format!("Reading key error: {}", e)));
     };
 
-    if buf.len() != signature::PrivateKey::BYTES {
-        return Err(Error::State(format!(
-            "Incorrect key size {}", buf.len())));
-    }
+    let sk: signature::PrivateKey = str::from_utf8(&buf).map_err(|e| {
+        return Error::State(format!("Key file is not UTF-8: {}", e));
+    })?.try_into().map_err(|e| {
+        return Error::State(format!("Key file is not a valid key: {}", e));
+    })?;
 
-    signature::KeyPair::try_from(buf.as_slice())
+    Ok(signature::KeyPair::from(&sk))
 }
 
 fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
@@ -593,7 +595,7 @@ fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
             format!("Creating key file error: {}", e))),
     };
 
-    let result = fp.write_all(keypair.private_key().as_bytes());
+    let result = fp.write_all(keypair.private_key().to_string().as_bytes());
     if let Err(e) = result {
         return Err(Error::Io(format!("Writing key error: {}", e)));
     }

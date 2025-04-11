@@ -109,14 +109,11 @@ pub(crate) struct ManagedFields {
 }
 
 impl ManagedFields {
-    pub(crate) fn new() -> Self {
-        let keypair = signature::KeyPair::random();
-        let session_keypair = cryptobox::KeyPair::from(&keypair);
-
+    pub(crate) fn new(keypair: &signature::KeyPair) -> Self {
         Self {
             userid:             Id::from(keypair.to_public_key()),
-            keypair,
-            session_keypair,
+            keypair:            keypair.clone(),
+            session_keypair:    cryptobox::KeyPair::from(keypair),
             cryptobox:          None,
 
             remote_node:        None,

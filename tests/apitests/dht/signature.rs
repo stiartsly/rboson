@@ -167,7 +167,7 @@ fn test_pk_into_id() {
 */
 
 #[test]
-fn test_keypair_trait_tryfrom_bytes() {
+fn test_keypair_tryfrom_bytes() {
     let bytes = create_random_bytes(PrivateKey::BYTES);
     let sk = PrivateKey::try_from(bytes.as_slice());
     assert_eq!(sk.is_ok(), true);
@@ -183,12 +183,25 @@ fn test_keypair_trait_tryfrom_bytes() {
 }
 
 #[test]
-fn test_keypair_trait_tryfrom_sk() {
+fn test_keypair_tryfrom_sk1() {
     let bytes = create_random_bytes(PrivateKey::BYTES);
     let sk = PrivateKey::try_from(bytes.as_slice());
     let kp = KeyPair::from(&sk.unwrap());
     assert_eq!(kp.private_key().clone(), kp.to_private_key());
     assert_eq!(kp.public_key().clone(), kp.to_public_key());
+}
+
+#[test]
+fn test_keypair_tryfrom_sk2() {
+    let kp = signature::KeyPair::random();
+    let kp_str = kp.private_key().to_string();
+    let sk = PrivateKey::try_from(kp_str.as_str());
+    assert_eq!(sk.is_ok(), true);
+    let sk = sk.unwrap();
+    assert_eq!(sk.size(), PrivateKey::BYTES);
+    assert_eq!(sk.as_bytes().len(), PrivateKey::BYTES);
+    assert_eq!(sk.as_bytes(), kp.private_key().as_bytes());
+    assert_eq!(sk.as_bytes(), kp.to_private_key().as_bytes());
 }
 
 #[test]

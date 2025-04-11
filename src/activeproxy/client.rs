@@ -37,10 +37,9 @@ pub struct ProxyClient {
 
     upstream_host:      String,
     upstream_port:      u16,
-    upstream_endp:      String,
+    upstream_endpoint:  String,
     upstream_addr:      SocketAddr,
-
-    peer_domain:        Option<String>,
+    upstream_domain:    Option<String>,
 
     managed:            Arc<Mutex<ManagedFields>>,
     worker:             Arc<Mutex<ManagedWorker>>,
@@ -53,6 +52,12 @@ impl ProxyClient {
             error!("The configuration for ActiveProxy is missing, preventing the use of the ActiveProxy feature!!!
                 Please check the config file later.");
             return Err(Error::Argument(format!("ActiveProxy configuration is missing")));
+        };
+
+        let Some(user) = cfg.user() else {
+            error!("The configuration for User is missing, preventing the use of the ActiveProxy feature!!!
+                Please check the config file later.");
+            return Err(Error::Argument(format!("User configuration is missing")));
         };
 
         let cached_dir = {
@@ -93,9 +98,22 @@ impl ProxyClient {
                 Error::Argument(format!("Network error!"))
             })?;
 
+        let user_sk: signature::PrivateKey = user.private_key().try_into()
+        .map_err(|e| {
+            error!("Failed to convert user private key, error: {e}");
+            Error::Argument(format!("Invalid user private key"))
+        })?;
+
+        println!(">>user_sk:{}", user_sk);
+
+        let user_keypair = signature::KeyPair::try_from(user_sk.as_bytes())
+        .map_err(|e| {
+            error!("Failed to convert user private key to KeyPair, error: {e}");
+            Error::Argument(format!("Invalid user private key"))
+        })?;
 
         let managed = {
-            let mut fields = ManagedFields::new();
+            let mut fields = ManagedFields::new(&user_keypair);
             fields.peer_keypair  = keypair;
             fields.upstream_addr = Some(upstream_addr.clone());
             fields.upstream_name = Some(upstream_name.clone());
@@ -122,9 +140,9 @@ impl ProxyClient {
 
             upstream_host:  ap.upstream_host().to_string(),
             upstream_port:  ap.upstream_port(),
-            upstream_endp:  upstream_name,
+            upstream_endpoint:  upstream_name,
             upstream_addr:  upstream_addr,
-            peer_domain:    ap.domain_name().map(|v|v.to_string()),
+            upstream_domain:    ap.domain_name().map(|v|v.to_string()),
 
             managed,
             worker,
@@ -153,7 +171,7 @@ impl ProxyClient {
     }
 
     pub fn upstream_endpoint(&self) -> &str {
-        &self.upstream_endp
+        &self.upstream_endpoint
     }
 
     pub fn upstream_addr(&self) -> &SocketAddr {
@@ -161,7 +179,7 @@ impl ProxyClient {
     }
 
     pub fn domain_name(&self) -> Option<&str> {
-        self.peer_domain.as_ref().map(|v|v.as_str())
+        self.upstream_domain.as_ref().map(|v|v.as_str())
     }
 
     pub fn remote_peerid(&self) -> &Id {

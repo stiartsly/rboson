@@ -1,6 +1,5 @@
 use std::collections::LinkedList;
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use url::Url;
 use log::error;
@@ -28,7 +27,7 @@ pub struct Builder {
     passphrase  : Option<String>,
 
     device      : Option<CryptoIdentity>,
-    device_node : Option<Arc<RefCell<Node>>>,
+    device_node : Option<Arc<Mutex<Node>>>,
     device_name : Option<String>,
     app_name    : Option<String>,
 
@@ -86,8 +85,8 @@ impl Builder {
         self
     }
 
-    pub fn with_node(&mut self, node: &Arc<RefCell<Node>>) -> &mut Self {
-        self.device_node = Some(node.clone());
+    pub fn with_node(&mut self, node: Arc<Mutex<Node>>) -> &mut Self {
+        self.device_node = Some(node);
         self
     }
 
@@ -129,8 +128,6 @@ impl Builder {
         }
         self
     }
-
-
 
     async fn eligible_check(&self) -> Result<()> {
         unimplemented!()
@@ -186,6 +183,15 @@ impl MessagingClient for Client {
 impl Client {
     pub fn new(user: Id, device: Id) -> Self {
         Self { user, device }
+    }
+
+    pub fn start(&self) -> Result<()> {
+        println!("Started!");
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        println!("stopped");
     }
 }
 

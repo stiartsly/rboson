@@ -6,6 +6,9 @@ use clap::Parser;
 use boson::{
     Node,
     configuration as cfg,
+    signature,
+    Id,
+    messaging::client,
 };
 
 #[derive(Parser, Debug)]
@@ -38,7 +41,8 @@ struct Options {
     daemonize: bool
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let opts = Options::parse();
     let mut b = cfg::Builder::new();
     b.load(&opts.config)
@@ -50,29 +54,53 @@ fn main() {
     }
 
     let cfg  = b.build().unwrap();
+    let Some(user_cfg) = cfg.user() else {
+        eprint!("User not found in configuration file");
+        return;
+    };
+
     let result = Node::new(&cfg);
     if let Err(e) = result {
         panic!("Creating Node instance error: {e}")
     }
 
     let node = Arc::new(Mutex::new(result.unwrap()));
-    let _ = node.lock()
+    _ = node.lock()
         .unwrap()
         .start();
 
     thread::sleep(Duration::from_secs(2));
-/*
-    let result = ActiveProxy::new(node.clone(), &cfg);
-    if let Err(e) = result {
-        panic!("Creating ActiveProxy client error: {e}")
-    }
 
-    let ap = result.unwrap();
-    match ap.start() {
-        Ok(_) => {},
-        Err(e) => panic!("{e}")
-    }
-*/
+    let sk: signature::PrivateKey = match user_cfg.private_key().try_into() {
+        Ok(key) => key,
+        Err(_) => {
+            eprint!("Failed to convert private key");
+            return;
+        }
+    };
+
+    let peerid = Id::random();
+    let nodeid = Id::random();
+
+    let Ok(client) = client::Builder::new()
+        .with_user_name("test")
+        .with_user_key(signature::KeyPair::from(&sk))
+        .with_node(node.clone())
+        .with_device_key(signature::KeyPair::random())
+        .with_deivce_name("test_device")
+        .with_app_name("im_app")
+        .register_user_and_device("test")
+        .with_peerid(peerid)
+        .with_nodeid(nodeid)
+        .with_api_url("https://www.example.com")
+        .build().await else {
+        eprint!("Failed to create client");
+        return;
+    };
+
+    _ = client.start();
+    client.stop();
+
     thread::sleep(Duration::from_secs(60*100));
     let _ = node.lock()
         .unwrap()

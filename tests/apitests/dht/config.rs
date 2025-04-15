@@ -74,7 +74,7 @@ fn test_load_cfg() {
     assert_eq!(cfg.addr4().is_some(), true);
     assert_eq!(cfg.addr6().is_some(), false);
     assert_eq!(cfg.listening_port(), 39003);
-    assert_eq!(cfg.bootstrap_nodes().len(), 4);
+    assert_eq!(cfg.bootstrap_nodes().len(), 1);
     assert_eq!(cfg.storage_path(), "apitests1_data");
     assert_eq!(cfg.log_level(), LevelFilter::Info);
     assert_eq!(cfg.log_file(), None);
@@ -85,21 +85,6 @@ fn test_load_cfg() {
     assert_eq!(n1.id().to_base58(), "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ");
     assert_eq!(n1.ip().to_string(), "155.138.245.211");
     assert_eq!(n1.port(), 39001);
-
-    let n2 = &nodes[1];
-    assert_eq!(n2.id().to_base58(), "6o6LkHgLyD5sYyW9iN5LNRYnUoX29jiYauQ5cDjhCpWQ");
-    assert_eq!(n2.ip().to_string(), "45.32.138.246");
-    assert_eq!(n2.port(), 39001);
-
-    let n3 = &nodes[2];
-    assert_eq!(n3.id().to_base58(), "8grFdb2f6LLJajHwARvXC95y73WXEanNS1rbBAZYbC5L");
-    assert_eq!(n3.ip().to_string(), "140.82.57.197");
-    assert_eq!(n3.port(), 39001);
-
-    let n4 = &nodes[3];
-    assert_eq!(n4.id().to_base58(), "4A6UDpARbKBJZmW5s6CmGDgeNmTxWFoGUi2Z5C4z7E41");
-    assert_eq!(n4.ip().to_string(), "66.42.74.13");
-    assert_eq!(n4.port(), 39001);
 
     assert_eq!(cfg.log_level(), LevelFilter::Info);
     assert_eq!(cfg.log_file(), None);

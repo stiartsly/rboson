@@ -73,18 +73,15 @@ impl ProxyClient {
         };
 
         let keypair = ap.peer_private_key().map(|v| {
-            let mut bytes = vec![0u8; signature::PrivateKey::BYTES];
-            if let Err(e) = hex::decode_to_slice(v, &mut bytes[..]) {
-                return Err(Error::Argument(format!("Invalid hexadecimal string as peer private key, error: {e}")));
-            }
+            let sk = v.try_into().map(|v| {
+                signature::PrivateKey::from(v)
+            }).map_err(|e| {
+                error!("Failed to convert peer private key, error: {e}");
+                Error::Argument(format!("Invalid peer private key"))
+            });
 
-            let sk = match signature::PrivateKey::try_from(&bytes[..]) {
-                Ok(sk) => sk,
-                Err(e) => return Err(Error::Argument(format!("The private key is invalid for conversion: {e}"))),
-            };
-
-            Ok(signature::KeyPair::from(&sk))
-        }).transpose().unwrap();
+            sk.map(|v| signature::KeyPair::from(&v)).unwrap()
+        });
 
         let upstream_name = format!("{}:{}", ap.upstream_host(), ap.upstream_port());
         let upstream_addr = upstream_name.to_socket_addrs()

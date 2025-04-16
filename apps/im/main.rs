@@ -59,6 +59,14 @@ async fn main() {
         return;
     };
 
+    user_cfg.name().as_ref().map(|v| {
+        println!("User name: {v}");
+    });
+
+    user_cfg.password().as_ref().map(|v| {
+        println!("User password: {v}");
+    });
+
     let result = Node::new(&cfg);
     if let Err(e) = result {
         panic!("Creating Node instance error: {e}")
@@ -79,17 +87,23 @@ async fn main() {
         }
     };
 
+    let Some(messaing_cfg) = cfg.messaging() else {
+        eprint!("Messaging not found in configuration file");
+        return;
+    };
+    println!("Messaging peerid: {}", messaing_cfg.server_peerid());
+
     let peerid = Id::random();
     let nodeid = Id::random();
 
     let Ok(client) = client::Builder::new()
-        .with_user_name("test")
+        .with_user_name(user_cfg.name().map_or("test", |v|v))
         .with_user_key(signature::KeyPair::from(&sk))
         .with_node(node.clone())
         .with_device_key(signature::KeyPair::random())
         .with_deivce_name("test_device")
         .with_app_name("im_app")
-        .register_user_and_device("test")
+        .register_user_and_device(user_cfg.password().map_or("password", |v|v))
         .with_peerid(peerid)
         .with_nodeid(nodeid)
         .with_api_url("https://www.example.com")

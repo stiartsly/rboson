@@ -42,6 +42,14 @@ struct LoggerItem {
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
+struct UserItem {
+    name:   Option<String>,
+    password: Option<String>,
+    privateKey  : String,
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
 struct ActiveProxyItem {
     serverPeerId    : String,
     peerPrivateKey  : Option<String>,
@@ -52,8 +60,8 @@ struct ActiveProxyItem {
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
-struct UserItem {
-    privateKey  : String,
+struct MessagingItem {
+    serverPeerId: String,
 }
 
 #[derive(Deserialize)]
@@ -65,8 +73,10 @@ struct Cfg {
     dataDir     : String,
     logger      : Option<LoggerItem>,
     bootstraps  : Vec<NodeItem>,
+
+    user        : Option<UserItem>,
     activeproxy : Option<ActiveProxyItem>,
-    user        : Option<UserItem>
+    messaging   : Option<MessagingItem>
 }
 
 pub struct Builder<'a> {
@@ -86,6 +96,7 @@ pub struct Builder<'a> {
 
     bootstrap_nodes : Vec<NodeInfo>,
     activeproxy : Option<ActiveProxyItem>,
+    messaging   : Option<MessagingItem>,
     user        : Option<UserItem>,
 }
 
@@ -102,9 +113,11 @@ impl<'a> Builder<'a> {
             data_dir    : env::var("HOME").unwrap_or_else(|_| String::from(".")),
             log_level   : LevelFilter::Info,
             log_file    : None,
-            activeproxy : None,
-            user        : None,
             bootstrap_nodes : Vec::new(),
+
+            user        : None,
+            activeproxy : None,
+            messaging   : None,
         }
     }
 
@@ -191,6 +204,7 @@ impl<'a> Builder<'a> {
 
         self.activeproxy = cfg.activeproxy;
         self.user = cfg.user;
+        self.messaging = cfg.messaging;
         Ok(self)
     }
 
@@ -216,6 +230,36 @@ impl<'a> Builder<'a> {
         }
 
         Ok(Box::new(DefaultConfiguration::new(self)))
+    }
+}
+
+pub(crate) struct UserConfiguration {
+    name: Option<String>,
+    password: Option<String>,
+    sk: String,
+}
+
+impl UserConfiguration {
+    fn new(b: &UserItem) -> Self {
+        Self {
+            name    : b.name.clone(),
+            password: b.password.clone(),
+            sk      : b.privateKey.clone()
+        }
+    }
+}
+
+impl config::UserConfig for UserConfiguration {
+    fn private_key(&self) -> &str {
+        &self.sk
+    }
+
+    fn name(&self) -> Option<&str> {
+        self.name.as_ref().map(|v|v.as_str())
+    }
+
+    fn password(&self) -> Option<&str> {
+        self.password.as_ref().map(|v|v.as_str())
     }
 }
 
@@ -261,21 +305,21 @@ impl config::ActiveProxyConfig for ActiveProxyConfiguration {
     }
 }
 
-pub(crate) struct UserConfiguration {
-    sk: String,
+pub(crate) struct MessagingConfiguration {
+    server_peerid: String
 }
 
-impl UserConfiguration {
-    fn new(b: &UserItem) -> Self {
+impl MessagingConfiguration {
+    fn new(b: &MessagingItem) -> Self {
         Self {
-            sk: b.privateKey.clone()
+            server_peerid:  b.serverPeerId.clone()
         }
     }
 }
 
-impl config::UserConfig for UserConfiguration {
-    fn private_key(&self) -> &str {
-        &self.sk
+impl config::MessagingConfig for MessagingConfiguration {
+    fn server_peerid(&self) -> &str {
+        &self.server_peerid
     }
 }
 
@@ -292,6 +336,7 @@ pub(crate) struct DefaultConfiguration {
     bootstrap_nodes: Vec<NodeInfo>,
 
     activeproxy: Option<Box<dyn config::ActiveProxyConfig>>,
+    messaging: Option<Box<dyn config::MessagingConfig>>,
     user: Option<Box<dyn config::UserConfig>>
 }
 
@@ -310,6 +355,11 @@ impl DefaultConfiguration {
             None => None
         };
 
+        let messaging = match b.messaging.as_ref() {
+            Some(m) => Some(Box::new(MessagingConfiguration::new(m))),
+            None => None
+        };
+
         let user = match b.user.as_ref() {
             Some(user) => Some(Box::new(UserConfiguration::new(user))),
             None => None
@@ -324,7 +374,8 @@ impl DefaultConfiguration {
             storage_path: b.data_dir.to_string(),
             bootstrap_nodes: b.bootstrap_nodes.clone(),
             activeproxy : activeproxy.map(|v| v as Box<dyn config::ActiveProxyConfig>),
-            user    : user.map(|v| v as Box<dyn config::UserConfig>)
+            messaging   : messaging.map(|v| v as Box<dyn config::MessagingConfig>),
+            user        : user.map(|v| v as Box<dyn config::UserConfig>)
         }
     }
 }
@@ -366,6 +417,10 @@ impl Config for DefaultConfiguration {
         self.user.as_ref()
     }
 
+    fn messaging(&self) -> Option<&Box<dyn config::MessagingConfig>> {
+        self.messaging.as_ref()
+    }
+
     #[cfg(feature = "inspect")]
     fn dump(&self) {
         println!("config: {}", self);
@@ -386,6 +441,7 @@ impl fmt::Display for DefaultConfiguration {
         for item in self.bootstrap_nodes.iter() {
             write!(f, "\t{}, ", item)?;
         }
+        // TODO:
         write!(f, "]")?;
         Ok(())
     }

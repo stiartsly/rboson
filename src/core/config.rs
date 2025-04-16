@@ -2,6 +2,12 @@ use std::net::SocketAddr;
 use log::LevelFilter;
 use crate::core::node_info::NodeInfo;
 
+pub trait UserConfig: Send + Sync {
+    fn name(&self) -> Option<&str> { None }
+    fn password(&self) -> Option<&str> { None }
+    fn private_key(&self) -> &str;
+}
+
 pub trait ActiveProxyConfig: Send + Sync {
     fn server_peerid(&self) -> &str;
     fn peer_private_key(&self) -> Option<&str>;
@@ -10,8 +16,8 @@ pub trait ActiveProxyConfig: Send + Sync {
     fn upstream_port(&self) -> u16;
 }
 
-pub trait UserConfig: Send + Sync {
-    fn private_key(&self) -> &str;
+pub trait MessagingConfig: Send + Sync {
+    fn server_peerid(&self) -> &str;
 }
 
 pub trait Config: Send + Sync {
@@ -25,8 +31,9 @@ pub trait Config: Send + Sync {
     fn log_level(&self) -> LevelFilter { LevelFilter::Info }
     fn log_file(&self) -> Option<&str> { None }
 
-    fn activeproxy(&self) -> Option<&Box<dyn ActiveProxyConfig>> { None }
     fn user(&self) -> Option<&Box<dyn UserConfig>> { None }
+    fn activeproxy(&self) -> Option<&Box<dyn ActiveProxyConfig>> { None }
+    fn messaging(&self) -> Option<&Box<dyn MessagingConfig>> { None }
 
     #[cfg(feature = "inspect")]
     fn dump(&self);

@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
+use std::process;
 use clap::Parser;
 use log::{info, debug, warn};
 use rand::seq::SliceRandom;
@@ -80,24 +81,33 @@ async fn main() {
         .unwrap()
         .start();
 
+    thread::sleep(Duration::from_secs(2));
+
     let mut peer: Option<PeerInfo> = None;
     let mut ni: Option<NodeInfo> = None;
 
     let peerid = messsaging_cfg.server_peerid().parse::<Id>().unwrap();
 
     _ = lookup_peer(node.clone(), &peerid, |v1, v2| {
-        peer = v1;
-        ni = v2;
-    }).await.map_err(|_| {
-        return;
+        peer = v1.clone();
+        ni = v2.clone();
+    }).await.map_err(|e| {
+        println!("error: {}", e);
+        process::exit(-1);
     });
 
-    println!("peer: {}", peer.unwrap());
-    println!("ni: {}", ni.unwrap());
+    let Some(peer) = peer else {
+        eprintln!("Peer not found!!!");
+        return;
+    };
 
-    return;
+    let Some(ni) = ni else {
+        eprintln!("Node hosting the peer not found!!!");
+        return;
+    };
 
-    thread::sleep(Duration::from_secs(2));
+    println!("peer: {}", peer);
+    println!("ni: {}", ni);
 
     let sk: signature::PrivateKey = match user_cfg.private_key().try_into() {
         Ok(key) => key,
@@ -113,9 +123,6 @@ async fn main() {
     };
     println!("Messaging peerid: {}", messaing_cfg.server_peerid());
 
-    let peerid = Id::random();
-    let nodeid = Id::random();
-
     let Ok(client) = client::Builder::new()
         .with_user_name(user_cfg.name().map_or("test", |v|v))
         .with_user_key(signature::KeyPair::from(&sk))
@@ -124,8 +131,8 @@ async fn main() {
         .with_deivce_name("test_device")
         .with_app_name("im_app")
         .register_user_and_device(user_cfg.password().map_or("password", |v|v))
-        .with_peerid(peerid)
-        .with_nodeid(nodeid)
+        .with_peerid(peer.id())
+        .with_nodeid(ni.id())
         .with_api_url("https://www.example.com")
         .build().await else {
         eprint!("Failed to create client");

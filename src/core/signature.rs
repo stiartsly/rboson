@@ -1,6 +1,8 @@
 use static_assertions::const_assert;
 use std::fmt;
 use std::mem;
+use bs58::decode;
+use hex::FromHexError;
 
 use libsodium_sys::{
     crypto_sign_BYTES,
@@ -56,11 +58,38 @@ impl TryFrom<&str> for PrivateKey {
     type Error = Error;
     fn try_from(input: &str) -> Result<Self> {
         let mut bytes = vec![0u8; Self::BYTES];
-        _ = hex::decode_to_slice(input, &mut bytes[..]).map_err(|e|{
-            Error::Argument(format!(
-                "Invalid hexadecimal string as private key, error: {e}"
-
-        ))})?;
+        match input.starts_with("0x") {
+            true => {
+                _ = hex::decode_to_slice(&input[2..], &mut bytes[..])
+                .map_err(|e| match e {
+                    FromHexError::InvalidHexCharacter { c, index } => {
+                        Error::Argument(format!("Invalid hex character {} at position {}", c, index))
+                    },
+                    FromHexError::OddLength => {
+                        Error::Argument(format!("Odd hex string length {}", input.len()))
+                    },
+                    FromHexError::InvalidStringLength => {
+                        Error::Argument(format!("Invalid hex string length"))
+                    }
+                })?;
+            },
+            false => {
+                _ = bs58::decode(input)
+                .with_alphabet(bs58::Alphabet::DEFAULT)
+                .onto(&mut bytes[..])
+                .map_err(|e| match e {
+                    decode::Error::BufferTooSmall => {
+                        Error::Argument(format!("Invalid base58 string length"))
+                    },
+                    decode::Error::InvalidCharacter { character, index } => {
+                        Error::Argument(format!("Invalid base58 character {} at {}", character, index))
+                    },
+                    _ => {
+                        Error::Argument(format!("Invalid base58 with unknown error"))
+                    }
+                })?
+            }
+        };
         Ok(PrivateKey(bytes.try_into().unwrap()))
     }
 }
@@ -105,6 +134,16 @@ impl PrivateKey {
         let mut sig = vec![0u8; Signature::BYTES];
         self.sign(data, sig.as_mut()).map(|_| sig)
     }
+
+    pub fn to_base58(&self) -> String {
+        bs58::encode(self.0)
+            .with_alphabet(bs58::Alphabet::DEFAULT)
+            .into_string()
+    }
+
+    pub fn to_hexstr(&self) -> String {
+        format!("0x{}", hex::encode(self.0))
+    }
 }
 
 impl Drop for PrivateKey {
@@ -115,7 +154,7 @@ impl Drop for PrivateKey {
 
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))?;
+        write!(f, "0x{}", hex::encode(self.0))?;
         Ok(())
     }
 }

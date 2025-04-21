@@ -137,7 +137,7 @@ fn test_load_cfg_full(){
     let result = cfg.user();
     assert!(result.is_some());
     let user = result.unwrap();
-    assert_eq!(user.private_key(), "a3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501");
+    assert_eq!(user.private_key(), "0xa3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501");
     let result = signature::PrivateKey::try_from(user.private_key());
     assert!(result.is_ok());
     let sk = result.unwrap();

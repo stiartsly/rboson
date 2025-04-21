@@ -24,12 +24,38 @@ use crate::create_random_bytes;
  */
 
 #[test]
-fn test_sk_from_str() {
-    let sk: Result<PrivateKey, Error> = "a3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501".try_into();
+fn test_sk_from_str1() {
+    let sk: Result<PrivateKey, Error> = "0xa3218958b88d86dead1a58b439a22c161e0573022738b570210b123dc0b046faec6f3cd4ed1e6801ebf33fd60c07cf9924ef01d829f3f5af7377f054bff31501".try_into();
     assert_eq!(sk.is_ok(), true);
     let sk = sk.unwrap();
     assert_eq!(sk.size(), PrivateKey::BYTES);
     assert_eq!(sk.as_bytes().len(), PrivateKey::BYTES);
+}
+
+#[test]
+fn test_sk_from_hexstr() {
+    let kp = signature::KeyPair::random();
+    let sk_str = kp.private_key().to_hexstr();
+
+    let result: Result<PrivateKey, Error> = sk_str.as_str().try_into();
+    assert!(result.is_ok());
+    let sk = result.unwrap();
+    assert_eq!(sk.size(), PrivateKey::BYTES);
+    assert_eq!(sk.as_bytes().len(), PrivateKey::BYTES);
+    assert_eq!(sk_str, sk.to_hexstr());
+}
+
+#[test]
+fn test_sk_from_base58str() {
+    let kp = signature::KeyPair::random();
+    let sk_str = kp.private_key().to_base58();
+
+    let result: Result<PrivateKey, Error> = sk_str.as_str().try_into();
+    assert!(result.is_ok());
+    let sk = result.unwrap();
+    assert_eq!(sk.size(), PrivateKey::BYTES);
+    assert_eq!(sk.as_bytes().len(), PrivateKey::BYTES);
+    assert_eq!(sk_str, sk.to_base58());
 }
 
 #[test]
@@ -173,9 +199,6 @@ fn test_keypair_tryfrom_bytes() {
     assert_eq!(sk.is_ok(), true);
 
     let kp = KeyPair::try_from(sk.unwrap().as_bytes());
-    if let Err(e) = kp.as_ref() {
-    println!("e:{}",e);
-    }
     assert_eq!(kp.is_ok(), true);
     let kp = kp.unwrap();
     assert_eq!(kp.private_key().clone(), kp.to_private_key());
@@ -195,6 +218,7 @@ fn test_keypair_tryfrom_sk1() {
 fn test_keypair_tryfrom_sk2() {
     let kp = signature::KeyPair::random();
     let kp_str = kp.private_key().to_string();
+
     let sk = PrivateKey::try_from(kp_str.as_str());
     assert_eq!(sk.is_ok(), true);
     let sk = sk.unwrap();

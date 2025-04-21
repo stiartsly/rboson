@@ -93,12 +93,11 @@ impl Node {
             path
         };
 
-        let signature_keypair = {
-            get_keypair(&path).map_err(|e| {
-                error!("Acquire keypair from {} for DHT node error: {}", path, e);
-                return e;
-            }).ok().unwrap()
-        };
+        let signature_keypair = get_keypair(&path).map_err(|e| {
+            error!("Acquire keypair from {} for DHT node error: {}", path, e);
+            e
+        })?;
+
         let encryption_keypair = cryptobox::KeyPair::try_from(&signature_keypair).unwrap();
 
         let nodeid = {
@@ -504,9 +503,7 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
                 return Err(Error::State(format!("Bad file path {} for key storage.", keypath)));
             };
             keypair = load_key(&keypath)
-                .map_err(|e| return e)
-                .ok()
-                .unwrap();
+                .map_err(|e| Error::from(e))?
         },
         Err(_) => {
             // otherwise, generate a fresh keypair

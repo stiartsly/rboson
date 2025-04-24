@@ -7,14 +7,15 @@ use crate::{
     error::Result
 };
 
-#[allow(dead_code)]
-pub(crate) struct CryptoIdentity {
+#[allow(unused)]
+#[derive(Clone, Debug)]
+pub struct CryptoIdentity {
     id: Id,
     keypair: cryptobox::KeyPair,
     signature_keypair: signature::KeyPair,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 impl CryptoIdentity {
     pub(crate) fn new() -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())

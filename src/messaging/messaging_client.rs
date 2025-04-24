@@ -11,7 +11,7 @@ use super::{
     // invite_ticket::InviteTicket,
 };
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub(crate) trait MessagingClient {
     fn user_id(&self) -> &Id;
     fn device_id(&self) -> &Id;

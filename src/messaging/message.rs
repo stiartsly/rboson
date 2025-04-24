@@ -4,7 +4,7 @@ use crate::{
 };
 
 #[allow(dead_code)]
-pub(crate) struct Message {
+pub struct Message {
     version:    i32,
     from:       Id,
     to:         Id,

@@ -21,12 +21,13 @@ pub mod config_adapter;
 pub mod conversation;
 
 pub mod client_device;
+pub mod api_client;
 
 pub(crate) mod rpc;
 
 pub mod user_agent;
+pub mod user_profile;
 
-pub mod crypto_identity;
 pub mod client;
 
 #[cfg(test)]

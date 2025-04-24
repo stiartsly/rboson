@@ -7,8 +7,11 @@ use crate::{
     error::Result,
 };
 
+use crate::core::{
+    identity::Identity
+};
+
 use super::{
-    crypto_identity::Identity,
     group_permission::GroupPermission,
     group_member::GroupMember,
     group_role::GroupRole,

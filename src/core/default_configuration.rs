@@ -26,6 +26,7 @@ use crate::core::{
 };
 
 #[derive(Deserialize)]
+#[allow(non_snake_case)]
 struct NodeItem {
     id      : String,
     address : String,

@@ -133,7 +133,7 @@ async fn main() {
         .register_user_and_device(user_cfg.password().map_or("password", |v|v))
         .with_peerid(peer.id())
         .with_nodeid(ni.id())
-        .with_api_url("https://www.example.com")
+        .with_api_url(peer.alternative_url().as_ref().unwrap())
         .build().await else {
         eprint!("Failed to create client");
         return;

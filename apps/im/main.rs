@@ -1,11 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
-use std::process;
 use clap::Parser;
-use log::{info, debug, warn};
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 
 use boson::{
     Node,
@@ -13,10 +9,7 @@ use boson::{
     signature,
     Id,
     messaging::client,
-    PeerInfo,
-    NodeInfo,
-    error::Result,
-    appdata_store::{AppDataStore, AppDataStoreBuilder},
+    appdata_store::AppDataStoreBuilder,
 };
 
 #[derive(Parser, Debug)]
@@ -27,22 +20,6 @@ struct Options {
     /// The configuration file
     #[arg(short, long, value_name = "FILE")]
     config: String,
-
-    /// IPv4 address used for listening.
-    #[arg(short = '4', long, value_name = "IPv4")]
-    addr4: Option<String>,
-
-    /// IPv6 address used for listening.
-    #[arg(short = '6', long, value_name = "IPv6")]
-    addr6: Option<String>,
-
-    /// The directory for storing node data
-    #[arg(short, long, value_name = "PATH")]
-    storage: Option<String>,
-
-    /// The port used for listening
-    #[arg(short, long, default_value_t = 39011)]
-    port: u16,
 
     /// Run this program in daemon mode
     #[arg(short='D', long)]
@@ -56,10 +33,6 @@ async fn main() {
     b.load(&opts.config)
         .map_err(|e| panic!("{e}"))
         .unwrap();
-
-    if let Some(path) = opts.storage.as_ref() {
-        b.with_storage_path(path);
-    }
 
     let cfg  = b.build().unwrap();
     let Some(user_cfg) = cfg.user() else {
@@ -97,7 +70,7 @@ async fn main() {
         .unwrap();
 
     if let Err(e) = appdata_store.load().await {
-        println!("error: {e}");
+        eprintln!("error: {e}");
         return;
     }
 

@@ -15,7 +15,8 @@ use boson::{
     messaging::client,
     PeerInfo,
     NodeInfo,
-    error::Result
+    error::Result,
+    appdata_store::{AppDataStore, AppDataStoreBuilder},
 };
 
 #[derive(Parser, Debug)]
@@ -82,26 +83,30 @@ async fn main() {
         .start();
 
     thread::sleep(Duration::from_secs(2));
-
-    let mut peer: Option<PeerInfo> = None;
-    let mut ni: Option<NodeInfo> = None;
-
     let peerid = messsaging_cfg.server_peerid().parse::<Id>().unwrap();
 
-    _ = lookup_peer(node.clone(), &peerid, |v1, v2| {
-        peer = v1.clone();
-        ni = v2.clone();
-    }).await.map_err(|e| {
-        println!("error: {}", e);
-        process::exit(-1);
-    });
+    let mut path = String::new();
+    path.push_str(cfg.storage_path());
+    path.push_str("/messaging");
 
-    let Some(peer) = peer else {
+    let mut appdata_store = AppDataStoreBuilder::new("im")
+        .with_path(path.as_str())
+        .with_node(&node)
+        .with_peerid(&peerid)
+        .build()
+        .unwrap();
+
+    if let Err(e) = appdata_store.load().await {
+        println!("error: {e}");
+        return;
+    }
+
+    let Some(peer) = appdata_store.service_peer() else {
         eprintln!("Peer not found!!!");
         return;
     };
 
-    let Some(ni) = ni else {
+    let Some(ni) = appdata_store.service_node() else {
         eprintln!("Node hosting the peer not found!!!");
         return;
     };
@@ -146,59 +151,4 @@ async fn main() {
     let _ = node.lock()
         .unwrap()
         .stop();
-}
-
-async fn lookup_peer<F>(node: Arc<Mutex<Node>>, peerid: &Id, mut cb: F) -> Result<()>
-where
-    F: FnMut(Option<PeerInfo>, Option<NodeInfo>),
-{
-    info!("MessagingClient is trying to find peer {} and its host node via DHT network...", peerid);
-
-    let node = node.lock().unwrap();
-    let mut peers = node.find_peer(peerid, Some(4), None).await.map_err(|e| {
-        warn!("Trying to find peer but error: {}, please try it later!!!", e);
-        e
-    })?;
-
-    if peers.is_empty() {
-        warn!("No peers with peerid {} is found at this moment, please try it later!!!", peerid);
-        cb(None, None);
-        return Ok(());
-    }
-
-    debug!("Discovered {} satisfied peers, extracting each node's infomation...", peers.len());
-
-    peers.shuffle(&mut thread_rng());
-    while let Some(peer) = peers.pop() {
-        let nodeid = peer.nodeid();
-        debug!("Trying to lookup node {} hosting the peer {} ...", nodeid, peerid);
-
-        let result = node.find_node(nodeid, None).await.map_err(|e| {
-            warn!("Failed to find node {}, error: {}", nodeid, e);
-            e
-        })?;
-
-        if result.is_empty() {
-            warn!("can't locate node: {}! Go on next ...", nodeid);
-            continue;
-        }
-
-        let mut ni = None;
-        if let Some(v6) = result.v6() {
-            ni = Some(v6.clone());
-        }
-        if let Some(v4) = result.v4() {
-            ni = Some(v4.clone());
-        }
-        let Some(ni) = ni else {
-            continue;
-        };
-
-        info!("Found peer {} and its host node {}.", peer.id(), node.id());
-        cb(Some(peer), Some(ni));
-        return Ok(())
-    }
-
-    cb(None, None);
-    Ok(())
 }

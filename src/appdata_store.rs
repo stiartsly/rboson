@@ -165,23 +165,20 @@ impl AppDataStore {
             let mut fp = match File::open(&path) {
                 Ok(fp) => fp,
                 Err(e) => {
-                    warn!("Failed to open cached file {} with error: {e}.", path.display());
-                    return None;
+                    return Err(Error::State(format!("Failed to open cached file [{}] with error: {e}.", path.display())));
                 }
             };
 
             if let Err(e) = fp.read_to_end(&mut buf) {
-                warn!("Failed to read conetnt from cache file with error {e}");
-                return None;
+                return Err(Error::State("Failed to read conetnt from cache file with error {e}".into()));
             }
 
             let reader = cbor::Reader::new(&buf);
             let val: CVal = match ciborium::de::from_reader(reader) {
                 Ok(v) => v,
                 Err(e) => {
-                   warn!("Failed to parse data from cached file with error: {e} -
-                        cached file might be broken");
-                    return None;
+                   return Err(Error::State("Failed to parse data from cached file with error: {e} -
+                        cached file might be broken".into()));
                 }
             };
 
@@ -200,24 +197,30 @@ impl AppDataStore {
                 }
             }
             let Some(peer) = peer else {
-                warn!("Missing peer information");
-                return None;
+                return Err(Error::State("Missing peer information in cache file".into()));
             };
 
             let Some(ni) = ni else {
-                warn!("Missing node information");
-                return None;
+                return Err(Error::State("Missing node information in cache file".into()));
             };
 
-            Some((peer, ni))
+            Ok((peer, ni))
         });
 
-        let Ok(Some(v)) = handle.await else {
-            return Ok(());
+        let result = match handle.await {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(Error::State("Join task handler error {e}".into()));
+            }
         };
 
-        self.service_peer = Some(v.0);
-        self.service_node = Some(v.1);
+        let result = match result {
+            Ok(v) => v,
+            Err(e) => return Err(e)
+        };
+
+        self.service_peer = Some(result.0);
+        self.service_node = Some(result.1);
         Ok(())
     }
 
@@ -252,9 +255,9 @@ impl AppDataStore {
             };
             _ = fp.write_all(&buf);
         }).await
-        .map_err(|e|
+        .map_err(|e| {
             Error::State("{e}".into())
-        )
+        })
     }
 
     pub async fn load(&mut self) -> Result<()> {
@@ -266,7 +269,7 @@ impl AppDataStore {
     }
 
     pub async fn store(&self) -> Result<()> {
-        unimplemented!()
+        self.store_internal().await
     }
 }
 

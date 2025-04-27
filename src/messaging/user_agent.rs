@@ -5,11 +5,19 @@ use std::path::Path;
 use crate::{
     Id,
     error::Result,
+    PeerInfo,
 };
 
 use super::{
     conversation::Conversation,
     message::Message,
+    user_profile::UserProfile,
+    device_profile::DeviceProfile,
+    connection_listener::ConnectionListener,
+    profile_listener::ProfileListener,
+    message_listener::MessageListener,
+    channel_listener::ChannelListener,
+    contact_listener::ContactListener
 };
 
 #[allow(dead_code)]
@@ -27,10 +35,23 @@ trait IUserAgent {
     fn clear_messages(&mut self, conversation_id: &Id);
 }
 
+struct MessagingRepository {}
+
 #[allow(dead_code)]
 pub struct UserAgent {
-    conversations: HashMap<Id, Conversation>,
+    user    : UserProfile,
+    device  : DeviceProfile,
+    peer    : PeerInfo,
 
+    repository  : MessagingRepository,
+
+    connection_listeners: LinkedList<Box<dyn ConnectionListener>>,
+    profile_listeners: LinkedList<Box<dyn ProfileListener>>,
+    message_listeners: LinkedList<Box<dyn MessageListener>>,
+    channel_listeners: LinkedList<Box<dyn ChannelListener>>,
+    contact_listeners: LinkedList<Box<dyn ContactListener>>,
+
+    conversations: HashMap<Id, Conversation>,
 }
 
 impl UserAgent {

@@ -17,6 +17,7 @@ pub mod messaging_client;
 pub mod message_listener;
 pub mod connection_listener;
 pub mod channel_listener;
+pub mod profile_listener;
 pub mod config_adapter;
 pub mod conversation;
 
@@ -27,6 +28,7 @@ pub(crate) mod rpc;
 
 pub mod user_agent;
 pub mod user_profile;
+pub mod device_profile;
 
 pub mod client;
 

@@ -13,7 +13,7 @@ use crate::{
 };
 
 use crate::core::{
-    crypto_identity::CryptoIdentity,
+    crypto_identity::CryptoIdentity
 };
 
 use super::{
@@ -22,6 +22,8 @@ use super::{
     channel_listener::ChannelListener,
     contact_listener::ContactListener,
     messaging_client::MessagingClient,
+
+    user_agent::UserAgent,
 };
 
 #[derive(Debug, Default)]
@@ -171,9 +173,9 @@ impl<'a> Builder<'a> {
     }
 
     async fn eligible_check(&self) -> Result<()> {
-        if self.repository.is_none() || self.repository_db.is_none() {
-            return Err(Error::State("Messaging repository is not configured".into()));
-        }
+        //if self.repository.is_none() || self.repository_db.is_none() {
+        //    return Err(Error::State("Messaging repository is not configured".into()));
+        //}
 
         //let mut device_check = false;
         //let mut peer_check = false;
@@ -193,17 +195,24 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
+    async fn build_default_user_agent(&self) -> Result<UserAgent> {
+        unimplemented!()
+    }
+
+    async fn register_agent(&self, _: &UserAgent) -> Result<()> {
+        unimplemented!()
+    }
+
     pub async fn build(&self) -> Result<Client> {
         self.eligible_check().await.map_err(|e| {
             error!("{e}");
             e
         })?;
 
+        let agent = self.build_default_user_agent().await?;
+        self.register_agent(&agent).await?;
 
-
-
-
-        unimplemented!()
+        Client::new()
     }
 }
 
@@ -245,8 +254,11 @@ impl MessagingClient for Client {
 }
 
 impl Client {
-    pub fn new(user: Id, device: Id) -> Self {
-        Self { user, device }
+    //pub fn new(user: Id, device: Id) -> Self {
+    //    Self { user, device }
+    //}
+    pub(crate) fn new() -> Result<Self> {
+        unimplemented!()
     }
 
     pub fn start(&self) -> Result<()> {

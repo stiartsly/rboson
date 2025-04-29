@@ -29,34 +29,39 @@ struct Options {
 #[tokio::main]
 async fn main() {
     let opts = Options::parse();
-    let mut b = cfg::Builder::new();
-    b.load(&opts.config)
+    let cfg = cfg::Builder::new()
+        .load(&opts.config)
+        .map_err(|e| panic!("{e}"))
+        .unwrap()
+        .build()
         .map_err(|e| panic!("{e}"))
         .unwrap();
 
-    let cfg  = b.build().unwrap();
-    let Some(user_cfg) = cfg.user() else {
-        eprint!("User not found in configuration file");
+    let Some(ucfg) = cfg.user() else {
+        eprint!("User item is not found in config file");
         return;
     };
 
-    let Some(messsaging_cfg) = cfg.messaging() else {
-        eprint!("Messaging not found in configuration file");
+    let Some(mcfg) = cfg.messaging() else {
+        eprint!("Messaging item not found in config file");
         return;
     };
+
+    let peerid = mcfg.server_peerid()
+        .parse::<Id>()
+        .map_err(|e| panic!("{e}"))
+        .unwrap();
 
     let result = Node::new(&cfg);
     if let Err(e) = result {
-        panic!("Creating Node instance error: {e}")
+        eprint!("Creating boson Node instance error: {e}");
+        return;
     }
 
     let node = Arc::new(Mutex::new(result.unwrap()));
-    _ = node.lock()
-        .unwrap()
-        .start();
+    node.lock().unwrap().start();
 
-    thread::sleep(Duration::from_secs(2));
-    let peerid = messsaging_cfg.server_peerid().parse::<Id>().unwrap();
+    thread::sleep(Duration::from_secs(1));
 
     let mut path = String::new();
     path.push_str(cfg.storage_path());
@@ -70,58 +75,60 @@ async fn main() {
         .unwrap();
 
     if let Err(e) = appdata_store.load().await {
-        eprintln!("error: {e}");
+        eprintln!("Loading app data store error: {e}");
+        node.lock().unwrap().stop();
         return;
     }
 
     let Some(peer) = appdata_store.service_peer() else {
-        eprintln!("Peer not found!!!");
+        println!("Messaging peer is not found!!!, please run it later.");
+        node.lock().unwrap().stop();
         return;
     };
 
     let Some(ni) = appdata_store.service_node() else {
         eprintln!("Node hosting the peer not found!!!");
+        node.lock().unwrap().stop();
         return;
     };
 
-    println!("peer: {}", peer);
-    println!("ni: {}", ni);
+    println!("Messaging Peer: {}", peer);
+    println!("Messaging Node: {}", ni);
 
-    let sk: signature::PrivateKey = match user_cfg.private_key().try_into() {
-        Ok(key) => key,
+    let sk: signature::PrivateKey = match ucfg.private_key().try_into() {
+        Ok(v) => v,
         Err(_) => {
-            eprint!("Failed to convert private key");
+            eprint!("Failed to convert private key from hex format");
+            node.lock().unwrap().stop();
             return;
         }
     };
 
-    let Some(messaing_cfg) = cfg.messaging() else {
-        eprint!("Messaging not found in configuration file");
-        return;
-    };
-    println!("Messaging peerid: {}", messaing_cfg.server_peerid());
-
-    let Ok(client) = client::Builder::new()
-        .with_user_name(user_cfg.name().map_or("test", |v|v))
+    let result = client::Builder::new()
+        .with_user_name(ucfg.name().map_or("testing", |v|v))
         .with_user_key(signature::KeyPair::from(&sk))
         .with_node(node.clone())
         .with_device_key(signature::KeyPair::random())
-        .with_deivce_name("test_device")
-        .with_app_name("im_app")
-        .register_user_and_device(user_cfg.password().map_or("password", |v|v))
+        .with_deivce_name("testing")
+        .with_app_name("im")
+        .register_user_and_device(ucfg.password().map_or("secret", |v|v))
         .with_peerid(peer.id())
         .with_nodeid(ni.id())
         .with_api_url(peer.alternative_url().as_ref().unwrap())
-        .build().await else {
-        eprint!("Failed to create client");
-        return;
+        .build()
+        .await;
+
+    let client = match result {
+        Ok(v) => v,
+        Err(e) => {
+            eprint!("Creating messaging client instance error: {e}");
+            node.lock().unwrap().stop();
+            return;
+        }
     };
 
     _ = client.start();
-    client.stop();
-
-    thread::sleep(Duration::from_secs(60*100));
-    let _ = node.lock()
-        .unwrap()
-        .stop();
+    thread::sleep(Duration::from_secs(1));
+    _ = client.stop();
+    node.lock().unwrap().stop();
 }

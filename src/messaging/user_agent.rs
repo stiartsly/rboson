@@ -39,11 +39,11 @@ struct MessagingRepository {}
 
 #[allow(dead_code)]
 pub struct UserAgent {
-    user    : UserProfile,
-    device  : DeviceProfile,
-    peer    : PeerInfo,
+    user    : Option<UserProfile>,
+    device  : Option<DeviceProfile>,
+    peer    : Option<PeerInfo>,
 
-    repository  : MessagingRepository,
+    repository  : Option<MessagingRepository>,
 
     connection_listeners: LinkedList<Box<dyn ConnectionListener>>,
     profile_listeners: LinkedList<Box<dyn ProfileListener>>,
@@ -55,8 +55,23 @@ pub struct UserAgent {
 }
 
 impl UserAgent {
-    pub fn new(_path: &Path) -> Result<Self> {
-        unimplemented!()
+    //pub fn new(_path: &Path) -> Result<Self> {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            user: None,
+            device: None,
+            peer: None,
+
+            repository: None,
+
+            connection_listeners: LinkedList::new(),
+            profile_listeners: LinkedList::new(),
+            message_listeners: LinkedList::new(),
+            channel_listeners: LinkedList::new(),
+            contact_listeners: LinkedList::new(),
+
+            conversations: HashMap::new(),
+        })
     }
 }
 

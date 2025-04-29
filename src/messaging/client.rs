@@ -10,10 +10,11 @@ use crate::{
     signature::KeyPair,
     error::Result,
     Error,
+    Identity,
 };
 
 use crate::core::{
-    crypto_identity::CryptoIdentity
+    crypto_identity::CryptoIdentity,
 };
 
 use super::{
@@ -196,11 +197,12 @@ impl<'a> Builder<'a> {
     }
 
     async fn build_default_user_agent(&self) -> Result<UserAgent> {
-        unimplemented!()
+        UserAgent::new()    // TODO:
     }
 
     async fn register_agent(&self, _: &UserAgent) -> Result<()> {
-        unimplemented!()
+        // unimplemented!()
+        Ok(())
     }
 
     pub async fn build(&self) -> Result<Client> {
@@ -212,24 +214,24 @@ impl<'a> Builder<'a> {
         let agent = self.build_default_user_agent().await?;
         self.register_agent(&agent).await?;
 
-        Client::new()
+        Client::new(self)
     }
 }
 
 #[allow(dead_code)]
 pub struct Client {
-    user:   Id,
-    device: Id,
+    userid:   Id,
+    dev_id: Id,
 }
 
 #[allow(dead_code)]
 impl MessagingClient for Client {
     fn user_id(&self) -> &Id {
-        &self.user
+        &self.userid
     }
 
     fn device_id(&self) -> &Id {
-        &self.device
+        &self.dev_id
     }
 
     async fn connect(&mut self) -> Result<()> {
@@ -257,8 +259,11 @@ impl Client {
     //pub fn new(user: Id, device: Id) -> Self {
     //    Self { user, device }
     //}
-    pub(crate) fn new() -> Result<Self> {
-        unimplemented!()
+    pub(crate) fn new(b: &Builder) -> Result<Self> {
+        Ok(Self {
+            userid: b.user.as_ref().unwrap().id().clone(),
+            dev_id: b.device.as_ref().unwrap().id().clone(),
+        })
     }
 
     pub fn start(&self) -> Result<()> {

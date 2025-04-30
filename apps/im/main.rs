@@ -38,12 +38,12 @@ async fn main() {
         .unwrap();
 
     let Some(ucfg) = cfg.user() else {
-        eprint!("User item is not found in config file");
+        eprintln!("User item is not found in config file");
         return;
     };
 
     let Some(mcfg) = cfg.messaging() else {
-        eprint!("Messaging item not found in config file");
+        eprintln!("Messaging item not found in config file");
         return;
     };
 
@@ -54,7 +54,7 @@ async fn main() {
 
     let result = Node::new(&cfg);
     if let Err(e) = result {
-        eprint!("Creating boson Node instance error: {e}");
+        eprintln!("Creating boson Node instance error: {e}");
         return;
     }
 
@@ -98,7 +98,7 @@ async fn main() {
     let sk: signature::PrivateKey = match ucfg.private_key().try_into() {
         Ok(v) => v,
         Err(_) => {
-            eprint!("Failed to convert private key from hex format");
+            eprintln!("Failed to convert private key from hex format");
             node.lock().unwrap().stop();
             return;
         }
@@ -111,6 +111,7 @@ async fn main() {
         .with_device_key(signature::KeyPair::random())
         .with_deivce_name("testing")
         .with_app_name("im")
+        .with_messaging_repository(path.as_str())
         .register_user_and_device(ucfg.password().map_or("secret", |v|v))
         .with_peerid(peer.id())
         .with_nodeid(ni.id())
@@ -121,7 +122,7 @@ async fn main() {
     let client = match result {
         Ok(v) => v,
         Err(e) => {
-            eprint!("Creating messaging client instance error: {e}");
+            eprintln!("Creating messaging client instance error: {e}");
             node.lock().unwrap().stop();
             return;
         }

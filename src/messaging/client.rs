@@ -1,8 +1,10 @@
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::cell::RefCell;
 use unicode_normalization::UnicodeNormalization;
 use url::Url;
-use log::error;
+use log::{warn, error};
 
 use crate::{
     Id,
@@ -24,11 +26,10 @@ use super::{
     contact_listener::ContactListener,
     messaging_client::MessagingClient,
 
-    user_agent::UserAgent,
+    user_agent::{IUserAgent, UserAgent},
+    persistence::database::Database,
+    messaging_repository::MessagingRepository,
 };
-
-#[derive(Debug, Default)]
-struct MessagingRepository {}
 
 #[allow(dead_code)]
 pub struct Builder<'a> {
@@ -51,15 +52,18 @@ pub struct Builder<'a> {
     nodeid      : Option<&'a Id>,
     api_url     : Option<Url>,
 
-    repository  : Option<MessagingRepository>,
-    repository_db: Option<PathBuf>,
+    repository  : Option<Rc<RefCell<dyn MessagingRepository>>>,
+    repository_db: Option<&'a str>,
 
     connection_listeners: Option<Box<dyn ConnectionListener>>,
     message_listeners   : Option<Box<dyn MessageListener>>,
     channel_listeners   : Option<Box<dyn ChannelListener>>,
     contact_listeners   : Option<Box<dyn ContactListener>>,
+
+    user_agent  : Option<Rc<RefCell<dyn IUserAgent>>>
 }
 
+#[allow(unused)]
 impl<'a> Builder<'a> {
     pub fn new() -> Self {
         Self {
@@ -88,6 +92,8 @@ impl<'a> Builder<'a> {
             message_listeners   : None,
             channel_listeners   : None,
             contact_listeners   : None,
+
+            user_agent  : None,
         }
     }
 
@@ -153,6 +159,11 @@ impl<'a> Builder<'a> {
         self
     }
 
+    pub fn with_messaging_repository(&mut self, path: &'a str) -> &mut Self {
+        self.repository_db = Some(path);
+        self
+    }
+
     pub fn with_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) -> &mut Self {
         self.connection_listeners = Some(listener);
         self
@@ -170,6 +181,11 @@ impl<'a> Builder<'a> {
 
     pub fn with_contact_listener(&mut self, listener: Box<dyn ContactListener>) -> &mut Self {
         self.contact_listeners = Some(listener);
+        self
+    }
+
+    pub(crate) fn with_user_agent(&mut self, agent: Rc<RefCell<dyn IUserAgent>>) -> &mut Self {
+        self.user_agent = Some(agent);
         self
     }
 
@@ -196,24 +212,69 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    async fn build_default_user_agent(&self) -> Result<UserAgent> {
-        UserAgent::new()    // TODO:
+    async fn build_default_user_agent(&mut self) -> Result<Rc<RefCell<dyn IUserAgent>>> {
+        let agent = Rc::new(RefCell::new(UserAgent::new().unwrap()));
+        let repo = match self.repository.take() {
+            Some(r) => r,
+            None => {
+                self.repository_db.as_ref().map(|db|
+                    println!("db path: {}", db)
+                );
+                if self.repository_db.is_none() {
+                    println!("db path is None");
+                }
+
+                let path = PathBuf::from(self.repository_db.as_ref().unwrap());
+                let db = Database::open(&path).map_err(|e| {
+                    error!("{e}");
+                    Error::State("Messaging repository is not configured".into())
+                })?;
+                Rc::new(RefCell::new(db))
+            }
+        };
+        self.repository = Some(repo);
+
+        if let Some(user) = self.user.as_ref() {
+            if agent.borrow().user().is_none() {
+                agent.borrow_mut().set_user(user, self.user_name.as_deref().unwrap());
+            } else {
+                warn!("Messaging repository is configured, user profile will be ignored.");
+            }
+        }
+
+        Ok(agent)
     }
 
-    async fn register_agent(&self, _: &UserAgent) -> Result<()> {
+    async fn register_agent(&self, _: Rc<RefCell<dyn IUserAgent>>) -> Result<()> {
         // unimplemented!()
         Ok(())
     }
 
-    pub async fn build(&self) -> Result<Client> {
+    async fn setup_user_agent(&mut self) -> Result<Rc<RefCell<dyn IUserAgent>>>  {
+        let Some(agent) = self.user_agent.take() else {
+            return Err(Error::State("User agent is not set up yet".into()));
+        };
+
+        if !agent.borrow().is_configured() {
+            return Err(Error::State("User agent is not configured yet".into()));
+        }
+
+        /* TODO: Listener */
+        return Ok(agent)
+    }
+
+    pub async fn build(&mut self) -> Result<Client> {
         self.eligible_check().await.map_err(|e| {
             error!("{e}");
             e
         })?;
 
-        let agent = self.build_default_user_agent().await?;
-        self.register_agent(&agent).await?;
+        let agent = match self.user_agent.is_some() {
+            true => self.setup_user_agent().await,
+            false => self.build_default_user_agent().await
+        }?;
 
+        self.register_agent(agent).await?;
         Client::new(self)
     }
 }
@@ -256,9 +317,6 @@ impl MessagingClient for Client {
 }
 
 impl Client {
-    //pub fn new(user: Id, device: Id) -> Self {
-    //    Self { user, device }
-    //}
     pub(crate) fn new(b: &Builder) -> Result<Self> {
         Ok(Self {
             userid: b.user.as_ref().unwrap().id().clone(),
@@ -267,12 +325,12 @@ impl Client {
     }
 
     pub fn start(&self) -> Result<()> {
-        println!("Started!");
+        println!("Messaging client Started!");
         Ok(())
     }
 
     pub fn stop(&self) {
-        println!("stopped");
+        println!("Messaging client stopped");
     }
 }
 

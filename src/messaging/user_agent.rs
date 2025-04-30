@@ -1,16 +1,17 @@
 use std::collections::LinkedList;
 use std::collections::HashMap;
-use std::path::Path;
 
 use crate::{
     Id,
-    error::Result,
     PeerInfo,
+    error::Result,
+    core::crypto_identity::CryptoIdentity,
 };
 
 use super::{
     conversation::Conversation,
     message::Message,
+
     user_profile::UserProfile,
     device_profile::DeviceProfile,
     connection_listener::ConnectionListener,
@@ -21,7 +22,10 @@ use super::{
 };
 
 #[allow(dead_code)]
-trait IUserAgent {
+pub(crate) trait IUserAgent {
+    fn user(&self) -> Option<&UserProfile>;
+    fn device(&self) -> Option<&DeviceProfile>;
+
     fn is_configured(&self) -> bool;
     fn list_conversations(&self) -> LinkedList<Conversation>;
     fn remove_conversation(&mut self, conversation_id: &Id);
@@ -73,9 +77,20 @@ impl UserAgent {
             conversations: HashMap::new(),
         })
     }
+
+    pub(crate) fn set_user(&mut self, _user: &CryptoIdentity, _name: &str) {
+        unimplemented!()
+    }
 }
 
 impl IUserAgent for UserAgent {
+    fn user(&self) -> Option<&UserProfile> {
+        None
+    }
+    fn device(&self) -> Option<&DeviceProfile> {
+        None
+    }
+
     fn is_configured(&self) -> bool {
         unimplemented!()
     }

@@ -30,6 +30,8 @@ pub mod user_agent;
 pub mod user_profile;
 pub mod device_profile;
 
+pub mod messaging_repository;
+
 pub mod client;
 
 #[cfg(test)]

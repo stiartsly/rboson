@@ -201,3 +201,47 @@ fn test_distance() {
     assert_eq!(distance(&id1_unwrap, &id2_unwrap).to_hexstr(), dist_str);
     assert_ne!(id1_unwrap, id2_unwrap);
 }
+
+#[test]
+fn test_ser_deser1() {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[allow(non_snake_case)]
+    struct TestId {
+        id: Id,
+        pad: String,
+    }
+
+    let se_data = TestId {
+        id: Id::random(),
+        pad: "pad".to_string(),
+    };
+    let json_data = serde_json::to_string(&se_data).unwrap();
+    println!("Serialized JSON: {}", json_data);
+    let de_data: TestId = serde_json::from_str(&json_data).unwrap();
+    assert_eq!(se_data, de_data);
+}
+
+#[test]
+fn test_ser_deser2() {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[allow(non_snake_case)]
+    struct TestId {
+        id: Option<Id>,
+    }
+
+    let se_data = TestId {
+        id: Some(Id::random())
+    };
+    let json_data = serde_json::to_string(&se_data).unwrap();
+    println!("Serialized JSON: {}", json_data);
+    let de_data: TestId = serde_json::from_str(&json_data).unwrap();
+    assert_eq!(se_data, de_data);
+
+    let se_data = TestId {
+        id: None,
+    };
+    let json_data = serde_json::to_string(&se_data).unwrap();
+    println!("Serialized JSON: {}", json_data);
+    let de_data: TestId = serde_json::from_str(&json_data).unwrap();
+    assert_eq!(se_data, de_data);
+}

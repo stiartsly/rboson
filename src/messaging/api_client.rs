@@ -16,7 +16,63 @@ use crate::core::{
     cryptobox::Nonce,
 };
 
-#[allow(dead_code)]
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct RefreshAccessTokenReqData {
+    userId  : Id,
+    deviceId: Id,
+    nonce   : Vec<u8>,
+    userSig : Vec<u8>,
+    deviceSig: Vec<u8>
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct RefreshAccessTokenRspData {
+    token   : Option<String>,
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct RegisterUserAndDeviceReqData {
+    userId  : Id,
+    userName: String,
+    passphrase  : String,
+    deviceId: Id,
+    deviceName  : String,
+    appName : String,
+    nonce   : Vec<u8>,
+    userSig : Vec<u8>,
+    deviceSig   : Vec<u8>,
+    profileSig  : Vec<u8>
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct RegisterUserAndDeviceRspData {
+    token   : Option<String>,
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct RegisterDeviceWithUserReqData {
+    userId: String,
+    passphrase: String,
+    deviceId: String,
+    deviceName: String,
+    appName: String,
+    nonce: Vec<u8>,
+    userSig: Vec<u8>,
+    deviceSig: Vec<u8>
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct RegisterDeviceWithUserRspData {
+    token   : Option<String>,
+}
+
+#[allow(unused)]
 pub(crate) struct APIClient {
     peerid      : Id,
     base_url    : Url,
@@ -31,7 +87,14 @@ pub(crate) struct APIClient {
     nonce       : RefCell<Nonce>,
 }
 
-#[allow(dead_code)]
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct ServiceIdsRspData {
+    peerId: Option<String>,
+    nodeId: Option<String>
+}
+
+#[allow(unused)]
 impl APIClient {
     pub fn new(peerid: &Id, base_url: &str) -> Self {
         Self {
@@ -82,30 +145,19 @@ impl APIClient {
     }
 
     pub(crate) async fn service_ids(&self) -> Result<Vec<String>> {
-        #[derive(Deserialize)]
-        #[allow(non_snake_case)]
-        struct ResponseData {
-            peerId: Option<String>,
-            nodeId: Option<String>
-        }
-
         let url = self.base_url.join("/api/v1/service/id").unwrap();
-        let rsp = self.client.get(url)
+        let result = self.client.get(url)
             .header("Accept", "application/json")
             .send()
-            .await
-            .map_err(|e| {
+            .await;
+
+        let rsp = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
-        })?;
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?;
 
-        let rsp = match rsp.error_for_status() {
-            Ok(_res) => {_res },
-            Err(e) => {
-                return Err(Error::State(format!("Http error: invalid http response {e}")));
-            }
-        };
-
-        let data = rsp.json::<ResponseData>().await.map_err(|e| {
+        let data = rsp.json::<ServiceIdsRspData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
@@ -133,56 +185,38 @@ impl APIClient {
         assert!(self.user.is_some());
         assert!(self.device.is_some());
 
-        #[derive(Serialize)]
-        #[allow(non_snake_case)]
-        struct RequestData {
-            userId  : String,
-            deviceId: String,
-            nonce   : String,
-            userSig : Vec<u8>,
-            deviceSig: Vec<u8>
-        }
-
-        #[derive(Deserialize)]
-        #[allow(non_snake_case)]
-        struct ResponseData {
-            token   : Option<String>,
-        }
-
         let nonce = self.nonce();
         let user = unwrap!(self.user);
         let device = unwrap!(self.device);
-        let data = RequestData {
-            userId  : user.id().to_string(),
-            deviceId: device.id().to_string(),
-            nonce   : nonce.borrow().to_string(),
+
+        let data = RefreshAccessTokenReqData {
+            userId  : user.id().clone(),
+            deviceId: device.id().clone(),
+            nonce   : nonce.borrow().as_bytes().to_vec(),
             userSig : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
             deviceSig: device.sign_into(nonce.borrow().as_bytes()).unwrap()
         };
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
-        let rsp = self.client.post(url)
+        let result = self.client.post(url)
             .json(&data)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .send()
-            .await
-            .map_err(|e| {
+            .await;
+
+        let rsp = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
-        })?;
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?;
 
-        let rsp = match rsp.error_for_status() {
-            Ok(_res) => {_res },
-            Err(e) => {
-                return Err(Error::State(format!("Http error: invalid http response {e}")));
-            }
-        };
-
-        let data = rsp.json::<ResponseData>().await.map_err(|e| {
+        let rsp = rsp.json::<RefreshAccessTokenRspData>().await;
+        let rspdata = rsp.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(token) = data.token else {
+        let Some(token) = rspdata.token else {
             return Err(Error::State("Http error: missing access token in the response body".into()));
         };
 
@@ -196,37 +230,17 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-        #[derive(Serialize)]
-        #[allow(non_snake_case)]
-        struct RequestData {
-            userId: String,
-            userName: String,
-            passphrase: String,
-            deviceId: String,
-            deviceName: String,
-            appName: String,
-            nonce: Vec<u8>,
-            userSig: Vec<u8>,
-            deviceSig: Vec<u8>,
-            profileSig: Vec<u8>
-        }
-
-        #[derive(Deserialize)]
-        #[allow(non_snake_case)]
-        struct ResponseData {
-            token   : Option<String>,
-        }
 
         let nonce = self.nonce();
         let user = unwrap!(self.user);
         let device = unwrap!(self.device);
         // byte[] profileDigest = Profile.digest(user.getId(), homePeerId, userName, false, null);
         let profile_digest = vec![0u8; 0]; // TODO:
-        let data = RequestData {
-            userId: user.id().to_string(),
+        let data = RegisterUserAndDeviceReqData {
+            userId: user.id().clone(),
             userName: user_name.to_string(),
             passphrase: passphrase.to_string(),
-            deviceId: device.id().to_string(),
+            deviceId: device.id().clone(),
             deviceName: device_name.to_string(),
             appName:  app_name.to_string(),
             nonce: nonce.borrow().as_bytes().to_vec(),
@@ -236,28 +250,25 @@ impl APIClient {
         };
 
         let url = self.base_url.join("/api/v1/users").unwrap();
-        let rsp = self.client.post(url)
+        let result = self.client.post(url)
             .json(&data)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .send()
-            .await
-            .map_err(|e| {
+            .await;
+
+        let rsp = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
-        })?;
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?;
 
-        let rsp = match rsp.error_for_status() {
-            Ok(_res) => {_res },
-            Err(e) => {
-                return Err(Error::State(format!("Http error: invalid http response {e}")));
-            }
-        };
-
-        let data = rsp.json::<ResponseData>().await.map_err(|e| {
+        let rsp = rsp.json::<RegisterUserAndDeviceRspData>().await;
+        let rspdata = rsp.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(token) = data.token else {
+        let Some(token) = rspdata.token else {
             return Err(Error::State("Http error: missing access token in the response body".into()));
         };
 
@@ -270,29 +281,11 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-        #[derive(Serialize)]
-        #[allow(non_snake_case)]
-        struct RequestData {
-            userId: String,
-            passphrase: String,
-            deviceId: String,
-            deviceName: String,
-            appName: String,
-            nonce: Vec<u8>,
-            userSig: Vec<u8>,
-            deviceSig: Vec<u8>
-        }
-
-        #[derive(Deserialize)]
-        #[allow(non_snake_case)]
-        struct ResponseData {
-            token   : Option<String>,
-        }
 
         let nonce = self.nonce();
         let user = unwrap!(self.user);
         let device = unwrap!(self.device);
-        let data = RequestData {
+        let data = RegisterDeviceWithUserReqData {
             userId: user.id().to_string(),
             passphrase: passphrase.to_string(),
             deviceId: device.id().to_string(),
@@ -304,28 +297,25 @@ impl APIClient {
         };
 
         let url = self.base_url.join("/api/v1/devices").unwrap();
-        let rsp = self.client.post(url)
+        let result = self.client.post(url)
             .json(&data)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .send()
-            .await
-            .map_err(|e| {
+            .await;
+
+        let rsp = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
-        })?;
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?;
 
-        let rsp = match rsp.error_for_status() {
-            Ok(_res) => {_res },
-            Err(e) => {
-                return Err(Error::State(format!("Http error: invalid http response {e}")));
-            }
-        };
-
-        let data = rsp.json::<ResponseData>().await.map_err(|e| {
+        let rsp = rsp.json::<RegisterDeviceWithUserRspData>().await;
+        let rspdata = rsp.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(token) = data.token else {
+        let Some(token) = rspdata.token else {
             return Err(Error::State("Http error: missing access token in the response body".into()));
         };
 

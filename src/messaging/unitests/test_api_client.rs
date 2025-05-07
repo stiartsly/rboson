@@ -5,6 +5,11 @@ use crate::{
     cryptobox::Nonce,
     signature
 };
+
+use crate::messaging::{
+    api_client::APIClient
+};
+
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -37,7 +42,6 @@ async fn test_refresh_access_token_data() {
     };
 
     let serialized = serde_json::to_string(&data).unwrap();
-    println!("Serialized JSON: {}", serialized);
     let deserialized: RefreshAccessTokenReqData = serde_json::from_str(&serialized).unwrap();
     assert_eq!(data.userId, deserialized.userId);
     assert_eq!(data.deviceId, deserialized.deviceId);
@@ -51,7 +55,6 @@ async fn test_refresh_access_token_data() {
     };
 
     let serialized = serde_json::to_string(&data).unwrap();
-    println!("Serialized JSON: {}", serialized);
     let deserialized: GetAccessTokenRspData = serde_json::from_str(&serialized).unwrap();
     assert!(data.token.is_some());
     assert!(deserialized.token.is_some());
@@ -94,7 +97,6 @@ async fn test_register_user_and_device_data() {
     };
 
     let serialized = serde_json::to_string(&data).unwrap();
-    println!("Serialized JSON: {}", serialized);
     let deserialized: RegisterUserAndDeviceReqData = serde_json::from_str(&serialized).unwrap();
     assert_eq!(data.userId, deserialized.userId);
     assert_eq!(data.userName, deserialized.userName);
@@ -138,7 +140,6 @@ async fn test_register_device_with_user_data() {
     };
 
     let serialized = serde_json::to_string(&data).unwrap();
-    println!("Serialized JSON: {}", serialized);
     let deserialized: RegisterDeviceWithUserReqData = serde_json::from_str(&serialized).unwrap();
     assert_eq!(data.userId, deserialized.userId);
     assert_eq!(data.passphrase, deserialized.passphrase);
@@ -165,9 +166,27 @@ async fn test_service_ids_data() {
     };
 
     let serialized = serde_json::to_string(&data).unwrap();
-    println!("Serialized JSON: {}", serialized);
     let deserialized: ServiceIdsRspData = serde_json::from_str(&serialized).unwrap();
     assert_eq!(data.peerId, deserialized.peerId);
     assert_eq!(data.nodeId, deserialized.nodeId);
     assert_eq!(data, deserialized);
+}
+
+#[tokio::test]
+async fn test_service_ids() {
+    use crate::signature;
+    let peerid:Id = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ".try_into().unwrap();
+    let nodeid:Id = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ".try_into().unwrap();
+    let mut client = APIClient::new(&peerid, "http://155.138.245.211:8882");
+
+    let user = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    client.with_user_identity(&user);
+    client.with_device_identity(&device);
+
+    let result = client.service_ids().await;
+    assert!(result.is_ok());
+    let result = result.unwrap();
+    assert_eq!(result.0, peerid);
+    assert_eq!(result.1, nodeid);
 }

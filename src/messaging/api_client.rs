@@ -16,11 +16,11 @@ use crate::core::{
     cryptobox::Nonce,
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[allow(non_snake_case)]
 struct RefreshAccessTokenReqData {
-    userId  : Id,
-    deviceId: Id,
+    userId  : String,
+    deviceId: String,
     nonce   : Vec<u8>,
     userSig : Vec<u8>,
     deviceSig: Vec<u8>
@@ -63,8 +63,8 @@ struct RegisterDeviceWithUserReqData {
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct ServiceIdsRspData {
-    peerId: Option<Id>,
-    nodeId: Option<Id>
+    peerId: Option<String>,
+    nodeId: Option<String>
 }
 
 #[allow(unused)]
@@ -84,7 +84,7 @@ pub(crate) struct APIClient {
 
 #[allow(unused)]
 impl APIClient {
-    pub fn new(peerid: &Id, base_url: &str) -> Self {
+    pub(crate) fn new(peerid: &Id, base_url: &str) -> Self {
         Self {
             peerid  : peerid.clone(),
             base_url: Url::parse(base_url).unwrap(),
@@ -132,7 +132,7 @@ impl APIClient {
         self.access_token.as_ref().map(|v|v.as_str())
     }
 
-    pub(crate) async fn service_ids(&self) -> Result<Vec<Id>> {
+    pub(crate) async fn service_ids(&self) -> Result<(Id, Id)> {
         let url = self.base_url.join("/api/v1/service/id").unwrap();
         let result = self.client.get(url)
             .header("Accept", "application/json")
@@ -149,19 +149,21 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(peerid) = data.peerId.as_ref() else {
+        let Some(peerid) = data.peerId else {
             return Err(Error::State("Http error: missing peer id".into()));
         };
-
-        let Some(nodeid) = data.nodeId.as_ref() else {
-            return Err(Error::State("Http error: missing nodeid id".into()));
+        let Ok(peerid) = Id::try_from(peerid.as_str()) else {
+            return Err(Error::State("Http error: invalid peer id".into()));
         };
 
-        let mut result = Vec::new();
-        result.push(peerid.clone());
-        result.push(nodeid.clone());
+        let Some(nodeid) = data.nodeId else {
+            return Err(Error::State("Http error: missing nodeid id".into()));
+        };
+        let Ok(nodeid) = Id::try_from(nodeid.as_str()) else {
+            return Err(Error::State("Http error: invalid node id".into()));
+        };
 
-        Ok(result)
+        Ok((peerid, nodeid))
     }
 
     fn nonce(&self) -> &RefCell<Nonce> {
@@ -178,14 +180,16 @@ impl APIClient {
         let device = unwrap!(self.device);
 
         let data = RefreshAccessTokenReqData {
-            userId  : user.id().clone(),
-            deviceId: device.id().clone(),
+            userId  : user.id().to_string(),
+            deviceId: device.id().to_string(),
             nonce   : nonce.borrow().as_bytes().to_vec(),
             userSig : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
             deviceSig: device.sign_into(nonce.borrow().as_bytes()).unwrap()
         };
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
+        println!("url: {}", url);
+        println!("data: {:?}", data);
         let result = self.client.post(url)
             .json(&data)
             .header("Accept", "application/json")
@@ -313,4 +317,19 @@ impl APIClient {
 
         Ok(token)
     }
+}
+
+#[tokio::test]
+async fn test_refresh_access_token() {
+    use crate::signature;
+    let peerid:Id = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ".try_into().unwrap();
+    let mut client = APIClient::new(&peerid, "http://155.138.245.211:8882");
+
+    let user = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    client.with_user_identity(&user);
+    client.with_device_identity(&device);
+
+    let result = client.refresh_access_token().await;
+    println!("result: {:?}", result);
 }

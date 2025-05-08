@@ -6,8 +6,9 @@ use bs58::decode;
 use hex::FromHexError;
 use ciborium::value::Value;
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 use serde_with::serde_as;
+use bs58;
 
 use crate::{
     randomize_bytes,
@@ -26,7 +27,7 @@ pub const MAX_ID: Id = Id::max();
 #[serde_as]
 #[derive(Default, Serialize, Deserialize, Clone, PartialOrd, PartialEq, Ord, Eq, Debug, Hash)]
 pub struct Id(
-    #[serde_as(as = "serde_with::Bytes")] // Serialize as bytes
+    #[serde(with = "base58_as_string")]
     [u8; ID_BYTES]
 );
 
@@ -250,4 +251,37 @@ impl fmt::Display for Id {
 
 pub fn distance(a: &Id, b: &Id) -> Id {
     a.distance(b)
+}
+
+mod base58_as_string {
+    use super::*;
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = bs58::encode(bytes).into_string();
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> result::Result<[u8; ID_BYTES], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let vec = bs58::decode(&s)
+            .into_vec()
+            .map_err(serde::de::Error::custom)?;
+
+        if vec.len() != ID_BYTES {
+            return Err(serde::de::Error::custom(format!(
+                "Invalid length: expected {}, got {}",
+                ID_BYTES,
+                vec.len()
+            )));
+        }
+        let mut arr = [0u8; ID_BYTES];
+        arr.copy_from_slice(&vec);
+        Ok(arr)
+    }
 }

@@ -216,7 +216,6 @@ fn test_ser_deser1() {
         pad: "pad".to_string(),
     };
     let json_data = serde_json::to_string(&se_data).unwrap();
-    println!("Serialized JSON: {}", json_data);
     let de_data: TestId = serde_json::from_str(&json_data).unwrap();
     assert_eq!(se_data, de_data);
 }
@@ -233,7 +232,6 @@ fn test_ser_deser2() {
         id: Some(Id::random())
     };
     let json_data = serde_json::to_string(&se_data).unwrap();
-    println!("Serialized JSON: {}", json_data);
     let de_data: TestId = serde_json::from_str(&json_data).unwrap();
     assert_eq!(se_data, de_data);
 
@@ -241,7 +239,6 @@ fn test_ser_deser2() {
         id: None,
     };
     let json_data = serde_json::to_string(&se_data).unwrap();
-    println!("Serialized JSON: {}", json_data);
     let de_data: TestId = serde_json::from_str(&json_data).unwrap();
     assert_eq!(se_data, de_data);
 }

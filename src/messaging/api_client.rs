@@ -16,13 +16,18 @@ use crate::core::{
     cryptobox::Nonce,
 };
 
+use super::profile;
+
 #[derive(Serialize, Debug)]
 #[allow(non_snake_case)]
 struct RefreshAccessTokenReqData {
-    userId  : String,
-    deviceId: String,
+    userId  : Id,
+    deviceId: Id,
+    #[serde(with = "base64_as_string")]
     nonce   : Vec<u8>,
+    #[serde(with = "base64_as_string")]
     userSig : Vec<u8>,
+    #[serde(with = "base64_as_string")]
     deviceSig: Vec<u8>
 }
 
@@ -41,9 +46,13 @@ struct RegisterUserAndDeviceReqData {
     deviceId: Id,
     deviceName  : String,
     appName : String,
+    #[serde(with = "base64_as_string")]
     nonce   : Vec<u8>,
+    #[serde(with = "base64_as_string")]
     userSig : Vec<u8>,
+    #[serde(with = "base64_as_string")]
     deviceSig   : Vec<u8>,
+    #[serde(with = "base64_as_string")]
     profileSig  : Vec<u8>
 }
 
@@ -69,7 +78,7 @@ struct ServiceIdsRspData {
 
 #[allow(unused)]
 pub(crate) struct APIClient {
-    peerid      : Id,
+    home_peerid : Id,
     base_url    : Url,
     client      : Client,
 
@@ -84,10 +93,18 @@ pub(crate) struct APIClient {
 
 #[allow(unused)]
 impl APIClient {
-    pub(crate) fn new(peerid: &Id, base_url: &str) -> Self {
-        Self {
-            peerid  : peerid.clone(),
-            base_url: Url::parse(base_url).unwrap(),
+    pub(crate) fn new(peerid: &Id, base_url: &str) -> Result<Self> {
+        let url = Url::parse(base_url).map_err(|e| {
+            Error::Argument(format!("Invalid base url: {e}"))
+        })?;
+
+        if url.scheme() != "http" && url.scheme() != "https" {
+            return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
+        }
+
+        Ok(Self {
+            home_peerid : peerid.clone(),
+            base_url: url,
             client  : Client::builder().build().unwrap(),
 
             user    : None,
@@ -97,7 +114,7 @@ impl APIClient {
             access_token_refresh_handler: None,
 
             nonce   : RefCell::new(Nonce::random())
-        }
+        })
     }
 
     pub(crate) fn with_user_identity(&mut self, user: &CryptoIdentity) -> &Self {
@@ -105,12 +122,12 @@ impl APIClient {
         self
     }
 
-    pub(crate) fn with_device_identity(&mut self, _device: &CryptoIdentity) -> &Self {
-        self.device = Some(_device.clone());
+    pub(crate) fn with_device_identity(&mut self, device: &CryptoIdentity) -> &Self {
+        self.device = Some(device.clone());
         self
     }
 
-    pub(crate) fn with_access_token(&mut self, access_token: &str) -> &Self {
+    fn with_access_token(&mut self, access_token: &str) -> &Self {
         self.access_token = Some(access_token.to_string());
         self
     }
@@ -139,27 +156,25 @@ impl APIClient {
             .send()
             .await;
 
-        let rsp = result.map_err(|e| {
+        let data = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?;
-
-        let data = rsp.json::<ServiceIdsRspData>().await.map_err(|e| {
+        )?.json::<ServiceIdsRspData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(peerid) = data.peerId else {
+        let Some(peerid_str) = data.peerId else {
             return Err(Error::State("Http error: missing peer id".into()));
         };
-        let Ok(peerid) = Id::try_from(peerid.as_str()) else {
-            return Err(Error::State("Http error: invalid peer id".into()));
-        };
-
-        let Some(nodeid) = data.nodeId else {
+        let Some(nodeid_str) = data.nodeId else {
             return Err(Error::State("Http error: missing nodeid id".into()));
         };
-        let Ok(nodeid) = Id::try_from(nodeid.as_str()) else {
+
+        let Ok(peerid) = Id::try_from(peerid_str.as_str()) else {
+            return Err(Error::State("Http error: invalid peer id".into()));
+        };
+        let Ok(nodeid) = Id::try_from(nodeid_str.as_str()) else {
             return Err(Error::State("Http error: invalid node id".into()));
         };
 
@@ -180,35 +195,30 @@ impl APIClient {
         let device = unwrap!(self.device);
 
         let data = RefreshAccessTokenReqData {
-            userId  : user.id().to_string(),
-            deviceId: device.id().to_string(),
+            userId  : user.id().clone(),
+            deviceId: device.id().clone(),
             nonce   : nonce.borrow().as_bytes().to_vec(),
             userSig : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
             deviceSig: device.sign_into(nonce.borrow().as_bytes()).unwrap()
         };
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
-        println!("url: {}", url);
-        println!("data: {:?}", data);
         let result = self.client.post(url)
             .json(&data)
-            .header("Accept", "application/json")
             .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
             .send()
             .await;
 
-        let rsp = result.map_err(|e| {
+        let data = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?;
-
-        let rsp = rsp.json::<GetAccessTokenRspData>().await;
-        let rspdata = rsp.map_err(|e| {
+        )?.json::<GetAccessTokenRspData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(token) = rspdata.token else {
+        let Some(token) = data.token else {
             return Err(Error::State("Http error: missing access token in the response body".into()));
         };
 
@@ -222,12 +232,11 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-
         let nonce = self.nonce();
         let user = unwrap!(self.user);
         let device = unwrap!(self.device);
-        // byte[] profileDigest = Profile.digest(user.getId(), homePeerId, userName, false, null);
-        let profile_digest = vec![0u8; 0]; // TODO:
+
+        let profile_digest = profile::digest(user.id(), &self.home_peerid, Some(user_name), false, None);
         let data = RegisterUserAndDeviceReqData {
             userId: user.id().clone(),
             userName: user_name.to_string(),
@@ -243,24 +252,21 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/users").unwrap();
         let result = self.client.post(url)
-            .json(&data)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
+            .json(&data)
             .send()
             .await;
 
-        let rsp = result.map_err(|e| {
+        let data = result.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?;
-
-        let rsp = rsp.json::<GetAccessTokenRspData>().await;
-        let rspdata = rsp.map_err(|e| {
+        )?.json::<GetAccessTokenRspData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let Some(token) = rspdata.token else {
+        let Some(token) = data.token else {
             return Err(Error::State("Http error: missing access token in the response body".into()));
         };
 
@@ -319,17 +325,27 @@ impl APIClient {
     }
 }
 
-#[tokio::test]
-async fn test_refresh_access_token() {
-    use crate::signature;
-    let peerid:Id = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ".try_into().unwrap();
-    let mut client = APIClient::new(&peerid, "http://155.138.245.211:8882");
+#[allow(unused)]
+mod base64_as_string {
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use base64::{engine::general_purpose, Engine as _};
 
-    let user = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    let device = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    client.with_user_identity(&user);
-    client.with_device_identity(&device);
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        serializer.serialize_str(&encoded)
+    }
 
-    let result = client.refresh_access_token().await;
-    println!("result: {:?}", result);
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        general_purpose::URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(D::Error::custom)
+    }
 }

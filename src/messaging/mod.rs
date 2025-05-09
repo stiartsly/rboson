@@ -33,6 +33,7 @@ pub mod device_profile;
 pub mod messaging_repository;
 
 pub mod client;
+pub(crate) mod profile;
 
 #[cfg(test)]
 mod unitests;

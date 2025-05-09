@@ -280,7 +280,6 @@ impl PeerInfo {
         data
     }
 
-    #[allow(dead_code)]
     pub(crate) fn to_cbor(&self) -> Value {
         Value::Map(vec![
             (

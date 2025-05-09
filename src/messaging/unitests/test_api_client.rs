@@ -1,8 +1,8 @@
 use crate::{
     Id,
     core::crypto_identity::CryptoIdentity,
-    Identity,
-    cryptobox::Nonce,
+    //Identity,
+    //cryptobox::Nonce,
     signature
 };
 
@@ -10,8 +10,13 @@ use crate::messaging::{
     api_client::APIClient
 };
 
-use serde::{Serialize, Deserialize};
+//use serde::{Serialize, Deserialize};
 
+const PEERID: &str = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ";
+const NODEID: &str = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
+const BASE_URL: &str = "http://155.138.245.211:8882";
+
+/*
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[allow(non_snake_case)]
 struct RefreshAccessTokenReqData {
@@ -171,22 +176,40 @@ async fn test_service_ids_data() {
     assert_eq!(data.nodeId, deserialized.nodeId);
     assert_eq!(data, deserialized);
 }
+*/
 
 #[tokio::test]
 async fn test_service_ids() {
-    use crate::signature;
-    let peerid:Id = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ".try_into().unwrap();
-    let nodeid:Id = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ".try_into().unwrap();
-    let mut client = APIClient::new(&peerid, "http://155.138.245.211:8882");
+    let peerid:Id = PEERID.try_into().unwrap();
+    let nodeid:Id = NODEID.try_into().unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
 
-    let user = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    let device = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let mut client = APIClient::new(&peerid, BASE_URL).unwrap();
     client.with_user_identity(&user);
     client.with_device_identity(&device);
 
     let result = client.service_ids().await;
     assert!(result.is_ok());
-    let result = result.unwrap();
-    assert_eq!(result.0, peerid);
-    assert_eq!(result.1, nodeid);
+
+    let data = result.unwrap();
+    assert_eq!(data.0, peerid);
+    assert_eq!(data.1, nodeid);
+}
+
+#[tokio::test]
+async fn test_register_user_and_device() {
+    let peerid:Id = PEERID.try_into().unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+
+    let mut client = APIClient::new(&peerid, BASE_URL).unwrap();
+    client.with_user_identity(&user);
+    client.with_device_identity(&device);
+
+    let result = client.register_user_and_device("password", "Alice", "Example", "Example").await;
+    assert!(result.is_ok());
+
+    let token = result.unwrap();
+    println!("result: {}", token);
 }

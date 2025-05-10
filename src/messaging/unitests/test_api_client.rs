@@ -5,7 +5,7 @@ use crate::{
 };
 
 use crate::messaging::{
-    api_client::APIClient
+    api_client::{Builder},
 };
 
 const PEERID: &str = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ";
@@ -19,9 +19,13 @@ async fn test_service_ids() {
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
 
-    let mut client = APIClient::new(&peerid, BASE_URL).unwrap();
-    client.with_user_identity(&user);
-    client.with_device_identity(&device);
+    let client = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device)
+        .build()
+        .unwrap();
 
     let result = client.service_ids().await;
     assert!(result.is_ok());
@@ -37,29 +41,45 @@ async fn test_register_user_and_device() {
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
 
-    let mut client = APIClient::new(&peerid, BASE_URL).unwrap();
-    client.with_user_identity(&user);
-    client.with_device_identity(&device);
+    let mut client = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device)
+        .build()
+        .unwrap();
 
     let result = client.register_user_and_device("password", "Alice", "Example", "Example").await;
     assert!(result.is_ok());
 }
 
-#[ignore]
 #[tokio::test]
 async fn test_register_device_with_user() {
     let peerid:Id = PEERID.try_into().unwrap();
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device1 = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device2 = CryptoIdentity::from_keypair(signature::KeyPair::random());
 
-    let mut client = APIClient::new(&peerid, BASE_URL).unwrap();
-    client.with_user_identity(&user);
-    client.with_device_identity(&device);
+    let mut client1 = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device1)
+        .build()
+        .unwrap();
 
-    let result = client.register_user_and_device("password", "Alice", "Example", "Example").await;
+    let result = client1.register_user_and_device("password", "Alice", "Example", "Example").await;
     assert!(result.is_ok());
 
-    let result = client.register_device_with_user("password", "Alice", "Example").await;
+    let mut client2 = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device2)
+        .build()
+        .unwrap();
+
+    let result = client2.register_device_with_user("password", "Alice", "Example").await;
     println!("Result: {:?}", result);
     assert!(result.is_ok());
 }

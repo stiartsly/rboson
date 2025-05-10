@@ -4,11 +4,10 @@ use url::Url;
 use serde::{Serialize, Deserialize};
 
 use crate::{
-    unwrap,
-    Identity,
     Id,
     Error,
     error::Result,
+    Identity,
 };
 
 use crate::core::{
@@ -18,7 +17,7 @@ use crate::core::{
 
 use super::profile;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 #[allow(non_snake_case)]
 struct RefreshAccessTokenReqData {
     userId  : Id,
@@ -79,16 +78,61 @@ struct ServiceIdsData {
     nodeId: Option<String>
 }
 
-#[allow(unused)]
+pub(crate) struct Builder<'a> {
+    home_peerid : Option<&'a Id>,
+    base_url    : Option<&'a str>,
+    user        : Option<&'a CryptoIdentity>,
+    device      : Option<&'a CryptoIdentity>,
+}
+
+impl<'a> Builder<'a> {
+    pub(crate) fn new() -> Self {
+        Self {
+            home_peerid : None,
+            base_url    : None,
+            user    : None,
+            device  : None,
+        }
+    }
+
+    pub(crate) fn with_home_peerid(mut self, peerid: &'a Id) -> Self {
+        self.home_peerid = Some(peerid);
+        self
+    }
+
+    pub(crate) fn with_base_url(mut self, base_url: &'a str) -> Self {
+        self.base_url = Some(base_url);
+        self
+    }
+
+    pub(crate) fn with_user_identity(mut self, user: &'a CryptoIdentity) -> Self {
+        self.user = Some(user);
+        self
+    }
+
+    pub(crate) fn with_device_identity(mut self, device: &'a CryptoIdentity) -> Self {
+        self.device = Some(device);
+        self
+    }
+
+    pub(crate) fn build(self) -> Result<APIClient> {
+        assert!(self.home_peerid.is_some());
+        assert!(self.base_url.is_some());
+        assert!(self.user.is_some());
+        assert!(self.device.is_some());
+
+        APIClient::new(self)
+    }
+}
+
 pub(crate) struct APIClient {
-    home_peerid : Id,
-    base_url    : Url,
     client      : Client,
+    peerid      : Id,
+    base_url    : Url,
+    user        : CryptoIdentity,
+    device      : CryptoIdentity,
 
-    user        : Option<CryptoIdentity>,
-    device      : Option<CryptoIdentity>,
     access_token: Option<String>,
-
     access_token_refresh_handler: Option<Box<dyn Fn(&str)>>,
 
     nonce       : RefCell<Nonce>,
@@ -96,8 +140,8 @@ pub(crate) struct APIClient {
 
 #[allow(unused)]
 impl APIClient {
-    pub(crate) fn new(peerid: &Id, base_url: &str) -> Result<Self> {
-        let url = Url::parse(base_url).map_err(|e| {
+    pub(crate) fn new(b: Builder) -> Result<Self> {
+        let url = Url::parse(b.base_url.as_ref().unwrap()).map_err(|e| {
             Error::Argument(format!("Invalid base url: {e}"))
         })?;
 
@@ -105,29 +149,19 @@ impl APIClient {
             return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
         }
 
+
         Ok(Self {
-            home_peerid : peerid.clone(),
-            base_url: url,
             client  : Client::builder().build().unwrap(),
+            peerid  : b.home_peerid.unwrap().clone(),
+            base_url: url,
+            user    : b.user.unwrap().clone(),
+            device  : b.device.unwrap().clone(),
 
-            user    : None,
-            device  : None,
             access_token: None,
-
             access_token_refresh_handler: None,
 
             nonce   : RefCell::new(Nonce::random())
         })
-    }
-
-    pub(crate) fn with_user_identity(&mut self, user: &CryptoIdentity) -> &Self {
-        self.user = Some(user.clone());
-        self
-    }
-
-    pub(crate) fn with_device_identity(&mut self, device: &CryptoIdentity) -> &Self {
-        self.device = Some(device.clone());
-        self
     }
 
     fn with_access_token(&mut self, access_token: &str) -> &Self {
@@ -140,13 +174,13 @@ impl APIClient {
         self
     }
 
-    /*pub(crate) fn user(&self) -> Option<&CryptoIdentity> {
-        self.user.as_ref()
+    pub(crate) fn user(&self) -> &CryptoIdentity {
+        &self.user
     }
 
-    pub(crate) fn device(&self) -> Option<&CryptoIdentity> {
-        self.device.as_ref()
-    }*/
+    pub(crate) fn device(&self) -> &CryptoIdentity {
+        &self.device
+    }
 
     pub(crate) fn access_token(&self) -> Option<&str> {
         self.access_token.as_ref().map(|v|v.as_str())
@@ -190,26 +224,21 @@ impl APIClient {
     }
 
     async fn refresh_access_token(&mut self) -> Result<()> {
-        assert!(self.user.is_some());
-        assert!(self.device.is_some());
-
         let nonce = self.nonce();
-        let user = unwrap!(self.user);
-        let device = unwrap!(self.device);
 
         let data = RefreshAccessTokenReqData {
-            userId      : user.id().clone(),
-            deviceId    : device.id().clone(),
+            userId      : self.user.id().clone(),
+            deviceId    : self.device.id().clone(),
             nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : device.sign_into(nonce.borrow().as_bytes()).unwrap()
+            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
+            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap()
         };
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
         let result = self.client.post(url)
-            .json(&data)
-            .header("Content-Type", "application/json")
             .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&data)
             .send()
             .await;
 
@@ -232,21 +261,18 @@ impl APIClient {
         app_name: &str
     ) -> Result<()> {
         let nonce = self.nonce();
-        let user = unwrap!(self.user);
-        let device = unwrap!(self.device);
-
-        let profile_digest = profile::digest(user.id(), &self.home_peerid, Some(user_name), false, None);
+        let profile_digest = profile::digest(self.user.id(), &self.peerid, Some(user_name), false, None);
         let data = RegisterUserData {
-            userId      : user.id().clone(),
+            userId      : self.user.id().clone(),
             userName    : user_name.to_string(),
             passphrase  : passphrase.to_string(),
-            deviceId    : device.id().clone(),
+            deviceId    : self.device.id().clone(),
             deviceName  : device_name.to_string(),
             appName     : app_name.to_string(),
             nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : device.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            profileSig  : user.sign_into(&profile_digest).unwrap(),
+            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
+            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+            profileSig  : self.user.sign_into(&profile_digest).unwrap(),
         };
 
         let url = self.base_url.join("/api/v1/users").unwrap();
@@ -274,19 +300,16 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-
         let nonce = self.nonce();
-        let user = unwrap!(self.user);
-        let device = unwrap!(self.device);
         let data = RegisterDeviceData {
-            userId      : user.id().clone(),
+            userId      : self.user.id().clone(),
             passphrase  : passphrase.to_string(),
-            deviceId    : device.id().clone(),
+            deviceId    : self.device.id().clone(),
             deviceName  : device_name.to_string(),
-            appName     :  app_name.to_string(),
+            appName     : app_name.to_string(),
             nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
+            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
         };
 
         let url = self.base_url.join("/api/v1/devices").unwrap();

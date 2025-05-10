@@ -25,6 +25,7 @@ use super::{
     channel_listener::ChannelListener,
     contact_listener::ContactListener,
     messaging_client::MessagingClient,
+    api_client::Builder as APIClientBuilder,
 
     user_agent::{IUserAgent, UserAgent},
     persistence::database::Database,
@@ -246,7 +247,26 @@ impl<'a> Builder<'a> {
     }
 
     async fn register_agent(&self, _: Rc<RefCell<dyn IUserAgent>>) -> Result<()> {
-        // unimplemented!()
+        let mut api_client = APIClientBuilder::new()
+            .with_base_url(self.api_url.as_ref().unwrap().as_str())
+            .with_home_peerid(self.peerid.as_ref().unwrap())
+            .with_user_identity(self.user.as_ref().unwrap())
+            .with_device_identity(self.device.as_ref().unwrap())
+            .build()
+            .unwrap();
+
+        let user = self.user_agent.as_ref().unwrap().borrow().user();
+        let device = self.user_agent.as_ref().unwrap().borrow().device();
+
+        if self.register_user_and_device {
+            api_client.register_user_and_device(
+                self.passphrase.as_ref().unwrap(),
+                self.user_name.as_ref().unwrap(),
+                self.device_name.as_ref().unwrap(),
+                self.app_name.as_ref().unwrap(),
+            ).await?;
+        }
+
         Ok(())
     }
 

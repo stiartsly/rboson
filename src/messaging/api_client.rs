@@ -20,35 +20,42 @@ use super::profile;
 #[derive(Serialize)]
 #[allow(non_snake_case)]
 struct RefreshAccessTokenReqData {
-    userId  : Id,
-    deviceId: Id,
+    userId      : Id,
+    deviceId    : Id,
     #[serde(with = "base64_as_string")]
-    nonce   : Vec<u8>,
+    nonce       : Vec<u8>,
     #[serde(with = "base64_as_string")]
-    userSig : Vec<u8>,
+    userSig     : Vec<u8>,
     #[serde(with = "base64_as_string")]
-    deviceSig: Vec<u8>
+    deviceSig   : Vec<u8>
+}
+
+#[derive(Deserialize)]
+#[allow(non_snake_case)]
+struct ServiceIdsData {
+    peerId: Option<String>,
+    nodeId: Option<String>
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct AccessTokenData {
-    token   : Option<String>,
+    token       : Option<String>,
 }
 
 #[derive(Serialize)]
 #[allow(non_snake_case)]
-struct RegisterUserData {
-    userId  : Id,
-    userName: String,
+struct UserData {
+    userId      : Id,
+    userName    : String,
     passphrase  : String,
-    deviceId: Id,
+    deviceId    : Id,
     deviceName  : String,
-    appName : String,
+    appName     : String,
     #[serde(with = "base64_as_string")]
-    nonce   : Vec<u8>,
+    nonce       : Vec<u8>,
     #[serde(with = "base64_as_string")]
-    userSig : Vec<u8>,
+    userSig     : Vec<u8>,
     #[serde(with = "base64_as_string")]
     deviceSig   : Vec<u8>,
     #[serde(with = "base64_as_string")]
@@ -57,25 +64,46 @@ struct RegisterUserData {
 
 #[derive(Serialize)]
 #[allow(non_snake_case)]
-struct RegisterDeviceData {
-    userId: Id,
-    passphrase: String,
-    deviceId: Id,
-    deviceName: String,
-    appName: String,
+struct DeviceData {
+    userId      : Id,
+    passphrase  : String,
+    deviceId    : Id,
+    deviceName  : String,
+    appName     : String,
     #[serde(with = "base64_as_string")]
-    nonce: Vec<u8>,
+    nonce       : Vec<u8>,
     #[serde(with = "base64_as_string")]
-    userSig: Vec<u8>,
+    userSig     : Vec<u8>,
     #[serde(with = "base64_as_string")]
-    deviceSig: Vec<u8>
+    deviceSig   : Vec<u8>
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct RegisterDeviceRequestData {
+    deviceId    : Id,
+    deviceName  : String,
+    appName     : String,
+    #[serde(with = "base64_as_string")]
+    nonce       : Vec<u8>,
+    #[serde(with = "base64_as_string")]
+    sig         : Vec<u8>,
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
-struct ServiceIdsData {
-    peerId: Option<String>,
-    nodeId: Option<String>
+struct DeviceRegisterationData {
+    registrationId: Option<String>,
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct FinishRegisterDeviceRequestData {
+    deviceId    : Id,
+   #[serde(with = "base64_as_string")]
+    nonce       : Vec<u8>,
+    #[serde(with = "base64_as_string")]
+    sig         : Vec<u8>,
 }
 
 pub(crate) struct Builder<'a> {
@@ -262,7 +290,7 @@ impl APIClient {
     ) -> Result<()> {
         let nonce = self.nonce();
         let profile_digest = profile::digest(self.user.id(), &self.peerid, Some(user_name), false, None);
-        let data = RegisterUserData {
+        let data = UserData {
             userId      : self.user.id().clone(),
             userName    : user_name.to_string(),
             passphrase  : passphrase.to_string(),
@@ -301,7 +329,7 @@ impl APIClient {
         app_name: &str
     ) -> Result<String> {
         let nonce = self.nonce();
-        let data = RegisterDeviceData {
+        let data = DeviceData {
             userId      : self.user.id().clone(),
             passphrase  : passphrase.to_string(),
             deviceId    : self.device.id().clone(),
@@ -333,6 +361,69 @@ impl APIClient {
             v(&token);
         });
         Ok(token)
+    }
+
+    pub(crate) async fn register_device_request(&mut self,
+        device_name: &str,
+        app_name: &str
+    ) -> Result<String> {
+        let nonce = self.nonce();
+        let data = RegisterDeviceRequestData {
+            deviceId    : self.device.id().clone(),
+            deviceName  : device_name.to_string(),
+            appName     : app_name.to_string(),
+            nonce       : nonce.borrow().as_bytes().to_vec(),
+            sig         : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+        };
+
+        let url = self.base_url.join("/api/v1/devices/registrations").unwrap();
+        let result = self.client.post(url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&data)
+            .send()
+            .await;
+
+        let data = result.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
+        Ok(data.registrationId.unwrap())
+    }
+
+    pub(crate) async fn finish_register_device_request(&mut self,
+        registration_id: &str,
+        _timeout: u64
+    ) -> Result<String> {
+        let nonce = self.nonce();
+        let data = FinishRegisterDeviceRequestData {
+            deviceId    : self.device.id().clone(),
+            nonce       : nonce.borrow().as_bytes().to_vec(),
+            sig         : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+        };
+
+        let url_path = format!("/api/v1/devices/registrations/{registration_id}/0");
+        let url = self.base_url.join(&url_path).unwrap();
+        let result = self.client.post(url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&data)
+            .send()
+            .await;
+
+        let data = result.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
+        Ok(data.registrationId.unwrap())
     }
 }
 

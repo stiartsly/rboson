@@ -80,6 +80,40 @@ async fn test_register_device_with_user() {
         .unwrap();
 
     let result = client2.register_device_with_user("password", "Alice", "Example").await;
-    println!("Result: {:?}", result);
+    assert!(result.is_ok());
+}
+
+#[ignore]
+#[tokio::test]
+async fn test_regsister_device_request() {
+    let peerid:Id = PEERID.try_into().unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device1 = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device2 = CryptoIdentity::from_keypair(signature::KeyPair::random());
+
+    let mut client1 = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device1)
+        .build()
+        .unwrap();
+
+    let result = client1.register_user_and_device("password", "Alice", "Example", "Example").await;
+    assert!(result.is_ok());
+
+    let mut client2 = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device2)
+        .build()
+        .unwrap();
+
+    let result = client2.register_device_request("Alice", "Example").await;
+    assert!(result.is_ok());
+
+    let registration_id = result.unwrap();
+    let result = client1.finish_register_device_request(&registration_id, 0).await;
     assert!(result.is_ok());
 }

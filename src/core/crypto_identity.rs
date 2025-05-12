@@ -7,7 +7,6 @@ use crate::{
     error::Result
 };
 
-#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct CryptoIdentity {
     id: Id,
@@ -15,12 +14,13 @@ pub struct CryptoIdentity {
     signature_keypair: signature::KeyPair,
 }
 
-#[allow(unused)]
 impl CryptoIdentity {
+    #[allow(unused)]
     pub(crate) fn new() -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())
     }
 
+    #[allow(unused)]
     pub(crate) fn from_private_key(private_key: &signature::PrivateKey) -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::from(private_key))
     }

@@ -27,6 +27,7 @@ use super::{
 pub(crate) trait UserAgent {
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
+    fn messaging_peer_info(&self) -> Option<&PeerInfo>;
 
     fn is_configured(&self) -> bool;
     fn list_conversations(&self) -> LinkedList<Conversation>;
@@ -115,6 +116,11 @@ impl UserAgent for DefaultUserAgent {
 
     fn device(&self) -> Option<&DeviceProfile> {
         self.device.as_ref()
+    }
+
+    fn messaging_peer_info(&self) -> Option<&PeerInfo> {
+        // unimplemented!()
+        None
     }
 
     fn is_configured(&self) -> bool {

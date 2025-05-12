@@ -1,6 +1,8 @@
 use crate::{
     Id,
     Identity,
+    Error,
+    error::Result,
 };
 
 use crate::core::{
@@ -11,16 +13,16 @@ use crate::core::{
 pub struct DeviceProfile {
     identity: Option<CryptoIdentity>,
     name: String,
-    app: String
+    app: Option<String>
 }
 
 #[allow(unused)]
 impl DeviceProfile {
-    pub(crate) fn new(name: &str, app: &str) -> Self {
+    pub(crate) fn new(identity: Option<&CryptoIdentity>, name: &str, app: Option<&str>) -> Self {
         Self {
-            identity: None,
+            identity: identity.map(|v| v.clone()),
             name: name.to_string(),
-            app: app.to_string(),
+            app: app.map(|v| v.to_string())
         }
     }
 
@@ -32,11 +34,24 @@ impl DeviceProfile {
         self.identity.as_ref()
     }
 
+    pub fn has_identity(&self) -> bool {
+        self.identity.is_some()
+    }
+
+    pub fn set_identity(&mut self, identity: &CryptoIdentity) -> Result<()> {
+        if self.has_identity() {
+            return Err(Error::State("Identity already set.".into()));
+        }
+
+        self.identity = Some(identity.clone());
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn app(&self) -> &str {
-        &self.app
+    pub fn app(&self) -> Option<&str> {
+        self.app.as_ref().map(|v| v.as_str())
     }
 }

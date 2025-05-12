@@ -1,3 +1,4 @@
+use std::fmt;
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use serde::{Serialize, Deserialize};
@@ -8,12 +9,9 @@ use crate::{
 
 #[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-pub struct ClientDevice {
+pub struct Profile {
 	#[serde(rename = "id")]
 	id: Id,
-
-	#[serde(skip)]
-	_client_id: String,
 
 	#[serde(rename = "p")]
     home_peerid: Id,
@@ -28,10 +26,87 @@ pub struct ClientDevice {
     avatar: bool,
 
 	#[serde(rename = "nt")]
-    notice: String,
+    notice: Option<String>,
 
     #[serde(rename = "s")]
     sig: Vec<u8>
+}
+
+#[allow(unused)]
+impl Profile {
+    pub(crate) fn new(id: &Id,
+            home_peerid: &Id,
+            name: &str,
+            avatar: bool,
+            notice: &str,
+            home_peer_sig: &[u8],
+            sig: &[u8]
+    ) -> Self {
+        Self {
+            id			: id.clone(),
+            home_peerid	: home_peerid.clone(),
+            home_peer_sig: home_peer_sig.to_vec(),
+            name		: name.to_string(),
+            avatar		: avatar,
+            notice		: Some(notice.to_string()),
+            sig			: sig.to_vec()
+        }
+    }
+
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub fn home_peerid(&self) -> &Id {
+        &self.home_peerid
+    }
+
+    pub fn home_peer_sig(&self) -> &[u8] {
+        &self.home_peer_sig
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn has_avatar(&self) -> bool {
+        self.avatar
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_ref().map(|v| v.as_str())
+    }
+
+    pub fn sig(&self) -> &[u8] {
+        &self.sig
+    }
+
+    pub fn is_genuine(&self) -> bool {
+        unimplemented!()
+
+    }
+}
+
+impl fmt::Display for Profile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Profile: {}[homePeer={}]",
+            self.id,
+            self.home_peerid
+        )?;
+
+        if !self.name.is_empty() {
+            write!(f, ", name={}", self.name)?;
+        }
+
+        write!(f, ", avatar={}", if self.avatar { "yes" } else { "no" })?;
+
+        if let Some(notice) = &self.notice {
+            write!(f, ", notice={}", notice)?;
+        }
+
+        write!(f, "]")?;
+        Ok(())
+    }
 }
 
 pub(crate) fn digest(id: &Id, home_peerid: &Id, name: Option<&str>, avatar: bool, notice: Option<&str>) -> Vec<u8> {

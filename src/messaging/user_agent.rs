@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::collections::LinkedList;
 use std::collections::HashMap;
 
@@ -5,6 +6,7 @@ use crate::{
     Id,
     PeerInfo,
     error::Result,
+    Error,
     core::crypto_identity::CryptoIdentity,
 };
 
@@ -22,7 +24,7 @@ use super::{
 };
 
 #[allow(dead_code)]
-pub(crate) trait IUserAgent {
+pub(crate) trait UserAgent {
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
 
@@ -42,7 +44,7 @@ pub(crate) trait IUserAgent {
 struct MessagingRepository {}
 
 #[allow(dead_code)]
-pub struct UserAgent {
+pub struct DefaultUserAgent {
     user    : Option<UserProfile>,
     device  : Option<DeviceProfile>,
     peer    : Option<PeerInfo>,
@@ -50,45 +52,69 @@ pub struct UserAgent {
     repository  : Option<MessagingRepository>,
 
     connection_listeners: LinkedList<Box<dyn ConnectionListener>>,
-    profile_listeners: LinkedList<Box<dyn ProfileListener>>,
-    message_listeners: LinkedList<Box<dyn MessageListener>>,
-    channel_listeners: LinkedList<Box<dyn ChannelListener>>,
-    contact_listeners: LinkedList<Box<dyn ContactListener>>,
+    profile_listeners   : LinkedList<Box<dyn ProfileListener>>,
+    message_listeners   : LinkedList<Box<dyn MessageListener>>,
+    channel_listeners   : LinkedList<Box<dyn ChannelListener>>,
+    contact_listeners   : LinkedList<Box<dyn ContactListener>>,
 
     conversations: HashMap<Id, Conversation>,
+
+    hardened: bool,
 }
 
-impl UserAgent {
-    //pub fn new(_path: &Path) -> Result<Self> {
-    pub fn new() -> Result<Self> {
+#[allow(unused)]
+impl DefaultUserAgent {
+    pub fn new(_path: Option<&Path>) -> Result<Self> {
         Ok(Self {
-            user: None,
-            device: None,
-            peer: None,
+            user    : None,
+            device  : None,
+            peer    : None,
 
             repository: None,
 
             connection_listeners: LinkedList::new(),
-            profile_listeners: LinkedList::new(),
-            message_listeners: LinkedList::new(),
-            channel_listeners: LinkedList::new(),
-            contact_listeners: LinkedList::new(),
+            profile_listeners   : LinkedList::new(),
+            message_listeners   : LinkedList::new(),
+            channel_listeners   : LinkedList::new(),
+            contact_listeners   : LinkedList::new(),
 
             conversations: HashMap::new(),
+
+            hardened: false,
         })
     }
 
-    pub(crate) fn set_user(&mut self, _user: &CryptoIdentity, _name: &str) {
-        unimplemented!()
+    pub(crate) fn set_user(&mut self, _user: &CryptoIdentity, name: &str) -> Result<()>{
+        if self.hardened {
+            return Err(Error::State("UserAgent is hardened".into()));
+        }
+
+        self.user = Some(UserProfile::new(_user, name, false));
+        self.update_user_info_config()
+    }
+
+    pub(crate) fn set_device(&mut self, device: &CryptoIdentity, name: &str, app: Option<&str>) -> Result<()> {
+        if self.hardened {
+            return Err(Error::State("UserAgent is hardened".into()));
+        }
+
+        self.device = Some(DeviceProfile::new(Some(device), name, app));
+        self.update_user_info_config()
+    }
+
+    fn update_user_info_config(&mut self) -> Result<()> {
+        //unimplemented!()
+        Ok(())
     }
 }
 
-impl IUserAgent for UserAgent {
+impl UserAgent for DefaultUserAgent {
     fn user(&self) -> Option<&UserProfile> {
-        None
+        self.user.as_ref()
     }
+
     fn device(&self) -> Option<&DeviceProfile> {
-        None
+        self.device.as_ref()
     }
 
     fn is_configured(&self) -> bool {

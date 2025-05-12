@@ -7,19 +7,17 @@ use crate::core::{
     crypto_identity::CryptoIdentity,
 };
 
-#[allow(unused)]
 pub struct UserProfile {
     identity: CryptoIdentity,
     name: String,
     avatar: bool
 }
 
-#[allow(unused)]
 impl UserProfile {
     pub(crate) fn new(identity: &CryptoIdentity, name: &str, avatar: bool) -> Self {
         Self {
             identity: identity.clone(),
-            name: name.to_string(),
+            name    : name.to_string(),
             avatar
         }
     }

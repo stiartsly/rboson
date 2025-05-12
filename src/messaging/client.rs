@@ -27,7 +27,7 @@ use super::{
     messaging_client::MessagingClient,
     api_client::Builder as APIClientBuilder,
 
-    user_agent::{IUserAgent, UserAgent},
+    user_agent::{UserAgent, DefaultUserAgent},
     persistence::database::Database,
     messaging_repository::MessagingRepository,
 };
@@ -61,7 +61,7 @@ pub struct Builder<'a> {
     channel_listeners   : Option<Box<dyn ChannelListener>>,
     contact_listeners   : Option<Box<dyn ContactListener>>,
 
-    user_agent  : Option<Rc<RefCell<dyn IUserAgent>>>
+    user_agent  : Option<Rc<RefCell<dyn UserAgent>>>
 }
 
 #[allow(unused)]
@@ -185,7 +185,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub(crate) fn with_user_agent(&mut self, agent: Rc<RefCell<dyn IUserAgent>>) -> &mut Self {
+    pub(crate) fn with_user_agent(&mut self, agent: Rc<RefCell<dyn UserAgent>>) -> &mut Self {
         self.user_agent = Some(agent);
         self
     }
@@ -213,8 +213,8 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    async fn build_default_user_agent(&mut self) -> Result<Rc<RefCell<dyn IUserAgent>>> {
-        let agent = Rc::new(RefCell::new(UserAgent::new().unwrap()));
+    async fn build_default_user_agent(&mut self) -> Result<Rc<RefCell<dyn UserAgent>>> {
+        let agent = Rc::new(RefCell::new(DefaultUserAgent::new(None).unwrap()));
         let repo = match self.repository.take() {
             Some(r) => r,
             None => {
@@ -246,7 +246,7 @@ impl<'a> Builder<'a> {
         Ok(agent)
     }
 
-    async fn register_agent(&self, _: Rc<RefCell<dyn IUserAgent>>) -> Result<()> {
+    async fn register_agent(&self, _: Rc<RefCell<dyn UserAgent>>) -> Result<()> {
         let mut api_client = APIClientBuilder::new()
             .with_base_url(self.api_url.as_ref().unwrap().as_str())
             .with_home_peerid(self.peerid.as_ref().unwrap())
@@ -270,7 +270,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    async fn setup_user_agent(&mut self) -> Result<Rc<RefCell<dyn IUserAgent>>>  {
+    async fn setup_user_agent(&mut self) -> Result<Rc<RefCell<dyn UserAgent>>>  {
         let Some(agent) = self.user_agent.take() else {
             return Err(Error::State("User agent is not set up yet".into()));
         };

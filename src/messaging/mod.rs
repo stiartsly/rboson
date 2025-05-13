@@ -20,6 +20,7 @@ pub mod channel_listener;
 pub mod profile_listener;
 pub mod config_adapter;
 pub mod conversation;
+pub mod channel;
 
 pub mod client_device;
 pub mod api_client;

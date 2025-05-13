@@ -2,9 +2,12 @@
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
+    Id,
     error::Result,
     Error,
 };
+
+use crate::messaging::message::Message;
 
 #[allow(unused)]
 pub(crate) trait MessagingRepository {
@@ -29,11 +32,17 @@ pub(crate) trait MessagingRepository {
         Ok(val)
     }
 
+    fn put_messages(&self, _messages: &[Message]) -> Result<()>;
+    fn put_amessage(&self, _message: Message) -> Result<()> {
+        self.put_messages(&[_message])
+    }
 
+    fn messages_between(&self, _conversation_id: &Id, _begin: u64, _end: u64) -> Result<Vec<Message>>;
+    fn messages_since(&self, _conversation_id: &Id, _since: u64, _limit: usize, _offset: usize) -> Result<Vec<Message>>;
 
-
-    //fn put_msg(&self, _:&Message) -> Result<()>;
-    //fn put_messages(&self, _: &[Message]) -> Result<()>;
-
-    //fn remove_msg(&self, _: u32);
+    fn remove_messages(&self, _rids: &[u32]) -> Result<()>;
+    fn remove_messages_by_conversation(&self, _conversation_id: &Id) -> Result<()>;
+    fn remove_amessage(&self, _rid: u32) -> Result<()> {
+        self.remove_messages(&[_rid])
+    }
 }

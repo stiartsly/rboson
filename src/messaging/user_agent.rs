@@ -17,6 +17,7 @@ use crate::{
 use super::{
     conversation::Conversation,
     message::Message,
+    channel::Channel,
     messaging_repository::MessagingRepository,
     persistence::database::Database,
 
@@ -33,19 +34,27 @@ use super::{
 pub(crate) trait UserAgent {
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
-    fn messaging_peer_info(&self) -> Option<&PeerInfo>;
+    fn peer_info(&self) -> Option<&PeerInfo>;
 
     fn is_configured(&self) -> bool;
-    fn list_conversations(&self) -> LinkedList<Conversation>;
+
+    fn conversation(&self, _conversation_id: &Id) -> Option<Conversation>;
+    fn conversations(&self) -> Vec<Conversation>;
     fn remove_conversation(&mut self, conversation_id: &Id);
     fn remove_conversations(&mut self, conversation_ids: Vec<&Id>);
 
-    fn list_messages(&self, converstation_id: &Id) -> LinkedList<Message>;
-    // TODO: list_messages_range(xxxx);
+    fn messages(&self, converstation_id: &Id) -> Vec<Message>;
+    fn messages_between(&self, converstation_id: &Id, from: u64, end: u64) -> Vec<Message>;
+    fn messages_since(&self, converstation_id: &Id, since: u64, limit: usize, offset: usize) -> Vec<Message>;
 
-    fn remove_message(&mut self, message_id: &Id);
-    fn remove_messages(&mut self, message_ids: Vec<&Id>);
-    fn clear_messages(&mut self, conversation_id: &Id);
+    fn remove_message(&mut self, message_id: u32);
+    fn remove_messages(&mut self, message_ids: &[u32]);
+    fn remove_messages_by_conversation(&mut self, conversation_id: &Id);
+
+    fn channels(&self) -> Vec<Channel>;
+    fn channel(&self, channel_id: &Id) -> Option<Channel>;
+
+    fn contact_version(&self) -> String;
 }
 
 //struct MessagingRepository {}
@@ -310,7 +319,7 @@ impl UserAgent for DefaultUserAgent {
         self.device.as_ref()
     }
 
-    fn messaging_peer_info(&self) -> Option<&PeerInfo> {
+    fn peer_info(&self) -> Option<&PeerInfo> {
         self.peer.as_ref()
     }
 
@@ -323,7 +332,11 @@ impl UserAgent for DefaultUserAgent {
             self.peer.as_ref().unwrap().alternative_url().is_some()
     }
 
-    fn list_conversations(&self) -> LinkedList<Conversation> {
+    fn conversation(&self, _conversation_id: &Id) -> Option<Conversation> {
+        unimplemented!()
+    }
+
+    fn conversations(&self) -> Vec<Conversation> {
         unimplemented!()
     }
 
@@ -335,19 +348,57 @@ impl UserAgent for DefaultUserAgent {
         unimplemented!()
     }
 
-    fn list_messages(&self, _converstation_id: &Id) -> LinkedList<Message> {
+    fn messages(&self, converstation_id: &Id) -> Vec<Message> {
+        self.repository.as_ref().map(|v| {
+            v.messages_since(converstation_id, 0, 100, 0)
+        })
+        .unwrap_or_else(|| Ok(vec![]))
+        .unwrap()
+    }
+
+    fn messages_between(&self, converstation_id: &Id, from: u64, end: u64) -> Vec<Message> {
+        self.repository.as_ref().map(|v| {
+            v.messages_between(converstation_id, from, end)
+        })
+        .unwrap_or_else(|| Ok(vec![]))
+        .unwrap()
+    }
+
+    fn messages_since(&self, converstation_id: &Id, since: u64, limit: usize, offset: usize) -> Vec<Message> {
+        self.repository.as_ref().map(|v| {
+            v.messages_since(converstation_id, since, limit, offset)
+        })
+        .unwrap_or_else(|| Ok(vec![]))
+        .unwrap()
+    }
+
+    fn remove_message(&mut self, messsage_id: u32) {
+        self.repository.as_mut().map(|v| {
+            _ = v.remove_amessage(messsage_id);
+        });
+    }
+
+    fn remove_messages(&mut self, message_ids: &[u32]) {
+        self.repository.as_mut().map(|v| {
+            _ = v.remove_messages(message_ids);
+        });
+    }
+
+    fn remove_messages_by_conversation(&mut self, converstation_id: &Id) {
+        self.repository.as_mut().map(|v| {
+            _ = v.remove_messages_by_conversation(converstation_id);
+        });
+    }
+
+    fn channels(&self) -> Vec<Channel> {
         unimplemented!()
     }
 
-    fn remove_message(&mut self, _message_id: &Id) {
+    fn channel(&self, _channel_id: &Id) -> Option<Channel> {
         unimplemented!()
     }
 
-    fn remove_messages(&mut self, _message_ids: Vec<&Id>) {
-        unimplemented!()
-    }
-
-    fn clear_messages(&mut self, _converstation_id: &Id) {
+    fn contact_version(&self) -> String {
         unimplemented!()
     }
 }

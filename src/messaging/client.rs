@@ -29,7 +29,6 @@ use super::{
 
     user_agent::{UserAgent, DefaultUserAgent},
     persistence::database::Database,
-    messaging_repository::MessagingRepository,
 };
 
 #[allow(dead_code)]
@@ -53,7 +52,7 @@ pub struct Builder<'a> {
     nodeid      : Option<&'a Id>,
     api_url     : Option<Url>,
 
-    repository  : Option<Rc<RefCell<dyn MessagingRepository>>>,
+    repository  : Option<Rc<RefCell<Database>>>,
     repository_db: Option<&'a str>,
 
     connection_listeners: Option<Box<dyn ConnectionListener>>,

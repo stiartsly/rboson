@@ -10,7 +10,6 @@ use crate::{
 
 use crate::messaging::{
     messaging_repository::MessagingRepository,
-    message::Message,
 };
 
 #[allow(unused)]
@@ -39,23 +38,11 @@ impl Database {
 }
 
 impl MessagingRepository for Database {
-    fn put_config(&self, _: &str, _: &[u8]) -> Result<()>  {
+    fn put_config(&self, _key: &str, _val: Vec<u8>) -> Result<()>  {
         unimplemented!()
     }
 
-    fn get_config(&self, _: &str) -> Result<Vec<u8>> {
-        unimplemented!()
-    }
-
-    fn put_msg(&self, _:&Message) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn put_messages(&self, _: &[Message]) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn remove_msg(&self, _: u32) {
+    fn get_config(&self, _key: &str) -> Result<Vec<u8>> {
         unimplemented!()
     }
 }

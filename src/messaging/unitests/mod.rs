@@ -2,3 +2,4 @@
 #[cfg(test)] mod test_user_profile;
 #[cfg(test)] mod test_client_device;
 #[cfg(test)] mod test_user_agent;
+#[cfg(test)] mod test_invite_ticket;

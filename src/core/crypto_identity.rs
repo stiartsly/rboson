@@ -92,9 +92,9 @@ impl Identity for CryptoIdentity {
         Ok(cipher)
     }
 
-    fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
-        let mut plain = vec![0u8; data.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
-        self.decrypt(sender, data, &mut plain)?;
+    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
+        self.decrypt(sender, cipher, &mut plain)?;
         Ok(plain)
     }
 

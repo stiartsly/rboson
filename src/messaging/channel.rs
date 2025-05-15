@@ -2,12 +2,16 @@ use crate::{
     Id,
 };
 
-use serde::{
-    Deserialize
-};
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Deserialize, Hash)]
-struct Permission {}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Permission {
+    Public = 0,
+    MemberInvite = 1,
+    ModeratorInvite = 2,
+    OwnerInvite = 3
+}
 
 #[derive(Debug, Clone, Deserialize, Hash)]
 #[allow(unused)]

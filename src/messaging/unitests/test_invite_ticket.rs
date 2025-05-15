@@ -11,8 +11,8 @@ use crate::messaging::{
     invite_ticket::InviteTicket,
 };
 
-#[tokio::test]
-async fn test_invite_public_ticket() {
+#[test]
+fn test_invite_public_ticket() {
     let channel_id = Id::random();
     let inviter_keypair = KeyPair::random();
     let inviter = Id::from(inviter_keypair.to_public_key());
@@ -54,8 +54,8 @@ async fn test_invite_public_ticket() {
     assert_eq!(proof.is_valid(&invitee), true);
 }
 
-#[tokio::test]
-async fn test_invite_private_ticket() {
+#[test]
+fn test_invite_private_ticket() {
     let channel_id = Id::random();
     let inviter_keypair = KeyPair::random();
     let inviter = Id::from(inviter_keypair.to_public_key());

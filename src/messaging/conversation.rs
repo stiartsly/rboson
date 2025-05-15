@@ -1,58 +1,120 @@
 use std::fmt;
 use std::time::SystemTime;
 
-use crate::Id;
+use crate::{
+    Id,
+    error::Result,
+    Error,
+};
+
 use super::{
     message::Message,
     contact::Contact
 };
 
-#[allow(dead_code)]
+pub static MAX_SNIPPET_LENGTH: usize = 128;
+pub static DEFAULT_AVATAR: Option<String> = None;
+
+#[allow(unused)]
 pub(crate) struct Conversation {
-    id:             Id, // conversation id: the id of the interlocutor, could be a user or a group
-    last_message:   Message,
-    interlocutor:   Contact,
+    interlocutor: Contact,
+    last_message: Option<Message>,
+    snippet     : Option<String>,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 impl Conversation {
     pub fn id(&self) -> &Id {
-        &self.id
+        self.interlocutor.id()
     }
 
     pub fn title(&self) -> String {
         self.interlocutor.display_name()
     }
 
-    pub fn avatar(&self) -> Option<&str> {
-        self.interlocutor.avatar()
-    }
-
-    pub fn updated(&self) -> SystemTime {
-        unimplemented!()
-    }
-
-    pub fn iterlocutor(&self) -> &Contact {
-        unimplemented!()
+    pub fn avatar(&self) -> Option<String> {
+        self.interlocutor.avatar_url()
     }
 
     pub fn snippet(&self) -> String {
-        unimplemented!()
+        if let Some(snippet) = self.snippet.as_ref() {
+            return snippet.to_string();
+        }
+
+        let Some(msg) = self.last_message.as_ref() else {
+            return "".to_string();
+        };
+
+        let content_type = msg.content_type();
+        if content_type.starts_with("text/") {
+            let msg_as_body = msg.body_as_text();
+            let trimmed = msg_as_body.trim();
+            if trimmed.len() > MAX_SNIPPET_LENGTH {
+                &trimmed[0..MAX_SNIPPET_LENGTH]
+            } else {
+                &trimmed[..]
+            }.to_string()
+        } else if content_type.starts_with("image/") {
+            "(Image)".to_string()
+        } else if content_type.starts_with("audio/") {
+            "(Audio)".to_string()
+        } else if content_type.starts_with("video/") {
+            "(Video)".to_string()
+        } else {
+            "(Attachment)".to_string()
+        }
+    }
+
+    pub(crate) fn udpate_snippet(&mut self) {
+        if self.snippet.is_none() {
+            self.snippet = Some(self.snippet())
+        }
+    }
+
+    pub fn updated(&self) -> Option<SystemTime> {
+        self.last_message.as_ref().map(|v| v.created())
+    }
+
+    pub fn iterlocutor(&self) -> &Contact {
+        &self.interlocutor
+    }
+
+    pub(crate) fn update_interlocutor(&mut self, contact: Contact) -> Result<()> {
+        if contact.id() != self.interlocutor.id() {
+            return Err(Error::Argument("Contact does not match the conversation".into()))
+        }
+        self.interlocutor = contact;
+        Ok(())
+    }
+
+    pub(crate) fn update(&mut self, message: Message) -> Result<()> {
+        if message.conversation_id() != self.id() {
+            return Err(Error::Argument("Message does not match the conversatio".into()))
+        }
+
+        self.last_message = Some(message);
+        self.snippet = None;
+        Ok(())
+    }
+
+    pub fn is(&self, conversation: &Conversation) -> bool {
+        self.id() == conversation.id()
     }
 }
 
 impl PartialEq for Conversation {
-    fn eq(&self, _other: &Self) -> bool {
-		unimplemented!()
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
     }
 }
 
 impl fmt::Display for Conversation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let snippet = self.snippet();
         write!(f, "Conversation:{} [{}, {}, {}]",
             self.title(),
-            self.id,
-            self.snippet(),
+            self.id().to_base58(),
+            snippet.as_str(),
             "TODO"
         )?;
         Ok(())

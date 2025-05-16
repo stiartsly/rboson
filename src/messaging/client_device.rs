@@ -1,9 +1,8 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
-use serde::{
-	Deserialize,
-	Serialize,
-};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use bs58;
 
 use crate::Id;
 
@@ -16,30 +15,31 @@ pub struct ClientDevice {
 	#[serde(rename = "id")]
 	id		: Id,
 	#[serde(rename = "n")]
-	name	: Option<String>,
+	name	: String,
     #[serde(rename = "a")]
-	app_name: Option<String>,
+	app_name: String,
 	#[serde(rename = "c")]
-    created	: u64, // Timestamp in Unix format (use i64 for time)
+    created	: u64,
 	#[serde(rename = "ls")]
 	last_seen: u64,
 	#[serde(rename = "la")]
     last_address: String,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 impl ClientDevice {
-	pub(crate) fn new(id: &Id, device_name: Option<&str>, app_name: Option<&str>,
+	pub(crate) fn new(id: &Id, device_name: &str, app_name: &str,
 		created: u64, last_seen: u64, last_address: &str) -> Self {
+
 		Self {
-			client_id: "TODO".to_string(),
-			id		: id.clone(),
-			name	: device_name.map(|v| v.to_string()),
-			app_name: app_name.map(|v| v.to_string()),
+			client_id	: bs58::encode(&Sha256::digest(id.as_bytes())).into_string(),
+			id			: id.clone(),
+			name		: device_name.into(),
+			app_name	: app_name.into(),
+			last_address: last_address.into(),
+
 			created,
 			last_seen,
-			last_address: last_address.to_string(),
-
 		}
 	}
 
@@ -52,11 +52,11 @@ impl ClientDevice {
 	}
 
 	pub fn name(&self) -> &str {
-		self.name.as_ref().map(|v| v.as_str()).unwrap_or("N/A")
+		&self.name
 	}
 
 	pub fn app_name(&self) -> &str {
-		self.name.as_ref().map(|v| v.as_str()).unwrap_or("N/A")
+		&self.app_name
 	}
 
 	pub fn created(&self) -> SystemTime {
@@ -80,16 +80,12 @@ impl PartialEq for ClientDevice {
 
 impl fmt::Display for ClientDevice {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Device: {} [clientId={} ",
+		write!(f, "Device: {} [clientId={}, name={}, app={}",
 			self.id.to_base58(),
 			self.client_id,
+			self.name,
+			self.app_name
 		)?;
-		if let Some(name) = self.name.as_ref() {
-			write!(f, "name={}", name)?;
-		}
-		if let Some(app_name) = self.app_name.as_ref() {
-			write!(f, ", app={}", app_name)?;
-		}
 		// TODO:
 		write!(f, "]")
 	}

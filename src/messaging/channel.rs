@@ -30,3 +30,6 @@ pub struct Channel {
 impl Channel {
     // TODO:
 }
+
+pub struct Member {}
+pub struct Role {}

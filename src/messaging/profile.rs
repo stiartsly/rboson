@@ -3,9 +3,7 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use serde::{Serialize, Deserialize};
 
-use crate::{
-    Id,
-};
+use crate::Id;
 
 #[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
@@ -100,7 +98,7 @@ impl fmt::Display for Profile {
 
         write!(f, ", avatar={}", if self.avatar { "yes" } else { "no" })?;
 
-        if let Some(notice) = &self.notice {
+        if let Some(notice) = self.notice.as_ref() {
             write!(f, ", notice={}", notice)?;
         }
 

@@ -1,4 +1,3 @@
-
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -7,7 +6,9 @@ use crate::{
     Error,
 };
 
-use crate::messaging::message::Message;
+use crate::messaging::{
+    message::Message
+};
 
 #[allow(unused)]
 pub(crate) trait MessagingRepository {

@@ -1,8 +1,8 @@
 use super::message::Message;
 
-#[allow(dead_code)]
 pub trait MessageListener {
-    fn on_message(&self, msg: &Message);
-    fn on_sent(&self, msg: &Message);
-    fn on_broadcast(&self, msg: &Message);
+    fn on_message(&self, message: &Message);
+    fn on_sending(&self, message: &Message);
+    fn on_sent(&self, message: &Message);
+    fn on_broadcast(&self, message: &Message);
 }

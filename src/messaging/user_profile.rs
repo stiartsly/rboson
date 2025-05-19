@@ -17,7 +17,7 @@ impl UserProfile {
     pub(crate) fn new(identity: &CryptoIdentity, name: &str, avatar: bool) -> Self {
         Self {
             identity: identity.clone(),
-            name    : name.to_string(),
+            name    : name.into(),
             avatar
         }
     }

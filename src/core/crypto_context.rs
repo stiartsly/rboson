@@ -6,7 +6,7 @@ use crate::{
     error::Result
 };
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CryptoContext {
     id  : Id,
     box_: CryptoBox,
@@ -15,7 +15,7 @@ pub struct CryptoContext {
     last_peer_nonce: Option<Nonce>,
 }
 
-#[allow(dead_code)]
+unsafe impl Send for CryptoContext {}
 impl CryptoContext {
     pub(crate) fn new(id: &Id, private_key: &PrivateKey) -> CryptoContext {
         let encryption_key = id.to_encryption_key();

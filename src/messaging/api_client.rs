@@ -4,6 +4,7 @@ use url::Url;
 use serde::{Serialize, Deserialize};
 
 use crate::{
+    unwrap,
     Id,
     Error,
     error::Result,
@@ -33,14 +34,26 @@ struct RefreshAccessTokenReqData {
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct ServiceIdsData {
-    peerId: Option<String>,
-    nodeId: Option<String>
+    peerId: String,
+    nodeId: String
+}
+
+impl ServiceIdsData {
+    fn ids(&self) -> Result<(Id, Id)> {
+        let Ok(peerid) = Id::try_from(self.peerId.as_str()) else {
+            return Err(Error::State("Http error: invalid peer id".into()));
+        };
+        let Ok(nodeid) = Id::try_from(self.nodeId.as_str()) else {
+            return Err(Error::State("Http error: invalid node id".into()));
+        };
+        Ok((peerid, nodeid))
+    }
 }
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct AccessTokenData {
-    token       : Option<String>,
+    token       : String,
 }
 
 #[derive(Serialize)]
@@ -93,7 +106,7 @@ struct RegisterDeviceRequestData {
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
 struct DeviceRegisterationData {
-    registrationId: Option<String>,
+    registrationId: String,
 }
 
 #[derive(Serialize)]
@@ -144,10 +157,18 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn build(self) -> Result<APIClient> {
-        assert!(self.home_peerid.is_some());
-        assert!(self.base_url.is_some());
-        assert!(self.user.is_some());
-        assert!(self.device.is_some());
+        if self.home_peerid.is_none() {
+            return Err(Error::Argument("Home peer id is required".into()));
+        }
+        if self.base_url.is_none() {
+            return Err(Error::Argument("Base url is required".into()));
+        }
+        if self.user.is_none() {
+            return Err(Error::Argument("User identity is required".into()));
+        }
+        if self.device.is_none() {
+            return Err(Error::Argument("Device identity is required".into()));
+        }
 
         APIClient::new(self)
     }
@@ -169,19 +190,30 @@ pub(crate) struct APIClient {
 #[allow(unused)]
 impl APIClient {
     pub(crate) fn new(b: Builder) -> Result<Self> {
-        let url = Url::parse(b.base_url.as_ref().unwrap()).map_err(|e| {
-            Error::Argument(format!("Invalid base url: {e}"))
+        let base_url = Url::parse(unwrap!(b.base_url)).map_err(|e| {
+            Error::Argument("Invalid base url: {e}".into())
         })?;
 
-        if url.scheme() != "http" && url.scheme() != "https" {
+        if base_url.scheme() != "http" && base_url.scheme() != "https" {
             return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
         }
 
+        let client = Client::builder()
+            .user_agent("boson-rs")
+            .timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .danger_accept_invalid_certs(false)
+            .danger_accept_invalid_hostnames(false)
+            .build()
+            .map_err(|e| {
+                Error::Argument(format!("Failed to create http client: {e}"))
+            })?;
 
         Ok(Self {
-            client  : Client::builder().build().unwrap(),
+            client,
+            base_url,
             peerid  : b.home_peerid.unwrap().clone(),
-            base_url: url,
             user    : b.user.unwrap().clone(),
             device  : b.device.unwrap().clone(),
 
@@ -192,14 +224,12 @@ impl APIClient {
         })
     }
 
-    fn with_access_token(&mut self, access_token: &str) -> &Self {
+    fn set_access_token(&mut self, access_token: &str) {
         self.access_token = Some(access_token.to_string());
-        self
     }
 
-    pub(crate) fn with_access_token_refresh_handler(&mut self, handler: fn(&str)) -> &Self {
+    pub(crate) fn set_access_token_refresh_handler(&mut self, handler: fn(&str)) {
         self.access_token_refresh_handler = Some(Box::new(handler));
-        self
     }
 
     pub(crate) fn user(&self) -> &CryptoIdentity {
@@ -221,29 +251,15 @@ impl APIClient {
             .send()
             .await;
 
-        let data = result.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<ServiceIdsData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
-        })?;
+        let data = result.map_err(|e|
+            Error::State("Http error: sending http request error {e}".into())
+        )?.error_for_status().map_err(|e|
+            Error::State("Http error: invalid http response {e}".into())
+        )?.json::<ServiceIdsData>().await.map_err(|e|
+            Error::State("Http error: deserialize json error {e}".into())
+        )?;
 
-        let Some(peerid_str) = data.peerId else {
-            return Err(Error::State("Http error: missing peer id".into()));
-        };
-        let Some(nodeid_str) = data.nodeId else {
-            return Err(Error::State("Http error: missing nodeid id".into()));
-        };
-
-        let Ok(peerid) = Id::try_from(peerid_str.as_str()) else {
-            return Err(Error::State("Http error: invalid peer id".into()));
-        };
-        let Ok(nodeid) = Id::try_from(nodeid_str.as_str()) else {
-            return Err(Error::State("Http error: invalid node id".into()));
-        };
-
-        Ok((peerid, nodeid))
+        data.ids()
     }
 
     fn nonce(&self) -> &RefCell<Nonce> {
@@ -278,7 +294,7 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        self.access_token = Some(data.token.unwrap());
+        self.access_token = Some(data.token);
         Ok(())
     }
 
@@ -319,7 +335,7 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        self.access_token = Some(data.token.unwrap());
+        self.access_token = Some(data.token);
         Ok(())
     }
 
@@ -356,7 +372,7 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        let token = data.token.unwrap();
+        let token = data.token;
         self.access_token_refresh_handler.as_ref().map(|v| {
             v(&token);
         });
@@ -392,7 +408,7 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        Ok(data.registrationId.unwrap())
+        Ok(data.registrationId)
     }
 
     pub(crate) async fn finish_register_device_request(&mut self,
@@ -423,7 +439,7 @@ impl APIClient {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        Ok(data.registrationId.unwrap())
+        Ok(data.registrationId)
     }
 }
 

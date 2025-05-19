@@ -45,20 +45,21 @@ impl Conversation {
             return "".to_string();
         };
 
-        let content_type = msg.content_type();
-        if content_type.starts_with("text/") {
-            let msg_as_body = msg.body_as_text();
-            let trimmed = msg_as_body.trim();
-            if trimmed.len() > MAX_SNIPPET_LENGTH {
+        let ctype = msg.content_type();
+        if ctype.starts_with("text/") {
+            let body = msg.body_as_text();
+            let trimmed = body.trim();
+            let snippet = if trimmed.len() > MAX_SNIPPET_LENGTH {
                 &trimmed[0..MAX_SNIPPET_LENGTH]
             } else {
                 &trimmed[..]
-            }.to_string()
-        } else if content_type.starts_with("image/") {
+            };
+            snippet.to_string()
+        } else if ctype.starts_with("image/") {
             "(Image)".to_string()
-        } else if content_type.starts_with("audio/") {
+        } else if ctype.starts_with("audio/") {
             "(Audio)".to_string()
-        } else if content_type.starts_with("video/") {
+        } else if ctype.starts_with("video/") {
             "(Video)".to_string()
         } else {
             "(Attachment)".to_string()
@@ -89,11 +90,11 @@ impl Conversation {
 
     pub(crate) fn update(&mut self, message: Message) -> Result<()> {
         if message.conversation_id() != self.id() {
-            return Err(Error::Argument("Message does not match the conversatio".into()))
+            return Err(Error::Argument("Message does not match the conversation".into()))
         }
 
         self.last_message = Some(message);
-        self.snippet = None;
+        self.snippet = None; // invalidate the previous snippet
         Ok(())
     }
 
@@ -110,11 +111,10 @@ impl PartialEq for Conversation {
 
 impl fmt::Display for Conversation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let snippet = self.snippet();
         write!(f, "Conversation:{} [{}, {}, {}]",
             self.title(),
             self.id().to_base58(),
-            snippet.as_str(),
+            self.snippet().as_str(),
             "TODO"
         )?;
         Ok(())

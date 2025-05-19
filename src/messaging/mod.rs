@@ -2,6 +2,8 @@ pub mod contact_listener;
 
 pub mod persistence;
 pub mod contact;
+pub(crate) mod contact_sync_result;
+pub(crate) mod contact_sequence;
 
 pub(crate) mod channel;
 pub(crate) mod channel_listener;
@@ -34,3 +36,17 @@ pub mod client;
 
 #[cfg(test)]
 mod unitests;
+
+pub(crate) fn is_none_or_empty_string(opt: &Option<String>) -> bool {
+    match opt {
+        Some(s) => s.is_empty(),
+        None => true,
+    }
+}
+pub(crate) fn is_false(b: &bool) -> bool {
+    !b
+}
+
+pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
+    *v == T::default()
+}

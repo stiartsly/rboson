@@ -1,5 +1,7 @@
+use std::fmt;
 use std::time::SystemTime;
-use serde::{Serialize};
+use std::sync::{Arc, Mutex};
+use serde::{Serialize, Deserialize};
 
 use crate::{
     Id,
@@ -15,6 +17,7 @@ use crate::{
 
 use super::{
     channel::Permission,
+    profile::Profile,
 };
 
 #[derive(Clone, Copy)]
@@ -172,61 +175,88 @@ impl ContactBuilder {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Contact {
     #[serde(rename = "id")]
-    id:             Id,
-
-    #[serde(rename = "home_peerid")]
-    home_peerid:    Id,
+    id              : Id,
 
     #[serde(skip)]
+    auto            : bool,
+
+    #[serde(skip)]  // internal use only.
     session_keypair : Option<signature::KeyPair>,
+    #[serde(skip)]  // internal use only.
+    encryption_keypair  : Option<cryptobox::KeyPair>,
+    #[serde(skip)]  //
+    session_id      : Option<Id>,
+
     #[serde(skip)]
-    encryption_keypair: Option<cryptobox::KeyPair>,
+    home_peerid     : Id,
+    #[serde(skip)]  // padding expicitly.
+    name            : Option<String>,
+    #[serde(skip)]  // padding expicitly.
+    avatar          : bool,
 
-    name:           String,
+    #[serde(rename="r")]
+    #[serde(skip_serializing_if = "super::is_none_or_empty_string")]
+    remark          : Option<String>,
+    #[serde(rename="ts")]
+    #[serde(skip_serializing_if = "super::is_none_or_empty_string")]
+    tags            : Option<String>,
+    #[serde(rename="d")]
+    #[serde(skip_serializing_if = "super::is_false")]
+    muted           : bool,
+    #[serde(rename="b")]
+    #[serde(skip_serializing_if = "super::is_false")]
+    blocked         : bool,
+    #[serde(rename="e")]
+    #[serde(skip_serializing_if = "super::is_false")]
+    deleted         : bool,
+    #[serde(rename="c")]
+    #[serde(skip_serializing_if = "super::is_zero")]
+    created         : u64,
+    #[serde(rename="m")]
+    #[serde(skip_serializing_if = "super::is_zero")]
+    last_modified   : u64,
+    #[serde(rename="v")]
+    revision        : i32,
 
-    avatar:         bool,
-
-    remark:         Option<String>,
-    tags:           Option<String>,
-
-    muted:          bool,
-    blocked:        bool,
-    deleted:        bool,
-
-    created:       SystemTime,
-    last_modified: SystemTime,
-    modified: bool,
-
-    revision: i32,
-
-    display_name:   Option<String>,
+    #[serde(skip)]
+    modified        : bool,
+    #[serde(skip)]
+    last_updated    : Option<SystemTime>,
+    #[serde(skip)]
+    display_name    : Option<String>,
 }
 
 #[allow(unused)]
 impl Contact {
-    pub(crate) fn new(b: &mut ContactBuilder) -> Self {
+    pub(crate) fn new(b: &ContactBuilder) -> Self {
         Self {
-            id:         std::mem::take(&mut b.id),
-            home_peerid: std::mem::take(&mut b.home_peerid).unwrap_or_default(),
-            name:       b.name.take().unwrap_or_default(),
-            avatar:     b.avatar,
-            remark:     b.remark.take(),
-            tags:       b.tags.take(),
-            muted:      b.muted,
-            blocked:    b.blocked,
-            deleted:    b.deleted,
-            created:    b.created.clone(),
-            last_modified:  b.last_modified.clone(),
-            modified:   false,
-            revision:   b.revision,
-
+            id          : b.id.clone(),
+            auto        : false,
+            home_peerid : b.home_peerid.clone().unwrap(),
+            name        : b.name.clone(),
+            avatar      : b.avatar,
+            remark      : b.remark.clone(),
+            tags        : b.tags.clone(),
+            muted       : b.muted,
+            blocked     : b.blocked,
+            deleted     : b.deleted,
+            created     : b.created.duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+            last_modified:b.last_modified.duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+            revision    : b.revision,
+            modified    :   false,
+            last_updated: None,
             display_name: None,
 
-            session_keypair: None,
-            encryption_keypair: None,
+            session_keypair     : None,
+            encryption_keypair  : None,
+            session_id          : None,
         }
     }
 
@@ -242,15 +272,14 @@ impl Contact {
         &self.home_peerid
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_ref().map(|v| v.as_str())
     }
 
     pub fn set_name(&mut self, name: &str) {
-        if self.name.is_empty() {
-            return;
-        }
-        self.name = name.to_string();
+        self.name = Some(name.into());
+        self.display_name = None;
+        self.touch();
     }
 
     pub fn has_avatar(&self) -> bool {
@@ -275,9 +304,11 @@ impl Contact {
     pub fn set_remark(&mut self, remark: &str) {
         if remark.is_empty() {
             self.remark = None;
-            return;
+        }else {
+            self.remark = Some(remark.into());
         }
-        self.remark = Some(remark.to_string());
+        self.display_name = None;
+        self.touch();
     }
 
     pub fn tags(&self) -> Option<&str> {
@@ -287,9 +318,11 @@ impl Contact {
     pub fn set_tags(&mut self, tags: &str) {
         if tags.is_empty() {
             self.tags = None;
-            return;
+        } else {
+            self.tags = Some(tags.into());
         }
-        self.tags = Some(tags.to_string());
+        self.display_name = None;
+        self.touch();
     }
 
     pub fn is_muted(&self) -> bool {
@@ -298,6 +331,7 @@ impl Contact {
 
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
+        self.touch();
     }
 
     pub fn is_blocked(&self) -> bool {
@@ -306,6 +340,7 @@ impl Contact {
 
     pub fn set_blocked(&mut self, blocked: bool) {
         self.blocked = blocked;
+        self.touch();
     }
 
     pub fn is_delted(&self) -> bool {
@@ -314,6 +349,7 @@ impl Contact {
 
     pub fn set_deleted(&mut self, deleted: bool) {
         self.deleted = deleted;
+        self.touch();
     }
 
     pub fn revision(&self) -> i32 {
@@ -325,28 +361,66 @@ impl Contact {
     }
 
     pub fn created(&self) -> SystemTime {
-        self.created.clone()
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.created)
     }
 
     pub fn last_modified(&self) -> SystemTime {
-        self.last_modified.clone()
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.last_modified)
     }
 
     pub fn is_modified(&self) -> bool {
         self.modified
     }
 
+    pub(crate) fn udpated(&mut self) {
+        self.last_updated = Some(SystemTime::now());
+    }
+
+    pub fn last_updated(&self) -> SystemTime{
+        self.last_updated.unwrap_or(SystemTime::UNIX_EPOCH)
+    }
+
     pub fn display_name(&self) -> String {
         unimplemented!()
     }
 
-    fn init_session_key(&mut self, private_key: &[u8]) -> Result<()> {
-        // TODO more.
+    pub fn update_profile(&mut self, profile: &Profile) {
+        unimplemented!()
+    }
 
-        let session_keypair = KeyPair::try_from(private_key)?;
-        let cryptobox_keypair = cryptobox::KeyPair::from(&session_keypair);
+    pub fn update_contact(&mut self, contact: &Contact) {
+        unimplemented!()
+    }
+
+    fn get_self_encryption_context(&self) -> Arc<Mutex<Option<Box<CryptoContext>>>> {
+        unimplemented!()
+    }
+
+    fn init_session_key(&mut self, private_key: &[u8]) -> Result<()> {
+        if private_key.len() != signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
+            return Err(Error::Argument(format!("Invalid session key size")));
+        }
+
+        let ctx = self.get_self_encryption_context();
+        let ctx = ctx.lock().unwrap();
+
+        let Some(ctx) = ctx.as_ref() else {
+            return Err(Error::State("No self encryption context".into()));
+        };
+
+        let private_key = ctx.decrypt_into(private_key).map_err(|e| {
+            Error::Crypto(format!("Failed to decrypt session key: {}", e))
+        })?;
+
+        if private_key.len() != signature::PrivateKey::BYTES {
+            return Err(Error::Crypto(format!("Invalid session key size")));
+        }
+
+        let session_keypair = KeyPair::try_from(private_key.as_slice())?;
+        self.session_id = Some(Id::from(session_keypair.to_public_key()));
+        self.encryption_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
         self.session_keypair = Some(session_keypair);
-        self.encryption_keypair = Some(cryptobox_keypair);
+
         Ok(())
     }
 
@@ -357,7 +431,16 @@ impl Contact {
     }
 
     fn touch(&mut self) {
-        unimplemented!()
+        if self.auto {
+            self.auto = false;
+        }
+        if !self.modified {
+            self.modified = true;
+            self.increment_revision();
+        }
+        self.last_modified = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
     }
 }
 
@@ -453,5 +536,12 @@ impl Identity for Contact {
         CryptoBox::try_from((&id.to_encryption_key(), keypair.private_key())).map(|v|
             CryptoContext::from_cryptobox(id, v)
         )
+    }
+}
+
+impl fmt::Display for Contact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Contact: {}[", self.id.to_base58())?;
+        unimplemented!()
     }
 }

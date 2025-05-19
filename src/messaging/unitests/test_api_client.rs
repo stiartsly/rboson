@@ -110,10 +110,11 @@ async fn test_regsister_device_request() {
         .build()
         .unwrap();
 
-    let result = client2.register_device_request("Alice", "Example").await;
+    let result = client2.register_device_request("Alice", "Example2").await;
     assert!(result.is_ok());
 
     let registration_id = result.unwrap();
     let result = client1.finish_register_device_request(&registration_id, 0).await;
+    println!("result: {:?}", result);
     assert!(result.is_ok());
 }

@@ -6,9 +6,9 @@ use std::result;
 #[derive(Debug)]
 pub enum Error {
     NotImplemented(String),
+    Argument(String),
     Io(String),
     Network(String),
-    Argument(String),
     State(String),
     Protocol(String),
     Crypto(String),

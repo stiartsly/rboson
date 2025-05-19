@@ -5,3 +5,4 @@
 #[cfg(test)] mod test_invite_ticket;
 #[cfg(test)] mod test_conversation;
 #[cfg(test)] mod test_contact;
+#[cfg(test)] mod test_channel;

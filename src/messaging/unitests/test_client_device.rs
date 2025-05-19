@@ -5,9 +5,9 @@ use crate::messaging::{
 
 #[test]
 fn test_serde_and_deserde() {
-    let id = Id::random();
+    let deviceid = Id::random();
     let device = ClientDevice::new(
-        &id,
+        &deviceid,
         "Alice",
         "Example",
         1234567890,
@@ -16,10 +16,11 @@ fn test_serde_and_deserde() {
     );
 
     let serialized = serde_json::to_string(&device).unwrap();
-    println!("Serialized: {}", serialized);
-
     let deserialized: ClientDevice = serde_json::from_str(&serialized).unwrap();
+    assert!(deserialized.client_id().is_empty());
 
+    assert_eq!(device.id().clone(), deviceid);
+    assert_eq!(device.client_id().is_empty(), false);
     assert_eq!(device.id(), deserialized.id());
     assert_eq!(device.name(), deserialized.name());
     assert_eq!(device.app_name(), deserialized.app_name());

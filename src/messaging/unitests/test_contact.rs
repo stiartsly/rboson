@@ -30,9 +30,9 @@ fn test_personal_contact() {
     assert_eq!(contact.id(), &id);
     assert_eq!(contact.home_peerid(), &peerid);
 
-    assert_eq!(contact.name(), "Alice");
+    assert_eq!(contact.name(), Some("Alice"));
     contact.set_name("Alice Smith");
-    assert_eq!(contact.name(), "Alice Smith");
+    assert_eq!(contact.name(), Some("Alice Smith"));
 
     assert_eq!(contact.has_avatar(), true);
     assert_eq!(contact.avatar_url().is_some(), true);
@@ -71,14 +71,14 @@ fn test_personal_contact() {
     assert_eq!(contact.is_delted(), true);
 
     assert_eq!(contact.created(), created);
-    assert_eq!(contact.last_modified(), modified);
-    assert_eq!(contact.is_modified(), false);
-    assert_eq!(contact.revision(), revision);
+    assert_eq!(contact.last_modified() > modified, true);
+    assert_eq!(contact.is_modified(), true);
+    assert_eq!(contact.revision() > revision, true);
 
 }
 
+#[ignore]
 #[test]
 fn test_group_contact() {
-    //let converstaion = Converstation::new()
-    assert_eq!(true, true);
+    unimplemented!();
 }

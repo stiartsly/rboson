@@ -4,6 +4,7 @@ pub mod persistence;
 pub mod contact;
 pub(crate) mod contact_sync_result;
 pub(crate) mod contact_sequence;
+pub(crate) mod contact_update;
 
 pub(crate) mod channel;
 pub(crate) mod channel_listener;

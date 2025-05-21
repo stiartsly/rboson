@@ -119,6 +119,15 @@ struct FinishRegisterDeviceRequestData {
     sig         : Vec<u8>,
 }
 
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct ProfileData {
+    userName    : String,
+    avatar      : bool,
+    #[serde(with = "base64_as_string")]
+    profileSig  : Vec<u8>,
+}
+
 pub(crate) struct Builder<'a> {
     home_peerid : Option<&'a Id>,
     base_url    : Option<&'a str>,
@@ -440,6 +449,45 @@ impl APIClient {
         })?;
 
         Ok(data.registrationId)
+    }
+
+    pub(crate) async fn update_profile(&mut self,
+        name: String,
+        avatar: bool
+    ) -> Result<()> {
+        let nonce = self.nonce();
+        let profile_digest = profile::digest(self.user.id(), &self.peerid, Some(&name), avatar, None);
+        let data = ProfileData {
+            userName    : name,
+            avatar      : avatar,
+            profileSig  : profile_digest,
+        };
+
+        let url_path = format!("/api/v1/profile");
+        let url = self.base_url.join(&url_path).unwrap();
+        let result = self.client.post(url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&data)
+            .send()
+            .await;
+
+        result.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn upload_avatar(&mut self,
+        content_type: &str,
+        avatar: &[u8]
+    ) -> Result<String> {
+        unimplemented!()
     }
 }
 

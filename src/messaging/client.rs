@@ -13,6 +13,7 @@ use crate::{
     error::Result,
     Error,
     Identity,
+    ServiceIds
 };
 
 use crate::core::{
@@ -25,7 +26,7 @@ use super::{
     channel_listener::ChannelListener,
     contact_listener::ContactListener,
     messaging_client::MessagingClient,
-    api_client::{APIClient, Builder as APIClientBuilder},
+    api_client::{self, APIClient},
 
     user_agent::{UserAgent, DefaultUserAgent},
     persistence::database::Database,
@@ -245,12 +246,11 @@ impl<'a> Builder<'a> {
                 warn!("Messaging repository is configured, user profile will be ignored.");
             }
         }
-
         Ok(agent)
     }
 
     async fn register_agent(&self, _: Rc<RefCell<dyn UserAgent>>) -> Result<()> {
-        let mut api_client = APIClientBuilder::new()
+        let mut api_client = api_client::Builder::new()
             .with_base_url(self.api_url.as_ref().unwrap().as_str())
             .with_home_peerid(self.peerid.as_ref().unwrap())
             .with_user_identity(self.user.as_ref().unwrap())
@@ -300,6 +300,10 @@ impl<'a> Builder<'a> {
         self.register_agent(agent).await?;
         Client::new(self)
     }
+
+    pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
+        APIClient::service_ids(url).await
+    }
 }
 
 #[allow(dead_code)]
@@ -316,7 +320,7 @@ impl Client {
             userid: b.user.as_ref().unwrap().id().clone(),
             dev_id: b.device.as_ref().unwrap().id().clone(),
 
-            api_client: APIClientBuilder::new()
+            api_client: api_client::Builder::new()
                 .with_base_url(b.api_url.as_ref().unwrap().as_str())
                 .with_home_peerid(b.peerid.as_ref().unwrap())
                 .with_user_identity(b.user.as_ref().unwrap())
@@ -333,6 +337,10 @@ impl Client {
 
     pub fn stop(&self) {
         println!("Messaging client stopped");
+    }
+
+    pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
+        APIClient::service_ids(url).await
     }
 }
 

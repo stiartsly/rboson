@@ -38,7 +38,12 @@ pub use {
 
     activeproxy::ActiveProxyClient,
 
-    messaging::client_device::ClientDevice
+    messaging::client_device::ClientDevice,
+    messaging::service_ids::ServiceIds,
+    messaging::client::{
+        Client as MessagingClient,
+        Builder as MessagingClientBuilder
+    },
 };
 
 #[macro_export]

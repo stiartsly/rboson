@@ -16,7 +16,8 @@ use crate::core::{
 };
 
 use crate::messaging::{
-    profile::{self, Profile}
+    profile::{self, Profile},
+    service_ids::{JsonServiceIds, ServiceIds},
 };
 
 static HTTP_HEADER_ACCEPT: &str = "Accept";
@@ -78,6 +79,7 @@ impl<'a> Builder<'a> {
     }
 }
 
+#[allow(unused)]
 pub(crate) struct APIClient {
     client      : Client,
     peerid      : Id,
@@ -105,10 +107,6 @@ impl APIClient {
         let client = Client::builder()
             .user_agent("boson-rs")
             .timeout(std::time::Duration::from_secs(30))
-            .read_timeout(std::time::Duration::from_secs(30))
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .danger_accept_invalid_certs(false)
-            .danger_accept_invalid_hostnames(false)
             .build()
             .map_err(|e| {
                 Error::Argument(format!("Failed to create http client: {e}"))
@@ -126,10 +124,6 @@ impl APIClient {
 
             nonce   : Nonce::random(),
         })
-    }
-
-    fn set_access_token(&mut self, access_token: &str) {
-        self.access_token = Some(access_token.to_string());
     }
 
     pub(crate) fn set_access_token_refresh_handler(&mut self, handler: fn(&str)) {
@@ -153,40 +147,27 @@ impl APIClient {
         self.access_token.as_ref().map(|v|v.as_str())
     }
 
-    pub(crate) async fn service_ids(&self) -> Result<(Id, Id)> {
-        #[derive(Deserialize)]
-        #[allow(non_snake_case)]
-        struct ResponseData {
-            peerId: String,
-            nodeId: String
-        }
+    pub(crate) async fn service_ids(base_url: &Url) -> Result<ServiceIds> {
+        let url = base_url.join("/api/v1/service/id").unwrap();
+        let client = Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .user_agent("boson-rs")
+                .build()
+                .map_err(|e| Error::Argument(format!("Failed to create http client: {e}")))?;
 
-        impl ResponseData {
-            fn ids(&self) -> Result<(Id, Id)> {
-                let Ok(peerid) = Id::try_from(self.peerId.as_str()) else {
-                    return Err(Error::State("Http error: invalid peer id".into()));
-                };
-                let Ok(nodeid) = Id::try_from(self.nodeId.as_str()) else {
-                    return Err(Error::State("Http error: invalid node id".into()));
-                };
-                Ok((peerid, nodeid))
-            }
-        }
-
-        let url = self.base_url.join("/api/v1/service/id").unwrap();
-        let rsp = self.client.get(url)
+        let rsp = client.get(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
-            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .send()
             .await;
 
-        let data = rsp.map_err(|e|
-            Error::State("Http error: sending http request error {e}".into())
-        )?.error_for_status().map_err(|e|
-            Error::State("Http error: invalid http response {e}".into())
-        )?.json::<ResponseData>().await.map_err(|e|
-            Error::State("Http error: deserialize json error {e}".into())
-        )?;
+        let data = rsp.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<JsonServiceIds>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
         data.ids()
     }
 
@@ -315,7 +296,7 @@ impl APIClient {
         Ok(())
     }
 
-    pub(crate) async fn register_device_with_user(&mut self,
+    pub(crate) async fn register_new_device(&mut self,
         passphrase: &str,
         device_name: &str,
         app_name: &str
@@ -538,15 +519,15 @@ impl APIClient {
     }
 
     pub(crate) async fn upload_avatar(&mut self,
-        content_type: &str,
-        avatar: &[u8]
+        _content_type: &str,
+        _avatar: &[u8]
     ) -> Result<String> {
         unimplemented!()
     }
 
     pub(crate) async fn upload_avatar_with_filename(&mut self,
-        content_type: &str,
-        file_name: String,
+        _content_type: &str,
+        _file_name: String,
     ) -> Result<String> {
         unimplemented!()
     }

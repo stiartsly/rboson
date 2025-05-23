@@ -34,6 +34,7 @@ pub mod user_agent;
 pub mod messaging_repository;
 
 pub mod client;
+pub mod service_ids;
 
 #[cfg(test)]
 mod unitests;

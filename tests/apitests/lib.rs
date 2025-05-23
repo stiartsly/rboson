@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod dht;
+#[cfg(test)]
+mod messaging;
 
 use std::env;
 use std::fs;

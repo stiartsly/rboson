@@ -1,12 +1,11 @@
 use std::fmt;
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 
 use crate::Id;
 
-#[allow(unused)]
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Deserialize, Hash)]
 pub struct Profile {
 	#[serde(rename = "id")]
 	id: Id,
@@ -15,6 +14,7 @@ pub struct Profile {
     home_peerid: Id,
 
     #[serde(rename = "ps")]
+    #[serde(with = "super::base64_as_string")]
     home_peer_sig: Vec<u8>,
 
 	#[serde(rename = "n")]
@@ -27,12 +27,13 @@ pub struct Profile {
     notice: Option<String>,
 
     #[serde(rename = "s")]
+    #[serde(with = "super::base64_as_string")]
     sig: Vec<u8>
 }
 
 #[allow(unused)]
 impl Profile {
-    pub(crate) fn new(id: &Id,
+    /* pub(crate) fn new(id: &Id,
             home_peerid: &Id,
             name: &str,
             avatar: bool,
@@ -49,7 +50,7 @@ impl Profile {
             notice		: Some(notice.to_string()),
             sig			: sig.to_vec()
         }
-    }
+    }*/
 
     pub fn id(&self) -> &Id {
         &self.id
@@ -107,7 +108,13 @@ impl fmt::Display for Profile {
     }
 }
 
-pub(crate) fn digest(id: &Id, home_peerid: &Id, name: Option<&str>, avatar: bool, notice: Option<&str>) -> Vec<u8> {
+pub(crate) fn digest(id: &Id,
+    home_peerid: &Id,
+    name: Option<&str>,
+    avatar: bool,
+    notice: Option<&str>
+) -> Vec<u8> {
+
     let mut sha256 = Sha256::new();
     sha256.update(id.as_bytes());
     sha256.update(home_peerid.as_bytes());

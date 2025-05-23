@@ -51,3 +51,26 @@ pub(crate) fn is_false(b: &bool) -> bool {
 pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
     *v == T::default()
 }
+
+mod base64_as_string {
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use base64::{engine::general_purpose, Engine as _};
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer,
+    {
+        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        serializer.serialize_str(&encoded)
+    }
+
+    #[allow(unused)]
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        general_purpose::URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(D::Error::custom)
+    }
+}

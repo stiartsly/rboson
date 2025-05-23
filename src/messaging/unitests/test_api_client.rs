@@ -1,5 +1,6 @@
 use crate::{
     Id,
+    Identity,
     core::crypto_identity::CryptoIdentity,
     signature
 };
@@ -49,7 +50,7 @@ async fn test_register_user_and_device() {
         .build()
         .unwrap();
 
-    let result = client.register_user_and_device("password", "Alice", "Example", "Example").await;
+    let result = client.register_user_with_device("password", "Alice", "Example", "Example").await;
     assert!(result.is_ok());
 }
 
@@ -68,7 +69,7 @@ async fn test_register_device_with_user() {
         .build()
         .unwrap();
 
-    let result = client1.register_user_and_device("password", "Alice", "Example", "Example").await;
+    let result = client1.register_user_with_device("password", "Alice", "Example", "Example").await;
     assert!(result.is_ok());
 
     let mut client2 = Builder::new()
@@ -99,7 +100,7 @@ async fn test_regsister_device_request() {
         .build()
         .unwrap();
 
-    let result = client1.register_user_and_device("password", "Alice", "Example", "Example").await;
+    let result = client1.register_user_with_device("password", "Alice", "Example", "Example").await;
     assert!(result.is_ok());
 
     let mut client2 = Builder::new()
@@ -115,6 +116,32 @@ async fn test_regsister_device_request() {
 
     let registration_id = result.unwrap();
     let result = client1.finish_register_device_request(&registration_id, 0).await;
+    println!("result: {:?}", result);
+    assert!(result.is_ok());
+}
+
+#[ignore]
+#[tokio::test]
+async fn test_update_profile() {
+    let peerid:Id = PEERID.try_into().unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+
+    let mut client = Builder::new()
+        .with_base_url(BASE_URL)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device)
+        .build()
+        .unwrap();
+
+    let result = client.register_user_with_device("password", "Alice", "Example", "Example").await;
+    assert!(result.is_ok());
+
+    let result = client.update_profile("Bob", false).await;
+    assert!(result.is_ok());
+
+    let result = client.get_profile(user.id()).await;
     println!("result: {:?}", result);
     assert!(result.is_ok());
 }

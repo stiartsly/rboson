@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use reqwest::Client;
 use url::Url;
 use serde::{Serialize, Deserialize};
@@ -16,117 +15,13 @@ use crate::core::{
     cryptobox::Nonce,
 };
 
-use super::profile;
+use crate::messaging::{
+    profile::{self, Profile}
+};
 
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct RefreshAccessTokenReqData {
-    userId      : Id,
-    deviceId    : Id,
-    #[serde(with = "base64_as_string")]
-    nonce       : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    userSig     : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    deviceSig   : Vec<u8>
-}
-
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct ServiceIdsData {
-    peerId: String,
-    nodeId: String
-}
-
-impl ServiceIdsData {
-    fn ids(&self) -> Result<(Id, Id)> {
-        let Ok(peerid) = Id::try_from(self.peerId.as_str()) else {
-            return Err(Error::State("Http error: invalid peer id".into()));
-        };
-        let Ok(nodeid) = Id::try_from(self.nodeId.as_str()) else {
-            return Err(Error::State("Http error: invalid node id".into()));
-        };
-        Ok((peerid, nodeid))
-    }
-}
-
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct AccessTokenData {
-    token       : String,
-}
-
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct UserData {
-    userId      : Id,
-    userName    : String,
-    passphrase  : String,
-    deviceId    : Id,
-    deviceName  : String,
-    appName     : String,
-    #[serde(with = "base64_as_string")]
-    nonce       : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    userSig     : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    deviceSig   : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    profileSig  : Vec<u8>
-}
-
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct DeviceData {
-    userId      : Id,
-    passphrase  : String,
-    deviceId    : Id,
-    deviceName  : String,
-    appName     : String,
-    #[serde(with = "base64_as_string")]
-    nonce       : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    userSig     : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    deviceSig   : Vec<u8>
-}
-
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct RegisterDeviceRequestData {
-    deviceId    : Id,
-    deviceName  : String,
-    appName     : String,
-    #[serde(with = "base64_as_string")]
-    nonce       : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    sig         : Vec<u8>,
-}
-
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct DeviceRegisterationData {
-    registrationId: String,
-}
-
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct FinishRegisterDeviceRequestData {
-    deviceId    : Id,
-   #[serde(with = "base64_as_string")]
-    nonce       : Vec<u8>,
-    #[serde(with = "base64_as_string")]
-    sig         : Vec<u8>,
-}
-
-#[derive(Serialize)]
-#[allow(non_snake_case)]
-struct ProfileData {
-    userName    : String,
-    avatar      : bool,
-    #[serde(with = "base64_as_string")]
-    profileSig  : Vec<u8>,
-}
+static HTTP_HEADER_ACCEPT: &str = "Accept";
+static HTTP_HEADER_CONTENT_TYPE: &str = "Content-Type";
+static HTTP_BODY_FORMAT_JSON: &str = "application/json";
 
 pub(crate) struct Builder<'a> {
     home_peerid : Option<&'a Id>,
@@ -193,7 +88,7 @@ pub(crate) struct APIClient {
     access_token: Option<String>,
     access_token_refresh_handler: Option<Box<dyn Fn(&str)>>,
 
-    nonce       : RefCell<Nonce>,
+    nonce       : Nonce,
 }
 
 #[allow(unused)]
@@ -229,7 +124,7 @@ impl APIClient {
             access_token: None,
             access_token_refresh_handler: None,
 
-            nonce   : RefCell::new(Nonce::random())
+            nonce   : Nonce::random(),
         })
     }
 
@@ -249,57 +144,95 @@ impl APIClient {
         &self.device
     }
 
+    fn increment_nonce(&mut self) -> Nonce {
+        self.nonce.increment();
+        self.nonce.clone()
+    }
+
     pub(crate) fn access_token(&self) -> Option<&str> {
         self.access_token.as_ref().map(|v|v.as_str())
     }
 
     pub(crate) async fn service_ids(&self) -> Result<(Id, Id)> {
+        #[derive(Deserialize)]
+        #[allow(non_snake_case)]
+        struct ResponseData {
+            peerId: String,
+            nodeId: String
+        }
+
+        impl ResponseData {
+            fn ids(&self) -> Result<(Id, Id)> {
+                let Ok(peerid) = Id::try_from(self.peerId.as_str()) else {
+                    return Err(Error::State("Http error: invalid peer id".into()));
+                };
+                let Ok(nodeid) = Id::try_from(self.nodeId.as_str()) else {
+                    return Err(Error::State("Http error: invalid node id".into()));
+                };
+                Ok((peerid, nodeid))
+            }
+        }
+
         let url = self.base_url.join("/api/v1/service/id").unwrap();
-        let result = self.client.get(url)
-            .header("Accept", "application/json")
+        let rsp = self.client.get(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .send()
             .await;
 
-        let data = result.map_err(|e|
+        let data = rsp.map_err(|e|
             Error::State("Http error: sending http request error {e}".into())
         )?.error_for_status().map_err(|e|
             Error::State("Http error: invalid http response {e}".into())
-        )?.json::<ServiceIdsData>().await.map_err(|e|
+        )?.json::<ResponseData>().await.map_err(|e|
             Error::State("Http error: deserialize json error {e}".into())
         )?;
-
         data.ids()
     }
 
-    fn nonce(&self) -> &RefCell<Nonce> {
-        self.nonce.borrow_mut().increment();
-        &self.nonce
-    }
-
     async fn refresh_access_token(&mut self) -> Result<()> {
-        let nonce = self.nonce();
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            userId      : &'a Id,
+            deviceId    : &'a Id,
+            #[serde(with = "super::base64_as_string")]
+            nonce       : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            userSig     : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            deviceSig   : &'a [u8],
+        }
 
-        let data = RefreshAccessTokenReqData {
-            userId      : self.user.id().clone(),
-            deviceId    : self.device.id().clone(),
-            nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap()
+        #[derive(Deserialize)]
+        struct ResponseData {
+            token       : String,
+        }
+
+        let nonce = self.increment_nonce();
+        let usr_sig = self.user.sign_into(nonce.as_bytes()).unwrap();
+        let dev_sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+        let data = RequestData {
+            userId      : self.user.id(),
+            deviceId    : self.device.id(),
+            nonce       : nonce.as_bytes(),
+            userSig     : usr_sig.as_slice(),
+            deviceSig   : dev_sig.as_slice(),
         };
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let rsp = self.client.post(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = result.map_err(|e| {
+        let data = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<AccessTokenData>().await.map_err(|e| {
+        )?.json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
@@ -307,40 +240,74 @@ impl APIClient {
         Ok(())
     }
 
-    pub(crate) async fn register_user_and_device(&mut self,
+    pub(crate) async fn register_user_with_device(&mut self,
         passphrase: &str,
         user_name: &str,
         device_name: &str,
         app_name: &str
     ) -> Result<()> {
-        let nonce = self.nonce();
-        let profile_digest = profile::digest(self.user.id(), &self.peerid, Some(user_name), false, None);
-        let data = UserData {
-            userId      : self.user.id().clone(),
-            userName    : user_name.to_string(),
-            passphrase  : passphrase.to_string(),
-            deviceId    : self.device.id().clone(),
-            deviceName  : device_name.to_string(),
-            appName     : app_name.to_string(),
-            nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            profileSig  : self.user.sign_into(&profile_digest).unwrap(),
+
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            userId      : &'a Id,
+            userName    : &'a str,
+            passphrase  : &'a str,
+            deviceId    : &'a Id,
+            deviceName  : &'a str,
+            appName     : &'a str,
+            #[serde(with = "super::base64_as_string")]
+            nonce       : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            userSig     : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            deviceSig   : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            profileSig  : &'a [u8],
+        }
+
+        #[derive(Deserialize)]
+        struct ResponseData {
+            token       : String,
+        }
+
+        let nonce = self.increment_nonce();
+        let usr_sig = self.user.sign_into(nonce.as_bytes()).unwrap();
+        let dev_sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+        let profile_sig = self.user.sign_into(&profile::digest(
+            self.user.id(),
+            &self.peerid,
+            Some(user_name),
+            false,
+            None
+        )).unwrap();
+
+        let data = RequestData {
+            userId      : self.user.id(),
+            userName    : user_name,
+            passphrase  : passphrase,
+            deviceId    : self.device.id(),
+            deviceName  : device_name,
+            appName     : app_name,
+            nonce       : nonce.as_bytes(),
+            userSig     : usr_sig.as_slice(),
+            deviceSig   : dev_sig.as_slice(),
+            profileSig  : profile_sig.as_slice(),
         };
 
         let url = self.base_url.join("/api/v1/users").unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let rsp = self.client.post(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = result.map_err(|e| {
+        let data = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<AccessTokenData>().await.map_err(|e| {
+        )?.json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
@@ -353,31 +320,55 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-        let nonce = self.nonce();
-        let data = DeviceData {
-            userId      : self.user.id().clone(),
-            passphrase  : passphrase.to_string(),
-            deviceId    : self.device.id().clone(),
-            deviceName  : device_name.to_string(),
-            appName     : app_name.to_string(),
-            nonce       : nonce.borrow().as_bytes().to_vec(),
-            userSig     : self.user.sign_into(nonce.borrow().as_bytes()).unwrap(),
-            deviceSig   : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            userId      : &'a Id,
+            passphrase  : &'a str,
+            deviceId    : &'a Id,
+            deviceName  : &'a str,
+            appName     : &'a str,
+            #[serde(with = "super::base64_as_string")]
+            nonce       : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            userSig     : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            deviceSig   : &'a [u8],
+        }
+
+        #[derive(Deserialize)]
+        struct ResponseData {
+            token       : String,
+        }
+
+        let nonce = self.increment_nonce();
+        let usr_sig = self.user.sign_into(nonce.as_bytes()).unwrap();
+        let dev_sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+        let data = RequestData {
+            userId      : self.user.id(),
+            passphrase  : passphrase,
+            deviceId    : self.device.id(),
+            deviceName  : device_name,
+            appName     : app_name,
+            nonce       : nonce.as_bytes(),
+            userSig     : usr_sig.as_slice(),
+            deviceSig   : dev_sig.as_slice(),
         };
 
         let url = self.base_url.join("/api/v1/devices").unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let rsp = self.client.post(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = result.map_err(|e| {
+        let data = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<AccessTokenData>().await.map_err(|e| {
+        )?.json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
@@ -392,31 +383,50 @@ impl APIClient {
         device_name: &str,
         app_name: &str
     ) -> Result<String> {
-        let nonce = self.nonce();
-        let data = RegisterDeviceRequestData {
-            deviceId    : self.device.id().clone(),
-            deviceName  : device_name.to_string(),
-            appName     : app_name.to_string(),
-            nonce       : nonce.borrow().as_bytes().to_vec(),
-            sig         : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            deviceId    : &'a Id,
+            deviceName  : &'a str,
+            appName     : &'a str,
+            #[serde(with = "super::base64_as_string")]
+            nonce       : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            sig         : &'a [u8],
+        }
+
+        #[derive(Deserialize)]
+        #[allow(non_snake_case)]
+        struct ResponseData {
+            registrationId: String,
+        }
+
+        let nonce = self.increment_nonce();
+        let sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+        let data = RequestData {
+            deviceId    : self.device.id(),
+            deviceName  : device_name,
+            appName     : app_name,
+            nonce       : nonce.as_bytes(),
+            sig         : sig.as_slice(),
         };
 
         let url = self.base_url.join("/api/v1/devices/registrations").unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let rsp = self.client.post(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = result.map_err(|e| {
+        let data = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+        )?.json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
-
         Ok(data.registrationId)
     }
 
@@ -424,63 +434,107 @@ impl APIClient {
         registration_id: &str,
         _timeout: u64
     ) -> Result<String> {
-        let nonce = self.nonce();
-        let data = FinishRegisterDeviceRequestData {
-            deviceId    : self.device.id().clone(),
-            nonce       : nonce.borrow().as_bytes().to_vec(),
-            sig         : self.device.sign_into(nonce.borrow().as_bytes()).unwrap(),
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            deviceId    : &'a Id,
+            #[serde(with = "super::base64_as_string")]
+            nonce       : &'a [u8],
+            #[serde(with = "super::base64_as_string")]
+            sig         : &'a [u8],
+        }
+
+        #[derive(Deserialize)]
+        #[allow(non_snake_case)]
+        struct ResponseData {
+            registrationId: String,
+        }
+
+        let nonce = self.increment_nonce();
+        let sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+        let data = RequestData {
+            deviceId    : self.device.id(),
+            nonce       : nonce.as_bytes(),
+            sig         : sig.as_slice(),
         };
 
-        let url_path = format!("/api/v1/devices/registrations/{registration_id}/0");
-        let url = self.base_url.join(&url_path).unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let url = self.base_url.join("/api/v1/devices/registrations/{registration_id}/0").unwrap();
+        let rsp = self.client.post(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = result.map_err(|e| {
+        let data = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+        )?.json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
-
         Ok(data.registrationId)
     }
 
-    pub(crate) async fn update_profile(&mut self,
-        name: String,
-        avatar: bool
-    ) -> Result<()> {
-        let nonce = self.nonce();
-        let profile_digest = profile::digest(self.user.id(), &self.peerid, Some(&name), avatar, None);
-        let data = ProfileData {
+    pub(crate) async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct RequestData<'a> {
+            userName    : &'a str,
+            avatar      : bool,
+            #[serde(with = "super::base64_as_string")]
+            profileSig  : &'a [u8],
+        }
+
+        let sig = self.user.sign_into(&profile::digest(
+            self.user.id(),
+            &self.peerid,
+            Some(name),
+            avatar,
+            None
+        )).unwrap();
+
+        let data = RequestData {
             userName    : name,
-            avatar      : avatar,
-            profileSig  : profile_digest,
+            avatar      : false,
+            profileSig  : sig.as_slice(),
         };
 
-        let url_path = format!("/api/v1/profile");
-        let url = self.base_url.join(&url_path).unwrap();
-        let result = self.client.post(url)
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
+        let url = self.base_url.join("/api/v1/profile").unwrap();
+        let rsp = self.client.put(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .bearer_auth(self.access_token().unwrap())
             .json(&data)
             .send()
             .await;
 
-        result.map_err(|e| {
+        rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
         })?.error_for_status().map_err(|e|
             Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<DeviceRegisterationData>().await.map_err(|e| {
+        )?;
+        Ok(())
+    }
+
+    #[allow(unused)]
+    pub(crate) async fn get_profile(&mut self, id: &Id) -> Result<profile::Profile> {
+        let path = format!("/api/v1/profile/{}", id.to_base58());
+        let url = self.base_url.join(path.as_str()).unwrap();
+        let rsp = self.client.get(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .send().await;
+
+        let data = rsp.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<Profile>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
 
-        Ok(())
+        Ok(data)
     }
 
     pub(crate) async fn upload_avatar(&mut self,
@@ -489,27 +543,11 @@ impl APIClient {
     ) -> Result<String> {
         unimplemented!()
     }
-}
 
-mod base64_as_string {
-    use serde::{Deserializer, Serializer};
-    use serde::de::{Error, Deserialize};
-    use base64::{engine::general_purpose, Engine as _};
-
-    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-        serializer.serialize_str(&encoded)
-    }
-
-    #[allow(unused)]
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        general_purpose::URL_SAFE_NO_PAD
-            .decode(&s)
-            .map_err(D::Error::custom)
+    pub(crate) async fn upload_avatar_with_filename(&mut self,
+        content_type: &str,
+        file_name: String,
+    ) -> Result<String> {
+        unimplemented!()
     }
 }

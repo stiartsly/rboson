@@ -262,7 +262,7 @@ impl<'a> Builder<'a> {
         let device = self.user_agent.as_ref().unwrap().borrow().device();
 
         if self.register_user_and_device {
-            api_client.register_user_and_device(
+            api_client.register_user_with_device(
                 self.passphrase.as_ref().unwrap(),
                 self.user_name.as_ref().unwrap(),
                 self.device_name.as_ref().unwrap(),
@@ -363,21 +363,19 @@ impl MessagingClient for Client {
     }
 
     async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
-        self.api_client.update_profile(
-            name.nfc().collect::<String>(),
-            avatar
-        ).await
+        let name = name.nfc().collect::<String>();
+        self.api_client.update_profile(&name, avatar).await
     }
 
     async fn upload_avatar(&mut self, content_type: &str, avatar: &[u8]) -> Result<String> {
-        self.api_client.upload_avatar(
-            content_type,
-            avatar
-        ).await
+        self.api_client.upload_avatar(content_type, avatar).await
     }
 
-    async fn upload_avatar_with_filename(&mut self, _content_type: &str, _file_name: &str) -> Result<String> {
-        unimplemented!()
+    async fn upload_avatar_with_filename(&mut self, content_type: &str, file_name: &str) -> Result<String> {
+        self.api_client.upload_avatar_with_filename(
+            content_type,
+            file_name.into()
+        ).await
     }
 
     async fn devices(&self) -> Result<Vec<ClientDevice>> {

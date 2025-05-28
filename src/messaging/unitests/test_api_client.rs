@@ -20,6 +20,7 @@ async fn test_service_ids() {
 
     let url = url::Url::parse(BASE_URL).unwrap();
     let result = APIClient::service_ids(&url).await;
+
     assert!(result.is_ok());
 
     let ids = result.unwrap();
@@ -43,7 +44,7 @@ async fn test_register_user_and_device() {
     assert!(client.is_ok());
 
     let result = client.unwrap()
-        .register_user_with_device("password", "Alice", "Example", "Example")
+        .register_user_with_device("password", "Alice", "test-Device", "test-App")
         .await;
     assert!(result.is_ok());
 }
@@ -63,7 +64,7 @@ async fn test_register_device_with_user() {
         .build();
 
     let result = client1.unwrap()
-        .register_user_with_device("password", "Alice", "Example", "Example")
+        .register_user_with_device("password", "Alice", "test-Device1", "test-App")
         .await;
     assert!(result.is_ok());
 
@@ -75,7 +76,7 @@ async fn test_register_device_with_user() {
         .build();
 
     let result = client2.unwrap()
-        .register_new_device("password", "Alice", "Example")
+        .register_new_device("password", "test-Device2", "test-App")
         .await;
     assert!(result.is_ok());
 }
@@ -96,7 +97,12 @@ async fn test_regsister_device_request() {
         .build()
         .unwrap();
 
-    let result = client1.register_user_with_device("password", "Alice", "Example", "Example").await;
+    let result = client1.register_user_with_device(
+        "password",
+        "Alice",
+        "test-Device1",
+        "test-App"
+    ).await;
     assert!(result.is_ok());
 
     let mut client2 = Builder::new()
@@ -107,16 +113,15 @@ async fn test_regsister_device_request() {
         .build()
         .unwrap();
 
-    let result = client2.register_device_request("Alice", "Example2").await;
+    let result = client2.register_device_request("test-Device2", "test-App").await;
     assert!(result.is_ok());
 
     let registration_id = result.unwrap();
-    let result = client1.finish_register_device_request(&registration_id, 0).await;
+    let result = client2.finish_register_device_request(&registration_id, 0).await;
     println!("result: {:?}", result);
     assert!(result.is_ok());
 }
 
-#[ignore]
 #[tokio::test]
 async fn test_update_profile() {
     let peerid  = Id::try_from(PEERID).unwrap();
@@ -131,13 +136,36 @@ async fn test_update_profile() {
         .build()
         .unwrap();
 
-    let result = client.register_user_with_device("password", "Alice", "Example", "Example").await;
+    let result = client.register_user_with_device(
+        "password",
+        "Alice",
+        "test-Device1",
+        "test-App"
+    ).await;
     assert!(result.is_ok());
 
+    // Get profile and check initial values
+    let result = client.get_profile(user.id()).await;
+    assert!(result.is_ok());
+    let profile = result.unwrap();
+    assert_eq!(profile.id(), user.id());
+    assert_eq!(profile.home_peerid(), &peerid);
+    assert_eq!(profile.name(), "Alice");
+    assert_eq!(profile.notice(), None);
+    assert!(profile.is_genuine());
+
+    // Update profile
     let result = client.update_profile("Bob", false).await;
     assert!(result.is_ok());
 
+    // Get profile and check updated values
     let result = client.get_profile(user.id()).await;
-    println!("result: {:?}", result);
     assert!(result.is_ok());
+    let profile = result.unwrap();
+    assert_eq!(profile.id(), user.id());
+    assert_eq!(profile.home_peerid(), &peerid);
+    assert_eq!(profile.name(), "Bob");
+    assert_eq!(profile.notice(), None);
+    assert_eq!(profile.sig().len(), 64);
+    assert!(profile.is_genuine());
 }

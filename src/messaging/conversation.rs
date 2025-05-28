@@ -16,7 +16,7 @@ pub static MAX_SNIPPET_LENGTH: usize = 128;
 pub static DEFAULT_AVATAR: Option<String> = None;
 
 #[allow(unused)]
-pub(crate) struct Conversation {
+pub struct Conversation {
     interlocutor: Contact,
     last_message: Option<Message>,
     snippet     : Option<String>,

@@ -5,7 +5,8 @@ use crate::{
 };
 
 use crate::messaging::{
-    user_agent::{UserAgent, DefaultUserAgent},
+    UserAgent,
+    DefaultUserAgent,
 };
 
 #[tokio::test]
@@ -20,8 +21,8 @@ async fn test_user_agent() {
     assert!(agent.user().is_none());
     assert!(agent.device().is_none());
 
-    _ = agent.set_user(&user_identity, "Alice");
-    _ = agent.set_device(&device_identity, "Example", Some("Example"));
+    _ = agent.set_user(user_identity.clone(), "Alice".into());
+    _ = agent.set_device(device_identity.clone(), "Example".into(), Some("Example".into()));
 
     assert!(agent.user().is_some());
     assert!(agent.device().is_some());

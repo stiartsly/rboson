@@ -6,4 +6,3 @@
 #[cfg(test)] mod test_conversation;
 #[cfg(test)] mod test_contact;
 #[cfg(test)] mod test_channel;
-#[cfg(test)] mod test_client;

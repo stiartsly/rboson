@@ -1,7 +1,6 @@
 pub mod core;
 pub mod activeproxy;
 pub mod messaging;
-
 pub mod appdata_store;
 
 pub use {
@@ -37,13 +36,6 @@ pub use {
     core::identity::Identity,
 
     activeproxy::ActiveProxyClient,
-
-    messaging::client_device::ClientDevice,
-    messaging::service_ids::ServiceIds,
-    messaging::client::{
-        Client as MessagingClient,
-        Builder as MessagingClientBuilder
-    },
 };
 
 #[macro_export]

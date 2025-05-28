@@ -3,7 +3,6 @@ use url::Url;
 use serde::{Serialize, Deserialize};
 
 use crate::{
-    unwrap,
     Id,
     Error,
     error::Result,
@@ -64,18 +63,27 @@ impl<'a> Builder<'a> {
     pub(crate) fn build(self) -> Result<APIClient> {
         if self.home_peerid.is_none() {
             return Err(Error::Argument("Home peer id is required".into()));
-        }
-        if self.base_url.is_none() {
-            return Err(Error::Argument("Base url is required".into()));
-        }
+        };
+
         if self.user.is_none() {
             return Err(Error::Argument("User identity is required".into()));
-        }
+        };
+
         if self.device.is_none() {
             return Err(Error::Argument("Device identity is required".into()));
+        };
+
+        let Some(base_url) = self.base_url else {
+            return Err(Error::Argument("Base url is required".into()));
+        };
+        let base_url = Url::parse(base_url).map_err(|e| {
+            Error::Argument(format!("Invalid base url: {e}"))
+        })?;
+        if base_url.scheme() != "http" && base_url.scheme() != "https" {
+            return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
         }
 
-        APIClient::new(self)
+        APIClient::new(self, base_url)
     }
 }
 
@@ -95,22 +103,12 @@ pub(crate) struct APIClient {
 
 #[allow(unused)]
 impl APIClient {
-    pub(crate) fn new(b: Builder) -> Result<Self> {
-        let base_url = Url::parse(unwrap!(b.base_url)).map_err(|e| {
-            Error::Argument("Invalid base url: {e}".into())
-        })?;
-
-        if base_url.scheme() != "http" && base_url.scheme() != "https" {
-            return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
-        }
-
+    pub(crate) fn new(b: Builder, base_url: Url) -> Result<Self> {
         let client = Client::builder()
             .user_agent("boson-rs")
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| {
-                Error::Argument(format!("Failed to create http client: {e}"))
-            })?;
+            .map_err(|e| Error::Argument(format!("Failed to create http client: {e}")))?;
 
         Ok(Self {
             client,
@@ -167,7 +165,6 @@ impl APIClient {
         )?.json::<JsonServiceIds>().await.map_err(|e| {
             Error::State(format!("Http error: deserialize json error {e}"))
         })?;
-
         data.ids()
     }
 
@@ -177,11 +174,11 @@ impl APIClient {
         struct RequestData<'a> {
             userId      : &'a Id,
             deviceId    : &'a Id,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -237,13 +234,13 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             deviceSig   : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             profileSig  : &'a [u8],
         }
 
@@ -310,11 +307,11 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -371,9 +368,9 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             sig         : &'a [u8],
         }
 
@@ -419,9 +416,9 @@ impl APIClient {
         #[allow(non_snake_case)]
         struct RequestData<'a> {
             deviceId    : &'a Id,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             sig         : &'a [u8],
         }
 
@@ -439,10 +436,11 @@ impl APIClient {
             sig         : sig.as_slice(),
         };
 
-        let url = self.base_url.join("/api/v1/devices/registrations/{registration_id}/0").unwrap();
+        let path = format!("/api/v1/devices/registrations/{}", registration_id);
+        let url = self.base_url.join(path.as_str()).unwrap();
         let rsp = self.client.post(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
-            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+           // .bearer_auth(self.access_token().unwrap())
             .json(&data)
             .send()
             .await;
@@ -463,7 +461,7 @@ impl APIClient {
         struct RequestData<'a> {
             userName    : &'a str,
             avatar      : bool,
-            #[serde(with = "super::base64_as_string")]
+            #[serde(with = "super::bytes_as_base64")]
             profileSig  : &'a [u8],
         }
 
@@ -477,7 +475,7 @@ impl APIClient {
 
         let data = RequestData {
             userName    : name,
-            avatar      : false,
+            avatar      : false, // TODO: handle avatar upload
             profileSig  : sig.as_slice(),
         };
 
@@ -498,9 +496,8 @@ impl APIClient {
         Ok(())
     }
 
-    #[allow(unused)]
     pub(crate) async fn get_profile(&mut self, id: &Id) -> Result<profile::Profile> {
-        let path = format!("/api/v1/profile/{}", id.to_base58());
+        let path = format!("/api/v1/profile/{}", id);
         let url = self.base_url.join(path.as_str()).unwrap();
         let rsp = self.client.get(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)

@@ -19,7 +19,6 @@ pub(crate) mod api_client;
 
 pub mod invite_ticket;
 pub mod message;
-pub mod messaging_client;
 pub mod message_listener;
 pub mod connection_listener;
 pub mod config_adapter;
@@ -29,12 +28,36 @@ pub mod client_device;
 
 pub(crate) mod rpc;
 
-pub mod user_agent;
-
 pub mod messaging_repository;
-
-pub mod client;
 pub mod service_ids;
+
+pub(crate) mod client;
+pub(crate) mod client_impl;
+pub(crate) mod client_builder;
+
+pub mod messaging_client {
+    pub use crate::messaging::client::MessagingClient;
+    pub use crate::messaging::client_impl::Client;
+    pub use crate::messaging::client_builder::Builder;
+}
+
+pub(crate) mod user_agent;
+pub(crate) mod user_agent_impl;
+pub mod user_agent_ {
+    pub use crate::messaging::user_agent_impl::DefaultUserAgent;
+    pub use crate::messaging::user_agent::UserAgent;
+}
+
+pub use crate::{
+    messaging::service_ids::ServiceIds,
+    messaging::messaging_client::MessagingClient,
+    messaging::messaging_client::Client,
+    messaging::messaging_client::Builder as ClientBuilder,
+    messaging::connection_listener::ConnectionListener, // Removed unresolved import
+
+    messaging::user_agent_::UserAgent,
+    messaging::user_agent_::DefaultUserAgent,
+};
 
 #[cfg(test)]
 mod unitests;
@@ -53,7 +76,7 @@ pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
     *v == T::default()
 }
 
-mod base64_as_string {
+mod bytes_as_base64 {
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};
     use base64::{engine::general_purpose, Engine as _};
@@ -65,7 +88,6 @@ mod base64_as_string {
         serializer.serialize_str(&encoded)
     }
 
-    #[allow(unused)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where D: Deserializer<'de>,
     {
@@ -73,5 +95,29 @@ mod base64_as_string {
         general_purpose::URL_SAFE_NO_PAD
             .decode(&s)
             .map_err(D::Error::custom)
+    }
+}
+
+#[allow(unused)]
+mod id_as_base58 {
+    use crate::Id;
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use bs58;
+
+    pub fn serialize<S>(id: &Id, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = bs58::encode(id.as_bytes()).into_string();
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Id, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Id::try_from(s.as_str()).map_err(D::Error::custom)?)
     }
 }

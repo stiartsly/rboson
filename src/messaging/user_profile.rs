@@ -14,10 +14,10 @@ pub struct UserProfile {
 }
 
 impl UserProfile {
-    pub(crate) fn new(identity: &CryptoIdentity, name: &str, avatar: bool) -> Self {
+    pub(crate) fn new(identity: CryptoIdentity, name: String, avatar: bool) -> Self {
         Self {
-            identity: identity.clone(),
-            name    : name.into(),
+            identity,
+            name,
             avatar
         }
     }

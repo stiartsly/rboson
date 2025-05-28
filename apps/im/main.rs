@@ -8,8 +8,8 @@ use boson::{
     configuration as cfg,
     signature,
     Id,
-    messaging::client,
     appdata_store::AppDataStoreBuilder,
+    messaging,
 };
 
 #[derive(Parser, Debug)]
@@ -104,11 +104,14 @@ async fn main() {
         }
     };
 
-    let result = client::Builder::new()
-        .with_user_name(ucfg.name().map_or("testing", |v|v))
-        .with_user_key(signature::KeyPair::from(&sk))
+    let user_key = signature::KeyPair::from(&sk);
+    let device_key = signature::KeyPair::random();
+
+    let result = messaging::ClientBuilder::new()
+        .with_user_name(ucfg.name())
+        .with_user_key(&user_key)
         .with_node(node.clone())
-        .with_device_key(signature::KeyPair::random())
+        .with_device_key(&device_key)
         .with_deivce_name("testing")
         .with_app_name("im")
         .with_messaging_repository(path.as_str())

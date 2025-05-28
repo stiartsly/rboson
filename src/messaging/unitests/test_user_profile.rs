@@ -11,7 +11,7 @@ use crate::messaging::{
 #[test]
 fn test_user_profile() {
     let identity = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    let profile = UserProfile::new(&identity, "Alice", true);
+    let profile = UserProfile::new(identity.clone(), "Alice".into(), true);
 
     assert_eq!(profile.id(), identity.id());
     // assert_eq!(profile.identity(), &identity);

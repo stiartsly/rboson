@@ -6,7 +6,7 @@ use crate::{
     error::Result,
 };
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
 pub(crate) struct JsonServiceIds {
     peerId: String,
@@ -29,6 +29,7 @@ impl JsonServiceIds {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ServiceIds {
     peerid: Id,
     nodeid: Id

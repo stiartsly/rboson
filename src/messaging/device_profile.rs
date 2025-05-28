@@ -18,7 +18,7 @@ pub struct DeviceProfile {
 
 #[allow(unused)]
 impl DeviceProfile {
-    pub(crate) fn new(identity: Option<&CryptoIdentity>, name: &str, app: Option<&str>) -> Self {
+    pub(crate) fn new(identity: Option<CryptoIdentity>, name: String, app: Option<String>) -> Self {
         Self {
             identity: identity.map(|v| v.clone()),
             name: name.to_string(),

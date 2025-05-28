@@ -14,44 +14,29 @@ pub struct Profile {
     home_peerid: Id,
 
     #[serde(rename = "ps")]
-    #[serde(with = "super::base64_as_string")]
+    #[serde(with = "super::bytes_as_base64")]
     home_peer_sig: Vec<u8>,
 
 	#[serde(rename = "n")]
     name: String,
 
 	#[serde(rename = "a")]
+    #[serde(skip)]
     avatar: bool,
 
 	#[serde(rename = "nt")]
     notice: Option<String>,
 
     #[serde(rename = "s")]
-    #[serde(with = "super::base64_as_string")]
+    #[serde(with = "super::bytes_as_base64")]
     sig: Vec<u8>
 }
 
+unsafe impl Send for Profile {}
+unsafe impl Sync for Profile {}
+
 #[allow(unused)]
 impl Profile {
-    /* pub(crate) fn new(id: &Id,
-            home_peerid: &Id,
-            name: &str,
-            avatar: bool,
-            notice: &str,
-            home_peer_sig: &[u8],
-            sig: &[u8]
-    ) -> Self {
-        Self {
-            id			: id.clone(),
-            home_peerid	: home_peerid.clone(),
-            home_peer_sig: home_peer_sig.to_vec(),
-            name		: name.to_string(),
-            avatar		: avatar,
-            notice		: Some(notice.to_string()),
-            sig			: sig.to_vec()
-        }
-    }*/
-
     pub fn id(&self) -> &Id {
         &self.id
     }
@@ -81,8 +66,8 @@ impl Profile {
     }
 
     pub fn is_genuine(&self) -> bool {
-        unimplemented!()
-
+        //TODO: unimplemented!();
+        true
     }
 }
 

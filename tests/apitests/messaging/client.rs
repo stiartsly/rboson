@@ -1,8 +1,12 @@
 use boson::{
+    signature,
     Id,
-    MessagingClient,
-    MessagingClientBuilder
+    messaging::MessagingClient,
+    messaging::Client,
+    messaging::ClientBuilder,
+    messaging::ConnectionListener,
 };
+
 
 const PEERID: &str = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ";
 const NODEID: &str = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
@@ -14,13 +18,40 @@ async fn test_service_ids() {
     let nodeid = Id::try_from(NODEID).unwrap();
     let peerid = Id::try_from(PEERID).unwrap();
 
-    let result = MessagingClient::service_ids(&url).await;
+    let result = Client::service_ids(&url).await;
     assert!(result.is_ok());
 
-    let result = MessagingClientBuilder::service_ids(&url).await;
+    let result = ClientBuilder::service_ids(&url).await;
     assert!(result.is_ok());
 
     let ids = result.unwrap();
     assert_eq!(ids.peerid(), &peerid);
     assert_eq!(ids.nodeid(), &nodeid);
+}
+
+struct TestConnectionListener;
+impl ConnectionListener for TestConnectionListener {}
+
+#[ignore]
+#[tokio::test]
+async fn test_messaing_client() {
+    let peerid = Id::try_from(PEERID).unwrap();
+    let user_key = signature::KeyPair::random();
+    let result = ClientBuilder::new()
+        .with_user_key(&user_key)
+        .with_peerid(&peerid)
+        .with_deivce_name("test-Device")
+        .with_app_name("test-App")
+        .register_user_and_device("secret")
+        .with_messaging_repository("test-repo")
+        .with_connection_listener(Box::new(TestConnectionListener {}))
+        .build()
+        .await;
+
+    assert!(result.is_ok());
+
+    let client = result.unwrap();
+    let userid = Id::from(user_key.to_public_key());
+
+    assert_eq!(client.userid(), &userid);
 }

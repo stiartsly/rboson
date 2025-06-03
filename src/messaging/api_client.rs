@@ -7,16 +7,24 @@ use crate::{
     Error,
     error::Result,
     Identity,
+    PeerInfo,
 };
 
 use crate::core::{
     crypto_identity::CryptoIdentity,
     cryptobox::Nonce,
+
+};
+
+use crate::messaging::{
+    UserProfile,
+    ServiceIds,
 };
 
 use crate::messaging::{
     profile::{self, Profile},
-    service_ids::{JsonServiceIds, ServiceIds},
+    service_ids::JsonServiceIds,
+    contact_update::ContactsUpdate,
 };
 
 static HTTP_HEADER_ACCEPT: &str = "Accept";
@@ -124,25 +132,29 @@ impl APIClient {
         })
     }
 
+     pub(crate) fn access_token(&self) -> Option<&str> {
+        self.access_token.as_ref().map(|v|v.as_str())
+    }
+
+    pub(crate) fn set_access_token(&mut self, token: String) {
+        self.access_token = Some(token);
+    }
+
     pub(crate) fn set_access_token_refresh_handler(&mut self, handler: fn(&str)) {
         self.access_token_refresh_handler = Some(Box::new(handler));
     }
 
-    pub(crate) fn user(&self) -> &CryptoIdentity {
-        &self.user
-    }
+    //pub(crate) fn user(&self) -> &CryptoIdentity {
+    //    &self.user
+    //}
 
-    pub(crate) fn device(&self) -> &CryptoIdentity {
-        &self.device
-    }
+    //pub(crate) fn device(&self) -> &CryptoIdentity {
+    //    &self.device
+    //}
 
     fn increment_nonce(&mut self) -> Nonce {
         self.nonce.increment();
         self.nonce.clone()
-    }
-
-    pub(crate) fn access_token(&self) -> Option<&str> {
-        self.access_token.as_ref().map(|v|v.as_str())
     }
 
     pub(crate) async fn service_ids(base_url: &Url) -> Result<ServiceIds> {
@@ -293,11 +305,11 @@ impl APIClient {
         Ok(())
     }
 
-    pub(crate) async fn register_new_device(&mut self,
+    pub(crate) async fn register_device_with_user(&mut self,
         passphrase: &str,
         device_name: &str,
         app_name: &str
-    ) -> Result<String> {
+    ) -> Result<UserProfile> {
 
         #[derive(Serialize)]
         #[allow(non_snake_case)]
@@ -316,8 +328,11 @@ impl APIClient {
         }
 
         #[derive(Deserialize)]
+        #[allow(non_snake_case)]
         struct ResponseData {
             token       : String,
+            userName    : String,
+            avatar      : bool,
         }
 
         let nonce = self.increment_nonce();
@@ -354,7 +369,12 @@ impl APIClient {
         self.access_token_refresh_handler.as_ref().map(|v| {
             v(&token);
         });
-        Ok(token)
+
+        Ok(UserProfile::new(
+            self.user.clone(),
+            data.userName,
+            data.avatar
+        ))
     }
 
     pub(crate) async fn register_device_request(&mut self,
@@ -455,6 +475,10 @@ impl APIClient {
         Ok(data.registrationId)
     }
 
+    pub(crate) async fn service_info(&self) -> Result<PeerInfo> {
+        unimplemented!()
+    }
+
     pub(crate) async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
@@ -526,6 +550,12 @@ impl APIClient {
         _content_type: &str,
         _file_name: String,
     ) -> Result<String> {
+        unimplemented!()
+    }
+
+    pub(crate) async fn fetch_contacts_update(&mut self,
+        version_id: Option<&str>
+    ) -> Result<ContactsUpdate> {
         unimplemented!()
     }
 }

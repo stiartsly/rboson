@@ -29,9 +29,6 @@ async fn test_service_ids() {
     assert_eq!(ids.nodeid(), &nodeid);
 }
 
-struct TestConnectionListener;
-impl ConnectionListener for TestConnectionListener {}
-
 #[ignore]
 #[tokio::test]
 async fn test_messaing_client() {
@@ -40,11 +37,15 @@ async fn test_messaing_client() {
     let result = ClientBuilder::new()
         .with_user_key(&user_key)
         .with_peerid(&peerid)
-        .with_deivce_name("test-Device")
+        .with_device_name("test-Device")
         .with_app_name("test-App")
         .register_user_and_device("secret")
         .with_messaging_repository("test-repo")
-        .with_connection_listener(Box::new(TestConnectionListener {}))
+        .with_connection_listener(Box::new({
+            struct TestConnectionListener;
+            impl ConnectionListener for TestConnectionListener {}
+            TestConnectionListener {}
+        }))
         .build()
         .await;
 

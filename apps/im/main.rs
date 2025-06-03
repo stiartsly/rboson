@@ -108,11 +108,11 @@ async fn main() {
     let device_key = signature::KeyPair::random();
 
     let result = messaging::ClientBuilder::new()
-        .with_user_name(ucfg.name())
+        .with_user_name(ucfg.name().unwrap_or("guest"))
         .with_user_key(&user_key)
-        .with_node(node.clone())
+        .with_device_node(node.clone())
         .with_device_key(&device_key)
-        .with_deivce_name("testing")
+        .with_device_name("testing")
         .with_app_name("im")
         .with_messaging_repository(path.as_str())
         .register_user_and_device(ucfg.password().map_or("secret", |v|v))
@@ -122,7 +122,7 @@ async fn main() {
         .build()
         .await;
 
-    let client = match result {
+    let mut client = match result {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Creating messaging client instance error: {e}");

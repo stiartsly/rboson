@@ -1,5 +1,13 @@
 use super::message::Message;
 
+#[allow(dead_code)]
+pub(crate) trait MessageListenerMut {
+    fn on_message(&mut self, message: Message);
+    fn on_sending(&mut self, message: Message);
+    fn on_sent(&mut self, message: Message);
+    fn on_broadcast(&mut self, message: Message);
+}
+
 pub trait MessageListener {
     fn on_message(&self, message: &Message);
     fn on_sending(&self, message: &Message);

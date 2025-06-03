@@ -1,10 +1,25 @@
 
-use crate::Id;
-use super::contact::Contact;
+use crate::{
+    Id,
+    messaging::Contact,
+};
 
 pub trait ContactListener {
-    fn on_contacts_updating(&self, _version_id: &str, _contacts: Vec<Contact>) {}
-    fn on_contacts_updated(&self, _base_version_id: &str, _new_version_id: &str, _contacts: Vec<Contact>) {}
-    fn on_contacts_cleared(&self) {}
-    fn on_contact_profile(&self, _contact_id: &Id, _profile: &Contact) {}
+    fn on_contacts_updating(&self,
+        version_id: &str,
+        contacts: Vec<Contact>
+    );
+
+    fn on_contacts_updated(&self,
+        base_version_id: &str,
+        new_version_id: &str,
+        contacts: Vec<Contact>
+    );
+
+    fn on_contacts_cleared(&self);
+
+    fn on_contact_profile(&self,
+        contact_id: &Id,
+        profile: &Contact
+    );
 }

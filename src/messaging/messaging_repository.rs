@@ -34,7 +34,7 @@ pub(crate) trait MessagingRepository {
     }
 
     fn put_messages(&self, _messages: &[Message]) -> Result<()>;
-    fn put_amessage(&self, _message: Message) -> Result<()> {
+    fn put_message(&self, _message: Message) -> Result<()> {
         self.put_messages(&[_message])
     }
 

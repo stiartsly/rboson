@@ -16,8 +16,7 @@ pub mod device_profile;
 
 
 pub(crate) mod api_client;
-
-pub mod invite_ticket;
+pub(crate) mod invite_ticket;
 pub mod message;
 pub mod message_listener;
 pub mod connection_listener;
@@ -53,10 +52,19 @@ pub use crate::{
     messaging::messaging_client::MessagingClient,
     messaging::messaging_client::Client,
     messaging::messaging_client::Builder as ClientBuilder,
-    messaging::connection_listener::ConnectionListener, // Removed unresolved import
 
     messaging::user_agent_::UserAgent,
     messaging::user_agent_::DefaultUserAgent,
+    messaging::contact::Contact,
+    messaging::contact_listener::ContactListener,
+    messaging::conversation::Conversation,
+    messaging::connection_listener::ConnectionListener,
+    messaging::user_profile::UserProfile,
+    messaging::device_profile::DeviceProfile,
+    messaging::profile_listener::ProfileListener,
+    messaging::message_listener::MessageListener,
+    messaging::channel_listener::ChannelListener,
+    messaging::invite_ticket::InviteTicket
 };
 
 #[cfg(test)]

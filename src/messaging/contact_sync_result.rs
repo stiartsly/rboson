@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::messaging::{
-    contact::Contact,
+    Contact,
     contact_sequence::ContactSequence,
 };
 

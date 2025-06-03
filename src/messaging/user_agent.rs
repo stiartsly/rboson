@@ -1,24 +1,23 @@
 use crate::{
     Id,
     PeerInfo,
+    error::Result,
+};
+
+use crate::messaging::{
+    Contact,
+    Conversation,
+    UserProfile,
+    DeviceProfile,
 };
 
 use super::{
-    conversation::Conversation,
     message::Message,
-    channel::Channel,
-
-    user_profile::UserProfile,
-    device_profile::DeviceProfile,
-    connection_listener::ConnectionListener,
-    profile_listener::ProfileListener,
-    message_listener::MessageListener,
-    channel_listener::ChannelListener,
-    contact_listener::ContactListener
+    channel::Channel
 };
 
 #[allow(dead_code)]
-pub trait UserAgent: ConnectionListener + ProfileListener + MessageListener + ChannelListener + ContactListener {
+pub trait UserAgent {
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
     fn peer_info(&self) -> Option<&PeerInfo>;
@@ -41,5 +40,6 @@ pub trait UserAgent: ConnectionListener + ProfileListener + MessageListener + Ch
     fn channels(&self) -> Vec<Channel>;
     fn channel(&self, channel_id: &Id) -> Option<Channel>;
 
-    fn contact_version(&self) -> String;
+    fn contact_version(&self) -> Result<Option<String>>;
+    fn put_contacts_update(&mut self, version_id: &str, contacts: &[Contact]) -> Result<()>;
 }

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::collections::LinkedList;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use log::{error};
+use log::{error, warn};
 
 use crate::{
     unwrap,
@@ -15,21 +15,26 @@ use crate::{
     messaging::user_agent::UserAgent,
 };
 
+use crate::messaging::{
+    Contact,
+    Conversation,
+    UserProfile,
+    DeviceProfile,
+    ProfileListener,
+    ContactListener,
+    ConnectionListener,
+    MessageListener,
+};
+
 use super::{
-    conversation::Conversation,
     message::Message,
     channel::{Member, Channel, Role},
     messaging_repository::MessagingRepository,
     persistence::database::Database,
-    contact::Contact,
 
-    user_profile::UserProfile,
-    device_profile::DeviceProfile,
-    connection_listener::ConnectionListener,
-    profile_listener::ProfileListener,
-    message_listener::MessageListener,
+    profile_listener::ProfileListenerMut,
+    message_listener::MessageListenerMut,
     channel_listener::ChannelListener,
-    contact_listener::ContactListener,
 };
 
 #[allow(dead_code)]
@@ -71,6 +76,14 @@ impl DefaultUserAgent {
 
             hardened: false,
         })
+    }
+
+    fn is_myself(&self, id: &Id) -> bool {
+        self.user.as_ref().unwrap().id() == id
+    }
+
+    pub(crate) fn harden(&mut self) {
+        self.hardened = true;
     }
 
     pub(crate) fn set_user(&mut self, user: CryptoIdentity, name: String) -> Result<()>{
@@ -281,6 +294,10 @@ impl DefaultUserAgent {
         self.peer = None;
         Ok(())
     }
+
+    fn put_message(&mut self, message: Message) {
+        unimplemented!()
+    }
 }
 
 impl ContactListener for DefaultUserAgent {
@@ -340,45 +357,91 @@ impl ChannelListener for DefaultUserAgent {
     }
 }
 
-impl MessageListener for DefaultUserAgent {
-    fn on_message(&self, _message: &Message) {
+impl MessageListenerMut for DefaultUserAgent {
+    fn on_message(&mut self, mut message: Message) {
+        let is_channel_message = !self.is_myself(message.to());
+        let conv_id = match is_channel_message {
+            true => message.to(),
+            false => message.from(),
+        }.clone();
+
+        message.set_conversation_id(&conv_id);
+
+        self.message_listeners.iter_mut().for_each(|l| {
+            l.on_message(&message);
+        });
+
+        self.repository.as_mut().map(|v| {
+            if let Err(e) = v.put_message(message) {
+                error!("Save message failed, error: {e}");
+            }
+        });
+    }
+
+    fn on_sending(&mut self, _message: Message) {
         unimplemented!()
     }
 
-    fn on_sending(&self, _message: &Message) {
+    fn on_sent(&mut self, _message: Message) {
         unimplemented!()
     }
 
-    fn on_sent(&self, _message: &Message) {
-        unimplemented!()
-    }
-
-    fn on_broadcast(&self, _message: &Message) {
+    fn on_broadcast(&mut self, _message: Message) {
         unimplemented!()
     }
 }
 
-impl ProfileListener for DefaultUserAgent {
-    fn on_user_profile_acquired(&self, _profile: &UserProfile) {
-        unimplemented!()
+impl ProfileListenerMut for DefaultUserAgent {
+    fn on_user_profile_acquired(&mut self, profile: UserProfile) {
+        if let Some(ref user) = self.user {
+            if user.id() != profile.id() {
+                warn!("User profile acquired with different id: {} != {}", user.id(), profile.id());
+            }
+        }
+
+        self.user = Some(profile);
+        self.update_userinfo_config();
+        for listener in self.profile_listeners.iter() {
+            listener.on_user_profile_acquired(self.user.as_ref().unwrap());
+        }
     }
 
-    fn on_user_profile_changed(&self, _avatar: bool) {
-        unimplemented!()
+    fn on_user_profile_changed(&mut self, name: String, avatar: bool) {
+        let Some(ref user) = self.user else {
+            warn!("User profile is not set!");
+            return;
+        };
+
+        self.user = Some(UserProfile::new(
+            user.identity().clone(),
+            name,
+            avatar
+        ));
+
+        self.update_userinfo_config();
+        for listener in self.profile_listeners.iter() {
+            listener.on_user_profile_changed(avatar);
+        }
     }
 }
 
 impl ConnectionListener for DefaultUserAgent {
-    fn on_connection(&self) {
-        unimplemented!()
+    fn on_connecting(&self) {
+        self.connection_listeners.iter().for_each(|l| {
+            l.on_connecting();
+        });
     }
 
     fn on_connected(&self) {
-        unimplemented!()
+        self.connection_listeners.iter().for_each(|l| {
+            l.on_connected();
+        });
     }
 
     fn on_disconnected(&self) {
-        unimplemented!()
+        self.connection_listeners.iter().for_each(|l| {
+            l.on_disconnected();
+        });
     }
 }
 
@@ -470,9 +533,14 @@ impl UserAgent for DefaultUserAgent {
         unimplemented!()
     }
 
-    fn contact_version(&self) -> String {
+    fn contact_version(&self) -> Result<Option<String>> {
         unimplemented!()
     }
 
-
+    fn put_contacts_update(&mut self,
+        _version_id: &str,
+        _contacts: &[Contact]
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }

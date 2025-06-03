@@ -1,18 +1,27 @@
 use unicode_normalization::UnicodeNormalization;
 use url::Url;
+use log::warn;
 
 use crate::{
     Id,
     error::Result,
+    Error,
     Identity,
     messaging::ServiceIds,
+    core::crypto_identity::CryptoIdentity,
+    core::crypto_context::CryptoContext,
+    PeerInfo,
+};
+
+use crate::messaging::{
+    DefaultUserAgent,
+    UserAgent,
 };
 
 use super::{
     messaging_client::{Builder, MessagingClient},
-    api_client::{self, APIClient},
+    api_client::{APIClient, Builder as APIClientBuilder},
 
-    user_agent::UserAgent,
     client_device::ClientDevice,
     channel::{Role, Permission, Channel},
     invite_ticket::InviteTicket,
@@ -21,31 +30,94 @@ use super::{
 
 #[allow(dead_code)]
 pub struct Client {
-    userid:   Id,
-    dev_id: Id,
 
-    api_client: APIClient,
+    peer            : PeerInfo,
+    user            : CryptoIdentity,
+    device          : CryptoIdentity,
+    client_id       : String,
+
+    inbox           : String,
+    outbox          : String,
+
+    self_context    : CryptoContext,
+    server_context  : CryptoContext,
+
+    api_client      : APIClient,
+
+    user_agent      : Box<DefaultUserAgent>
+
 }
 
 #[allow(dead_code)]
 impl Client {
-    pub(crate) fn new(b: &Builder) -> Result<Self> {
-        Ok(Self {
-            userid: b.user().unwrap().id().clone(),
-            dev_id: b.device().as_ref().unwrap().id().clone(),
+    pub(crate) fn new(b: &mut Builder) -> Result<Self> {
+        let mut agent = b.user_agent_take();
+        if !agent.is_configured() {
+            return Err(Error::State("User agent is not configured".into()));
+        }
 
-            api_client: api_client::Builder::new()
-                .with_base_url(b.api_url().as_ref().unwrap().as_str())
-                .with_home_peerid(b.peerid().as_ref().unwrap())
-                .with_user_identity(b.user().as_ref().unwrap())
-                .with_device_identity(b.device().as_ref().unwrap())
-                .build()
-                .unwrap(),
+        agent.harden();
+
+        let client_id: String = {
+            // unimplemented!();
+            "TODO".into()
+        };
+
+        let peer    = agent.peer_info().unwrap().clone();
+        let user    = agent.user().unwrap().identity().clone();
+        let device  = agent.device().unwrap().identity().unwrap().clone();
+
+        let api_client = APIClientBuilder::new()
+            .with_base_url(peer.alternative_url().unwrap())
+            .with_home_peerid(peer.id())
+            .with_user_identity(&user)
+            .with_device_identity(&device)
+            .build()?;
+
+        Ok(Self {
+            peer        : peer.clone(),
+            user        : user.clone(),
+            device      : device.clone(),
+
+            client_id,
+
+            inbox       : format!("inbox/{}", user.id().to_base58()),
+            outbox      : format!("outbox/{}", user.id().to_base58()),
+
+            user_agent  : agent,
+            api_client,
+
+            self_context    : user.create_crypto_context(user.id())?,
+            server_context  : device.create_crypto_context(device.id())?
         })
     }
 
-    pub fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         println!("Messaging client Started!");
+
+        let version_id = self.user_agent.contact_version().unwrap_or_else(|_| {
+            warn!("Fectching all contacts due to failed to get contacts version.");
+            None
+        });
+
+        if version_id.is_none() {
+            let update = self.api_client.fetch_contacts_update(
+                version_id.as_ref().map(|v| v.as_str())
+            ).await?;
+
+            let Some(version_id) = update.version_id() else {
+                return Err(Error::State("Contacts update does not contain version id".into()));
+            };
+
+            self.user_agent.put_contacts_update(version_id, update.contacts())
+                .map_err(|e|
+                    Error::State(format!("Failed to put contacts update: {}", e))
+            )?;
+        }
+
+        //let
+
+
         Ok(())
     }
 
@@ -61,10 +133,11 @@ impl Client {
 #[allow(dead_code)]
 impl MessagingClient for Client {
     fn userid(&self) -> &Id {
-        &self.userid
+        self.user.id()
     }
 
     fn user_agent(&self) -> &Box<dyn UserAgent> {
+    //    &*self.user_agent
         unimplemented!()
     }
 

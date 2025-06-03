@@ -2,7 +2,7 @@ use std::fmt;
 use std::collections::HashMap;
 use crate::{
     Id,
-    core::crypto_context::CryptoContext,
+    CryptoContext,
 };
 
 use serde::{Serialize, Deserialize};

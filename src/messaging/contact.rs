@@ -28,7 +28,7 @@ pub enum ContactType {
 }
 
 #[allow(dead_code)]
-pub struct ContactBuilder {
+pub(crate) struct ContactBuilder {
     id          : Id,
     home_peerid : Option<Id>,
     _type       : ContactType,
@@ -56,7 +56,7 @@ pub struct ContactBuilder {
 
 #[allow(dead_code)]
 impl ContactBuilder {
-    pub fn new(id: &Id) -> Self {
+    pub(crate) fn new(id: &Id) -> Self {
         Self {
             id          : id.clone(),
             home_peerid : None,
@@ -78,91 +78,91 @@ impl ContactBuilder {
         }
     }
 
-    pub fn with_home_peerid(&mut self, peer_id:&Id) -> &mut Self {
+    pub(crate) fn with_home_peerid(&mut self, peer_id:&Id) -> &mut Self {
         self.home_peerid = Some(peer_id.clone());
         self
     }
 
-    pub fn with_type(&mut self, _type: ContactType) -> &mut Self {
+    pub(crate) fn with_type(&mut self, _type: ContactType) -> &mut Self {
         self._type = _type;
         self
     }
 
-    pub fn with_session_key(&mut self, key: &[u8]) -> &mut Self {
+    pub(crate) fn with_session_key(&mut self, key: &[u8]) -> &mut Self {
         self.session_key = Some(key.to_vec());
         self
     }
 
-    pub fn with_remark(&mut self, remark: &str) -> &mut Self {
+    pub(crate) fn with_remark(&mut self, remark: &str) -> &mut Self {
         self.remark = Some(remark.to_string());
         self
     }
 
-    pub fn with_tags(&mut self, tags: &str) -> &mut Self {
+    pub(crate) fn with_tags(&mut self, tags: &str) -> &mut Self {
         self.tags = Some(tags.to_string());
         self
     }
 
-    pub fn with_muted(&mut self, muted: bool) -> &mut Self {
+    pub(crate) fn with_muted(&mut self, muted: bool) -> &mut Self {
         self.muted = muted;
         self
     }
 
-    pub fn with_blocked(&mut self, blocked: bool) -> &mut Self {
+    pub(crate) fn with_blocked(&mut self, blocked: bool) -> &mut Self {
         self.blocked = blocked;
         self
     }
 
-    pub fn with_deleted(&mut self, deleted: bool) -> &mut Self {
+    pub(crate) fn with_deleted(&mut self, deleted: bool) -> &mut Self {
         self.deleted = deleted;
         self
     }
 
-    pub fn with_created(&mut self, created: SystemTime) -> &mut Self {
+    pub(crate) fn with_created(&mut self, created: SystemTime) -> &mut Self {
         self.created = created;
         self
     }
 
-    pub fn with_last_modified(&mut self, modified: SystemTime) -> &mut Self {
+    pub(crate) fn with_last_modified(&mut self, modified: SystemTime) -> &mut Self {
         self.last_modified = modified;
         self
     }
 
-    pub fn with_revision(&mut self, revision: i32) -> &mut Self {
+    pub(crate) fn with_revision(&mut self, revision: i32) -> &mut Self {
         self.revision = revision;
         self
     }
 
-    pub fn with_name(&mut self, name: &str) -> &mut Self {
+    pub(crate) fn with_name(&mut self, name: &str) -> &mut Self {
         self.name = Some(name.to_string());
         self
     }
 
-    pub fn with_avatar(&mut self, avatar: bool) -> &mut Self {
+    pub(crate) fn with_avatar(&mut self, avatar: bool) -> &mut Self {
         self.avatar = avatar;
         self
     }
 
-    pub fn with_notice(&mut self, notice: &str) -> &mut Self {
+    pub(crate) fn with_notice(&mut self, notice: &str) -> &mut Self {
         self.notice = Some(notice.to_string());
         self
     }
 
-    pub fn with_owner(&mut self, owner: &Id) -> &mut Self {
+    pub(crate) fn with_owner(&mut self, owner: &Id) -> &mut Self {
         self.owner = Some(owner.clone());
         self
     }
 
-    pub fn with_permission(&mut self, permission: &Permission) -> &mut Self {
+    pub(crate) fn with_permission(&mut self, permission: &Permission) -> &mut Self {
         self.permission = Some(permission.clone());
         self
     }
 
-    pub fn check_valid(&self) -> bool {
+    pub(crate) fn check_valid(&self) -> bool {
         false
     }
 
-    pub fn build(&mut self) -> Result<Contact> {
+    pub(crate) fn build(&mut self) -> Result<Contact> {
         if self.check_valid() {
             return Err(Error::Argument(format!("Invalid contact")));
         }

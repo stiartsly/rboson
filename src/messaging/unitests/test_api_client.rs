@@ -76,9 +76,15 @@ async fn test_register_device_with_user() {
         .build();
 
     let result = client2.unwrap()
-        .register_new_device("password", "test-Device2", "test-App")
+        .register_device_with_user("password", "test-Device2", "test-App")
         .await;
     assert!(result.is_ok());
+
+    let profile = result.unwrap();
+    assert_eq!(profile.id(), user.id());
+    assert_eq!(profile.identity().id(), user.id());
+    assert_eq!(profile.name(), "Alice");
+    assert_eq!(profile.has_avatar(), false);
 }
 
 #[ignore]

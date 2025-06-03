@@ -7,6 +7,7 @@ use crate::core::{
     crypto_identity::CryptoIdentity,
 };
 
+#[derive(Debug, Clone)]
 pub struct UserProfile {
     identity: CryptoIdentity,
     name: String,

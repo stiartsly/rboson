@@ -9,6 +9,11 @@ use crate::messaging::{
     Conversation,
     UserProfile,
     DeviceProfile,
+    ConnectionListener,
+    ProfileListener,
+    MessageListener,
+    ChannelListener,
+    ContactListener
 };
 
 use super::{
@@ -24,6 +29,12 @@ pub trait UserAgent {
 
     fn is_configured(&self) -> bool;
 
+    fn set_connection_listener(&mut self, listener: Box<dyn ConnectionListener>);
+    fn set_profile_listener(&mut self, listener: Box<dyn ProfileListener>);
+    fn set_message_listener(&mut self, listener: Box<dyn MessageListener>);
+    fn set_channel_listener(&mut self, listener: Box<dyn ChannelListener>);
+    fn set_contact_listener(&mut self, listener: Box<dyn ContactListener>);
+
     fn conversation(&self, _conversation_id: &Id) -> Option<Conversation>;
     fn conversations(&self) -> Vec<Conversation>;
     fn remove_conversation(&mut self, conversation_id: &Id);
@@ -37,8 +48,8 @@ pub trait UserAgent {
     fn remove_messages(&mut self, message_ids: &[u32]);
     fn remove_messages_by_conversation(&mut self, conversation_id: &Id);
 
-    fn channels(&self) -> Vec<Channel>;
-    fn channel(&self, channel_id: &Id) -> Option<Channel>;
+    fn channels(&self) -> Result<Vec<Channel>>;
+    fn channel(&self, channel_id: &Id) -> Result<Option<Channel>>;
 
     fn contact_version(&self) -> Result<Option<String>>;
     fn put_contacts_update(&mut self, version_id: &str, contacts: &[Contact]) -> Result<()>;

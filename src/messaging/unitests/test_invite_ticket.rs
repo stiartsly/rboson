@@ -4,11 +4,11 @@ use crate::{
     Id,
     signature::KeyPair,
     cryptobox::PrivateKey,
+    messaging::InviteTicket,
 };
 
 use crate::messaging::{
-    invite_ticket,
-    invite_ticket::InviteTicket,
+    invite_ticket
 };
 
 #[test]

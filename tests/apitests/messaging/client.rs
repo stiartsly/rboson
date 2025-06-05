@@ -1,12 +1,19 @@
 use boson::{
     signature,
     Id,
-    messaging::MessagingClient,
-    messaging::Client,
-    messaging::ClientBuilder,
-    messaging::ConnectionListener,
+    messaging::message::Message,
 };
 
+use boson::messaging::{
+    MessagingClient,
+    Client,
+    ClientBuilder,
+    Contact,
+    ConnectionListener,
+    MessageListener,
+    ContactListener,
+    ProfileListener
+};
 
 const PEERID: &str = "G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ";
 const NODEID: &str = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
@@ -29,6 +36,79 @@ async fn test_service_ids() {
     assert_eq!(ids.nodeid(), &nodeid);
 }
 
+struct ConnectionListenerTest;
+impl ConnectionListener for ConnectionListenerTest {
+    fn on_connecting(&self) {
+        println!("Connecting to messaging service...");
+    }
+
+    fn on_connected(&self) {
+        println!("Connected to messaging service");
+    }
+
+    fn on_disconnected(&self) {
+        println!("Disconnected from messaging service");
+    }
+}
+
+struct MessageListenerTest;
+impl MessageListener for MessageListenerTest {
+    fn on_message(&self, message: &Message) {
+        println!("Received message: {:?}", message);
+    }
+    fn on_sending(&self, message: &Message) {
+        println!("Sending message: {:?}", message);
+    }
+
+    fn on_sent(&self, message: &Message) {
+        println!("Message sent: {:?}", message);
+    }
+
+    fn on_broadcast(&self, message: &Message) {
+        println!("Broadcast message: {:?}", message);
+    }
+}
+
+struct ContactListenerTest;
+impl ContactListener for ContactListenerTest {
+    fn on_contacts_updating(&self,
+        _version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        println!("Contacts updating!");
+    }
+
+    fn on_contacts_updated(&self,
+        _base_version_id: &str,
+        _new_version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        println!("Contacts updated");
+    }
+
+    fn on_contacts_cleared(&self) {
+        println!("Contacts cleared");
+    }
+
+    fn on_contact_profile(&self,
+        _contact_id: &Id,
+        _profile: &Contact
+    ) {
+        println!("Contact profile ");
+    }
+}
+
+struct ProfileListenerTest;
+impl ProfileListener for ProfileListenerTest {
+    fn on_user_profile_acquired(&self, _profile: &boson::messaging::UserProfile) {
+        println!("User profile acquired");
+    }
+
+    fn on_user_profile_changed(&self, _avatar: bool) {
+        println!("User profile changed");
+    }
+}
+
 #[ignore]
 #[tokio::test]
 async fn test_messaing_client() {
@@ -41,11 +121,10 @@ async fn test_messaing_client() {
         .with_app_name("test-App")
         .register_user_and_device("secret")
         .with_messaging_repository("test-repo")
-        .with_connection_listener(Box::new({
-            struct TestConnectionListener;
-            impl ConnectionListener for TestConnectionListener {}
-            TestConnectionListener {}
-        }))
+        .with_connection_listener(ConnectionListenerTest)
+        .with_message_listener(MessageListenerTest)
+        .with_contact_listener(ContactListenerTest)
+        .with_profile_listener(ProfileListenerTest)
         .build()
         .await;
 

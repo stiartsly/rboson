@@ -1,5 +1,7 @@
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 #[allow(dead_code)]
 pub(crate) enum RPCMethod {

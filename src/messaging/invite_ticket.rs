@@ -9,7 +9,6 @@ use crate::{
     Id
 };
 
-#[allow(unused)]
 pub static DEFAULT_EXPIRATION: u64 = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash)]

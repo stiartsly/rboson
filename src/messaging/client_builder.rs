@@ -11,7 +11,6 @@ use crate::{
     error::Result,
     Error,
     core::crypto_identity::CryptoIdentity,
-
 };
 
 use crate::messaging::{
@@ -22,6 +21,7 @@ use crate::messaging::{
     MessageListener,
     ContactListener,
     ChannelListener,
+    ProfileListener,
     Client,
 };
 
@@ -54,10 +54,11 @@ pub struct Builder<'a> {
     repository  : Option<Database>,
     repository_db: Option<&'a str>,
 
-    connection_listeners: Option<Box<dyn ConnectionListener>>,
-    message_listeners   : Option<Box<dyn MessageListener>>,
-    channel_listeners   : Option<Box<dyn ChannelListener>>,
-    contact_listeners   : Option<Box<dyn ContactListener>>,
+    connection_listener : Option<Box<dyn ConnectionListener>>,
+    message_listener    : Option<Box<dyn MessageListener>>,
+    channel_listener    : Option<Box<dyn ChannelListener>>,
+    profile_listener    : Option<Box<dyn ProfileListener>>,
+    contact_listener    : Option<Box<dyn ContactListener>>,
 
     user_agent  : Option<Box<DefaultUserAgent>>
 }
@@ -66,33 +67,34 @@ pub struct Builder<'a> {
 impl<'a> Builder<'a> {
     pub fn new() -> Self {
         Self {
-            user        : None,
-            user_name   : None,
-            passphrase  : None,
+            user                : None,
+            user_name           : None,
+            passphrase          : None,
 
-            device      : None,
-            device_node : None,
-            device_name : None,
-            app_name    : None,
+            device              : None,
+            device_node         : None,
+            device_name         : None,
+            app_name            : None,
 
-            register_user_and_device: false,
-            register_device : false,
+            register_user_and_device    : false,
+            register_device     : false,
 
             registration_request_handler: None,
 
-            peerid      : None,
-            nodeid      : None,
-            api_url     : None,
+            peerid              : None,
+            nodeid              : None,
+            api_url             : None,
 
-            repository  : None,
-            repository_db: None,
+            repository          : None,
+            repository_db       : None,
 
-            connection_listeners: None,
-            message_listeners   : None,
-            channel_listeners   : None,
-            contact_listeners   : None,
+            connection_listener : None,
+            message_listener    : None,
+            profile_listener    : None,
+            channel_listener    : None,
+            contact_listener    : None,
 
-            user_agent  : None,
+            user_agent          : None,
         }
     }
 
@@ -208,23 +210,28 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn with_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) -> &mut Self {
-        self.connection_listeners = Some(listener);
+    pub fn with_connection_listener(&mut self, listener: impl ConnectionListener + 'static) -> &mut Self {
+        self.connection_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_message_listener(&mut self, listener: Box<dyn MessageListener>) -> &mut Self {
-        self.message_listeners = Some(listener);
+    pub fn with_profile_listener(&mut self, listener: impl ProfileListener + 'static) -> &mut Self {
+        self.profile_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_channel_listener(&mut self, listener: Box<dyn ChannelListener>) -> &mut Self {
-        self.channel_listeners = Some(listener);
+    pub fn with_message_listener(&mut self, listener: impl MessageListener + 'static ) -> &mut Self {
+        self.message_listener = Some(Box::new(listener));
+        self
+    }
+
+    pub fn with_channel_listener(&mut self, listener: impl ChannelListener + 'static ) -> &mut Self {
+        self.channel_listener = Some(Box::new(listener));
         self
     }
 
     pub fn with_contact_listener(&mut self, listener: impl ContactListener + 'static) -> &mut Self {
-        self.contact_listeners = Some(Box::new(listener));
+        self.contact_listener = Some(Box::new(listener));
         self
     }
 
@@ -293,32 +300,8 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    async fn register_agent(&self, _: Box<dyn UserAgent>) -> Result<()> {
-        let mut api_client = api_client::Builder::new()
-            .with_base_url(self.api_url.as_ref().unwrap().as_str())
-            .with_home_peerid(self.peerid.as_ref().unwrap())
-            .with_user_identity(self.user.as_ref().unwrap())
-            .with_device_identity(self.device.as_ref().unwrap())
-            .build()
-            .unwrap();
-
-        let user = self.user_agent.as_ref().unwrap().user();
-        let device = self.user_agent.as_ref().unwrap().device();
-
-        if self.register_user_and_device {
-            api_client.register_user_with_device(
-                self.passphrase.as_ref().unwrap(),
-                self.user_name.as_ref().unwrap(),
-                self.device_name.as_ref().unwrap(),
-                self.app_name.as_ref().unwrap(),
-            ).await?;
-        }
-
-        Ok(())
-    }
-
     async fn setup_user_agent(&mut self) -> Result<Box<dyn UserAgent>>  {
-        let Some(agent) = self.user_agent.take() else {
+        let Some(mut agent) = self.user_agent.take() else {
             return Err(Error::State("User agent is not set up yet".into()));
         };
 
@@ -326,7 +309,18 @@ impl<'a> Builder<'a> {
             return Err(Error::State("User agent is not configured yet".into()));
         }
 
-        /* TODO: Listener */
+        if let Some(listener) = self.connection_listener.take() {
+            agent.set_connection_listener(listener);
+        }
+        if let Some(listener) = self.message_listener.take() {
+            agent.set_message_listener(listener);
+        }
+        if let Some(listener) = self.channel_listener.take() {
+            agent.set_channel_listener(listener);
+        }
+        if let Some(listener) = self.contact_listener.take() {
+            agent.set_contact_listener(listener);
+        }
         return Ok(agent)
     }
 
@@ -361,7 +355,43 @@ impl<'a> Builder<'a> {
         }
          */
 
+        if let Some(listener) = self.connection_listener.take() {
+            agent.set_connection_listener(listener);
+        }
+        if let Some(listener) = self.message_listener.take() {
+            agent.set_message_listener(listener);
+        }
+        if let Some(listener) = self.channel_listener.take() {
+            agent.set_channel_listener(listener);
+        }
+        if let Some(listener) = self.contact_listener.take() {
+            agent.set_contact_listener(listener);
+        }
         Ok(agent)
+    }
+
+    async fn register_agent(&self, _: Box<dyn UserAgent>) -> Result<()> {
+        let mut api_client = api_client::Builder::new()
+            .with_base_url(self.api_url.as_ref().unwrap().as_str())
+            .with_home_peerid(self.peerid.as_ref().unwrap())
+            .with_user_identity(self.user.as_ref().unwrap())
+            .with_device_identity(self.device.as_ref().unwrap())
+            .build()
+            .unwrap();
+
+        let user = self.user_agent.as_ref().unwrap().user();
+        let device = self.user_agent.as_ref().unwrap().device();
+
+        if self.register_user_and_device {
+            api_client.register_user_with_device(
+                self.passphrase.as_ref().unwrap(),
+                self.user_name.as_ref().unwrap(),
+                self.device_name.as_ref().unwrap(),
+                self.app_name.as_ref().unwrap(),
+            ).await?;
+        }
+
+        Ok(())
     }
 
     pub async fn build(&mut self) -> Result<Client> {
@@ -375,7 +405,7 @@ impl<'a> Builder<'a> {
             false => self.build_default_user_agent().await
         }?;
 
-        //self.register_agent(agent).await?;
+        self.register_agent(agent).await?;
         Client::new(self)
     }
 

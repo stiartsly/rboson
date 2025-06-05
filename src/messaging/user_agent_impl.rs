@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::collections::LinkedList;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use log::{error, warn};
@@ -45,11 +44,11 @@ pub struct DefaultUserAgent {
 
     repository  : Option<Database>,
 
-    connection_listeners: LinkedList<Box<dyn ConnectionListener>>,
-    profile_listeners   : LinkedList<Box<dyn ProfileListener>>,
-    message_listeners   : LinkedList<Box<dyn MessageListener>>,
-    channel_listeners   : LinkedList<Box<dyn ChannelListener>>,
-    contact_listeners   : LinkedList<Box<dyn ContactListener>>,
+    connection_listener : Option<Box<dyn ConnectionListener>>,
+    profile_listener    : Option<Box<dyn ProfileListener>>,
+    message_listener    : Option<Box<dyn MessageListener>>,
+    channel_listener    : Option<Box<dyn ChannelListener>>,
+    contact_listener    : Option<Box<dyn ContactListener>>,
 
     conversations: HashMap<Id, Conversation>,
 
@@ -66,11 +65,11 @@ impl DefaultUserAgent {
 
             repository: None,
 
-            connection_listeners: LinkedList::new(),
-            profile_listeners   : LinkedList::new(),
-            message_listeners   : LinkedList::new(),
-            channel_listeners   : LinkedList::new(),
-            contact_listeners   : LinkedList::new(),
+            connection_listener : None,
+            profile_listener    : None,
+            message_listener    : None,
+            channel_listener    : None,
+            contact_listener    : None,
 
             conversations: HashMap::new(),
 
@@ -367,7 +366,7 @@ impl MessageListenerMut for DefaultUserAgent {
 
         message.set_conversation_id(&conv_id);
 
-        self.message_listeners.iter_mut().for_each(|l| {
+        self.message_listener.as_mut().map(|l| {
             l.on_message(&message);
         });
 
@@ -401,9 +400,9 @@ impl ProfileListenerMut for DefaultUserAgent {
 
         self.user = Some(profile);
         self.update_userinfo_config();
-        for listener in self.profile_listeners.iter() {
-            listener.on_user_profile_acquired(self.user.as_ref().unwrap());
-        }
+        self.profile_listener.as_mut().map(|l| {
+            l.on_user_profile_acquired(self.user.as_ref().unwrap());
+        });
     }
 
     fn on_user_profile_changed(&mut self, name: String, avatar: bool) {
@@ -419,27 +418,27 @@ impl ProfileListenerMut for DefaultUserAgent {
         ));
 
         self.update_userinfo_config();
-        for listener in self.profile_listeners.iter() {
-            listener.on_user_profile_changed(avatar);
-        }
+        self.profile_listener.as_mut().map(|l| {
+            l.on_user_profile_changed(avatar);
+        });
     }
 }
 
 impl ConnectionListener for DefaultUserAgent {
     fn on_connecting(&self) {
-        self.connection_listeners.iter().for_each(|l| {
+        self.connection_listener.as_ref().map(|l| {
             l.on_connecting();
         });
     }
 
     fn on_connected(&self) {
-        self.connection_listeners.iter().for_each(|l| {
+        self.connection_listener.as_ref().map(|l| {
             l.on_connected();
         });
     }
 
     fn on_disconnected(&self) {
-        self.connection_listeners.iter().for_each(|l| {
+        self.connection_listener.as_ref().map(|l| {
             l.on_disconnected();
         });
     }
@@ -465,6 +464,26 @@ impl UserAgent for DefaultUserAgent {
             self.repository.is_some() &&
             self.peer.as_ref().unwrap().is_valid() &&
             self.peer.as_ref().unwrap().alternative_url().is_some()
+    }
+
+    fn set_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {
+        self.connection_listener = Some(listener);
+    }
+
+    fn set_profile_listener(&mut self, listener: Box<dyn ProfileListener>) {
+        self.profile_listener = Some(listener);
+    }
+
+    fn set_message_listener(&mut self, listener: Box<dyn MessageListener>) {
+        self.message_listener = Some(listener);
+    }
+
+    fn set_channel_listener(&mut self, listener: Box<dyn ChannelListener>) {
+        self.channel_listener = Some(listener);
+    }
+
+    fn set_contact_listener(&mut self, listener: Box<dyn ContactListener>) {
+        self.contact_listener = Some(listener);
     }
 
     fn conversation(&self, _conversation_id: &Id) -> Option<Conversation> {
@@ -525,11 +544,11 @@ impl UserAgent for DefaultUserAgent {
         });
     }
 
-    fn channels(&self) -> Vec<Channel> {
+    fn channels(&self) -> Result<Vec<Channel>> {
         unimplemented!()
     }
 
-    fn channel(&self, _channel_id: &Id) -> Option<Channel> {
+    fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
         unimplemented!()
     }
 

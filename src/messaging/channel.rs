@@ -1,11 +1,11 @@
 use std::fmt;
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 use crate::{
     Id,
     CryptoContext,
+    cryptobox,
 };
-
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -181,7 +181,21 @@ pub struct Channel {
 #[allow(unused)]
 impl Channel {
 
-    // TODO:
+    pub(crate) fn session_keypair(&self) -> &cryptobox::KeyPair {
+        unimplemented!()
+    }
+
+    pub(crate) fn is_owner(&self, id: &Id) -> bool {
+        self.owner == *id
+    }
+
+    pub(crate) fn is_member(&self, id: &Id) -> bool {
+        unimplemented!()
+    }
+
+    pub(crate) fn is_moderator(&self, id: &Id) -> bool {
+        unimplemented!()
+    }
 }
 
 /* Removed duplicate empty Member struct */

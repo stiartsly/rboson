@@ -1,4 +1,6 @@
 use unicode_normalization::UnicodeNormalization;
+use serde::{Serialize, Deserialize};
+use sha2::{Digest, Sha256};
 use url::Url;
 use log::warn;
 
@@ -16,16 +18,21 @@ use crate::{
 use crate::messaging::{
     DefaultUserAgent,
     UserAgent,
+    InviteTicket,
+    Contact,
+    ClientBuilder as Builder,
+    MessagingClient,
 };
 
 use super::{
-    messaging_client::{Builder, MessagingClient},
     api_client::{APIClient, Builder as APIClientBuilder},
 
     client_device::ClientDevice,
     channel::{Role, Permission, Channel},
-    invite_ticket::InviteTicket,
-    contact::Contact,
+    invite_ticket,
+
+    rpc::request::RPCRequest,
+    rpc::method::RPCMethod,
 };
 
 #[allow(dead_code)]
@@ -128,6 +135,51 @@ impl Client {
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
         APIClient::service_ids(url).await
     }
+
+    async fn sign_into_invite_ticket(&self, channel_id: &Id, invitee: Option<&Id>) -> Result<InviteTicket> {
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        use std::time::{SystemTime, Duration};
+        let expire = SystemTime::now() + Duration::from_secs(invite_ticket::DEFAULT_EXPIRATION);
+
+
+        let mut sha256 = Sha256::new();
+        sha256.update(channel_id.as_bytes());
+        sha256.update(self.user.id().as_bytes());
+        if let Some(invitee) = invitee {
+            sha256.update(invitee.as_bytes());
+        } else {
+            sha256.update(Id::max().as_bytes());
+        }
+
+        // sha256.update(expire.duration_since(SystemTime::UNIX_EPOCH)?.as_secs().to_be_bytes());
+        // TODO: expire.
+
+        let sig = self.user.sign_into(sha256.finalize().as_slice())?;
+        let sk = channel.session_keypair().private_key().as_bytes();
+        let sk = match invitee {
+            Some(invitee) => self.user.encrypt_into(invitee, sk)?,
+            None => sk.to_vec(),
+        };
+
+        Ok(InviteTicket::new(
+            channel_id.clone(),
+            self.user.id().clone(),
+            invitee.is_none(),
+            expire,
+            sig,
+            Some(sk)
+        ))
+    }
+
+    async fn send_rpc_request<T, R>(&mut self, _channel_id: &Id, _request: RPCRequest<T, R>) -> Result<()>
+    where T: Serialize, R: serde::de::DeserializeOwned {
+        unimplemented!()
+    }
+
+    fn next_index(&mut self) -> u32 { 0 }
 }
 
 #[allow(dead_code)]
@@ -201,44 +253,204 @@ impl MessagingClient for Client {
         unimplemented!()
     }
 
-    async fn create_invite_ticket(&mut self, _channel_id: &Id) -> Result<InviteTicket> {
-        unimplemented!()
+    async fn create_invite_ticket(&mut self,
+        channel_id: &Id
+    ) -> Result<InviteTicket> {
+        self.sign_into_invite_ticket(channel_id, None).await
     }
 
-    async fn create_invite_ticket_with_invitee(&mut self, _channel_id: &Id, _invitee: &Id) -> Result<InviteTicket> {
-        unimplemented!()
+    async fn create_invite_ticket_with_invitee(&mut self,
+        channel_id: &Id,
+        invitee: &Id
+    ) -> Result<InviteTicket> {
+        self.sign_into_invite_ticket(channel_id, Some(invitee)).await
     }
 
-    async fn set_channel_owner(&mut self, _channel_id: &Id, _new_owner: &Id) -> Result<()> {
-        unimplemented!()
+    async fn set_channel_owner(&mut self,
+        channel_id: &Id,
+        new_owner: &Id
+    ) -> Result<()> {
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) {
+            return Err(Error::State("Not channel owner".into()));
+        }
+
+        if channel.is_member(new_owner) {
+            return Err(Error::State("New owner is not in the channel".into()));
+        }
+
+        let req = RPCRequest::<Id, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelOwner,
+            new_owner.clone()
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_permission(&mut self, _channel_id: &Id, _permission: &Permission) -> Result<()> {
-        unimplemented!()
+    async fn set_channel_permission(&mut self,
+        channel_id: &Id,
+        permission: Permission
+    ) -> Result<()> {
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) {
+            return Err(Error::State("Not channel owner".into()));
+        }
+
+        let req = RPCRequest::<Permission, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelPermission,
+            permission
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_name(&mut self, _channel_id: &Id, _name: &str) -> Result<()> {
-        unimplemented!()
+    async fn set_channel_name(&mut self,
+        channel_id: &Id,
+        name: Option<&str>
+    ) -> Result<()> {
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let name = name.map(|n| n.nfc().collect::<String>())
+            .unwrap_or_default();
+
+        let req = RPCRequest::<String, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelName,
+            name
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_notice(&mut self, _channel_id: &Id, _notice: &str) -> Result<()> {
-        unimplemented!()
+    async fn set_channel_notice(&mut self,
+        channel_id: &Id,
+        notice: Option<&str>
+    ) -> Result<()> {
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let notice = notice.map(|n| n.nfc().collect::<String>())
+            .unwrap_or_default();
+
+        let req = RPCRequest::<String, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelNotice,
+            notice
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_member_role(&mut self, _channel_id: &Id, _members: Vec<&Id>, _role: &Role) -> Result<()> {
-        unimplemented!()
+    async fn set_channel_member_role(&mut self,
+        channel_id: &Id,
+        members: Vec<&Id>,
+        role: Role
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let req = RPCRequest::<Role, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelRole,
+            role
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn ban_channel_members(&mut self, _channel_id: &Id, _members: Vec<&Id>) -> Result<()> {
-        unimplemented!()
+    async fn ban_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<Id>,
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let req = RPCRequest::<Vec<Id>, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelBan,
+            members
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn unban_channel_members(&mut self, _channel_id: &Id, _members: Vec<&Id>) -> Result<()> {
-        unimplemented!()
+    async fn unban_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<Id>
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let req = RPCRequest::<Vec<Id>, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelUnban,
+            members
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn remove_channel_members(&mut self, _channel_id: &Id, _members: Vec<&Id>) -> Result<()> {
-        unimplemented!()
+    async fn remove_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<Id>
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+
+        let Some(channel) = self.user_agent.channel(channel_id)? else {
+            return Err(Error::State("Channel does not exist".into()));
+        };
+
+        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
+            return Err(Error::State("Not channel owner or moderator".into()));
+        }
+
+        let req = RPCRequest::<Vec<Id>, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelRemove,
+            members
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
     async fn channel(&self, _id: &Id) -> Result<&Channel> {

@@ -166,7 +166,7 @@ impl ProxyConnection {
 
             let peer = PeerBuilder::new(unwrap!(inners.remote_node).lock().unwrap().id())
                 .with_keypair(inners.peer_keypair.as_ref())
-                .with_alternative_url(inners.peer_domain.as_ref().map(|v|v.as_str()))
+                .with_alternative_url(inners.peer_domain.as_deref())
                 .with_port(port)
                 .build();
 

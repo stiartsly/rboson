@@ -233,7 +233,7 @@ impl PeerInfo {
     }
 
     pub fn alternative_url(&self) -> Option<&str> {
-        self.url.as_ref().map(|v| v.as_str())
+        self.url.as_deref()
     }
 
     pub fn signature(&self) -> &[u8] {

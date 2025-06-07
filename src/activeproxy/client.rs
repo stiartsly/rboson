@@ -174,7 +174,7 @@ impl ProxyClient {
     }
 
     pub fn domain_name(&self) -> Option<&str> {
-        self.upstream_domain.as_ref().map(|v|v.as_str())
+        self.upstream_domain.as_deref()
     }
 
     pub fn remote_peerid(&self) -> &Id {

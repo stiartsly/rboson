@@ -256,11 +256,11 @@ impl config::UserConfig for UserConfiguration {
     }
 
     fn name(&self) -> Option<&str> {
-        self.name.as_ref().map(|v|v.as_str())
+        self.name.as_deref()
     }
 
     fn password(&self) -> Option<&str> {
-        self.password.as_ref().map(|v|v.as_str())
+        self.password.as_deref()
     }
 }
 
@@ -290,11 +290,11 @@ impl config::ActiveProxyConfig for ActiveProxyConfiguration {
     }
 
     fn peer_private_key(&self) -> Option<&str> {
-        self.peer_sk.as_ref().map(|v|v.as_str())
+        self.peer_sk.as_deref()
     }
 
     fn domain_name(&self) -> Option<&str> {
-        self.domain_name.as_ref().map(|v|v.as_str())
+        self.domain_name.as_deref()
     }
 
     fn upstream_host(&self) -> &str {
@@ -407,7 +407,7 @@ impl Config for DefaultConfiguration {
     }
 
     fn log_file(&self) -> Option<&str> {
-        self.log_file.as_ref().map(|v|v.as_str())
+        self.log_file.as_deref()
     }
 
     fn activeproxy(&self) -> Option<&Box<dyn config::ActiveProxyConfig>> {

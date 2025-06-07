@@ -1,23 +1,23 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use bs58;
 
-use crate::Id;
+use crate::{
+	as_millis,
+	Id
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-#[allow(unused)]
 pub struct ClientDevice {
 	#[serde(skip)]
-	client_id: String,
+	client_id: String,	// MQTT Client ID
 
 	#[serde(rename = "id")]
 	id		: Id,
-	#[serde(rename = "n")]
-	name	: String,
-    #[serde(rename = "a")]
-	app_name: String,
+	#[serde(rename = "n", skip_serializing_if = "Option::is_none")]
+	name	: Option<String>,
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+	app_name: Option<String>,
 	#[serde(rename = "c")]
     created	: u64,
 	#[serde(rename = "ls")]
@@ -26,20 +26,27 @@ pub struct ClientDevice {
     last_address: String,
 }
 
-#[allow(unused)]
 impl ClientDevice {
-	pub(crate) fn new(id: &Id, device_name: &str, app_name: &str,
+	#[cfg(test)]
+	pub(crate) fn new(id: &Id, device_name: Option<&str>, app_name: Option<&str>,
 		created: u64, last_seen: u64, last_address: &str) -> Self {
 
+		use sha2::{Digest, Sha256};
+		use bs58;
+
+		let digest = Sha256::digest(id.as_bytes());
+		let client_id = bs58::encode(&digest).into_string();
+
 		Self {
-			client_id	: bs58::encode(&Sha256::digest(id.as_bytes())).into_string(),
 			id			: id.clone(),
-			name		: device_name.into(),
-			app_name	: app_name.into(),
-			last_address: last_address.into(),
+			name		: device_name.map(|v|v.to_string()),
+			app_name	: app_name.map(|v|v.to_string()),
+			last_address: last_address.to_string(),
 
 			created,
 			last_seen,
+
+			client_id
 		}
 	}
 
@@ -51,12 +58,12 @@ impl ClientDevice {
 		&self.client_id
 	}
 
-	pub fn name(&self) -> &str {
-		&self.name
+	pub fn name(&self) -> Option<&str> {
+		self.name.as_deref()
 	}
 
-	pub fn app_name(&self) -> &str {
-		&self.app_name
+	pub fn app_name(&self) -> Option<&str> {
+		self.app_name.as_deref()
 	}
 
 	pub fn created(&self) -> SystemTime {
@@ -80,13 +87,25 @@ impl PartialEq for ClientDevice {
 
 impl fmt::Display for ClientDevice {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Device: {} [clientId={}, name={}, app={}",
+		write!(f, "Device: {} [clientId={}",
 			self.id.to_base58(),
-			self.client_id,
-			self.name,
-			self.app_name
+			self.client_id
 		)?;
-		// TODO:
+
+		self.name.as_ref().map(|v| {
+			write!(f, ", name={}", v)
+		});
+
+		self.app_name.as_ref().map(|v| {
+			write!(f, ", app={}", v)
+		});
+
+		write!(f, ", created={}", self.created)?;
+		if self.last_seen > 0 {
+			write!(f, ", lastSeen={}, address={}",
+			as_millis!(SystemTime::now()) - self.last_seen as u128,
+			self.last_seen)?;
+		}
 		write!(f, "]")
 	}
 }

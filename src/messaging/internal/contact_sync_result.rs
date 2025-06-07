@@ -1,10 +1,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::{
-    Contact,
-    contact_sequence::ContactSequence,
-};
+use crate::messaging::Contact;
+use super::contact_sequence::ContactSequence;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ContactSyncResult {

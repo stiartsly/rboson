@@ -4,11 +4,7 @@ use crate::{
     Id,
     signature::KeyPair,
     cryptobox::PrivateKey,
-    messaging::InviteTicket,
-};
-
-use crate::messaging::{
-    invite_ticket
+    messaging::InviteTicket
 };
 
 #[test]
@@ -17,14 +13,15 @@ fn test_invite_public_ticket() {
     let inviter_keypair = KeyPair::random();
     let inviter = Id::from(inviter_keypair.to_public_key());
     let invitee = Id::random();
-    let expire  = SystemTime::now() + Duration::from_secs(invite_ticket::DEFAULT_EXPIRATION as u64);
+    let expire  = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
     let is_public = true;
 
-    let digest = invite_ticket::generate_digest(
+    let expire_ts = expire.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let digest = InviteTicket::digest(
         &channel_id,
         &inviter,
         is_public,
-        expire,
+        expire_ts,
         &invitee
     );
     let sig = inviter_keypair.private_key().sign_into(&digest).unwrap();
@@ -33,7 +30,7 @@ fn test_invite_public_ticket() {
         channel_id.clone(),
         inviter.clone(),
         is_public,
-        expire,
+        expire_ts,
         sig.clone(),
         None
     );
@@ -60,15 +57,16 @@ fn test_invite_private_ticket() {
     let inviter_keypair = KeyPair::random();
     let inviter = Id::from(inviter_keypair.to_public_key());
     let invitee = Id::random();
-    let expire  = SystemTime::now() + Duration::from_secs(invite_ticket::DEFAULT_EXPIRATION as u64);
+    let expire  = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
     let is_public = false;
     let session_sk = PrivateKey::try_from(inviter_keypair.private_key()).unwrap();
 
-    let digest = invite_ticket::generate_digest(
+    let expire_ts = expire.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let digest = InviteTicket::digest(
         &channel_id,
         &inviter,
         is_public,
-        expire,
+        expire_ts,
         &invitee
     );
     let sig = inviter_keypair.private_key().sign_into(&digest).unwrap();
@@ -77,7 +75,7 @@ fn test_invite_private_ticket() {
         channel_id.clone(),
         inviter.clone(),
         is_public,
-        expire,
+        expire_ts,
         sig.clone(),
         Some(session_sk.as_bytes().to_vec())
     );

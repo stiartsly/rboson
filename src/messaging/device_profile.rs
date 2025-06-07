@@ -9,18 +9,16 @@ use crate::core::{
     crypto_identity::CryptoIdentity,
 };
 
-#[allow(unused)]
 pub struct DeviceProfile {
-    identity: Option<CryptoIdentity>,
-    name: String,
-    app: Option<String>
+    identity    : Option<CryptoIdentity>,
+    name        : String,
+    app         : Option<String>
 }
 
-#[allow(unused)]
 impl DeviceProfile {
-    pub(crate) fn new(identity: Option<CryptoIdentity>, name: String, app: Option<String>) -> Self {
+    pub(crate) fn new(identity: CryptoIdentity, name: String, app: Option<String>) -> Self {
         Self {
-            identity: identity.map(|v| v.clone()),
+            identity: Some(identity),
             name: name.to_string(),
             app: app.map(|v| v.to_string())
         }
@@ -52,6 +50,6 @@ impl DeviceProfile {
     }
 
     pub fn app(&self) -> Option<&str> {
-        self.app.as_ref().map(|v| v.as_str())
+        self.app.as_deref()
     }
 }

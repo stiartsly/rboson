@@ -18,7 +18,6 @@ pub(crate) struct ContactSequence {
 #[allow(unused)]
 impl ContactSequence {
     pub(crate) fn new() -> Self {
-        let id = generate_id();
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH).unwrap()
             .as_secs();

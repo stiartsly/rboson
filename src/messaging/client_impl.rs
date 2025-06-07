@@ -1,5 +1,5 @@
 use unicode_normalization::UnicodeNormalization;
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 use log::warn;
@@ -29,7 +29,6 @@ use super::{
 
     client_device::ClientDevice,
     channel::{Role, Permission, Channel},
-    invite_ticket,
 
     rpc::request::RPCRequest,
     rpc::method::RPCMethod,
@@ -142,7 +141,8 @@ impl Client {
         };
 
         use std::time::{SystemTime, Duration};
-        let expire = SystemTime::now() + Duration::from_secs(invite_ticket::DEFAULT_EXPIRATION);
+        let expire = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
+        let expire_ts = expire.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
 
         let mut sha256 = Sha256::new();
@@ -168,7 +168,7 @@ impl Client {
             channel_id.clone(),
             self.user.id().clone(),
             invitee.is_none(),
-            expire,
+            expire_ts,
             sig,
             Some(sk)
         ))

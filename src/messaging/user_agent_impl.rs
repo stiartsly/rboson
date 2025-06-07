@@ -100,7 +100,7 @@ impl DefaultUserAgent {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.device = Some(DeviceProfile::new(Some(device), name, app));
+        self.device = Some(DeviceProfile::new(device, name, app));
         self.update_device_info_config();
         Ok(())
     }
@@ -145,7 +145,7 @@ impl DefaultUserAgent {
         #[derive(Serialize, Debug)]
         #[allow(non_snake_case)]
         struct UserInfo<'a> {
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             privateKey  : &'a [u8],
             name        : &'a str,
             #[serde(skip)]
@@ -174,7 +174,7 @@ impl DefaultUserAgent {
         #[derive(Serialize, Debug)]
         #[allow(non_snake_case)]
         struct DeviceInfo<'a> {
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             privateKey  : &'a [u8],
             name        : &'a str,
             app         : Option<&'a str>
@@ -228,7 +228,7 @@ impl DefaultUserAgent {
         #[derive(Deserialize, Debug)]
         #[allow(non_snake_case)]
         struct UserInfo {
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             privateKey  : Vec<u8>,
             name        : String,
             #[serde(skip)]
@@ -251,7 +251,7 @@ impl DefaultUserAgent {
         #[derive(Serialize, Deserialize, Debug)]
         #[allow(non_snake_case)]
         struct DeviceInfo {
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             privateKey  : Vec<u8>,
             name        : String,
             app         : Option<String>
@@ -265,7 +265,7 @@ impl DefaultUserAgent {
         )?;
 
         let device = DeviceProfile::new(
-            Some(CryptoIdentity::from_private_key(&sk)),
+            CryptoIdentity::from_private_key(&sk),
             device.name,
             device.app
         );
@@ -277,7 +277,7 @@ impl DefaultUserAgent {
             nodeId: Id,
             port: u16,
             apiUrl: Option<String>,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             sig: Vec<u8>
         }
 

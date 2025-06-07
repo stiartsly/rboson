@@ -8,12 +8,8 @@ use crate::{
     error::Result,
     Identity,
     PeerInfo,
-};
-
-use crate::core::{
-    crypto_identity::CryptoIdentity,
     cryptobox::Nonce,
-
+    core::crypto_identity::CryptoIdentity,
 };
 
 use crate::messaging::{
@@ -24,7 +20,7 @@ use crate::messaging::{
 use crate::messaging::{
     profile::{self, Profile},
     service_ids::JsonServiceIds,
-    contact_update::ContactsUpdate,
+    internal::contact_update::ContactsUpdate,
 };
 
 static HTTP_HEADER_ACCEPT: &str = "Accept";
@@ -72,11 +68,9 @@ impl<'a> Builder<'a> {
         if self.home_peerid.is_none() {
             return Err(Error::Argument("Home peer id is required".into()));
         };
-
         if self.user.is_none() {
             return Err(Error::Argument("User identity is required".into()));
         };
-
         if self.device.is_none() {
             return Err(Error::Argument("Device identity is required".into()));
         };
@@ -95,7 +89,6 @@ impl<'a> Builder<'a> {
     }
 }
 
-#[allow(unused)]
 pub(crate) struct APIClient {
     client      : Client,
     peerid      : Id,
@@ -112,11 +105,14 @@ pub(crate) struct APIClient {
 #[allow(unused)]
 impl APIClient {
     pub(crate) fn new(b: Builder, base_url: Url) -> Result<Self> {
-        let client = Client::builder()
-            .user_agent("boson-rs")
+        let result = Client::builder()
+            .user_agent("rboson")
             .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| Error::Argument(format!("Failed to create http client: {e}")))?;
+            .build();
+
+        let client = result.map_err(|e|
+            Error::Argument(format!("Failed to create http client: {e}"))
+        )?;
 
         Ok(Self {
             client,
@@ -133,7 +129,7 @@ impl APIClient {
     }
 
      pub(crate) fn access_token(&self) -> Option<&str> {
-        self.access_token.as_ref().map(|v|v.as_str())
+        self.access_token.as_deref()
     }
 
     pub(crate) fn set_access_token(&mut self, token: String) {
@@ -144,14 +140,6 @@ impl APIClient {
         self.access_token_refresh_handler = Some(Box::new(handler));
     }
 
-    //pub(crate) fn user(&self) -> &CryptoIdentity {
-    //    &self.user
-    //}
-
-    //pub(crate) fn device(&self) -> &CryptoIdentity {
-    //    &self.device
-    //}
-
     fn increment_nonce(&mut self) -> Nonce {
         self.nonce.increment();
         self.nonce.clone()
@@ -159,11 +147,14 @@ impl APIClient {
 
     pub(crate) async fn service_ids(base_url: &Url) -> Result<ServiceIds> {
         let url = base_url.join("/api/v1/service/id").unwrap();
-        let client = Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .user_agent("boson-rs")
-                .build()
-                .map_err(|e| Error::Argument(format!("Failed to create http client: {e}")))?;
+        let result = Client::builder()
+            .user_agent("rboson")
+            .timeout(std::time::Duration::from_secs(30))
+            .build();
+
+        let client = result.map_err(|e|
+            Error::Argument(format!("Failed to create http client: {e}"))
+        )?;
 
         let rsp = client.get(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
@@ -186,11 +177,11 @@ impl APIClient {
         struct RequestData<'a> {
             userId      : &'a Id,
             deviceId    : &'a Id,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -246,13 +237,13 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             deviceSig   : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             profileSig  : &'a [u8],
         }
 
@@ -319,11 +310,11 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -388,9 +379,9 @@ impl APIClient {
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             sig         : &'a [u8],
         }
 
@@ -436,9 +427,9 @@ impl APIClient {
         #[allow(non_snake_case)]
         struct RequestData<'a> {
             deviceId    : &'a Id,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             sig         : &'a [u8],
         }
 
@@ -485,17 +476,18 @@ impl APIClient {
         struct RequestData<'a> {
             userName    : &'a str,
             avatar      : bool,
-            #[serde(with = "super::bytes_as_base64")]
+            #[serde(with = "super::serde_bytes_with_base64")]
             profileSig  : &'a [u8],
         }
 
-        let sig = self.user.sign_into(&profile::digest(
+        let digest = profile::digest(
             self.user.id(),
             &self.peerid,
             Some(name),
             avatar,
             None
-        )).unwrap();
+        );
+        let sig = self.user.sign_into(&digest).unwrap();
 
         let data = RequestData {
             userName    : name,

@@ -14,9 +14,9 @@ use crate::{
 };
 
 use crate::messaging::{
+    ServiceIds,
     UserAgent,
     DefaultUserAgent,
-    ServiceIds,
     ConnectionListener,
     MessageListener,
     ContactListener,

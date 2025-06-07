@@ -1,15 +1,16 @@
 
-use std::time::SystemTime;
 use std::fmt;
+use std::time::SystemTime;
 use serde::{ Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
+    as_millis,
     id,
     Id
 };
 
-pub static DEFAULT_EXPIRATION: u64 = 7 * 24 * 60 * 60 * 1000; // 7 days
+const DEFAULT_EXPIRATION: u64 = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash)]
 #[allow(unused)]
@@ -25,7 +26,7 @@ pub struct InviteTicket {
     is_public:  bool,
 
     #[serde(rename = "e")]
-    expire:     SystemTime,
+    expire:     u64,
 
     #[serde(rename = "s")]
     sig:       Vec<u8>,
@@ -37,10 +38,12 @@ pub struct InviteTicket {
 
 #[allow(unused)]
 impl InviteTicket {
+    pub const EXPIRATION: u64 = DEFAULT_EXPIRATION;
+
     pub(crate) fn new(channel_id: Id,
         inviter: Id,
         is_public: bool,
-        expire: SystemTime,
+        expire: u64,
         sig: Vec<u8>,
         session_key: Option<Vec<u8>>
     ) -> Self {
@@ -67,7 +70,7 @@ impl InviteTicket {
     }
 
     pub fn is_expired(&self) -> bool {
-        self.expire < SystemTime::now()
+        self.expire < as_millis!(SystemTime::now()) as u64
     }
 
     pub fn session_key(&self) -> Option<&[u8]> {
@@ -75,7 +78,7 @@ impl InviteTicket {
     }
 
     pub fn is_valid(&self, invitee: &Id) -> bool {
-        let digest = generate_digest(
+        let digest = Self::digest(
             &self.channel_id,
             &self.inviter,
             self.is_public,
@@ -99,6 +102,26 @@ impl InviteTicket {
             None
         )
     }
+
+    pub(crate) fn digest(channel_id: &Id,
+        inviter: &Id,
+        is_public: bool,
+        expire: u64,
+        invitee: &Id
+    ) -> Vec<u8> {
+        let invitee_bytes = if is_public {
+            id::MAX_ID.as_bytes()
+        } else {
+            invitee.as_bytes()
+        };
+
+        let mut sha256 = Sha256::new();
+        sha256.update(channel_id.as_bytes());
+        sha256.update(inviter.as_bytes());
+        sha256.update(invitee_bytes);
+        sha256.update(&expire.to_le_bytes());
+        sha256.finalize().to_vec()
+    }
 }
 
 impl fmt::Display for InviteTicket {
@@ -111,7 +134,7 @@ impl fmt::Display for InviteTicket {
             write!(f, ", public")?;
         }
 
-        // TODO: write!(_f, ", expiration={}", self.expire)?;
+        write!(f, ", expiration={}", self.expire)?;
         if self.is_expired() {
             write!(f, ", expired")?;
         }
@@ -120,23 +143,4 @@ impl fmt::Display for InviteTicket {
     }
 }
 
-pub(crate) fn generate_digest(channel_id: &Id,
-    inviter: &Id,
-    is_public: bool,
-    _expire: SystemTime,
-    invitee: &Id
-) -> Vec<u8> {
-    let invitee_bytes = if is_public {
-        id::MAX_ID.as_bytes()
-    } else {
-        invitee.as_bytes()
-    };
 
-    let mut sha256 = Sha256::new();
-    sha256.update(channel_id.as_bytes());
-    sha256.update(inviter.as_bytes());
-    sha256.update(invitee_bytes);
-    // TODO: expire
-
-    sha256.finalize().to_vec()
-}

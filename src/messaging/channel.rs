@@ -181,6 +181,24 @@ pub struct Channel {
 #[allow(unused)]
 impl Channel {
 
+    pub fn owner(&self) -> &Id {
+        &self.owner
+    }
+
+    pub(crate) fn set_owner(&mut self, owner: Id) {
+        self.owner = owner;
+        self.touch();
+    }
+
+    pub fn permission(&self) -> Permission {
+        self.permission
+    }
+
+    pub(crate) fn set_permission(&mut self, permission: Permission) {
+        self.permission = permission;
+        self.touch();
+    }
+
     pub(crate) fn session_keypair(&self) -> &cryptobox::KeyPair {
         unimplemented!()
     }
@@ -194,6 +212,10 @@ impl Channel {
     }
 
     pub(crate) fn is_moderator(&self, id: &Id) -> bool {
+        unimplemented!()
+    }
+
+    fn touch(&mut self) {
         unimplemented!()
     }
 }

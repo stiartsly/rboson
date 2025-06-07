@@ -14,7 +14,7 @@ pub struct Profile {
     home_peerid: Id,
 
     #[serde(rename = "ps")]
-    #[serde(with = "super::bytes_as_base64")]
+    #[serde(with = "super::serde_bytes_with_base64")]
     home_peer_sig: Vec<u8>,
 
 	#[serde(rename = "n")]
@@ -28,7 +28,7 @@ pub struct Profile {
     notice: Option<String>,
 
     #[serde(rename = "s")]
-    #[serde(with = "super::bytes_as_base64")]
+    #[serde(with = "super::serde_bytes_with_base64")]
     sig: Vec<u8>
 }
 

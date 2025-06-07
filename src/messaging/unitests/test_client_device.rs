@@ -8,8 +8,8 @@ fn test_serde_and_deserde() {
     let deviceid = Id::random();
     let device = ClientDevice::new(
         &deviceid,
-        "Alice",
-        "Example",
+        Some("Alice"),
+        Some("Example"),
         1234567890,
         1234567890,
         "localhost",

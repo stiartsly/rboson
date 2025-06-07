@@ -20,7 +20,9 @@ use super::{
     profile::Profile,
 };
 
-#[derive(Clone, Copy)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(unused)]
 pub enum ContactType {
     Unknown = 0,
     Contact = 1,

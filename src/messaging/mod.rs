@@ -1,10 +1,9 @@
-pub mod contact_listener;
+pub(crate) mod internal;
+pub(crate) mod rpc;
+pub(crate) mod persistence;
 
-pub mod persistence;
-pub mod contact;
-pub(crate) mod contact_sync_result;
-pub(crate) mod contact_sequence;
-pub(crate) mod contact_update;
+pub(crate) mod contact;
+pub(crate) mod contact_listener;
 
 pub(crate) mod channel;
 pub(crate) mod channel_listener;
@@ -17,15 +16,16 @@ pub mod device_profile;
 
 pub(crate) mod api_client;
 pub(crate) mod invite_ticket;
+
 pub mod message;
+pub mod message_builder;
 pub mod message_listener;
+
 pub mod connection_listener;
 pub mod config_adapter;
 pub mod conversation;
 
 pub mod client_device;
-
-pub(crate) mod rpc;
 
 pub mod messaging_repository;
 pub mod service_ids;
@@ -55,8 +55,10 @@ pub use crate::{
 
     messaging::user_agent_::UserAgent,
     messaging::user_agent_::DefaultUserAgent,
+
     messaging::contact::Contact,
     messaging::contact_listener::ContactListener,
+
     messaging::conversation::Conversation,
     messaging::connection_listener::ConnectionListener,
     messaging::user_profile::UserProfile,
@@ -64,7 +66,9 @@ pub use crate::{
     messaging::profile_listener::ProfileListener,
     messaging::message_listener::MessageListener,
     messaging::channel_listener::ChannelListener,
-    messaging::invite_ticket::InviteTicket
+    messaging::invite_ticket::InviteTicket,
+
+    messaging::channel::{Role, Member, Permission, Channel},
 };
 
 #[cfg(test)]
@@ -84,7 +88,8 @@ pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
     *v == T::default()
 }
 
-mod bytes_as_base64 {
+// bytes serded as base64 URL safe without padding
+mod serde_bytes_with_base64 {
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};
     use base64::{engine::general_purpose, Engine as _};
@@ -106,8 +111,9 @@ mod bytes_as_base64 {
     }
 }
 
+// serde Id as base58 string
 #[allow(unused)]
-mod id_as_base58 {
+mod serde_id_with_base58 {
     use crate::Id;
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};

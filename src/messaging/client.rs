@@ -5,11 +5,13 @@ use crate::{
 };
 
 use crate::messaging::{
-    user_agent::UserAgent,
-    channel::{Role, Permission, Channel},
+    UserAgent,
+    Role,
+    Permission,
+    Channel,
+    InviteTicket,
+    Contact,
     client_device::ClientDevice,
-    invite_ticket::InviteTicket,
-    contact::Contact,
 };
 
 pub trait MessagingClient {

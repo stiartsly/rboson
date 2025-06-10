@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::collections::HashMap;
 
 use crate::{
-    id::distance,
     id::MAX_ID,
     Id,
     NodeInfo
@@ -65,7 +64,7 @@ impl ClosestCandidates {
 
     pub(crate) fn head(&self) -> Id {
         match self.closest.is_empty() {
-            true => distance(&self.target, &MAX_ID),
+            true => self.target.distance(&MAX_ID),
             false => self.closest.iter().next().unwrap().0.clone()
         }
     }

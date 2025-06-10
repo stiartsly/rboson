@@ -117,7 +117,7 @@ impl ProxyClient {
             Arc::new(Mutex::new(fields))
         };
 
-        let peerid = ap.server_peerid().parse::<Id>()?;
+        let peerid = Id::try_from(ap.server_peerid())?;
         let worker = Arc::new(Mutex::new(ManagedWorker::new(
             cached_dir.clone(),
             node.clone(),

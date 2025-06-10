@@ -187,7 +187,7 @@ impl<'a> Builder<'a> {
         self.data_dir = cfg.dataDir.clone();
 
         for item in cfg.bootstraps {
-            let id = Id::try_from_base58(&item.id).map_err(|e|{
+            let id = Id::try_from(item.id.as_str()).map_err(|e|{
                 Error::Argument(format!("bad node id {} with error {}", item.id, e))
             })?;
             let ip = item.address.parse::<IpAddr>().map_err(|e| {

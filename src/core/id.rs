@@ -1,14 +1,15 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::str::FromStr;
 use core::result;
-use bs58::decode;
-use hex::FromHexError;
 use ciborium::value::Value;
-
-use serde::{Serialize, Serializer, Deserialize, Deserializer};
-use serde_with::serde_as;
 use bs58;
+use serde_with::serde_as;
+use serde::{
+    Serialize,
+    Serializer,
+    Deserialize,
+    Deserializer
+};
 
 use crate::{
     randomize_bytes,
@@ -24,10 +25,12 @@ pub const ID_BITS:  usize = 256;
 pub const MIN_ID: Id = Id::min();
 pub const MAX_ID: Id = Id::max();
 
+pub const DID_PREFIX: &str = "did:boson:";
+
 #[serde_as]
-#[derive(Default, Serialize, Deserialize, Clone, PartialOrd, PartialEq, Ord, Eq, Debug, Hash)]
+#[derive(Debug, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Serialize, Deserialize, Hash)]
 pub struct Id(
-    #[serde(with = "base58_as_string")]
+    #[serde(with = "bytes_as_base58")]
     [u8; ID_BYTES]
 );
 
@@ -48,38 +51,46 @@ impl Id {
     }
 
     pub fn try_from_hexstr(input: &str) -> Result<Self> {
+        let Some(input) = input.strip_prefix("0x") else {
+            return Err(Error::Argument("Hex format strings must have a '0x' prefix.".into()));
+        };
+
         let mut bytes = [0u8; ID_BYTES];
-        hex::decode_to_slice(input, &mut bytes[..])
-            .map_err(|e| match e {
-                FromHexError::InvalidHexCharacter { c, index } => {
-                    Error::Argument(format!("Invalid hex character {} at position {}", c, index))
-                },
-                FromHexError::OddLength => {
-                    Error::Argument(format!("Odd hex string length {}", input.len()))
-                },
-                FromHexError::InvalidStringLength => {
-                    Error::Argument(format!("Invalid hex string length"))
-                }
-            })?;
+        hex::decode_to_slice(input, &mut bytes[..]).map_err(|e|
+            Error::Argument(format!("Invalid hex format string: {e}"))
+        )?;
         Ok(Id(bytes))
     }
 
     pub fn try_from_base58(input: &str) -> Result<Self> {
+        if input.starts_with("0x") {
+            return Err(Error::Argument("Base58 format strings must not have a '0x' prefix.".into()));
+        }
+
         let mut bytes = [0u8; ID_BYTES];
         bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
-            .map_err(|e| match e {
-                decode::Error::BufferTooSmall => {
-                    Error::Argument(format!("Invalid base58 string length"))
-                },
-                decode::Error::InvalidCharacter { character, index } => {
-                    Error::Argument(format!("Invalid base58 character {} at {}", character, index))
-                },
-                _ => {
-                    Error::Argument(format!("Invalid base58 with unknown error"))
-                }
-            })?;
+            .map_err(|e|
+                Error::Argument(format!("Invalid base58 format string: {e}"))
+            )?;
+        Ok(Id(bytes))
+    }
+
+    //  Creates an id with the specified bit set to 1.
+    pub fn try_from_bit_at(index: usize) -> Result<Self> {
+        if index >= ID_BITS {
+            return Err(Error::Argument(format!(
+                "Index {} is out of bounds for ID with {} bits",
+                index, ID_BITS
+            )));
+        }
+
+        let mut bytes = [0u8; ID_BYTES];
+        let byte_index = index / 8;
+        let bit_index = index % 8;
+
+        bytes[byte_index] |= 1 << (7 - bit_index);
         Ok(Id(bytes))
     }
 
@@ -91,8 +102,17 @@ impl Id {
         Id([0xFF; ID_BYTES])
     }
 
+    pub const fn zero() -> Self {
+        Id([0u8; ID_BYTES])
+    }
+
     pub fn to_hexstr(&self) -> String {
-        hex::encode(&self.0)
+        format!("0x{}", hex::encode(&self.0))
+    }
+
+    pub fn to_abbr_hexstr(&self) -> String {
+        let hex = hex::encode(&self.0);
+        format!("0x{}...{}", &hex[..6], &hex[hex.len() - 4..])
     }
 
     pub fn to_base58(&self) -> String {
@@ -101,12 +121,33 @@ impl Id {
             .into_string()
     }
 
+    pub fn to_abbr_base58(&self) -> String {
+        let bs58 = self.to_base58();
+        format!("{}...{}", &bs58[..4], &bs58[bs58.len() - 4..])
+    }
+
+    pub fn to_did_string(&self) -> String {
+        format!("{}{}", DID_PREFIX, self.to_base58())
+    }
+
+    pub fn to_binary_string(&self) -> String {
+        unimplemented!()
+    }
+
+    pub fn to_abbr_str(&self) -> String {
+        self.to_abbr_base58()
+    }
+
     pub fn to_signature_key(&self) -> signature::PublicKey {
         signature::PublicKey::try_from(self.as_bytes()).unwrap()
     }
 
     pub fn to_encryption_key(&self) -> cryptobox::PublicKey {
         cryptobox::PublicKey::try_from(&self.to_signature_key()).unwrap()
+    }
+
+    pub(crate) fn to_cbor(&self) -> Value {
+        Value::Bytes(self.0.to_vec())
     }
 
     pub fn distance(&self, other: &Id) -> Id {
@@ -147,8 +188,8 @@ impl Id {
         ua.cmp(&ub)
     }
 
-    pub(crate) fn to_cbor(&self) -> Value {
-        Value::Bytes(self.0.to_vec())
+    pub fn distance_between(a: &Id, b: &Id) -> Id {
+        a.distance(b)
     }
 }
 
@@ -167,28 +208,27 @@ impl TryFrom<&[u8]> for Id {
     }
 }
 
-impl FromStr for Id {
-    type Err = Error;
-    fn from_str(base58: &str) -> result::Result<Self, Self::Err> {
-        Self::try_from_base58(base58)
-    }
-}
-
-// Create Id from a base58 string
+// Create Id from a string (base58 or hex)
 impl TryFrom<&str> for Id {
     type Error = Error;
-    fn try_from(base58: &str) -> Result<Self> {
-        Self::try_from_base58(base58)
+    fn try_from(str: &str) -> Result<Self> {
+        match str.starts_with("0x") {
+            true => Self::try_from_hexstr(str),
+            false => Self::try_from_base58(str)
+        }
     }
 }
 
 // Create Id from signature public key.
 impl From<signature::PublicKey> for Id {
     fn from(pk: signature::PublicKey) -> Self {
-        assert_eq!(ID_BYTES, pk.as_bytes().len());
-        assert_eq!(ID_BYTES, signature::PublicKey::BYTES);
-
         Id(pk.0)
+    }
+}
+
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_base58())
     }
 }
 
@@ -233,29 +273,8 @@ pub(crate) fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
     dst.0[idx] |= src.0[idx] & mask;
 }
 
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[cfg(feature = "inspect")]
-        write!(f,
-            "0x{}/{}",
-            self.to_hexstr(),
-            self.to_base58()
-        )?;
-
-        #[cfg(not(feature = "inspect"))]
-        write!(f, "{}", self.to_base58())?;
-
-        Ok(())
-    }
-}
-
-pub fn distance(a: &Id, b: &Id) -> Id {
-    a.distance(b)
-}
-
-mod base58_as_string {
+mod bytes_as_base58 {
     use super::*;
-
     pub fn serialize<S>(bytes: &[u8], serializer: S) -> result::Result<S::Ok, S::Error>
     where
         S: Serializer,

@@ -39,8 +39,8 @@ fn test_from_id() {
 
 #[test]
 fn test_is_prefix_of() {
-    let hexstr = "4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     let id = rc.unwrap();
     assert_eq!(id.to_hexstr(), hexstr);
@@ -48,15 +48,15 @@ fn test_is_prefix_of() {
     let prefix = Prefix::from_id(&id, 64);
     assert_eq!(prefix.is_prefix_of(&id), true);
 
-    let hexstr = "4833af415161cbd0ffffffffffffffffffffffffffffffffffffffffffffffff";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd0ffffffffffffffffffffffffffffffffffffffffffffffff";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     let id = rc.unwrap();
     assert_eq!(id.to_hexstr(), hexstr);
     assert_eq!(prefix.is_prefix_of(&id), true);
 
-    let hexstr = "4833af415161cbd1f3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd1f3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     let id = rc.unwrap();
     assert_eq!(id.to_hexstr(), hexstr);
@@ -78,20 +78,20 @@ fn test_is_splitable() {
 
 #[test]
 fn test_is_sibling_of() {
-    let hexstr = "4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     let id = rc.unwrap();
     let prefix = Prefix::from_id(&id, 84);
 
-    let hexstr = "4833af415161cbd0a3ef8faa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd0a3ef8faa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     let id = rc.unwrap();
     let prefix2 = Prefix::from_id(&id, 84);
 
-    let hexstr = "4833af415161cbd0a3ef93aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let rc = Id::try_from_hexstr(hexstr);
+    let hexstr = "0x4833af415161cbd0a3ef93aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let rc = Id::try_from(hexstr);
     assert_eq!(rc.is_ok(), true);
     //let id = rc.unwrap();
     //let prefix3 = Prefix::from_id(&id, 84);

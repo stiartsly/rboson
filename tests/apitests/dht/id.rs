@@ -1,8 +1,6 @@
-use std::str::FromStr;
 use boson::{
     Id,
     id::ID_BYTES,
-    id::distance,
     signature,
     cryptobox,
 };
@@ -30,23 +28,18 @@ use crate::{
  - Id::try_from(&[u8])
  - Id::try_from(&str)
  - Id::from(signature::PublicKey)
- - Id::from_str(&str)
  - Eq
  - PartialEq
  */
 
  #[test]
  fn test_default() {
-    let mut bytes = [0u8; ID_BYTES];
-    bytes.fill(0);
+    let zeros = [0u8; ID_BYTES];
 
-    let id1 = Id::from_bytes(bytes);
-    assert_eq!(id1.size(), ID_BYTES);
-    assert_eq!(id1.as_bytes(), bytes.as_slice());
-
+    let id1 = Id::from_bytes(zeros);
     let id2 = Id::default();
     assert_eq!(id2.size(), ID_BYTES);
-    assert_eq!(id2.as_bytes(), bytes.as_slice());
+    assert_eq!(id2.as_bytes(), zeros.as_slice());
     assert_eq!(id1, id2);
  }
 
@@ -58,152 +51,188 @@ fn test_from_bytes() {
     let id = Id::from_bytes(bytes);
     assert_eq!(id.size(), ID_BYTES);
     assert_eq!(id.as_bytes(), bytes.as_slice());
+
+    let result = Id::try_from(bytes.as_slice());
+    assert_eq!(result.is_ok(), true);
+    let id2 = result.unwrap();
+    assert_eq!(id2.size(), ID_BYTES);
+    assert_eq!(id2.as_bytes(), bytes.as_slice());
+    assert_eq!(id, id2);
 }
 
 #[test]
-fn test_try_from_hex() {
-    let hex_str = "71e1b2ecdf528b623192f899d984c53f2b13508e21ccd53de5d7158672820636";
-    let id = Id::try_from_hexstr(hex_str);
-    assert_eq!(id.is_ok(), true);
-    assert_eq!(id.as_ref().unwrap().size(), ID_BYTES);
-    assert_eq!(id.as_ref().unwrap().to_hexstr(), hex_str);
+fn test_try_from_hex_str() {
+    let hexstr = "71e1b2ecdf528b623192f899d984c53f2b13508e21ccd53de5d7158672820636";
+    let result = Id::try_from(hexstr);
+    assert_eq!(result.is_ok(), false);
+    println!("Error: {}", result.err().unwrap());
+
+    let hexstr = "0x71e1b2ecdf528b623192f899d984c53f2b13508e21ccd53de5d7158672820636";
+    let result = Id::try_from(hexstr);
+    assert_eq!(result.is_ok(), true);
+    let id1 = result.unwrap();
+    assert_eq!(id1.size(), ID_BYTES);
+    assert_eq!(id1.to_hexstr(), hexstr);
+
+    let result = Id::try_from(hexstr);
+    assert_eq!(result.is_ok(), true);
+    let id2 = result.unwrap();
+    assert_eq!(id2.size(), ID_BYTES);
+    assert_eq!(id2.to_hexstr(), hexstr);
+    assert_eq!(id1, id2);
 }
 
 #[test]
-fn test_try_from_base58() {
+fn test_try_from_base58_str() {
+    let base58 = "0xHZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), false);
+
     let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
-    let id1 = Id::try_from_base58(base58);
-    assert_eq!(id1.is_ok(), true);
-    assert_eq!(id1.as_ref().unwrap().size(), ID_BYTES);
-    assert_eq!(id1.as_ref().unwrap().to_base58(), base58);
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), true);
 
-    let id2 = Id::try_from(base58);
-    assert_eq!(id2.is_ok(), true);
-    assert_eq!(id2.as_ref().unwrap().size(), ID_BYTES);
-    assert_eq!(id2.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id1.as_ref().unwrap(), id2.as_ref().unwrap());
+    let id1 = result.unwrap();
+    assert_eq!(id1.size(), ID_BYTES);
+    assert_eq!(id1.to_base58(), base58);
+
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), true);
+    let id2 = result.unwrap();
+    assert_eq!(id2.size(), ID_BYTES);
+    assert_eq!(id2.to_base58(), base58);
+    assert_eq!(id1, id2);
 }
 
 #[test]
 fn test_min() {
     let mut bytes = [0u8; ID_BYTES];
     bytes.fill(0);
-    let id  = Id::from_bytes(bytes);
-    let min = Id::min();
-    assert_eq!(min.size(), ID_BYTES);
-    assert_eq!(min.as_bytes(), bytes.as_slice());
-    assert_eq!(min.to_hexstr(), "0000000000000000000000000000000000000000000000000000000000000000");
-    assert_eq!(min,id);
+    let id1  = Id::from_bytes(bytes);
+    let id2 = Id::min();
+    let id3 = Id::default();
+    let id4 = Id::zero();
+    assert_eq!(id1.size(), ID_BYTES);
+    assert_eq!(id1.as_bytes(), bytes.as_slice());
+    assert_eq!(id1.to_hexstr(), "0x0000000000000000000000000000000000000000000000000000000000000000");
+    assert_eq!(id1, id2);
+    assert_eq!(id1, id3);
+    assert_eq!(id1, id4);
 }
 
 #[test]
 fn test_max() {
     let mut bytes = [0u8; ID_BYTES];
     bytes.fill(0xFF);
-    let id = Id::from_bytes(bytes);
-    let max = Id::max();
-    assert_eq!(max.size(), ID_BYTES);
-    assert_eq!(max.as_bytes(), bytes.as_slice());
-    assert_eq!(max.to_hexstr(), "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-    assert_eq!(max, id);
+    let id1 = Id::from_bytes(bytes);
+    let id2 = Id::max();
+    assert_eq!(id1.size(), ID_BYTES);
+    assert_eq!(id1.as_bytes(), bytes.as_slice());
+    assert_eq!(id1.to_hexstr(), "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    assert_eq!(id1, id2);
 }
 
 #[test]
-fn test_try_from_bytes_error() { // invalid length.
+fn test_try_from_bytes() {
+    // wrong size of bytes
     let bytes = create_random_bytes(45);
-    let id = Id::try_from(bytes.as_slice());
-    assert_eq!(id.is_ok(), false);
+    let result = Id::try_from(bytes.as_slice());
+    assert_eq!(result.is_ok(), false);
 
     let bytes = create_random_bytes(25);
-    let id = Id::try_from(bytes.as_slice());
-    assert_eq!(id.is_ok(), false);
-}
+    let result = Id::try_from(bytes.as_slice());
+    assert_eq!(result.is_ok(), false);
 
-#[test]
-fn test_trait_try_from_bytes() {
+    // correct size of bytes
     let bytes = create_random_bytes(ID_BYTES);
-    let id = Id::try_from(bytes.as_slice());
-    assert_eq!(id.is_ok(), true);
-    assert_eq!(id.as_ref().unwrap().size(), ID_BYTES);
-    assert_eq!(id.as_ref().unwrap().as_bytes(), bytes);
+    let result = Id::try_from(bytes.as_slice());
+    assert_eq!(result.is_ok(), true);
+
+    let id = result.unwrap();
+    assert_eq!(id.size(), ID_BYTES);
+    assert_eq!(id.as_bytes(), bytes.as_slice());
 }
 
 #[test]
-fn test_trait_try_from_base58_error() { // Wrong base58 encoded string.
+fn test_try_from_base58() {
     let base58 = "OZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
-    let id_from = Id::try_from(base58);
-    let id_into: Result<Id,_> = base58.try_into();
-    assert_eq!(id_from.is_ok(), false);
-    assert_eq!(id_into.is_ok(), false);
-}
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), false);
 
-#[test]
-fn test_trait_try_from_base58() {
+    let result: Result<Id,_> = base58.try_into();
+    assert_eq!(result.is_ok(), false);
+
     let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
-    let id_from = Id::try_from(base58);
-    let id_into: Result<Id,_> = base58.try_into();
-    assert_eq!(id_from.is_ok(), true);
-    assert_eq!(id_from.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id_into.is_ok(), true);
-    assert_eq!(id_into.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id_from.unwrap(), id_into.unwrap());
-}
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), true);
 
-#[test]
-fn test_trait_from_str() {
-    let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
-    let id_from = Id::from_str(base58);
-    let id_parsed1: Result<Id, _> = base58.parse();
-    let id_parsed2 = base58.parse::<Id>();
-    assert_eq!(id_from.is_ok(), true);
-    assert_eq!(id_from.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id_parsed1.is_ok(), true);
-    assert_eq!(id_parsed2.is_ok(), true);
-    assert_eq!(id_parsed1.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id_parsed2.as_ref().unwrap().to_base58(), base58);
-    assert_eq!(id_from.as_ref().unwrap().clone(), id_parsed1.unwrap());
-    assert_eq!(id_from.unwrap(), id_parsed2.unwrap());
-}
+    let id_from = result.unwrap();
+    assert_eq!(id_from.size(), ID_BYTES);
+    assert_eq!(id_from.to_base58(), base58);
 
-#[test]
-fn test_trait_try_from_signature_publickey() {
-    let kp = signature::KeyPair::random();
-    let pk = kp.to_public_key();
-    let encryption_pk: cryptobox::PublicKey = kp.public_key().try_into().unwrap();
-    let id_from = Id::from(pk.clone());
-    let id_into: Id = pk.clone().into();
-    assert_eq!(id_from.to_signature_key(), pk.clone());
-    assert_eq!(id_into.to_signature_key(), pk.clone());
-    assert_eq!(id_from.to_encryption_key(), encryption_pk);
+    let result: Result<Id,_> = base58.try_into();
+    assert_eq!(result.is_ok(), true);
+
+    let id_into = result.unwrap();
+    assert_eq!(id_into.size(), ID_BYTES);
+    assert_eq!(id_into.to_base58(), base58);
     assert_eq!(id_from, id_into);
 }
 
 #[test]
+fn test_try_from_str() {
+    let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
+    let result = Id::try_from(base58);
+    assert_eq!(result.is_ok(), true);
+
+    let id1 = result.unwrap();
+    assert_eq!(id1.size(), ID_BYTES);
+    assert_eq!(id1.to_base58(), base58);
+
+    let hexstr = "0xf610197a374dfc3801cb00ad1acda6f7a52bb8e0bff10a3e0db2aacdcea41ed8";
+    let result = Id::try_from(hexstr);
+    assert_eq!(result.is_ok(), true);
+    let id2 = result.unwrap();
+    assert_eq!(id2.size(), ID_BYTES);
+    assert_eq!(id2.to_hexstr(), hexstr);
+    assert_eq!(id1.to_hexstr(), hexstr);
+    assert_eq!(id2.to_base58(), base58);
+    assert_eq!(id1, id2);
+}
+
+#[test]
+fn test_try_from_signature_publickey() {
+    let kp = signature::KeyPair::random();
+    let sig_pk = kp.to_public_key();
+    let enc_pk: cryptobox::PublicKey = kp.public_key().try_into().unwrap();
+
+    let id = Id::from(sig_pk.clone());
+    assert_eq!(id.to_signature_key(), sig_pk);
+    assert_eq!(id.to_encryption_key(), enc_pk);
+}
+
+#[test]
 fn test_id_eq() {
-    let hex_str = "71e1b2ecdf528b623192f899d984c53f2b13508e21ccd53de5d7158672820636";
-    let id1 = Id::try_from_hexstr(hex_str).expect("Invalid hex Id");
-    let id2 = Id::try_from_hexstr(hex_str).expect("Invalid hex Id");
+    let hexstr = "0x71e1b2ecdf528b623192f899d984c53f2b13508e21ccd53de5d7158672820636";
+    let id1 = Id::try_from(hexstr).expect("Invalid hex Id");
+    let id2 = Id::try_from(hexstr).expect("Invalid hex Id");
     assert_eq!(id1, id2);
 }
 
 #[test]
 fn test_distance() {
-    let id1_str = "00000000f528d6132c15787ed16f09b08a4e7de7e2c5d3838974711032cb7076";
-    let id2_str = "00000000f0a8d6132c15787ed16f09b08a4e7de7e2c5d3838974711032cb7076";
-    let dist_str = "0000000005800000000000000000000000000000000000000000000000000000";
-    let id1 = Id::try_from_hexstr(id1_str);
-    let id2 = Id::try_from_hexstr(id2_str);
-    assert_eq!(id1.is_ok(), true);
-    assert_eq!(id2.is_ok(), true);
+    let id1str = "0x00000000f528d6132c15787ed16f09b08a4e7de7e2c5d3838974711032cb7076";
+    let id2str = "0x00000000f0a8d6132c15787ed16f09b08a4e7de7e2c5d3838974711032cb7076";
+    let dist_str = "0x0000000005800000000000000000000000000000000000000000000000000000";
+    let id1 = Id::try_from(id1str).expect("Invalid hex Id");
+    let id2 = Id::try_from(id2str).expect("Invalid hex Id");
 
-    let id1_unwrap = id1.unwrap();
-    let id2_unwrap = id2.unwrap();
-    assert_eq!(distance(&id1_unwrap, &id2_unwrap).to_hexstr(), dist_str);
-    assert_ne!(id1_unwrap, id2_unwrap);
+    assert_eq!(Id::distance_between(&id1, &id2).to_hexstr(), dist_str);
+    assert_ne!(id1, id2);
 }
 
 #[test]
-fn test_ser_deser1() {
+fn test_ser_deser() {
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     #[allow(non_snake_case)]
     struct TestId {
@@ -221,7 +250,7 @@ fn test_ser_deser1() {
 }
 
 #[test]
-fn test_ser_deser2() {
+fn test_ser_deser_option() {
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     #[allow(non_snake_case)]
     struct TestId {

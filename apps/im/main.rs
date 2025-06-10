@@ -47,8 +47,7 @@ async fn main() {
         return;
     };
 
-    let peerid = mcfg.server_peerid()
-        .parse::<Id>()
+    let peerid = Id::try_from(mcfg.server_peerid())
         .map_err(|e| panic!("{e}"))
         .unwrap();
 

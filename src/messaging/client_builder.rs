@@ -5,6 +5,7 @@ use url::Url;
 use log::error;
 
 use crate::{
+    unwrap,
     Id,
     Node,
     signature::KeyPair,
@@ -60,7 +61,7 @@ pub struct Builder<'a> {
     profile_listener    : Option<Box<dyn ProfileListener>>,
     contact_listener    : Option<Box<dyn ContactListener>>,
 
-    user_agent  : Option<Box<DefaultUserAgent>>
+    user_agent  : Option<Arc<Mutex<DefaultUserAgent>>>
 }
 
 #[allow(unused)]
@@ -235,7 +236,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub(crate) fn with_user_agent(&mut self, agent: Box<DefaultUserAgent>) -> &mut Self {
+    pub(crate) fn with_user_agent(&mut self, agent: Arc<Mutex<DefaultUserAgent>>) -> &mut Self {
         self.user_agent = Some(agent);
         self
     }
@@ -300,32 +301,33 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    async fn setup_user_agent(&mut self) -> Result<Box<dyn UserAgent>>  {
-        let Some(mut agent) = self.user_agent.take() else {
+    async fn setup_user_agent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>>  {
+        let Some(agent) = self.user_agent.as_ref() else {
             return Err(Error::State("User agent is not set up yet".into()));
         };
 
-        if !agent.is_configured() {
+        let mut agent_guard = agent.lock().unwrap();
+        if !agent_guard.is_configured() {
             return Err(Error::State("User agent is not configured yet".into()));
         }
+        self.connection_listener.take().map(|v|{
+            agent_guard.set_connection_listener(v);
+        });
+        self.message_listener.take().map(|v| {
+            agent_guard.set_message_listener(v);
+        });
+        self.channel_listener.take().map(|v| {
+            agent_guard.set_channel_listener(v);
+        });
+        self.contact_listener.take().map(|v| {
+            agent_guard.set_contact_listener(v);
+        });
 
-        if let Some(listener) = self.connection_listener.take() {
-            agent.set_connection_listener(listener);
-        }
-        if let Some(listener) = self.message_listener.take() {
-            agent.set_message_listener(listener);
-        }
-        if let Some(listener) = self.channel_listener.take() {
-            agent.set_channel_listener(listener);
-        }
-        if let Some(listener) = self.contact_listener.take() {
-            agent.set_contact_listener(listener);
-        }
-        return Ok(agent)
+        return Ok(agent.clone())
     }
 
-    async fn build_default_user_agent(&mut self) -> Result<Box<dyn UserAgent>> {
-        let mut agent = Box::new(DefaultUserAgent::new(None)?);
+    async fn build_default_user_agent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
+        let mut agent = DefaultUserAgent::new(None)?;
         let repos = match self.repository.take() {
             Some(r) => r,
             None => {
@@ -367,10 +369,10 @@ impl<'a> Builder<'a> {
         if let Some(listener) = self.contact_listener.take() {
             agent.set_contact_listener(listener);
         }
-        Ok(agent)
+        Ok(Arc::new(Mutex::new(agent)))
     }
 
-    async fn register_agent(&self, _: Box<dyn UserAgent>) -> Result<()> {
+    async fn register_agent(&self, _: Arc<Mutex<dyn UserAgent>>) -> Result<()> {
         let mut api_client = api_client::Builder::new()
             .with_base_url(self.api_url.as_ref().unwrap().as_str())
             .with_home_peerid(self.peerid.as_ref().unwrap())
@@ -379,8 +381,8 @@ impl<'a> Builder<'a> {
             .build()
             .unwrap();
 
-        let user = self.user_agent.as_ref().unwrap().user();
-        let device = self.user_agent.as_ref().unwrap().device();
+        let user = unwrap!(self.user_agent).lock().unwrap().user();
+        let device = unwrap!(self.user_agent).lock().unwrap().device();
 
         if self.register_user_and_device {
             api_client.register_user_with_device(
@@ -409,9 +411,8 @@ impl<'a> Builder<'a> {
         Client::new(self)
     }
 
-    pub(crate) fn user_agent_take(&mut self) -> Box<DefaultUserAgent> {
-        self.user_agent.take()
-            .expect("User agent is not set up yet")
+    pub(crate) fn user_agent(&self) -> Option<Arc<Mutex<DefaultUserAgent>>> {
+        self.user_agent.as_ref().map(|v| v.clone())
     }
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {

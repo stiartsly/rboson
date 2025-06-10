@@ -1,6 +1,6 @@
 use super::message::Message;
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub(crate) trait MessageListenerMut {
     fn on_message(&mut self, message: Message);
     fn on_sending(&mut self, message: Message);

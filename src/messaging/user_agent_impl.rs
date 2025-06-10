@@ -295,7 +295,11 @@ impl DefaultUserAgent {
     }
 
     fn put_message(&mut self, message: Message) {
-        unimplemented!()
+        self.repository.as_mut().map(|v| {
+            v.put_message(message).map_err(|e| {
+                error!("Save message failed, error: {e}");
+            });
+        });
     }
 }
 
@@ -358,27 +362,28 @@ impl ChannelListener for DefaultUserAgent {
 
 impl MessageListenerMut for DefaultUserAgent {
     fn on_message(&mut self, mut message: Message) {
-        let is_channel_message = !self.is_myself(message.to());
-        let conv_id = match is_channel_message {
+        let conv_id = match !self.is_myself(message.to()) {
             true => message.to(),
             false => message.from(),
         }.clone();
 
         message.set_conversation_id(&conv_id);
-
-        self.message_listener.as_mut().map(|l| {
+        self.message_listener.as_ref().map(|l| {
             l.on_message(&message);
         });
 
-        self.repository.as_mut().map(|v| {
-            if let Err(e) = v.put_message(message) {
-                error!("Save message failed, error: {e}");
-            }
-        });
+        self.put_message(message);
+        // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
 
-    fn on_sending(&mut self, _message: Message) {
-        unimplemented!()
+    fn on_sending(&mut self, mut message: Message) {
+        let conv_id = message.to().clone();
+        message.set_conversation_id(&conv_id);
+        self.message_listener.as_ref().map(|l| {
+            l.on_sending(&message);
+        });
+        self.put_message(message);
+        // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
 
     fn on_sent(&mut self, _message: Message) {

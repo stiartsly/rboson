@@ -1,8 +1,8 @@
 use crate::{
     Id,
-    core::crypto_context::CryptoContext,
     Error,
-    error::Result
+    error::Result,
+    core::crypto_context::CryptoContext
 };
 
 pub trait Identity {

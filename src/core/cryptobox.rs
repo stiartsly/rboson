@@ -1,4 +1,3 @@
-
 use std::fmt;
 use static_assertions::const_assert;
 use libsodium_sys::{
@@ -100,8 +99,7 @@ impl Drop for PrivateKey {
 
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))?;
-        Ok(())
+        write!(f, "{}", hex::encode(self.0))
     }
 }
 

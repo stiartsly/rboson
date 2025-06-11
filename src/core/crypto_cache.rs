@@ -51,7 +51,7 @@ impl CryptoCache {
     }
 
     fn load(&self, key: &Id) -> CryptoContext {
-        CryptoContext::new(
+        CryptoContext::from_private_key(
             key,
             self.keypair.private_key()
         )

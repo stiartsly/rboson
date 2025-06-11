@@ -1,7 +1,7 @@
 use boson::{
-    id,
     Id,
     Prefix,
+    ID_BITS
 };
 
 /*
@@ -65,14 +65,14 @@ fn test_is_prefix_of() {
 
 #[test]
 fn test_is_splitable() {
-    for i in 0 .. (id::ID_BITS as i32 -2) {
+    for i in 0 .. (ID_BITS as i32 -2) {
         let id = Id::random();
         let prefix = Prefix::from_id(&id, i);
         assert_eq!(prefix.is_splittable(), true);
     }
 
     let id = Id::random();
-    let prefix = Prefix::from_id(&id, id::ID_BITS as i32 -1);
+    let prefix = Prefix::from_id(&id, ID_BITS as i32 -1);
     assert_eq!(prefix.is_splittable(), false);
 }
 
@@ -102,7 +102,7 @@ fn test_is_sibling_of() {
 
 #[test]
 fn test_first() {
-    for i in 0 .. id::ID_BITS as i32 -1 {
+    for i in 0 .. ID_BITS as i32 -1 {
         let id = Id::random();
         let prefix = Prefix::from_id(&id, i);
         let first = prefix.first();
@@ -112,7 +112,7 @@ fn test_first() {
 
 #[test]
 fn test_last() {
-    for i in 0 .. id::ID_BITS as i32 -1 {
+    for i in 0 .. ID_BITS as i32 -1 {
         let id = Id::random();
         let prefix = Prefix::from_id(&id, i);
         let last = prefix.last();
@@ -130,7 +130,7 @@ fn test_parent() {
 
 #[test]
 fn test_randomid() {
-    for i in 0 .. id::ID_BITS as i32 {
+    for i in 0 .. ID_BITS as i32 {
         let id = Id::random();
         let prefix = Prefix::from_id(&id, i);
         let rand_id = prefix.random_id();
@@ -143,7 +143,7 @@ fn test_randomid() {
 
 #[test]
 fn test_split_branch() {
-    for i in 0 .. id::ID_BITS as i32 -1 {
+    for i in 0 .. ID_BITS as i32 -1 {
         let id = Id::random();
         let prefix = Prefix::from_id(&id, i);
         let pl = prefix.split_branch(false);

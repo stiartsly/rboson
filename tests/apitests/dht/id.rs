@@ -1,6 +1,6 @@
 use boson::{
     Id,
-    id::ID_BYTES,
+    ID_BYTES,
     signature,
     cryptobox,
 };

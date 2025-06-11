@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::{
-    id::MAX_ID,
+    MAX_ID,
     Id,
 };
 

@@ -12,7 +12,7 @@ use log::{error, info};
 use crate::{
     create_dirs,
     Id,
-    id::MIN_ID,
+    MIN_ID,
     Config,
     Error,
     error::Result,
@@ -556,7 +556,7 @@ impl Identity for Node {
     }
 
     fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
-        Ok(CryptoContext::new(
+        Ok(CryptoContext::from_private_key(
             _id,
             self.encryption_keypair.private_key()
         ))

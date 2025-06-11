@@ -9,7 +9,7 @@ use log::{
 
 static mut MY_LOGGER: Option<Logger> = None;
 
-struct  Logger {
+struct Logger {
     console_output_enabled: bool,
     max_level: LevelFilter,
     fp: Option<Arc<Mutex<File>>>,

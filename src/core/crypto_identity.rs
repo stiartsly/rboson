@@ -100,7 +100,7 @@ impl Identity for CryptoIdentity {
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         CryptoBox::try_from((&id.to_encryption_key(), self.encrypt_keypair.private_key())).map(|v|
-            CryptoContext::from_cryptobox(id, v)
+            CryptoContext::new(id, v)
         )
     }
 }

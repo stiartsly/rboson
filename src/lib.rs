@@ -3,39 +3,46 @@ pub mod activeproxy;
 pub mod messaging;
 pub mod appdata_store;
 
-pub use {
-    core::id,
-    core::id::Id,
-    core::node::Node,
-    core::error::Error,
-    core::error,
-    core::config,
-    core::config::Config,
-    core::prefix::Prefix,
-    core::node_info::NodeInfo,
-    core::peer_info::{
+pub use crate::core::{
+    Id,
+    DID_PREFIX,
+    ID_BYTES,
+    ID_BITS,
+    MIN_ID,
+    MAX_ID,
+
+    node::Node,
+    error::Error,
+    error,
+    config,
+    config::Config,
+    prefix::Prefix,
+    node_info::NodeInfo,
+    peer_info::{
         PeerInfo,
         PeerBuilder
     },
-    core::value::{
+    value::{
         Value,
         ValueBuilder,
         SignedBuilder,
         EncryptedBuilder
     },
-    core::network::Network,
-    core::node_status::NodeStatus,
-    core::lookup_option::LookupOption,
-    core::joint_result::JointResult,
-    core::default_configuration as configuration,
-    core::signature,
-    core::signature::Signature,
-    core::cryptobox,
-    core::cryptobox::CryptoBox,
-    core::crypto_context::CryptoContext,
-    core::identity::Identity,
+    network::Network,
+    node_status::NodeStatus,
+    lookup_option::LookupOption,
+    joint_result::JointResult,
+    default_configuration as configuration,
+    signature,
+    signature::Signature,
+    cryptobox,
+    cryptobox::CryptoBox,
+    crypto_context::CryptoContext,
+    identity::Identity,
+};
 
-    activeproxy::ActiveProxyClient,
+pub use crate::activeproxy::{
+    ActiveProxyClient
 };
 
 #[macro_export]

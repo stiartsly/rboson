@@ -1,14 +1,14 @@
 
 use crate::Network;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct JointResult<T> {
     v4: Option<T>,
     v6: Option<T>,
 }
 
 impl<T> JointResult<T> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             v4: None,
             v6: None
@@ -34,7 +34,7 @@ impl<T> JointResult<T> {
         self.v4.is_none() && self.v6.is_none()
     }
 
-    pub(crate) fn has_value(&self) -> bool {
+    pub fn has_value(&self) -> bool {
         self.v4.is_some() || self.v6.is_some()
     }
 

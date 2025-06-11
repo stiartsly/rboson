@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io;
 use std::net;
-use std::result;
+use core::result;
 
 #[derive(Debug)]
 pub enum Error {

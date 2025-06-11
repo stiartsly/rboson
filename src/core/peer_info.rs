@@ -7,7 +7,7 @@ use ciborium::Value;
 
 use crate::{
     Id,
-    id::ID_BYTES,
+    ID_BYTES,
     signature,
     signature::{KeyPair, PrivateKey}
 };

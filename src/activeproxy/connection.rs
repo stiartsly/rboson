@@ -32,9 +32,9 @@ use crate::{
     enbox,
     unwrap,
     random_bytes,
-    id,
     Id,
     Error,
+    ID_BYTES,
     error::Result,
     cryptobox, CryptoBox,
     signature,
@@ -140,7 +140,7 @@ impl ProxyConnection {
 
             deviceid:           Id::from(keypair.to_public_key()),
             signature_keypair:  keypair.clone(),
-            crypto_context:     RefCell::new(CryptoContext::new(
+            crypto_context:     RefCell::new(CryptoContext::from_private_key(
                 srv_peer!(inners).lock().unwrap().id(),
                 encryption_keypair.private_key()
             )),
@@ -873,16 +873,16 @@ impl ProxyConnection {
         plain.extend_from_slice(dev_sig);           // signature of challenge.
 
         let len = PACKET_HEADER_BYTES
-            + id::ID_BYTES                          // plain device id
+            + ID_BYTES                          // plain device id
             + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
             + plain.len();
 
         let mut payload =vec![0u8;len];
-        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
+        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
         self.encrypt(
             srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
-            &mut payload[PACKET_HEADER_BYTES + id::ID_BYTES..]
+            &mut payload[PACKET_HEADER_BYTES + ID_BYTES..]
         ).map_err(|e| {
             error!("Connection {} failed to encrypt attach request: {e}", self.cid());
             e
@@ -916,7 +916,7 @@ impl ProxyConnection {
         self.state = State::Authenticating;
 
         //let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
-        let len = id::ID_BYTES                      // client user id.
+        let len = ID_BYTES                      // client user id.
             + cryptobox::PublicKey::BYTES       // client public key.
             + mem::size_of::<u8>()              // the value to domain length.
             + Signature::BYTES                  // signature of challenge from user client.
@@ -930,7 +930,7 @@ impl ProxyConnection {
         plain.extend_from_slice(dev_sig);               // signature of challenge.
 
         let mut len = PACKET_HEADER_BYTES               // packet header.
-            + id::ID_BYTES                              // plain device id
+            + ID_BYTES                                  // plain device id
             + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
             + plain.len();                              // encyption payload
 
@@ -941,11 +941,11 @@ impl ProxyConnection {
         len += padding_sz;                              // padding size for randomness.
 
         let mut payload =vec![0u8;len];
-        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + id::ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
+        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + ID_BYTES].copy_from_slice(self.deviceid.as_bytes());
         self.encrypt(
             srv_peer!(self.inners).lock().unwrap().id(),
             &plain,
-            &mut payload[PACKET_HEADER_BYTES + id::ID_BYTES..]
+            &mut payload[PACKET_HEADER_BYTES + ID_BYTES..]
         ).map_err(|e| {
             error!("Connection {} failed to encrypt authentication request: {e}", self.cid());
             e

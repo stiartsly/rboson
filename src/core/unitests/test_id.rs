@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
+use crate::core::id;
 use crate::{
-    id,
     Id,
-    id::ID_BITS,
+    ID_BITS,
 };
 
 #[test]

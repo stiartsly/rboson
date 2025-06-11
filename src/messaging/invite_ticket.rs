@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     as_millis,
-    id,
+    MAX_ID,
     Id
 };
 
@@ -110,7 +110,7 @@ impl InviteTicket {
         invitee: &Id
     ) -> Vec<u8> {
         let invitee_bytes = if is_public {
-            id::MAX_ID.as_bytes()
+            MAX_ID.as_bytes()
         } else {
             invitee.as_bytes()
         };

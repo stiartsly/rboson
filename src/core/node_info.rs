@@ -1,4 +1,5 @@
 use std::fmt;
+use std::hash::Hash;
 use std::net::{
     SocketAddr,
     IpAddr,
@@ -7,8 +8,10 @@ use std::net::{
 };
 use ciborium::Value;
 
-use crate::Id;
-use crate::core::version;
+use crate::{
+    Id,
+    core::version
+};
 
 pub(crate) trait Reachable {
     fn reachable(&self) -> bool;
@@ -109,13 +112,19 @@ impl Reachable for NodeInfo {
     fn set_reachable(&mut self, _: bool) {}
 }
 
+impl Hash for NodeInfo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        0x6e.hash(state); // + 'n'
+    }
+}
+
 impl fmt::Display for NodeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "{},{}",
+            "<{},{}>",
             self.id,
             self.addr
-        )?;
-        Ok(())
+        )
     }
 }

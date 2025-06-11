@@ -1,5 +1,5 @@
 use crate::{
-    id::Id,
+    Id,
     signature,
     Identity,
     core::crypto_identity::CryptoIdentity,

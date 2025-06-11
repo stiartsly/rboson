@@ -536,7 +536,7 @@ impl Identity for Contact {
         };
 
         CryptoBox::try_from((&id.to_encryption_key(), keypair.private_key())).map(|v|
-            CryptoContext::from_cryptobox(id, v)
+            CryptoContext::new(id, v)
         )
     }
 }

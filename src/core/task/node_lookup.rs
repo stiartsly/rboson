@@ -5,7 +5,7 @@ use log::error;
 
 use crate::{
     Id,
-    id::MAX_ID,
+    MAX_ID,
     Network,
     NodeInfo
 };

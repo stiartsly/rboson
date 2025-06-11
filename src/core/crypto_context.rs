@@ -8,31 +8,31 @@ use crate::{
 
 #[derive(Debug)]
 pub struct CryptoContext {
-    id  : Id,
-    box_: CryptoBox,
+    id          : Id,
+    crypto_box  : CryptoBox,
 
-    next_nonce: Nonce,
+    next_nonce  : Nonce,
     last_peer_nonce: Option<Nonce>,
 }
 
 unsafe impl Send for CryptoContext {}
 impl CryptoContext {
-    pub(crate) fn new(id: &Id, private_key: &PrivateKey) -> CryptoContext {
-        let encryption_key = id.to_encryption_key();
-
+    pub(crate) fn new(id: &Id, crypto_box: CryptoBox) -> CryptoContext {
         Self {
-            id: id.clone(),
-            box_: CryptoBox::try_from((&encryption_key, private_key)).ok().unwrap(),
-            next_nonce: Nonce::random(),
+            id          : id.clone(),
+            crypto_box,
+            next_nonce  : Nonce::random(),
             last_peer_nonce: None
         }
     }
 
-    pub(crate) fn from_cryptobox(id: &Id, box_: CryptoBox) -> CryptoContext {
+    pub(crate) fn from_private_key(id: &Id, private_key: &PrivateKey) -> CryptoContext {
+        let encryption_key = id.to_encryption_key();
+
         Self {
-            id: id.clone(),
-            box_,
-            next_nonce: Nonce::random(),
+            id          : id.clone(),
+            crypto_box  : CryptoBox::try_from((&encryption_key, private_key)).unwrap(),
+            next_nonce  : Nonce::random(),
             last_peer_nonce: None
         }
     }
@@ -49,12 +49,12 @@ impl CryptoContext {
 
     pub fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         let nonce = self.increment_nonce();
-        self.box_.encrypt(plain, cipher, &nonce)
+        self.crypto_box.encrypt(plain, cipher, &nonce)
     }
 
     pub fn encrypt_into(&mut self, plain: &[u8]) -> Result<Vec<u8>> {
         let nonce = self.increment_nonce();
-        self.box_.encrypt_into(plain, &nonce)
+        self.crypto_box.encrypt_into(plain, &nonce)
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
@@ -64,7 +64,7 @@ impl CryptoContext {
                 return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".to_string()));
             }
         }
-        self.box_.decrypt(cipher, plain)
+        self.crypto_box.decrypt(cipher, plain)
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
@@ -74,13 +74,13 @@ impl CryptoContext {
                 return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".to_string()));
             }
         }
-        self.box_.decrypt_into(&cipher)
+        self.crypto_box.decrypt_into(&cipher)
     }
 }
 
 impl Drop for CryptoContext {
     fn drop(&mut self) {
-        self.box_.clear();
+        self.crypto_box.clear();
         self.next_nonce.clear();
     }
 }

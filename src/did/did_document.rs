@@ -8,7 +8,7 @@ use crate::{
 	core::crypto_identity::CryptoIdentity,
 };
 
-use crate::core::identifier::{
+use super::{
 	did_constants::DID_SCHEME as did_scheme,
     VerificationMethod,
 	VerificationMethodType,

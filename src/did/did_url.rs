@@ -6,7 +6,7 @@ use crate::{
     error::{Error, Result},
 };
 
-use crate::core::identifier::{
+use super::{
     DID_SCHEME,
     DID_METHOD
 };
@@ -51,8 +51,8 @@ impl DIDUrl {
         }).unwrap_or_default();
 
         Self {
-            scheme: "did".to_string(),
-            method: "boson".to_string(),
+            scheme: DID_SCHEME.to_string(),
+            method: DID_METHOD.to_string(),
             id: id.clone(),
             path,
             query,

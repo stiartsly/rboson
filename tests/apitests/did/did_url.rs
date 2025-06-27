@@ -1,5 +1,5 @@
 use boson::Id;
-use boson::core::identifier::{
+use boson::did::{
     DID_SCHEME,
     DID_METHOD,
     DIDUrl

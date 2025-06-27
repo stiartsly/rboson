@@ -2,8 +2,6 @@ pub(crate) mod sqlite3;
 pub(crate) mod msg;
 pub(crate) mod task;
 
-pub mod identifier;
-
 mod constants;
 mod crypto_cache;
 mod dht;

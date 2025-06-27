@@ -8,7 +8,7 @@ use crate::{
     signature,
 };
 
-use crate::core::identifier::{
+use super::{
     VerificationMethod,
 };
 

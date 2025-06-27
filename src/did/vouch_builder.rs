@@ -7,7 +7,7 @@ use crate::{
     core::crypto_identity::CryptoIdentity,
 };
 
-use crate::core::identifier::{
+use super::{
     BosonIdentityObjectBuilder,
     Credential,
     Vouch,

@@ -11,11 +11,11 @@ use crate::{
     Id,
     error::{Error, Result},
     signature,
-    core::identifier::Credential,
     core::crypto_identity::CryptoIdentity,
 };
 
-use crate::core::identifier::{
+use super::{
+    Credential,
     CardBuilder
 };
 

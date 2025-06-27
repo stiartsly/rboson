@@ -1,4 +1,5 @@
 pub mod core;
+pub mod did;
 pub mod activeproxy;
 pub mod messaging;
 pub mod appdata_store;

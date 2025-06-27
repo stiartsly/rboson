@@ -8,7 +8,7 @@ use crate::{
     core::Identity,
 };
 
-use crate::core::identifier::{
+use super::{
     did_constants,
     BosonIdentityObjectBuilder,
     VerificationMethod,

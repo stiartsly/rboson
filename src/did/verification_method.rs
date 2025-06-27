@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::Id;
-use crate::core::identifier::{
+use super::{
     did_url::DIDUrl,
     did_constants
 };

@@ -18,7 +18,6 @@ use super::{
     VerifiablePresentation,
 };
 
-#[allow(unused)]
 pub struct VerifiablePresentationBuilder {
     holder      : CryptoIdentity,
 
@@ -28,7 +27,6 @@ pub struct VerifiablePresentationBuilder {
     credentials : HashMap<String, VerifiableCredential>,
 }
 
-#[allow(unused)]
 impl VerifiablePresentationBuilder {
     pub(crate) fn new(holder: CryptoIdentity) -> Self {
         let types = vec![

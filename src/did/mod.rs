@@ -18,7 +18,7 @@ pub(crate) mod verifiable_credential_builder;
 pub(crate) mod verifiable_presentation;
 pub(crate) mod verifiable_presentation_builder;
 
-pub use crate::core::identifier::{
+pub use crate::did::{
     did_url::DIDUrl,
     proof::Proof,
     verification_method::{

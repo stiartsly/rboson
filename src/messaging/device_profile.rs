@@ -1,6 +1,5 @@
 use crate::{
     Id,
-    Identity,
     Error,
     error::Result,
 };

@@ -98,6 +98,8 @@ pub(crate) struct ProxyConnection {
 }
 
 impl Identity for ProxyConnection {
+    type IdentityObject = ProxyConnection;
+
     fn id(&self) -> &Id {
         &self.deviceid
     }

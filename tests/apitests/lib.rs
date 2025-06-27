@@ -1,5 +1,9 @@
 #[cfg(test)]
 mod dht;
+
+#[cfg(test)]
+mod did;
+
 #[cfg(test)]
 mod messaging;
 

@@ -11,7 +11,7 @@ pub use crate::core::{
     MIN_ID,
     MAX_ID,
 
-    node::Node,
+
     error::Error,
     error,
     config,
@@ -39,6 +39,9 @@ pub use crate::core::{
     cryptobox::CryptoBox,
     crypto_context::CryptoContext,
     identity::Identity,
+
+    node::Node,
+
 };
 
 pub use crate::activeproxy::{
@@ -48,7 +51,14 @@ pub use crate::activeproxy::{
 #[macro_export]
 macro_rules! as_millis {
     ($time:expr) => {{
-        $time.elapsed().unwrap().as_millis()
+        $time.elapsed().unwrap().as_millis() as u128
+    }};
+}
+
+#[macro_export]
+macro_rules! as_secs {
+    ($time:expr) => {{
+        $time.elapsed().unwrap().as_secs() as u64
     }};
 }
 

@@ -14,6 +14,10 @@ pub enum Error {
     Crypto(String),
     Db(String),
     Permission(String),
+    Signature(String),
+    Malformed(String),
+    Expired(String),
+    BeforeValidPeriod(String),
 }
 
 impl fmt::Display for Error {
@@ -28,6 +32,10 @@ impl fmt::Display for Error {
             Error::Crypto(msg)      => write!(f, "{}", msg),
             Error::Db(msg)          => write!(f, "{}", msg),
             Error::Permission(msg)  => write!(f, "{}", msg),
+            Error::Signature(msg)   => write!(f, "{}", msg),
+            Error::Malformed(msg)   => write!(f, "{}", msg),
+            Error::Expired(msg)     => write!(f, "{}", msg),
+            Error::BeforeValidPeriod(msg) => write!(f, "{}", msg),
         }
     }
 }

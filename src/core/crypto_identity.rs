@@ -40,6 +40,10 @@ impl CryptoIdentity {
     pub fn encryption_keypair(&self) -> &cryptobox::KeyPair {
         &self.encrypt_keypair
     }
+
+    pub fn id(&self) -> &Id {
+        Identity::id(self)
+    }
 }
 
 impl PartialEq for CryptoIdentity {
@@ -49,6 +53,8 @@ impl PartialEq for CryptoIdentity {
 }
 
 impl Identity for CryptoIdentity {
+    type IdentityObject = CryptoIdentity;
+
     fn id(&self) -> &Id {
         &self.id
     }

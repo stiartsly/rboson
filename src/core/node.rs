@@ -519,6 +519,8 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
 }
 
 impl Identity for Node {
+    type IdentityObject = Node;
+
     fn id(&self) -> &Id {
         &self.nodeid
     }

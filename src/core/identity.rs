@@ -6,6 +6,8 @@ use crate::{
 };
 
 pub trait Identity {
+    type IdentityObject;
+
     fn id(&self) -> &Id;
 
     fn sign(&self, _data: &[u8], _signature: &mut [u8]) -> Result<usize> {

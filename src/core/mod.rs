@@ -1,3 +1,9 @@
+pub(crate) mod sqlite3;
+pub(crate) mod msg;
+pub(crate) mod task;
+
+pub mod identifier;
+
 mod constants;
 mod crypto_cache;
 mod dht;
@@ -5,11 +11,8 @@ mod kbucket;
 mod kclosest_nodes;
 mod server;
 mod rpccall;
-mod task;
 mod scheduler;
-mod sqlite3;
 
-pub(crate) mod msg;
 pub(crate) mod cbor;
 pub(crate) mod logger;
 pub(crate) mod crypto_context;
@@ -61,7 +64,7 @@ pub use crate::core::{
     joint_result::JointResult,
     network::Network,
     crypto_context::CryptoContext,
-    node_info::NodeInfo,
+    node_info::NodeInfo
 };
 
 #[cfg(test)]

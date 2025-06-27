@@ -232,6 +232,12 @@ impl fmt::Display for Id {
     }
 }
 
+impl fmt::Binary for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_binary_string())
+    }
+}
+
 pub(crate) fn bits_equal(a: &Id, b: &Id, depth: i32) -> bool {
     if depth == -1 {
         return true;

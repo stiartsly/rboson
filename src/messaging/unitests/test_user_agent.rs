@@ -1,7 +1,6 @@
 use crate::{
     core::crypto_identity::CryptoIdentity,
     signature,
-    Identity,
 };
 
 use crate::messaging::{

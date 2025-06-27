@@ -453,6 +453,8 @@ impl PartialEq for Contact {
 }
 
 impl Identity for Contact {
+    type IdentityObject = Contact;
+
     fn id(&self) -> &Id {
         &self.id
     }

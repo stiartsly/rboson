@@ -1,8 +1,4 @@
-use crate::{
-    Id,
-    Identity,
-};
-
+use crate::Id;
 use crate::core::{
     crypto_identity::CryptoIdentity,
 };

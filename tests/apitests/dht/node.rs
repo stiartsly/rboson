@@ -8,13 +8,13 @@ use boson::{
     configuration as cfg,
     Id,
     NodeInfo,
-    Node,
     ValueBuilder,
     PeerBuilder,
     cryptobox::{Nonce, CryptoBox},
     signature::Signature,
     Identity,
-    error::Result,
+    core::Result,
+    dht::Node,
 };
 use crate::{
     create_random_bytes,

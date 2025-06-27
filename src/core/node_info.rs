@@ -8,9 +8,9 @@ use std::net::{
 };
 use ciborium::Value;
 
-use crate::{
+use super::{
     Id,
-    core::version
+    version
 };
 
 pub(crate) trait Reachable {

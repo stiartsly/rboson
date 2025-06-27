@@ -1,5 +1,4 @@
-
-use crate::Network;
+use super::Network;
 
 #[derive(Debug, Clone)]
 pub struct JointResult<T> {

@@ -1,8 +1,7 @@
-use crate::{
+use super::{
     Id,
-    Error,
-    error::Result,
-    core::crypto_context::CryptoContext
+    Error, Result,
+    CryptoContext
 };
 
 pub trait Identity {
@@ -10,7 +9,7 @@ pub trait Identity {
 
     fn id(&self) -> &Id;
 
-    fn sign(&self, _data: &[u8], _signature: &mut [u8]) -> Result<usize> {
+    fn sign(&self, _data: &[u8], _sig: &mut [u8]) -> Result<usize> {
         Err(Error::NotImplemented("sign".into()))
     }
 
@@ -18,11 +17,11 @@ pub trait Identity {
         Err(Error::NotImplemented("sign_into".into()))
     }
 
-    fn verify(&self, _data: &[u8], _signature: &[u8]) -> Result<()> {
+    fn verify(&self, _data: &[u8], _sig: &[u8]) -> Result<()> {
         Err(Error::NotImplemented("verify".into()))
     }
 
-    fn encrypt(&self, _recipient: &Id, _plain: &[u8], _cipher: &mut [u8]) -> Result<usize> {
+    fn encrypt(&self, _rec: &Id, _plain: &[u8], _cipher: &mut [u8]) -> Result<usize> {
         Err(Error::NotImplemented("encrypt".into()))
     }
 
@@ -30,7 +29,7 @@ pub trait Identity {
         Err(Error::NotImplemented("decrypt".into()))
     }
 
-    fn encrypt_into(&self, _recipient: &Id, _plain: &[u8]) -> Result<Vec<u8>> {
+    fn encrypt_into(&self, _rec: &Id, _plain: &[u8]) -> Result<Vec<u8>> {
         Err(Error::NotImplemented("encrypt_into".into()))
     }
 

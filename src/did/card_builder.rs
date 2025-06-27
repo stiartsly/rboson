@@ -6,10 +6,10 @@ use serde_json::Map;
 use crate::{
     Error,
     error::Result,
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity
 };
 
-use super::{
+use crate::did::{
     Card,
     card::Service,
     Credential,

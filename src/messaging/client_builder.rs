@@ -7,11 +7,11 @@ use log::error;
 use crate::{
     unwrap,
     Id,
-    Node,
     signature::KeyPair,
-    error::Result,
+    core::Result,
     Error,
     core::crypto_identity::CryptoIdentity,
+    dht::Node,
 };
 
 use crate::messaging::{

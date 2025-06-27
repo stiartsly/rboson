@@ -5,6 +5,11 @@ mod managed;
 mod worker;
 pub mod client;
 
+#[cfg(test)]
+mod unitests {
+    mod test_activeproxy;
+}
+
 pub use {
     client::ProxyClient as ActiveProxyClient,
 };

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
-use crate::core::id;
-use crate::{
+use crate::core::{
+    id,
     Id,
     ID_BITS,
 };

@@ -26,9 +26,9 @@ use crate::{
     randomize_bytes,
 };
 
-use crate::core::{
+use super::{
     signature,
-    error::{Error, Result}
+    Error, Result
 };
 
 const_assert!(PrivateKey::BYTES == crypto_box_SECRETKEYBYTES as usize);

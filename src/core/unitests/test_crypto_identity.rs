@@ -1,8 +1,8 @@
-use crate::{
+use crate::core::{
     Id,
     signature,
     Identity,
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity,
 };
 /*
  Testcases for critical methods:

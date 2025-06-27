@@ -9,13 +9,12 @@ use std::fs::File;
 use tokio::task;
 
 use crate::{
-    core::cbor,
     Id,
-    Node,
     PeerInfo,
     NodeInfo,
-    error::Result,
-    Error
+    Error,
+    core::{cbor, Result},
+    dht::Node,
 };
 
 #[allow(unused)]

@@ -26,11 +26,7 @@ use crate::{
     as_uchar_ptr,
     as_uchar_ptr_mut
 };
-
-use crate::{
-    Error,
-    error::Result,
-};
+use super::{ Error, Result};
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
 const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);

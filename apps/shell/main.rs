@@ -4,8 +4,8 @@ use clap::Parser;
 
 use boson::{
     Id,
-    Node,
-    configuration as cfg
+    configuration as cfg,
+    dht::Node,
 };
 
 #[derive(Parser, Debug)]

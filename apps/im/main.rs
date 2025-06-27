@@ -4,10 +4,10 @@ use std::thread;
 use clap::Parser;
 
 use boson::{
-    Node,
     configuration as cfg,
     signature,
     Id,
+    dht::Node,
     appdata_store::AppDataStoreBuilder,
     messaging,
 };

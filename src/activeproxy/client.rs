@@ -11,15 +11,13 @@ use rand::thread_rng;
 use log::{error, warn, info, debug};
 
 use crate::{
-    core::cbor,
     Id,
-    Node,
     PeerInfo,
     NodeInfo,
-    Config,
     signature,
     Error,
-    error::Result
+    core::{cbor, Result, config::Config},
+    dht::Node,
 };
 
 use super::{

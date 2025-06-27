@@ -1,6 +1,4 @@
-use std::fmt;
-use std::io;
-use std::net;
+use std::{fmt, io, net};
 use core::result;
 
 #[derive(Debug)]

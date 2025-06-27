@@ -14,15 +14,13 @@ use crate::{
     local_addr,
     Id,
     NodeInfo,
-    config,
-    Config,
     Error,
-    error::Result
-};
-
-use crate::core::{
-    constants,
-    logger,
+    error::Result,
+    core::{
+        logger,
+        config,
+        config::Config,
+    },
 };
 
 #[derive(Deserialize)]
@@ -64,6 +62,8 @@ struct ActiveProxyItem {
 struct MessagingItem {
     serverPeerId: String,
 }
+
+const DEFAULT_DHT_PORT: u16 = 39001;
 
 #[derive(Deserialize)]
 #[allow(non_snake_case)]
@@ -110,7 +110,7 @@ impl<'a> Builder<'a> {
             ipv6_str    : None,
             ipv4_addr   : None,
             ipv6_addr   : None,
-            port        : constants::DEFAULT_DHT_PORT,
+            port        : DEFAULT_DHT_PORT,
             data_dir    : env::var("HOME").unwrap_or_else(|_| String::from(".")),
             log_level   : LevelFilter::Info,
             log_file    : None,

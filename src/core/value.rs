@@ -2,16 +2,16 @@ use std::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::unwrap;
-use crate::core::{
+use super::{
     cryptobox,
     signature,
-    id::{Id, ID_BYTES},
+    Id, ID_BYTES,
     signature::{
         KeyPair,
         PrivateKey
     },
     cryptobox::Nonce,
-    error::{Error, Result}
+    Error, Result
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

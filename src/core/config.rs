@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use log::LevelFilter;
-use crate::core::node_info::NodeInfo;
+
+use crate::NodeInfo;
 
 pub trait UserConfig: Send + Sync {
     fn name(&self) -> Option<&str> { None }
@@ -23,8 +24,8 @@ pub trait MessagingConfig: Send + Sync {
 pub trait Config: Send + Sync {
     fn addr4(&self) -> Option<&SocketAddr> { None }
     fn addr6(&self) -> Option<&SocketAddr> { None }
-    fn listening_port(&self) -> u16;
 
+    fn listening_port(&self) -> u16;
     fn storage_path(&self) -> &str;
     fn bootstrap_nodes(&self) -> &[NodeInfo];
 

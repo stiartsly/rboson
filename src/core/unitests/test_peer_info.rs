@@ -1,13 +1,9 @@
-use super::create_random_bytes;
-
-use crate::{
+use crate::core::{
     Id,
     PeerInfo,
     PeerBuilder,
-};
-
-use crate::core::{
-    peer_info::PackBuilder
+    peer_info::PackBuilder,
+    unitests::create_random_bytes,
 };
 
 #[test]

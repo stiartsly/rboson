@@ -57,7 +57,7 @@ impl Logger {
             logger.fp = match OpenOptions::new().append(true).create(true).open(file) {
                 Ok(fp) => Some(Arc::new(Mutex::new(fp))),
                 Err(e) => {
-                    println!("Failed to open log file {e}. Unable to log output to file.");
+                    println!("Failed to open log file {e}!!! Unable to log output to file.");
                     None
                 }
             }
@@ -92,7 +92,7 @@ pub(crate) fn teardown() {
     _ = log::set_logger(&NULL_LOGGER);
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub(crate) fn revert_console_output() {
     unsafe {
         if let Some(ref mut v) = MY_LOGGER {
@@ -101,6 +101,7 @@ pub(crate) fn revert_console_output() {
     }
 }
 
+#[allow(unused)]
 pub(crate) fn convert_loglevel(loglevel: &str) -> LevelFilter {
     match loglevel {
         "trace" => LevelFilter::Trace,

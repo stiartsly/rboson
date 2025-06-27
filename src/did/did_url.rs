@@ -3,10 +3,11 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     Id,
-    error::{Error, Result},
+    Error,
+    core::Result,
 };
 
-use super::{
+use crate::did::{
     DID_SCHEME,
     DID_METHOD
 };

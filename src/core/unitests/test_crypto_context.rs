@@ -1,5 +1,5 @@
 use crate::core::{
-    id::Id,
+    Id,
     cryptobox::{self, CryptoBox, Nonce},
     signature,
     CryptoContext,

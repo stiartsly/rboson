@@ -4,9 +4,9 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::Id;
-use super::{
-    did_url::DIDUrl,
-    did_constants
+use crate::did::{
+    did_constants,
+    DIDUrl
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

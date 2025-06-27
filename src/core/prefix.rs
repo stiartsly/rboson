@@ -1,10 +1,8 @@
 use std::fmt;
 use std::cmp::Ordering;
 
-use crate::core::id;
-use crate::{
-    Id,
-    ID_BITS,
+use super::{
+    id, Id, ID_BITS,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

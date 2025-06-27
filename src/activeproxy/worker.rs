@@ -18,10 +18,10 @@ use crate::{
     srv_addr,
     unwrap,
     Id,
-    Node,
-    error::Result,
+    core::Result,
     Error,
-    signature
+    signature,
+    dht::Node,
 };
 
 use super::{

@@ -11,7 +11,7 @@ use crate::{
     Id,
     error::{Error, Result},
     signature,
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity,
 };
 
 use super::{

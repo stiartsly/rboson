@@ -1,15 +1,30 @@
 #[cfg(test)]
-mod dht;
+mod core {
+    mod id;
+    mod prefix;
+    mod signature;
+    mod cryptobox;
+    mod node_info;
+    mod peer_info;
+    mod value;
+    mod config;
+}
 
 #[cfg(test)]
-mod did;
+mod dht {
+    mod node;
+}
 
 #[cfg(test)]
-mod messaging;
+mod did {
+    mod did_url;
+}
 
-use std::env;
-use std::fs;
-use std::net::IpAddr;
+use std::{
+    env,
+    fs,
+    net::IpAddr
+};
 
 pub(crate) fn local_addr(ipv4: bool) -> Option<IpAddr>{
     let if_addrs = match get_if_addrs::get_if_addrs() {

@@ -5,7 +5,7 @@ use std::net::{
     SocketAddr
 };
 
-use crate::{
+use crate::core::{
     Id,
     NodeInfo
 };

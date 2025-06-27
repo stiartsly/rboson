@@ -1,10 +1,10 @@
-use crate::{
+use super::{
     Id,
     cryptobox::{self, Nonce, CryptoBox},
     signature,
-    error::Result,
+    Result,
     Identity,
-    core::crypto_context::CryptoContext
+    CryptoContext
 };
 
 #[derive(Clone, Debug)]

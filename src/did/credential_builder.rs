@@ -6,10 +6,10 @@ use serde_json::{Map, Value};
 use crate::{
     Id,
     error::{Error, Result},
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity,
 };
 
-use super::{
+use crate::did::{
     Credential,
     BosonIdentityObjectBuilder
 };

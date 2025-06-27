@@ -1,9 +1,7 @@
-use std::convert::TryFrom;
-use crate::{
+use super::{
     Id,
     cryptobox::{CryptoBox, Nonce, PrivateKey},
-    Error,
-    error::Result
+    Error, Result,
 };
 
 #[derive(Debug)]

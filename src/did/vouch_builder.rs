@@ -4,10 +4,10 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     error::{Error, Result},
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity,
 };
 
-use super::{
+use crate::did::{
     BosonIdentityObjectBuilder,
     Credential,
     Vouch,

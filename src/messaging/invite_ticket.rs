@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     as_millis,
-    MAX_ID,
+    id::MAX_ID,
     Id
 };
 

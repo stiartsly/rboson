@@ -4,8 +4,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     as_secs,
-    error::Result,
-    core::crypto_identity::CryptoIdentity
+    core::Result,
+    CryptoIdentity
 };
 
 pub(crate) trait BosonIdentityObjectBuilder {

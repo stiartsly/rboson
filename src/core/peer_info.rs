@@ -5,14 +5,14 @@ use std::hash::{Hash, Hasher};
 use unicode_normalization::UnicodeNormalization;
 use ciborium::Value;
 
-use crate::{
+use super::{
     Id,
     ID_BYTES,
     signature,
     signature::{KeyPair, PrivateKey}
 };
 
-// No signature field here, which would be calculated during creation.
+// No signature field here, which would be calculated on creation.
 #[derive(Clone)]
 pub struct PeerBuilder<'a> {
     keypair: Option<&'a KeyPair>,
@@ -280,6 +280,7 @@ impl PeerInfo {
         data
     }
 
+    #[allow(unused)]
     pub(crate) fn to_cbor(&self) -> Value {
         Value::Map(vec![
             (

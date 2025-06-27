@@ -10,12 +10,12 @@ use crate::{
     Error,
     error::Result,
     signature,
-    core::crypto_identity::CryptoIdentity,
+    CryptoIdentity,
 };
 
-use super::{
+use crate::did::{
     CredentialBuilder,
-    VerifiableCredential,
+    w3c::VerifiableCredential,
 };
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use std::thread;
 use clap::Parser;
 
 use boson::{
-    Node,
+    dht::Node,
     configuration as cfg,
     ActiveProxyClient as ActiveProxy,
 };

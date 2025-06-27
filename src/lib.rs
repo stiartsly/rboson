@@ -1,48 +1,53 @@
 pub mod core;
 pub mod did;
+pub mod dht;
+pub mod appdata_store;
 pub mod activeproxy;
 pub mod messaging;
-pub mod appdata_store;
 
 pub use crate::core::{
-    Id,
-    DID_PREFIX,
-    ID_BYTES,
-    ID_BITS,
-    MIN_ID,
-    MAX_ID,
-
-
-    error::Error,
-    error,
-    config,
-    config::Config,
-    prefix::Prefix,
-    node_info::NodeInfo,
-    peer_info::{
-        PeerInfo,
-        PeerBuilder
+    id::{
+        self,
+        Id,
+        DID_PREFIX,
+        ID_BYTES,
+        ID_BITS
     },
+
+    error::{self, Error},
+    prefix::{self, Prefix},
+    signature::{self, Signature},
+    cryptobox::{self, CryptoBox},
+    node_info::{self, NodeInfo},
+    peer_info::{self, PeerInfo, PeerBuilder},
     value::{
+        self,
         Value,
         ValueBuilder,
         SignedBuilder,
         EncryptedBuilder
     },
-    network::Network,
-    node_status::NodeStatus,
-    lookup_option::LookupOption,
-    joint_result::JointResult,
+    network::{self, Network},
+    identity::{self, Identity},
+    crypto_identity::{self, CryptoIdentity},
+    crypto_context::{self, CryptoContext},
+    joint_result::{self, JointResult},
+
+    config,
     default_configuration as configuration,
-    signature,
-    signature::Signature,
-    cryptobox,
-    cryptobox::CryptoBox,
-    crypto_context::CryptoContext,
-    identity::Identity,
+};
 
-    node::Node,
-
+pub use crate::did::{
+    did_url,
+    verification_method,
+    proof,
+    w3c,
+    credential,
+    credential_builder,
+    vouch,
+    vouch_builder,
+    card,
+    card_builder,
 };
 
 pub use crate::activeproxy::{
@@ -83,7 +88,7 @@ use std::path::Path;
 use get_if_addrs::get_if_addrs;
 use libsodium_sys::randombytes_buf;
 
-fn local_addr(ipv4: bool) -> Result<IpAddr, Error>{
+fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
     let if_addrs = match get_if_addrs() {
         Ok(v) => v,
         Err(e) => return Err(Error::from(e))
@@ -100,7 +105,7 @@ fn local_addr(ipv4: bool) -> Result<IpAddr, Error>{
     Err(Error::Network(format!("No working network interfaces")))
 }
 
-fn create_dirs(input: &str) -> Result<(), Error> {
+fn create_dirs(input: &str) -> crate::core::Result<()> {
     let path = Path::new(input);
     if path.exists() {
         return Ok(())

@@ -3,8 +3,7 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::cmp::Ordering;
 use std::vec::Vec;
-use std::collections::HashSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     id::MAX_ID,

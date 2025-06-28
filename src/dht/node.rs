@@ -557,9 +557,9 @@ impl Identity for Node {
         cache.get(sender).lock().unwrap().ctx_mut().decrypt_into(cipher)
     }
 
-    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
+    fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         Ok(CryptoContext::from_private_key(
-            _id,
+            id.clone(),
             self.encryption_keypair.private_key()
         ))
     }

@@ -8,12 +8,11 @@ use crate::{
     Id,
     PeerInfo,
     Error,
-    error::Result
-};
-
-use crate::core::{
-    version,
-    peer_info::PackBuilder,
+    core::{
+        Result,
+        version,
+        peer_info::PackBuilder
+    }
 };
 
 use super::msg::{
@@ -24,12 +23,12 @@ use super::msg::{
 pub(crate) struct Message {
     base_data: MsgData,
 
-    token: i32,
-    peerid: Option<Id>,
-    origin: Option<Id>,  // Optional, only for the delegated peer
-    port: Option<u16>,
-    url: Option<String>,
-    sig: Option<Vec<u8>>
+    token   : i32,
+    peerid  : Option<Id>,
+    origin  : Option<Id>,  // Optional, only for the delegated peer
+    port    : Option<u16>,
+    url     : Option<String>,
+    sig     : Option<Vec<u8>>
 }
 
 impl Msg for Message {

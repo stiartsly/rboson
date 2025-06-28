@@ -6,12 +6,11 @@ use log::error;
 
 use crate::PeerInfo;
 use crate::dht::{
-    dht::DHT
-};
-
-use crate::dht::msg::{
-    msg::Msg,
-    announce_peer_req as req,
+    dht::DHT,
+    msg::{
+        msg::Msg,
+        announce_peer_req as req,
+    }
 };
 
 use super::{

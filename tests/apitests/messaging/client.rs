@@ -1,7 +1,6 @@
 use boson::{
-    signature,
     Id,
-    messaging::message::Message,
+    signature
 };
 
 use boson::messaging::{

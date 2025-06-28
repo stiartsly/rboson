@@ -8,12 +8,11 @@ use crate::{
     PeerInfo,
     NodeInfo,
     Error,
-    error::Result
-};
-
-use crate::core::{
-    version,
-    peer_info::PackBuilder,
+    core::{
+        version,
+        Result,
+        peer_info::PackBuilder
+    }
 };
 
 use super::{
@@ -28,10 +27,10 @@ use super::{
 };
 
 pub(crate) struct Message {
-    base_data: MsgData,
-    lookup_data: LookuResponseData,
+    base_data   : MsgData,
+    lookup_data : LookuResponseData,
 
-    peers: Vec<PeerInfo>,
+    peers       : Vec<PeerInfo>,
 }
 
 impl Msg for Message {

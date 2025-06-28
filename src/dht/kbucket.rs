@@ -12,11 +12,10 @@ use crate::{
     Id,
     Prefix,
     core::node_info::Reachable,
-};
-
-use crate::dht::{
-    constants,
-    kbucket_entry::KBucketEntry
+    dht::{
+        constants,
+        kbucket_entry::KBucketEntry
+    }
 };
 
 /**

@@ -1,5 +1,5 @@
 pub(crate) mod models;
-pub(crate) mod schema;
+mod schema;
 mod sql;
 
 use crate::dht::sqlite3::models::{

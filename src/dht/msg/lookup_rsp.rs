@@ -4,17 +4,17 @@ use ciborium::Value as CVal;
 use crate::NodeInfo;
 
 pub(crate) struct Data {
-    nodes4: Option<Vec<Rc<NodeInfo>>>,
-    nodes6: Option<Vec<Rc<NodeInfo>>>,
-    token: i32,
+    nodes4  : Option<Vec<Rc<NodeInfo>>>,
+    nodes6  : Option<Vec<Rc<NodeInfo>>>,
+    token   : i32,
 }
 
 impl Data {
     pub(crate) fn new() -> Self {
         Self {
-            nodes4: None,
-            nodes6: None,
-            token: 0,
+            nodes4  : None,
+            nodes6  : None,
+            token   : 0,
         }
     }
 }

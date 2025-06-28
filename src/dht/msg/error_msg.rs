@@ -4,9 +4,8 @@ use ciborium::Value as CVal;
 
 use crate::{
     Error,
-    error::Result
+    core::{version, Result}
 };
-use crate::core::version;
 use super::msg::{
     Kind, Method, Msg,
     Data as MsgData
@@ -14,8 +13,9 @@ use super::msg::{
 
 pub(crate) struct Message {
     base_data: MsgData,
-    msg: String,
-    code: i32,
+
+    msg     : String,
+    code    : i32,
 }
 
 impl Msg for Message {

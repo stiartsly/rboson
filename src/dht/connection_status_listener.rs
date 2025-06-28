@@ -1,7 +1,5 @@
-use crate::{
-    Network,
-    dht::connection_status::ConnectionStatus,
-};
+use crate::Network;
+use crate::dht::ConnectionStatus;
 
 pub trait ConnectionStatusListener {
     fn status_changed(&self,

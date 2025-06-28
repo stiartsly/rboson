@@ -4,9 +4,8 @@ use ciborium::Value as CVal;
 
 use crate::{
     Error,
-    error::Result
+    core::{Result, version}
 };
-use crate::core::version;
 use super::msg::{
     Kind, Method, Msg,
     Data as MsgData

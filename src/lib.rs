@@ -50,6 +50,10 @@ pub use crate::did::{
     card_builder,
 };
 
+pub use crate::dht::{
+    node::{self, Node}
+};
+
 pub use crate::activeproxy::{
     ActiveProxyClient
 };

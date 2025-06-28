@@ -6,10 +6,9 @@ use ciborium::Value as CVal;
 use crate::{
     Id,
     Error,
-    error::Result
+    core::{version, Result}
 };
 
-use crate::core::version;
 use super::{
     msg::{
         Kind, Method, Msg,
@@ -22,10 +21,10 @@ use super::{
 };
 
 pub(crate) struct Message {
-    base_data: MsgData,
+    base_data   : MsgData,
     lookkup_data: LookupRequestData,
 
-    seq: i32,
+    seq         : i32,
 }
 
 impl Msg for Message {

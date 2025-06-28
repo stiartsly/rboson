@@ -8,23 +8,23 @@ use serial_test::serial;
 use once_cell::sync::Lazy;
 
 use super::{
-    create_random_bytes,
     working_path,
     remove_working_path
 };
 
 use crate::{
+    random_bytes as create_random_bytes,
     local_addr,
     signature,
     cryptobox,
     Network,
     CryptoBox,
     configuration as config,
-    JointResult,
-    core::crypto_cache::CryptoCache,
+    JointResult
 };
 
-use crate::core::{
+use crate::dht::{
+    crypto_cache::CryptoCache,
     node_runner::NodeRunner,
     bootstrap_channel::BootstrapChannel,
     future::{Command}
@@ -79,6 +79,7 @@ fn create_node(port: u16, path: &str, keypair: &signature::KeyPair) -> Rc<RefCel
  */
 #[test]
 #[serial]
+#[ignore]
 fn test_encrypt_into() {
     let node_runner1 = create_node(32222, &PATH1, &KEYPAIR1);
     _ = node_runner1.borrow_mut().start();

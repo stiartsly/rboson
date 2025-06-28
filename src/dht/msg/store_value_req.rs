@@ -8,12 +8,11 @@ use crate::{
     Value,
     cryptobox::Nonce,
     Error,
-    error::Result
-};
-
-use crate::core::{
-    version,
-    value::PackBuilder
+    core::{
+        version,
+        Result,
+        value::PackBuilder
+    }
 };
 
 use super::msg::{

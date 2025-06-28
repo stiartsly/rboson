@@ -35,12 +35,11 @@ use crate::dht::{
     routing_table::RoutingTable,
     kclosest_nodes::KClosestNodes,
     kbucket_entry::KBucketEntry,
-};
-
-use crate::dht::msg::{
-    lookup_req::Msg as LookupRequest,
-    lookup_rsp::Msg as LookupResponse,
-    msg::{Msg, Kind, Method},
+    msg::{
+        msg::{Msg, Kind, Method},
+        lookup_req::Msg as LookupRequest,
+        lookup_rsp::Msg as LookupResponse,
+    }
 };
 
 use crate::dht::task::{

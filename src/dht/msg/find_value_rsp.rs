@@ -9,11 +9,10 @@ use crate::{
     NodeInfo,
     Value,
     Error,
-    error::Result
-};
-
-use crate::core::{
-    value::PackBuilder
+    core::{
+        Result,
+        value::PackBuilder
+    }
 };
 
 use super::{
@@ -28,8 +27,8 @@ use super::{
 };
 
 pub(crate) struct Message {
-    base_data: MsgData,
-    lookup_data: LookupResponseData,
+    base_data   : MsgData,
+    lookup_data : LookupResponseData,
 
     value: Option<Rc<Value>>,
 }

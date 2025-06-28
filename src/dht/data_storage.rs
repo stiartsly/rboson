@@ -4,7 +4,7 @@ use crate::{
     Id,
     Value,
     PeerInfo,
-    error::Result
+    core::Result
 };
 
 pub(crate) trait DataStorage {

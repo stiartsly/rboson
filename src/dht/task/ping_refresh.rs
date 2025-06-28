@@ -9,11 +9,10 @@ use crate::dht::{
     kbucket_entry::KBucketEntry,
     rpccall::RpcCall,
     dht::DHT,
-};
-
-use crate::dht::msg::{
-    ping_req::Message,
-    msg::Msg,
+    msg::{
+        ping_req::Message,
+        msg::Msg,
+    }
 };
 
 use super::task::{

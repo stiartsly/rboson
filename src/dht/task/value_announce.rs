@@ -5,10 +5,12 @@ use std::cell::RefCell;
 use log::error;
 
 use crate::Value;
-use crate::dht::dht::DHT;
-use crate::dht::msg::{
-    store_value_req as req,
-    msg::Msg
+use crate::dht::{
+    dht::DHT,
+    msg::{
+        store_value_req as req,
+        msg::Msg
+    }
 };
 
 use super::{

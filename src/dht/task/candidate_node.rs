@@ -18,7 +18,6 @@ pub(crate) struct CandidateNode {
 
     // acked: bool,
     pinged: i32,
-
     token: i32,
 }
 

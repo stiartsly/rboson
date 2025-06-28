@@ -4,7 +4,8 @@ use ciborium::Value as CVal;
 
 use crate::core::{
     version,
-    error::{Error, Result},
+    Error,
+    Result,
 };
 
 use super::msg::{

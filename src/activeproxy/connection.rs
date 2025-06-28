@@ -143,7 +143,7 @@ impl ProxyConnection {
             deviceid:           Id::from(keypair.to_public_key()),
             signature_keypair:  keypair.clone(),
             crypto_context:     RefCell::new(CryptoContext::from_private_key(
-                srv_peer!(inners).lock().unwrap().id(),
+                srv_peer!(inners).lock().unwrap().id().clone(),
                 encryption_keypair.private_key()
             )),
 

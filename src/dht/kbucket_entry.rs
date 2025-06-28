@@ -10,12 +10,11 @@ use crate::{
     as_millis,
     Id,
     NodeInfo,
-    core::version,
-    core::node_info::Reachable
-};
-
-use crate::dht::{
-    constants,
+    core::{
+        version,
+        node_info::Reachable
+    },
+    dht::constants,
 };
 
 /**

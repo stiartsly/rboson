@@ -15,11 +15,11 @@ use crate::{
     Id,
     NodeInfo,
     Error,
-    error::Result,
     core::{
         logger,
         config,
         config::Config,
+        Result
     },
 };
 
@@ -111,7 +111,7 @@ impl<'a> Builder<'a> {
             ipv4_addr   : None,
             ipv6_addr   : None,
             port        : DEFAULT_DHT_PORT,
-            data_dir    : env::var("HOME").unwrap_or_else(|_| String::from(".")),
+            data_dir    : env::var("HOME").unwrap_or_else(|_| ".".into()),
             log_level   : LevelFilter::Info,
             log_file    : None,
             bootstrap_nodes : Vec::new(),

@@ -85,8 +85,9 @@ mod unitests {
     mod test_find_node_rsp;
     mod test_find_peer_req;
     mod test_find_peer_rsp;
+    mod test_node_runner;
 
-    /*use std::{fs, env};
+    use std::{fs, env};
     fn working_path(input: &str) -> String {
         let path = env::current_dir().unwrap().join(input);
         if !fs::metadata(&path).is_ok() {
@@ -109,7 +110,7 @@ mod unitests {
                 }
             }
         }
-    }*/
+    }
 }
 
 #[macro_export]

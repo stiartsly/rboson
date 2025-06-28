@@ -14,14 +14,13 @@ use crate::dht::{
     dht::DHT,
     rpccall::RpcCall,
     kclosest_nodes::KClosestNodes,
-    msg::find_value_req as req,
-    msg::find_value_rsp as rsp,
-};
-
-use crate::dht::msg::{
-    msg::{Method, Kind, Msg},
-    lookup_req::{Msg as LookupRequest},
-    lookup_rsp::{Msg as LookupResponse},
+    msg::{
+        msg::{Method, Kind, Msg},
+        lookup_req::{Msg as LookupRequest},
+        lookup_rsp::{Msg as LookupResponse},
+        find_value_req as req,
+        find_value_rsp as rsp
+    }
 };
 
 use super::{

@@ -13,10 +13,9 @@ use crate::dht::{
     constants,
     rpccall::RpcCall,
     dht::DHT,
-};
-
-use crate::dht::msg::lookup_rsp::{
-    Msg as LookupResponse,
+    msg::lookup_rsp::{
+        Msg as LookupResponse,
+    }
 };
 
 use super::{

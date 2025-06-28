@@ -1,22 +1,24 @@
 use std::rc::Rc;
 use ciborium::Value as CVal;
 
-use crate::unwrap;
-use crate::Id;
+use crate::{
+    unwrap,
+    Id
+};
 
 pub(crate) struct Data {
-    target: Option<Rc<Id>>,
-    want4: bool,
-    want6: bool,
+    target  : Option<Rc<Id>>,
+    want4   : bool,
+    want6   : bool,
     want_token: bool,
 }
 
 impl Data {
     pub(crate) fn new(want_token: bool) -> Self {
         Self {
-            target: None,
-            want4: false,
-            want6: false,
+            target  : None,
+            want4   : false,
+            want6   : false,
             want_token,
         }
     }

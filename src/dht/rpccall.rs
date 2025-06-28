@@ -7,14 +7,13 @@ use libsodium_sys::randombytes_uniform;
 use crate::{
     unwrap,
     Id,
-    NodeInfo
-};
-
-use crate::dht::{
-    constants,
-    dht::DHT,
-    scheduler::Scheduler,
-    msg::msg::{self, Msg}
+    NodeInfo,
+    dht::{
+        constants,
+        dht::DHT,
+        scheduler::Scheduler,
+        msg::msg::{self, Msg}
+    }
 };
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]

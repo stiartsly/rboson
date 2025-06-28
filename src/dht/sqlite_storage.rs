@@ -7,17 +7,19 @@ use crate::{
     Id,
     PeerInfo,
     Value,
-    core::peer_info::PackBuilder as PeerPackBuilder,
-    core::value::PackBuilder as ValuePackBuilder,
     cryptobox::Nonce,
     signature::PrivateKey,
-    error::{Error, Result},
-};
+    Error,
+    core::{
+        peer_info::PackBuilder as PeerPackBuilder,
+        value::PackBuilder as ValuePackBuilder,
+        Result,
+    },
+    dht::{
+        constants,
+        data_storage::DataStorage,
 
-use crate::dht::{
-    constants,
-    data_storage::DataStorage,
-
+    }
 };
 
 use crate::dht::sqlite3::{

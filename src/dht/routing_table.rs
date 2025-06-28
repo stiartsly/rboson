@@ -14,7 +14,7 @@ use crate::{
     as_millis,
     Id,
     Prefix,
-    core::node_info::Reachable,
+    core::node_info::Reachable
 };
 
 use crate::dht::{

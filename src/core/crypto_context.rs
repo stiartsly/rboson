@@ -1,35 +1,34 @@
-use super::{
+use crate::{
     Id,
-    cryptobox::{CryptoBox, Nonce, PrivateKey},
-    Error, Result,
+    Error,
+    core::Result,
+    cryptobox::{CryptoBox, Nonce, PrivateKey}
 };
 
 #[derive(Debug)]
 pub struct CryptoContext {
     id          : Id,
     crypto_box  : CryptoBox,
-
     next_nonce  : Nonce,
     last_peer_nonce: Option<Nonce>,
 }
 
 unsafe impl Send for CryptoContext {}
 impl CryptoContext {
-    pub(crate) fn new(id: &Id, crypto_box: CryptoBox) -> CryptoContext {
+    pub(crate) fn new(id: Id, crypto_box: CryptoBox) -> CryptoContext {
         Self {
-            id          : id.clone(),
+            id,
             crypto_box,
             next_nonce  : Nonce::random(),
             last_peer_nonce: None
         }
     }
 
-    pub(crate) fn from_private_key(id: &Id, private_key: &PrivateKey) -> CryptoContext {
-        let encryption_key = id.to_encryption_key();
-
+    pub(crate) fn from_private_key(id: Id, pk: &PrivateKey) -> CryptoContext {
+        let crypto_box = CryptoBox::try_from((&id.to_encryption_key(), pk)).unwrap();
         Self {
-            id          : id.clone(),
-            crypto_box  : CryptoBox::try_from((&encryption_key, private_key)).unwrap(),
+            id,
+            crypto_box,
             next_nonce  : Nonce::random(),
             last_peer_nonce: None
         }
@@ -59,7 +58,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".to_string()));
+                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".into()));
             }
         }
         self.crypto_box.decrypt(cipher, plain)
@@ -69,7 +68,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".to_string()));
+                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".into()));
             }
         }
         self.crypto_box.decrypt_into(&cipher)

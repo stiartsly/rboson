@@ -7,7 +7,8 @@ use std::time::{SystemTime, Duration};
 use ciborium::value::Value;
 
 use crate::{
-    as_millis,
+    as_secs,
+    elapsed_ms,
     Id,
     NodeInfo,
     core::{
@@ -196,13 +197,13 @@ impl KBucketEntry {
         // don't ping if recently seen to allow NAT entries to time out
         // see https://arxiv.org/pdf/1605.05606v1.pdf for numbers
         // and do exponential backoff after failures to reduce traffic
-        if as_millis!(&self.last_seen) < 30 * 1000 ||
+        if elapsed_ms!(&self.last_seen) < 30 * 1000 ||
             self.within_backoff_window(&self.last_seen) {
             return false;
         }
 
         self.failed_requests != 0
-            || as_millis!(&self.last_seen) > constants::KBUCKET_OLD_AND_STALE_TIME
+            || elapsed_ms!(&self.last_seen) > constants::KBUCKET_OLD_AND_STALE_TIME
     }
 
     pub(crate) fn merge(&mut self, other: Rc<RefCell<Self>>) {
@@ -229,12 +230,12 @@ impl KBucketEntry {
                 constants::KBUCKET_MAX_TIMEOUTS,
                 std::cmp::min(0, self.failed_requests - 1),
             );
-        self.failed_requests != 0 && as_millis!(&self.last_sent) < backoff
+        self.failed_requests != 0 && elapsed_ms!(&self.last_sent) < backoff
     }
 
     fn old_and_stale(&self) -> bool {
         self.failed_requests > constants::KBUCKET_OLD_AND_STALE_TIMEOUT
-            && as_millis!(&self.last_seen) > constants::KBUCKET_OLD_AND_STALE_TIME
+            && elapsed_ms!(&self.last_seen) > constants::KBUCKET_OLD_AND_STALE_TIME
     }
 
     pub(crate) fn equals(&self, other: &Self) -> bool {
@@ -266,15 +267,15 @@ impl KBucketEntry {
             ),
             (
                 Value::Text(String::from("created")),
-                Value::Integer(self.created.elapsed().unwrap().as_secs().into())
+                Value::Integer(as_secs!(self.created).into())
             ),
             (
                 Value::Text(String::from("lastSeen")),
-                Value::Integer(self.last_seen.elapsed().unwrap().as_secs().into())
+                Value::Integer(as_secs!(self.last_seen).into())
             ),
             (
                 Value::Text(String::from("lastSend")),
-                Value::Integer(self.last_sent.elapsed().unwrap().as_secs().into())
+                Value::Integer(as_secs!(self.last_sent).into())
             ),
             (
                 Value::Text(String::from("failedRequests")),
@@ -322,12 +323,12 @@ impl fmt::Display for KBucketEntry {
             "{}@{};seen:{}; age:{}",
             self.ni.id(),
             self.ni.socket_addr(),
-            as_millis!(&self.last_seen),
-            as_millis!(&self.created)
+            as_secs!(self.last_seen),
+            as_secs!(self.created)
         )?;
 
         if self.last_sent.elapsed().is_ok() {
-            write!(f, "; sent:{}", as_millis!(&self.last_sent))?;
+            write!(f, "; sent:{}", as_secs!(self.last_sent))?;
         }
         if self.failed_requests > 0 {
             write!(f, "; fail: {}", self.failed_requests - 0)?;

@@ -12,7 +12,7 @@ use log::{debug, info, warn, error, trace};
 use crate::{
     unwrap,
     addr_family,
-    as_millis,
+    elapsed_ms,
     Id,
     Network,
     NodeInfo,
@@ -282,14 +282,14 @@ impl DHT {
 
         if self.bootstrap_needed ||
             self.rt.borrow().size_of_entries() < constants::BOOTSTRAP_IF_LESS_THAN_X_PEERS ||
-            as_millis!(self.bootstrap_time.borrow()) > constants::SELF_LOOKUP_INTERVAL {
+            elapsed_ms!(self.bootstrap_time.borrow()) > constants::SELF_LOOKUP_INTERVAL {
 
             // Regularly search for our ID to update the routing table
             self.bootstrap_needed = false;
             self.bootstrap();
         }
 
-        if as_millis!(self.last_saved) > constants::ROUTING_TABLE_PERSIST_INTERVAL as u128 {
+        if elapsed_ms!(self.last_saved) > constants::ROUTING_TABLE_PERSIST_INTERVAL as u128 {
             info!("Persisting routing table ....");
             self.rt.borrow_mut().save(self.store_path.as_ref().unwrap().as_str());
             self.last_saved = SystemTime::now();

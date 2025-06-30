@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	as_millis,
+	as_secs,
 	Id
 };
 
@@ -103,7 +103,7 @@ impl fmt::Display for ClientDevice {
 		write!(f, ", created={}", self.created)?;
 		if self.last_seen > 0 {
 			write!(f, ", lastSeen={}, address={}",
-			as_millis!(SystemTime::now()) - self.last_seen as u128,
+			as_secs!(SystemTime::now()) - self.last_seen,
 			self.last_seen)?;
 		}
 		write!(f, "]")

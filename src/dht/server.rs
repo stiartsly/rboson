@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     Id,
     Error,
     core::{id, version},
@@ -101,7 +101,7 @@ impl Server {
             return;
         }
 
-        if as_millis!(self.last_reachable_check) >  constants::RPC_SERVER_REACHABILITY_TIMEOUT {
+        if elapsed_ms!(self.last_reachable_check) >  constants::RPC_SERVER_REACHABILITY_TIMEOUT {
             self.reachable = false;
         }
     }
@@ -340,7 +340,7 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
     // b) didn't find a call
     // c) up-time is high enough that it's not a stray from a restart
     // did not expect this response
-    if msg.borrow().kind() == msg::Kind::Response { // && as_millis!(self.started) > 2 * 60 * 1000 {
+    if msg.borrow().kind() == msg::Kind::Response { // && elapsed_ms!(self.started) > 2 * 60 * 1000 {
         warn!("Can not find rpc call for response {}", msg.borrow());
         return Ok(None);
     }

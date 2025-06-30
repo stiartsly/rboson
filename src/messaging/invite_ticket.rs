@@ -5,7 +5,7 @@ use serde::{ Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    as_millis,
+    as_secs,
     id::MAX_ID,
     Id
 };
@@ -70,7 +70,7 @@ impl InviteTicket {
     }
 
     pub fn is_expired(&self) -> bool {
-        self.expire < as_millis!(SystemTime::now()) as u64
+        self.expire < as_secs!(SystemTime::now()) as u64
     }
 
     pub fn session_key(&self) -> Option<&[u8]> {

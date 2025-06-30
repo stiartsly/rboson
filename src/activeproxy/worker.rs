@@ -14,7 +14,7 @@ use tokio::{
 use log::{info, debug, error};
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     srv_addr,
     unwrap,
     Id,
@@ -231,7 +231,7 @@ async fn run_iteraction(worker: Arc<Mutex<ManagedWorker>>) {
     let managed = worker.lock().unwrap().managed.clone();
     let node    = worker.lock().unwrap().node.clone();
 
-    if as_millis!(managed.lock().unwrap().last_save_peer) >= PERSISTENCE_INTERVAL {
+    if elapsed_ms!(managed.lock().unwrap().last_save_peer) >= PERSISTENCE_INTERVAL {
         managed.lock().unwrap().last_save_peer = SystemTime::now();
         let peerid = worker.lock().unwrap().remote_peerid().clone();
         _ = client::lookup_peer(node.clone(), &peerid).await.map(|v| {
@@ -243,7 +243,7 @@ async fn run_iteraction(worker: Arc<Mutex<ManagedWorker>>) {
     }
 
     if managed.lock().unwrap().peer.is_some() &&
-        as_millis!(managed.lock().unwrap().last_announce_peer) >= RE_ANNOUNCE_INTERVAL {
+        elapsed_ms!(managed.lock().unwrap().last_announce_peer) >= RE_ANNOUNCE_INTERVAL {
         managed.lock().unwrap().last_announce_peer = SystemTime::now();
         _ = worker.lock().unwrap().announce_peer();
     }

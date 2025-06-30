@@ -23,7 +23,7 @@ use tokio::net::{
 use log::{warn, error,info, debug, trace};
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     srv_endp,
     srv_addr,
     srv_peer,
@@ -404,7 +404,7 @@ impl ProxyConnection {
             return Ok(())
         }
 
-        if as_millis!(self.keepalive) > MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
+        if elapsed_ms!(self.keepalive) > MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
             warn!("Connection {} is dead and should be obsolete.", self.cid());
             return Err(Error::State(format!("Connection {} is dead", self.cid())));
         }
@@ -412,7 +412,7 @@ impl ProxyConnection {
         // keepalive check.
         let random_shift = random_timeshift() as u128; // max  10 seconds;
         if self.state == State::Idling &&
-            as_millis!(self.keepalive) >= KEEPALIVE_INTERVAL - random_shift {
+            elapsed_ms!(self.keepalive) >= KEEPALIVE_INTERVAL - random_shift {
             return self.send_ping_request().await;
         }
         return Ok(())

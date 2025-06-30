@@ -8,7 +8,7 @@ use libsodium_sys::randombytes_uniform;
 use log::info;
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     Id,
     Prefix,
     core::node_info::Reachable,
@@ -102,7 +102,7 @@ impl KBucket {
     }
 
     pub(crate) fn needs_refreshing(&self) -> bool {
-        as_millis!(&self.last_refreshed) > constants::BUCKET_REFRESH_INTERVAL
+        elapsed_ms!(&self.last_refreshed) > constants::BUCKET_REFRESH_INTERVAL
             && self.find_any(|v| v.borrow().needs_ping()).is_some()
     }
 

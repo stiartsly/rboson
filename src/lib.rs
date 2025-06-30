@@ -59,16 +59,23 @@ pub use crate::activeproxy::{
 };
 
 #[macro_export]
-macro_rules! as_millis {
+macro_rules! elapsed_ms {
     ($time:expr) => {{
         $time.elapsed().unwrap().as_millis() as u128
     }};
 }
 
 #[macro_export]
+macro_rules! as_ms {
+    ($time:expr) => {{
+        $time.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()
+    }};
+}
+
+#[macro_export]
 macro_rules! as_secs {
     ($time:expr) => {{
-        $time.elapsed().unwrap().as_secs() as u64
+        $time.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
     }};
 }
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     Id
 };
 
@@ -65,7 +65,7 @@ impl Entry {
     }
 
     fn expired(&self) -> bool {
-        as_millis!(&self.1) >= EXPIRED_CHECK_INTERVAL as u128
+        elapsed_ms!(&self.1) >= EXPIRED_CHECK_INTERVAL as u128
     }
 
     pub(crate) fn ctx_mut(&mut self) -> &mut CryptoContext {

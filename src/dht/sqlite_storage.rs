@@ -3,7 +3,8 @@ use diesel::prelude::*;
 use log::{debug, warn};
 
 use crate::{
-    as_millis,
+    as_ms,
+    elapsed_ms,
     Id,
     PeerInfo,
     Value,
@@ -88,19 +89,19 @@ impl DataStorage for SqliteStorage {
     fn expire(&mut self) {
         debug!("Remove all expired values and peers from local SQLite storage.");
 
-        let before = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
         remove_expired_values(self.conn(), before as i64)
             .map_err(|e| warn!("Removing expired values from SQLite storage error: {}", e))
             .ok();
 
-        let before = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
         remove_expired_peers(self.conn(), before as i64)
             .map_err(|e| warn!("Removing expired peers from SQLite storage error: {}", e))
             .ok();
     }
 
     fn value(&mut self, id: &Id) -> Result<Option<Value>> {
-        let before = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
         match get_value(self.conn(), id.as_bytes(), before as i64) {
             Ok(Some(v)) => {
                 let peer = ValuePackBuilder::new(v.data)
@@ -172,7 +173,7 @@ impl DataStorage for SqliteStorage {
         v.persistent = persistent.unwrap_or(false);
         v.sequenceNumber = value.sequence_number();
 
-        v.timestamp  = millis_since_epoch() as i64;
+        v.timestamp  = ms_since_epoch() as i64;
         v.announced  = if update_last_announce.unwrap_or(false) { v.timestamp } else { 0 };
 
         put_value(self.conn(), v)
@@ -181,7 +182,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn update_value_last_announce(&mut self, id: &Id) -> Result<()> {
-        let timestamp = millis_since_epoch();
+        let timestamp = ms_since_epoch();
         update_value_last_announce(self.conn(),
                 id.as_bytes(),
                 timestamp as i64,
@@ -191,7 +192,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn persistent_values(&mut self, before: &SystemTime) -> Result<Vec<Value>> {
-        let before = as_millis!(before) as i64;
+        let before = elapsed_ms!(before) as i64;
         let result = persistent_values(self.conn(), before);
         let values = match result {
             Ok(v) => v,
@@ -222,7 +223,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn value_ids(&mut self) -> Result<Vec<Id>> {
-        let timestamp = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
         value_ids(self.conn(), timestamp as i64)
             .and_then(|v| {
                 let ids = v.iter()
@@ -233,7 +234,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn peers(&mut self, peer_id: &Id, max_peers: usize) -> Result<Vec<PeerInfo>> {
-        let timestamp = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
         let result = get_peers( self.conn(),
             peer_id.as_bytes(),
             max_peers as i64,
@@ -270,7 +271,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn peer(&mut self, id: &Id, origin: &Id) -> Result<Option<PeerInfo>> {
-        let timestamp = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
         match get_peer(self.conn(), id.as_bytes(), origin.as_bytes(), timestamp as i64) {
             Ok(Some(v)) => {
                 let nodeid = Id::try_from(v.nodeId.as_slice()).unwrap();
@@ -322,7 +323,7 @@ impl DataStorage for SqliteStorage {
         p.alternativeURL = peer.alternative_url();
         p.signature = peer.signature();
 
-        p.timestamp = millis_since_epoch() as i64;
+        p.timestamp = ms_since_epoch() as i64;
         p.announced = if update_last_announce.unwrap_or(false) { p.timestamp } else { 0 };
 
         put_peer(self.conn(), p)
@@ -331,7 +332,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn update_peer_last_announce(&mut self, target: &Id, origin: &Id) -> Result<()> {
-        let timestamp = millis_since_epoch() as i64;
+        let timestamp = ms_since_epoch() as i64;
         update_peer_last_announce(self.conn(),
                 target.as_bytes(),
                 origin.as_bytes(),
@@ -342,7 +343,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn persistent_peers(&mut self, before: &SystemTime) -> Result<Vec<PeerInfo>> {
-        let before = as_millis!(before) as i64;
+        let before = elapsed_ms!(before) as i64;
         let result = persistent_peers(self.conn(), before);
         let result = match result {
             Ok(v) => v,
@@ -376,7 +377,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn peer_ids(&mut self) -> Result<Vec<Id>> {
-        let timestamp  = millis_since_epoch() - constants::MAX_VALUE_AGE;
+        let timestamp  = ms_since_epoch() - constants::MAX_VALUE_AGE;
         peer_ids(self.conn(), timestamp as i64)
             .and_then(|v| {
                 let ids = v.iter()
@@ -388,9 +389,6 @@ impl DataStorage for SqliteStorage {
 }
 
 #[inline(always)]
-fn millis_since_epoch() -> u128 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis()
+fn ms_since_epoch() -> u128 {
+    as_ms!(SystemTime::now())
 }

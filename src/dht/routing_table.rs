@@ -11,7 +11,7 @@ use libsodium_sys::randombytes_uniform;
 use log::{info, warn};
 
 use crate::{
-    as_millis,
+    elapsed_ms,
     Id,
     Prefix,
     core::node_info::Reachable
@@ -354,7 +354,7 @@ impl RoutingTable {
 
     fn _maintenance(&mut self) {
         // Don't spam the checks if we're not receiving anything.
-        if as_millis!(self.time_of_last_ping_check) < constants::ROUTING_TABLE_MAINTENANCE_INTERVAL {
+        if elapsed_ms!(self.time_of_last_ping_check) < constants::ROUTING_TABLE_MAINTENANCE_INTERVAL {
             return;
         }
 

@@ -3,13 +3,18 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
-use crate::Id;
+use crate::{
+    Id,
+    Error,
+    core::Result
+};
+
 use crate::did::{
     did_constants,
     DIDUrl
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum VerificationMethodType {
@@ -31,14 +36,13 @@ pub enum VerificationMethod {
     Entity(Entity),
 }
 
-#[allow(unused)]
 impl VerificationMethod {
     pub fn entity(id: String,
         method_type: VerificationMethodType,
         controller: Id,
         public_key_multibase: String
     ) -> Self {
-        VerificationMethod::Entity(Entity {
+        Self::Entity(Entity {
             id,
             method_type,
             controller: Some(controller),
@@ -46,23 +50,24 @@ impl VerificationMethod {
         })
     }
 
-    pub fn reference(id: String) -> Self {
-        VerificationMethod::Reference(Reference {
+    pub(crate) fn reference(id: String) -> Self {
+        Self::Reference(Reference {
             id      : id.into(),
             entity  : None,
         })
     }
 
-    pub fn default_entity(id: &Id) -> Self {
+    pub(crate) fn default_entity(id: Id) -> Self {
+        let pk_multibase = id.to_base58();
         Self::entity(
-            Self::to_default_method_id(id),
+            Self::to_default_method_id(&id),
             VerificationMethodType::Ed25519VerificationKey2020,
-            id.clone(),
-            id.to_base58(),
+            id,
+            pk_multibase,
         )
     }
 
-    pub fn default_reference(id: &Id) -> Self {
+    pub(crate) fn default_reference(id: &Id) -> Self {
         Self::reference(Self::to_default_method_id(id))
     }
 
@@ -110,13 +115,20 @@ impl VerificationMethod {
         }
     }
 
-    pub fn to_reference(&self) -> Option<Reference> {
-        match self.is_reference() {
-            true => match self {
-                VerificationMethod::Reference(v) => Some(v.clone()),
-                VerificationMethod::Entity(_) => None,
-            },
-            false => None,
+    pub fn to_reference(&self) -> VerificationMethod {
+        match self {
+            VerificationMethod::Reference(_) => self.clone(),
+            VerificationMethod::Entity(v) => VerificationMethod::Reference(
+                Reference::from_entity(v.clone())
+            )
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()> {
+        match self {
+            VerificationMethod::Reference(ref mut r) => r.update_reference(entity),
+            VerificationMethod::Entity(_) => Err(Error::Argument("Cannot update Entity with Reference".into())),
         }
     }
 }
@@ -144,7 +156,7 @@ impl fmt::Display for VerificationMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "VerificationMethod{{id:{}\'", self.id())?;
         if !self.is_reference() {
-            write!(f, "type={}, controller:{}, publicKeyMultibase:{}}}",
+            write!(f, "type={},controller:{},publicKeyMultibase:{}}}",
                 self.method_type().unwrap(),
                 self.controller().unwrap().to_did_string(),
                 self.public_key_multibase().unwrap()
@@ -172,11 +184,11 @@ pub struct Entity {
 
 impl Entity {
     pub(crate) fn id(&self) -> &str {
-        unimplemented!()
+        &self.id
     }
 
     pub(crate) fn method_type(&self) -> Option<VerificationMethodType> {
-        unimplemented!()
+        Some(self.method_type)
     }
 
     pub(crate) fn controller(&self) -> Option<&Id> {
@@ -212,12 +224,19 @@ pub struct Reference {
 }
 
 impl Reference {
+    pub(crate) fn from_entity(entity: Entity) -> Self {
+        Reference {
+            id: entity.id.clone(),
+            entity: Some(entity),
+        }
+    }
+
     pub(crate) fn id(&self) -> &str {
-        unimplemented!()
+        &self.id
     }
 
     pub(crate) fn method_type(&self) -> Option<VerificationMethodType> {
-        unimplemented!()
+        self.entity.as_ref().map(|e| e.method_type().unwrap())
     }
 
     pub(crate) fn controller(&self) -> Option<&Id> {
@@ -230,6 +249,18 @@ impl Reference {
 
     pub(crate) fn is_reference(&self) -> bool {
         true
+    }
+
+    pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()>{
+        if entity.is_reference() {
+            return Err(Error::Argument("Cannot update Reference with another Reference".into()));
+        }
+
+        if entity.id != self.id {
+            return Err(Error::Argument("Entity ID does not match Reference ID".into()));
+        }
+        self.entity = Some(entity);
+        Ok(())
     }
 }
 

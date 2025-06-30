@@ -1,6 +1,6 @@
 
 pub(crate) mod did_constants;
-pub mod did_url;
+pub mod didurl;
 pub mod verification_method;
 pub mod proof;
 
@@ -35,7 +35,7 @@ pub(crate) use crate::did::{
 };
 
 pub use crate::did::{
-    did_url::DIDUrl,
+    didurl::DIDUrl,
     proof::Proof,
     verification_method::{
         VerificationMethod,
@@ -60,4 +60,10 @@ pub(crate) fn is_none_or_empty(v: &Option<String>) -> bool {
 }
 pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
     *v == T::default()
+}
+
+#[cfg(test)]
+mod unitests {
+    mod test_didurl;
+    mod test_verification_method;
 }

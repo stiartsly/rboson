@@ -39,7 +39,7 @@ impl DIDDocumentBuilder {
             did_constants::BOSON_DID_CONTEXT.into(),
             did_constants::W3C_ED25519_CONTEXT.into()
         ];
-        let def_method = VerificationMethod::default_entity(identity.id());
+        let def_method = VerificationMethod::default_entity(identity.id().clone());
         let verification_methods = HashMap::from([
             (def_method.id().to_string(), def_method.clone())
         ]);
@@ -131,7 +131,7 @@ impl BosonIdentityObjectBuilder for DIDDocumentBuilder {
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
-        let def_method = VerificationMethod::default_entity(self.identity.id());
+        let def_method = VerificationMethod::default_entity(self.identity.id().clone());
 
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,

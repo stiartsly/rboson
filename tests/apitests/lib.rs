@@ -17,7 +17,8 @@ mod dht {
 
 #[cfg(test)]
 mod did {
-    mod did_url;
+    mod didurl;
+    mod verification_method;
 }
 
 use std::{

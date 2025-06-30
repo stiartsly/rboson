@@ -16,7 +16,7 @@ use crate::did::{
     proof::{Proof, ProofType, ProofPurpose},
     Credential,
     VerificationMethod,
-    did_url::DIDUrl,
+    DIDUrl,
     w3c::VerifiableCredentialBuilder
 
 };

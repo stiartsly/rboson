@@ -38,7 +38,7 @@ pub use crate::core::{
 };
 
 pub use crate::did::{
-    did_url,
+    didurl,
     verification_method,
     proof,
     w3c,
@@ -86,14 +86,9 @@ macro_rules! unwrap_mut {
     }};
 }
 
-use std::fs;
 use std::net::IpAddr;
-use std::path::Path;
-use get_if_addrs::get_if_addrs;
-use libsodium_sys::randombytes_buf;
-
 fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
-    let if_addrs = match get_if_addrs() {
+    let if_addrs = match get_if_addrs::get_if_addrs() {
         Ok(v) => v,
         Err(e) => return Err(Error::from(e))
     };
@@ -110,13 +105,13 @@ fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
 }
 
 fn create_dirs(input: &str) -> crate::core::Result<()> {
-    let path = Path::new(input);
+    let path = std::path::Path::new(input);
     if path.exists() {
         return Ok(())
     }
 
-    fs::create_dir_all(path).map_err(|e|
-         Error::Io(format!("Creating directory path {} error: {}", input, e))
+    std::fs::create_dir_all(path).map_err(|e|
+         Error::Io(format!("Creating directory path {} error: {e}", input))
     )
 }
 
@@ -129,15 +124,13 @@ fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     }
 }
 
-#[allow(dead_code)]
 fn random_bytes(len: usize) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(len);
+    let mut bytes = vec![0u8; len];
     unsafe {
-        randombytes_buf(
+        libsodium_sys::randombytes_buf(
             bytes.as_mut_ptr() as *mut libc::c_void,
             len
         );
-        bytes.set_len(len);
     };
     bytes
 }

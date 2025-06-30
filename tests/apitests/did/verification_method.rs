@@ -5,7 +5,7 @@ use boson::did::{
 };
 
 #[test]
-fn test_verification_method_serde_entity() {
+fn test_verification_method_deserde_entity() {
     let json = "{\
         \"Entity\":{\
             \"id\":\"did:boson:D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv#key-1\",\
@@ -30,7 +30,7 @@ fn test_verification_method_serde_entity() {
 }
 
 #[test]
-fn test_verification_method_serde_reference() {
+fn test_verification_method_deserde_reference() {
     let json = "{\
         \"Reference\":{\
             \"id\":\"did:boson:4K6hgZPEAcQT1hLkADbapDAoPhnfhbWUtcEYseQ1i8as#key-1\",\
@@ -50,7 +50,7 @@ fn test_verification_method_serde_reference() {
 }
 
 #[test]
-fn test_verification_method_serde_reference_with_entity() {
+fn test_verification_method_deserde_reference_with_entity() {
     let json = "{\
         \"Reference\":{\
             \"id\":\"did:boson:BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng#key-1\",\

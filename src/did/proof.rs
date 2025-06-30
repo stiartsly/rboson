@@ -14,7 +14,6 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum ProofType {
     Ed25519Signature2020,
 }
@@ -142,7 +141,7 @@ impl PartialEq<Self> for Proof {
 impl fmt::Display for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "Proof{{type={}, created={}, verificationMethod:{:?}, proofPurpose={}, proofValue={}}}",
+            "Proof{{type={},created={},verificationMethod:{:?},proofPurpose={},proofValue={}}}",
             self.proof_type,
             self.created,
             self.verification_method,

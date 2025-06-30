@@ -52,7 +52,7 @@ impl VerificationMethod {
 
     pub(crate) fn reference(id: String) -> Self {
         Self::Reference(Reference {
-            id      : id.into(),
+            id,
             entity  : None,
         })
     }

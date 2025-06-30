@@ -66,4 +66,5 @@ pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
 mod unitests {
     mod test_didurl;
     mod test_verification_method;
+    mod test_proof;
 }

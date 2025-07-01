@@ -7,6 +7,7 @@ use crate::{
     Id,
     error::{Error, Result},
     CryptoIdentity,
+    Identity,
 };
 
 use crate::did::{
@@ -27,9 +28,9 @@ pub struct CredentialBuilder {
 }
 
 impl CredentialBuilder {
-    pub(crate) fn new(identity: CryptoIdentity) -> Self {
+    pub fn new(issuer: CryptoIdentity) -> Self {
         Self {
-            identity,
+            identity    : issuer,
             id          : None,
             types       : Vec::new(),
             name        : None,
@@ -42,29 +43,25 @@ impl CredentialBuilder {
     }
 
     pub fn with_id(&mut self, id: &str) -> &mut Self {
-        match !id.is_empty() {
-            true => self.id = Some(id.nfc().collect::<String>()),
-            false => {},
+        if !id.is_empty() {
+            self.id = Some(id.nfc().collect::<String>());
         }
         self
     }
 
-    pub fn with_types(&mut self, types: &[&str]) -> &mut Self {
-        for t in types {
-            if t.is_empty() {
-                continue;
-            }
+    pub fn with_type(&mut self, credential_type: &str) -> &mut Self {
+        if credential_type.is_empty() {
+            return self;
+        }
 
-            let t = t.nfc().collect::<String>();
-            if self.types.contains(&t) {
-                continue;
-            }
+        let t = credential_type.nfc().collect::<String>();
+        if !self.types.contains(&t) {
             self.types.push(t);
         }
         self
     }
 
-    pub fn add_types(&mut self, types: &[&str]) -> &mut Self {
+    pub fn with_types(&mut self, types: Vec<&str>) -> &mut Self {
         for t in types {
             if t.is_empty() {
                 continue;
@@ -114,35 +111,26 @@ impl CredentialBuilder {
         self
     }
 
-    pub fn with_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
+    pub fn with_claim<T>(&mut self, name: &str, value: T) -> &mut Self
         where T: serde::Serialize {
-        if claims.is_empty() {
-            return self;
+        let key = name.nfc().collect::<String>();
+        if !self.claims.contains_key(&key) {
+            let val = Self::normalize(serde_json::to_value(value).unwrap());
+            self.claims.insert(key, val);
         }
-        let mut values_map = Map::new();
-        for (k, v) in claims {
-            let value = serde_json::to_value(v).unwrap();
-            let key = k.nfc().collect::<String>();
-            let val = Self::normalize(value);
-            values_map.insert(key, val);
-        }
-
-        self.claims = values_map;
         self
     }
 
-    pub fn add_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
+    pub fn with_claims<T>(&mut self, claims: HashMap<&str, T>) -> &mut Self
     where T: serde::Serialize {
         if claims.is_empty() {
             return self;
         }
 
         for (k, v) in claims {
-            let value = serde_json::to_value(v).unwrap();
             let key = k.nfc().collect::<String>();
-            let val = Self::normalize(value);
-
             if !self.claims.contains_key(&key) {
+                let val = Self::normalize(serde_json::to_value(v).unwrap());
                 self.claims.insert(key, val);
             }
         }
@@ -183,11 +171,11 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
             self.claims.clone()
         );
 
-        let data = unsigned.to_sign_data();
+        let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
         Ok(Credential::signed(
             unsigned,
             Some(Self::now()),
-            Some(data)
+            Some(signature)
         ))
     }
 }

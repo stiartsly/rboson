@@ -70,21 +70,5 @@ fn test_from_str() {
 #[test]
 #[ignore]
 fn test_full_didurl() {
-    /*let id = Id::random();
-    let path = "path/to/resource";
-    let query = "query=param";
-    let fragment = "fragment";
-    let did_url_str = format!("{}?query#fragment", id.to_did_string, "", id.to_did_string());
-    let did_url_str = format!("{}:{}#{}", DID_SCHEME, id.to_did_string(), "fragment");
-
-    let rc = DIDUrl::parse(&did_url_str);
-    assert!(rc.is_ok());
-
-    let url = rc.unwrap();
-    assert_eq!(url.scheme(), DID_SCHEME);
-    assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
-    assert_eq!(url.path(), None);
-    assert_eq!(url.query(), None);
-    assert_eq!(url.fragment(), Some("fragment"));*/
+    // TODO;
 }

@@ -29,8 +29,8 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "super::is_zero")]
-    signed_at: u64,
+    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_zero")]
+    signed_at: Option<u64>,
 
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
     signature: Vec<u8>,
@@ -49,7 +49,7 @@ impl Vouch {
             types,
             holder,
             credentials,
-            signed_at: 0, // unsigned vouch has no signed_at
+            signed_at: None, // unsigned vouch has no signed_at
             signature: vec![],
         }
     }
@@ -59,7 +59,7 @@ impl Vouch {
         signed_at: Option<SystemTime>,
         signature: Option<Vec<u8>>
     )-> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v)).unwrap_or(0);
+        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
         unsigned
     }
@@ -80,8 +80,10 @@ impl Vouch {
         self.credentials.iter().collect()
     }
 
-    pub fn signed_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.signed_at)
+    pub fn signed_at(&self) -> Option<SystemTime> {
+        self.signed_at.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
     pub fn signature(&self) -> &[u8] {

@@ -56,10 +56,10 @@ pub use crate::did::{
 };
 
 pub(crate) fn is_none_or_empty(v: &Option<String>) -> bool {
-    v.as_ref().map(|s| s.is_empty()).unwrap_or(false)
+    v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
 }
-pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
-    *v == T::default()
+pub(crate) fn is_none_or_zero<T: PartialEq + Default>(v: &Option<T>) -> bool {
+    v.as_ref().map(|s| *s == T::default()).unwrap_or(true)
 }
 
 #[cfg(test)]
@@ -67,4 +67,27 @@ mod unitests {
     mod test_didurl;
     mod test_verification_method;
     mod test_proof;
+}
+
+// bytes serded as base64 URL safe without padding
+mod serde_bytes_with_base64 {
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use base64::{engine::general_purpose, Engine as _};
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer,
+    {
+        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        serializer.serialize_str(&encoded)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        general_purpose::URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(D::Error::custom)
+    }
 }

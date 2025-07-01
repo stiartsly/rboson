@@ -8,8 +8,9 @@ use crate::{
     signature,
 };
 
-use super::{
+use crate::did::{
     VerificationMethod,
+    DIDUrl
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,14 +112,14 @@ impl Proof {
             return false;
         }
 
-        /*let url = DIDUrl::from_id(self.verification_method.id());
-        if url.id() != subject {
-            return false;
-        }*/
-
-        //if self.verification_method.id() != subject {
-        //    return false;
-        //}
+        match DIDUrl::try_from(self.verification_method.id()) {
+            Ok(url) => {
+                if url.id() != subject {
+                    return false;
+                }
+            },
+            Err(_) => return false
+        }
 
         signature::verify(
             data,

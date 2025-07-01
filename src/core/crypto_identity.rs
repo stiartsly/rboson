@@ -15,17 +15,15 @@ pub struct CryptoIdentity {
 }
 
 impl CryptoIdentity {
-    #[allow(unused)]
-    pub(crate) fn new() -> CryptoIdentity {
+    pub fn new() -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())
     }
 
-    #[allow(unused)]
-    pub(crate) fn from_private_key(private_key: &signature::PrivateKey) -> CryptoIdentity {
+    pub fn from_private_key(private_key: &signature::PrivateKey) -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::from(private_key))
     }
 
-    pub(crate) fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
+    pub fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
         Self {
             id: Id::from(keypair.to_public_key()),
             encrypt_keypair: cryptobox::KeyPair::from(&keypair),

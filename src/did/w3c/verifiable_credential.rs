@@ -41,11 +41,11 @@ pub struct VerifiableCredential {
     #[serde(rename = "issuer")]
     issuer: Id,
 
-    #[serde(rename = "validFrom", skip_serializing_if = "crate::did::is_zero")]
-    valid_from: u64,
+    #[serde(rename = "validFrom", skip_serializing_if = "crate::did::is_none_or_zero")]
+    valid_from: Option<u64>,
 
-    #[serde(rename = "validUntil", skip_serializing_if = "crate::did::is_zero")]
-    valid_until: u64,
+    #[serde(rename = "validUntil", skip_serializing_if = "crate::did::is_none_or_zero")]
+    valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]
     subject: CredentialSubject,
@@ -79,8 +79,8 @@ impl VerifiableCredential {
             name,
             description,
             issuer,
-            valid_from  : valid_from.map(|v| as_secs!(v)).unwrap_or(0),
-            valid_until : valid_until.map(|v| as_secs!(v)).unwrap_or(0),
+            valid_from  : valid_from.map(|v| as_secs!(v)),
+            valid_until : valid_until.map(|v| as_secs!(v)),
             subject,
             proof: None,
         }
@@ -143,12 +143,12 @@ impl VerifiableCredential {
 
         let subject = CredentialSubject::new(
             credential.subject().id().clone(),
-            credential.subject().claims().clone()
+            credential.subject().claims_map().clone()
         );
 
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
-            credential.signed_at(),
+            credential.signed_at().unwrap_or(SystemTime::now()),
             VerificationMethod::default_reference(credential.issuer()),
             ProofPurpose::AssertionMethod,
             credential.signature().to_vec()
@@ -161,8 +161,8 @@ impl VerifiableCredential {
             name        : credential.name().map(|v| v.to_string()),
             description : credential.description().map(|v| v.to_string()),
             issuer      : credential.issuer().clone(),
-            valid_from  : as_secs!(credential.valid_from()),
-            valid_until : as_secs!(credential.valid_until()),
+            valid_from  : credential.valid_from().map(|v| as_secs!(v)),
+            valid_until : credential.valid_until().map(|v| as_secs!(v)),
             subject,
             proof       : Some(proof),
         }
@@ -192,12 +192,16 @@ impl VerifiableCredential {
         &self.issuer
     }
 
-    pub fn valid_from(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.valid_from)
+    pub fn valid_from(&self) -> Option<SystemTime> {
+        self.valid_from.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
-    pub fn valid_until(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.valid_until)
+    pub fn valid_until(&self) -> Option<SystemTime> {
+        self.valid_until.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
     pub fn subject(&self) -> &CredentialSubject {
@@ -213,15 +217,15 @@ impl VerifiableCredential {
     }
 
     pub fn is_valid(&self) -> bool {
-        if self.valid_from == 0 && self.valid_until == 0 {
-            return true; // No validity constraints
+        if self.valid_from.is_none() && self.valid_until.is_none() {
+            return true;
         }
 
         let now = as_secs!(SystemTime::now());
-        if self.valid_from > now {
+        if self.valid_from.map(|v| v > now).unwrap_or(false) {
             return false;
         }
-        if self.valid_until < now && self.valid_until > 0 {
+        if self.valid_until.map(|v| v < now).unwrap_or(false) {
             return false;
         }
         true
@@ -235,14 +239,6 @@ impl VerifiableCredential {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let now = as_secs!(SystemTime::now());
-        if self.valid_from != 0 && self.valid_from > now {
-            return Err(Error::BeforeValidPeriod("Credential is not valid yet".into()));
-        }
-        if self.valid_until != 0 && self.valid_until < now {
-            return Err(Error::Expired("Credential is expired".into()));
-        }
-
         if !self.is_geniune() {
             return Err(Error::Signature("Credential proof is not valid".into()));
         }

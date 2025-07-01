@@ -53,28 +53,28 @@ impl CardBuilder {
     pub fn add_credentials_by_claims<T>(&mut self,
         id: &str,
         credential_type: &str,
-        claims: HashMap<String, T>
+        claims: HashMap<&str, T>
     ) -> Result<&mut Self>
         where T: Serialize {
 
         self.with_credential(CredentialBuilder::new(self.identity.clone())
             .with_id(id)
-            .with_types(&[credential_type])
+            .with_types(vec![credential_type.into()])
             .with_claims(claims)
             .build()?
         )
     }
 
     pub fn add_service<T>(&mut self,
-        id: String,
-        service_type: String,
-        endpoint: String,
-        properties: HashMap<String, T>
+        id: &str,
+        service_type: &str,
+        endpoint: &str,
+        properties: HashMap<&str, T>
     ) -> Result<&mut Self>
         where T: Serialize {
 
         if properties.keys().any(|key|
-            key == "id" || key == "t" || key == "e"
+            key == &"id" || key == &"t" || key == &"e"
         ) {
             return Err(Error::Argument("Service properties cannot contain 'id', 't' or 'e'".into()));
         }
@@ -88,7 +88,12 @@ impl CardBuilder {
         }
 
         self.services.push(
-            Service::new(id, service_type, endpoint, map)
+            Service::new(
+                id.to_string(),
+                service_type.to_string(),
+                endpoint.to_string(),
+                map
+            )
         );
         Ok(self)
     }

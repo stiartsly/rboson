@@ -1,4 +1,5 @@
 use std::fmt;
+use std::collections::HashMap;
 use std::time::{Duration,SystemTime};
 use std::hash::Hash;
 use serde::{Deserialize, Serialize};
@@ -35,19 +36,20 @@ pub struct Credential {
     #[serde(rename = "i")]
     issuer: Id,
 
-    #[serde(rename = "v", skip_serializing_if = "super::is_zero")]
-    valid_from: u64,
+    #[serde(rename = "v", skip_serializing_if = "super::is_none_or_zero")]
+    valid_from: Option<u64>,
 
-    #[serde(rename = "e", skip_serializing_if = "super::is_zero")]
-    valid_until: u64,
+    #[serde(rename = "e", skip_serializing_if = "super::is_none_or_zero")]
+    valid_until: Option<u64>,
 
     #[serde(rename = "s")]
     subject: Subject,
 
-    #[serde(rename = "sat", skip_serializing_if = "super::is_zero")]
-    signed_at: u64,
+    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_zero")]
+    signed_at: Option<u64>,
 
     #[serde(rename = "sig")]
+    #[serde(with="super::serde_bytes_with_base64")]
     signature: Vec<u8>
 }
 
@@ -69,10 +71,10 @@ impl Credential {
             name,
             description,
             issuer      : issuer.unwrap_or_else(|| subject.clone()),
-            valid_from  : valid_from.map_or(0, |t| as_secs!(t)),
-            valid_until : valid_until.map_or(0, |t| as_secs!(t)),
+            valid_from  : valid_from.map(|t| as_secs!(t)),
+            valid_until : valid_until.map(|t| as_secs!(t)),
             subject     : Subject::new(subject, claims),
-            signed_at   : 0,
+            signed_at   : None,
             signature   : vec![]
         }
     }
@@ -82,7 +84,7 @@ impl Credential {
         signed_at: Option<SystemTime>,
         signature: Option<Vec<u8>>
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v)).unwrap_or(0);
+        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
         unsigned
     }
@@ -107,20 +109,26 @@ impl Credential {
         &self.issuer
     }
 
-    pub fn valid_from(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.valid_from)
+    pub fn valid_from(&self) -> Option<SystemTime> {
+        self.valid_from.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
-    pub fn valid_until(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.valid_until)
+    pub fn valid_until(&self) -> Option<SystemTime> {
+        self.valid_until.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
     pub fn subject(&self) -> &Subject {
         &self.subject
     }
 
-    pub fn signed_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.signed_at)
+    pub fn signed_at(&self) -> Option<SystemTime> {
+        self.signed_at.map(|v|
+            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
+        )
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -132,21 +140,21 @@ impl Credential {
     }
 
     pub fn is_valid(&self) -> bool {
-        if self.valid_from == 0 && self.valid_until == 0 {
+        if self.valid_from.is_none() && self.valid_until.is_none() {
             return true; // No validity constraints
         }
 
         let now = as_secs!(SystemTime::now());
-        if self.valid_from > now {
+        if self.valid_from.map(|v| v > now).unwrap_or(false) {
             return false;
         }
-        if self.valid_until < now && self.valid_until > 0 {
+        if self.valid_until.map(|v| v < now).unwrap_or(false) {
             return false;
         }
         true
     }
 
-    pub fn is_geniune(&self) -> bool {
+    pub fn is_genuine(&self) -> bool {
         if self.signature.len() != signature::Signature::BYTES {
             return false;
         }
@@ -159,18 +167,24 @@ impl Credential {
     }
 
     pub fn validate(&self) -> Result<()> {
-        match self.is_geniune() {
+        let now = as_secs!(SystemTime::now());
+        if self.valid_from.is_some() && self.valid_from.unwrap() > now {
+            return Err(Error::BeforeValidPeriod("Credential is not yet valid".into()));
+        }
+        if self.valid_until.is_some() && self.valid_until.unwrap() < now {
+            return Err(Error::Expired("Credential has expired".into()));
+        }
+
+        match self.is_genuine() {
             true => Ok(()),
             false => Err(Error::Signature("Credential signature is not valid".into())),
         }
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        if self.signature.is_empty() {
-            let card = Self::signed(self.clone(), None, None);
-            Vec::from(&card)
-        } else {
-            Vec::from(self)
+        match self.signature.is_empty() {
+            true    => Vec::from(self),
+            false   => Vec::from(&Self::signed(self.clone(), None, None))
         }
     }
 
@@ -256,8 +270,21 @@ impl Subject {
         &self.id
     }
 
-    pub fn claims(&self) -> &Map<String, Value> {
+    pub(crate) fn claims_map(&self) -> &Map<String, Value> {
         &self.claims
+    }
+
+    pub fn claims<'a, T>(&'a self) -> HashMap<&'a str, T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let mut claims_map: HashMap<&str, T> = HashMap::new();
+        for (key, value) in &self.claims {
+            if let Ok(val) = serde_json::from_value(value.clone()) {
+                claims_map.insert(key.as_str(), val);
+            }
+        }
+        claims_map
     }
 
     pub fn claim(&self, key: &str) -> Option<&Value> {

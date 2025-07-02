@@ -15,7 +15,7 @@ fn test_token() {
 
     let nodeid = Id::random();
     let target = Id::random();
-    let addr = "192.168.1.123:39001".parse::<SocketAddr>().unwrap();
+    let addr = "192.168.1.123:32222".parse::<SocketAddr>().unwrap();
     thread::sleep(Duration::from_secs(1));
 
     let token1 = man.generate_token(&nodeid, &addr, &target);
@@ -29,7 +29,7 @@ fn test_token1() {
 
     let nodeid = Id::random();
     let target = Id::random();
-    let addr = "192.168.1.123:39001".parse::<SocketAddr>().unwrap();
+    let addr = "192.168.1.123:32222".parse::<SocketAddr>().unwrap();
     thread::sleep(Duration::from_secs(1));
 
     let token = man.generate_token(&nodeid, &addr, &target);

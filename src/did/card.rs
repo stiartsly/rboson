@@ -9,14 +9,15 @@ use serde_json::{Map, Value};
 use crate::{
     as_secs,
     Id,
-    error::{Error, Result},
+    core::{Error, Result},
     signature,
     CryptoIdentity,
 };
 
 use super::{
     Credential,
-    CardBuilder
+    CardBuilder,
+    w3c::DIDDocument
 };
 
 const DEFAULT_PROFILE_CREDENTIAL_ID     : &str = "profile";
@@ -29,49 +30,37 @@ pub struct Card {
     #[serde(rename = "id")]
     id: Id,
 
-    #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
-    credentials: Vec<Credential>,
+    #[serde(rename = "c", skip_serializing_if = "super::is_none_or_empty")]
+    credentials: Option<Vec<Credential>>,
 
-    #[serde(rename = "s", skip_serializing_if = "Vec::is_empty")]
-    services: Vec<Service>,
+    #[serde(rename = "s", skip_serializing_if = "super::is_none_or_empty")]
+    services: Option<Vec<Service>>,
 
-    #[serde(rename = "sat")]
-    signed_at: u64,
+    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_empty")]
+    signed_at: Option<u64>,
 
     #[serde(rename = "sig")]
-    signature: Vec<u8>
+    #[serde(with = "super::serde_bytes_with_base64")]
+    signature: Vec<u8>,
+
+    #[serde(skip)]
+    doc: Option<DIDDocument>,
 }
 
 impl Card {
-    #[allow(unused)]
-    #[cfg(test)]
-    pub(crate) fn new(
-        id: Id,
-        credentials: Vec<Credential>,
-        services: Vec<Service>,
-        signed_at: SystemTime,
-        signature: Vec<u8>
-    ) -> Self {
-        Self {
-            id,
-            credentials,
-            services,
-            signed_at: as_secs!(signed_at) as u64,
-            signature,
-        }
-    }
-
     pub(crate) fn unsigned(
         id: Id,
-        credentials: Vec<Credential>,
-        services: Vec<Service>
+        credentials: Option<Vec<Credential>>,
+        services: Option<Vec<Service>>,
+        doc: Option<DIDDocument>
     ) -> Self {
         Self {
             id,
             credentials,
             services,
-            signed_at: 0,
+            signed_at: None,
             signature: vec![0u8;0],
+            doc,
         }
     }
 
@@ -80,7 +69,7 @@ impl Card {
         signed_at: Option<SystemTime>,
         signature: Option<Vec<u8>>
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v)).unwrap_or(0);
+        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
         unsigned
     }
@@ -90,53 +79,70 @@ impl Card {
     }
 
     pub fn credentials(&self) -> Vec<&Credential> {
-        self.credentials.iter().collect()
+        self.credentials.as_ref().map(|v|
+            v.iter().collect()
+        ).unwrap_or_default()
     }
 
-    pub fn credentials_with_type(&self, credential_type: &str) -> Option<&Credential> {
-        self.credentials.iter()
-            .find(|c| c.types().contains(&credential_type))
+    pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&Credential> {
+        self.credentials.as_ref().map(|v|
+            v.iter().filter(|c| c.types().contains(&credential_type)).collect()
+        ).unwrap_or_default()
+    }
+
+    pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
+        self.credentials.as_ref().map(|v|
+            v.iter().filter(|c| c.id() == id).collect()
+        ).unwrap_or_default()
     }
 
     pub fn profile_credential(&self) -> Option<&Credential> {
-        self.credentials.iter()
-            .find(|cred|
-                cred.id() == DEFAULT_PROFILE_CREDENTIAL_ID &&
-                cred.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
+        self.credentials.as_ref().map(|v| {
+            v.iter().find(|c|
+                c.id() == DEFAULT_PROFILE_CREDENTIAL_ID &&
+                c.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
             )
+        }).flatten()
     }
 
-    pub fn services(&self) -> &[Service] {
-        &self.services
+    pub fn services(&self) -> Vec<&Service> {
+        self.services.as_ref().map(|v|
+            v.iter().collect()
+        ).unwrap_or_default()
     }
 
-    pub fn service_with_type(&self, service_type: &str) -> Option<&Service> {
-        self.services.iter()
-            .find(|s| s.service_type() == service_type)
+    pub fn services_by_type(&self, service_type: &str) -> Vec<&Service> {
+        self.services.as_ref().map(|v|
+            v.iter().filter(|s| s.service_type() == service_type).collect()
+        ).unwrap_or_default()
     }
 
-    pub fn services_with_id(&self, id: &str) -> Option<&Service> {
-        self.services.iter()
-            .find(|s| s.id() == id)
+    pub fn services_by_id(&self, id: &str) -> Vec<&Service> {
+        self.services.as_ref().map(|v|
+            v.iter().filter(|s| s.id() == id).collect()
+        ).unwrap_or_default()
     }
 
     pub fn  homenode_service(&self) -> Option<&Service> {
-        self.services.iter()
-            .find(|s|
+        self.services.as_ref().map(|v| {
+            v.iter().find(|s|
                 s.id() == DEFAULT_HOME_NODE_SERVICE_ID &&
                 s.service_type() == DEFAULT_HOME_NODE_SERVICE_TYPE
             )
+        }).flatten()
     }
 
-    pub fn signed_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.signed_at)
+    pub fn signed_at(&self) -> Option<SystemTime> {
+        self.signed_at.map(|s| {
+            SystemTime::UNIX_EPOCH + Duration::from_secs(s)
+        })
     }
 
     pub fn signature(&self) -> &[u8] {
         &self.signature
     }
 
-    pub fn is_geniune(&self) -> bool {
+    pub fn is_genuine(&self) -> bool {
         if self.signature.len() != signature::Signature::BYTES {
             return false;
         }
@@ -149,19 +155,25 @@ impl Card {
     }
 
     pub fn validate(&self) -> Result<()> {
-        match self.is_geniune() {
+        if self.signature.is_empty() {
+            return Err(Error::Signature("Card signature is empty".into()));
+        }
+
+        match self.is_genuine() {
             true => Ok(()),
             false => Err(Error::Signature("Card signature is not valid".into())),
         }
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        if self.signature.is_empty() {
-            let card = Self::signed(self.clone(), None, None);
-            Vec::from(&card)
-        } else {
-            Vec::from(self)
+        match self.signature.is_empty() {
+            true    => self.into(),
+            false   => Vec::from(&Self::signed(self.clone(), None, None))
         }
+    }
+
+    pub fn did_doc(&self) -> Option<&DIDDocument> {
+        self.doc.as_ref()
     }
 
     pub fn builder(subject: CryptoIdentity) -> CardBuilder {
@@ -201,21 +213,15 @@ impl TryFrom<&[u8]> for Card {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e| {
+        serde_cbor::from_slice(data).map_err(|e| {
             Error::Argument(format!("Failed to parse Card from bytes: {}", e))
         })
     }
 }
 
-impl From<&Card> for String {
-    fn from(card: &Card) -> Self {
-        serde_json::to_string(&card).unwrap()
-    }
-}
-
 impl From<&Card> for Vec<u8> {
     fn from(card: &Card) -> Self {
-        serde_json::to_vec(card).unwrap()
+        serde_cbor::to_vec(card).unwrap()
     }
 }
 
@@ -259,21 +265,25 @@ impl Service {
         &self.endpoint
     }
 
+    pub fn properties_map(&self) -> &Map<String, Value> {
+        &self.properties
+    }
+
     pub fn properties<T>(&self) -> HashMap<&str, T>
-    where T: Serialize + DeserializeOwned + Clone {
-        self.properties.iter()
-            .filter_map(|(k, v)| {
+    where T: Serialize + DeserializeOwned
+    {
+        self.properties.iter().filter_map(|(k, v)| {
                 serde_json::from_value(v.clone())
                     .ok()
                     .map(|value| (k.as_str(), value))
-            })
-            .collect()
+            }).collect()
     }
 
     pub fn property<T>(&self, key: &str) -> Option<T>
-    where T: Serialize + DeserializeOwned + Clone {
+    where T: Serialize + DeserializeOwned
+    {
         self.properties.get(key)
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }
 

@@ -1,7 +1,9 @@
-use boson::Id;
-use boson::did::{
-    VerificationMethod,
-    VerificationMethodType
+use boson::{
+    Id,
+    did::{
+        VerificationMethod,
+        VerificationMethodType
+    }
 };
 
 #[test]

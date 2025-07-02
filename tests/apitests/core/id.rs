@@ -198,6 +198,11 @@ fn test_try_from_str() {
     assert_eq!(id1.to_hexstr(), hexstr);
     assert_eq!(id2.to_base58(), base58);
     assert_eq!(id1, id2);
+
+    let id3: Id = base58.parse().unwrap();
+    let id4: Id = hexstr.parse().unwrap();
+    assert_eq!(id1, id3);
+    assert_eq!(id1, id4);
 }
 
 #[test]

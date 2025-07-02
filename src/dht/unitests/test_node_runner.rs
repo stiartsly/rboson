@@ -45,9 +45,9 @@ fn create_node(port: u16, path: &str, keypair: &signature::KeyPair) -> Rc<RefCel
     let ip_addr = local_addr(true).unwrap();
     let ip_str = ip_addr.to_string();
     let cfg = config::Builder::new()
-        .with_listening_port(port)
+        .with_port(port)
         .with_ipv4(&ip_str)
-        .with_storage_path(path)
+        .with_data_dir(path)
         .build()
         .unwrap();
 
@@ -60,7 +60,7 @@ fn create_node(port: u16, path: &str, keypair: &signature::KeyPair) -> Rc<RefCel
     }
 
     let nr = Rc::new(RefCell::new(NodeRunner::new(
-        cfg.storage_path().to_string(),
+        cfg.data_dir().to_string(),
         keypair.clone(),
         addrs1,
         Arc::new(Mutex::new(LinkedList::new() as LinkedList<Command>)),

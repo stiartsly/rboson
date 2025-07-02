@@ -47,7 +47,7 @@ fn main() {
         .unwrap();
 
     if let Some(path) = opts.storage.as_ref() {
-        b.with_storage_path(path);
+        b.with_data_dir(path);
     }
 
     let cfg  = b.build().unwrap();

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::str::FromStr;
 use std::fmt;
 use core::result;
 use ciborium::value::Value;
@@ -71,9 +72,10 @@ impl Id {
         bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
-            .map_err(|e|
+            .map_err(|e| {
+                println!(">>> e: {}, input:{}", e, input);
                 Error::Argument(format!("Invalid base58 format string: {e}"))
-            )?;
+        })?;
         Ok(Id(bytes))
     }
 
@@ -216,6 +218,13 @@ impl TryFrom<&str> for Id {
             true => Self::try_from_hexstr(str),
             false => Self::try_from_base58(str)
         }
+    }
+}
+
+impl FromStr for Id {
+    type Err = Error;
+    fn from_str(str: &str) -> Result<Self> {
+        Self::try_from(str)
     }
 }
 

@@ -20,6 +20,11 @@ mod did {
     mod didurl;
     mod verification_method;
     mod credential;
+    mod vouch;
+    mod card;
+    mod vc;
+    mod vp;
+    mod diddoc;
 }
 
 // helper functions

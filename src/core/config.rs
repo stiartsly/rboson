@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use log::LevelFilter;
 
 use crate::NodeInfo;
+use crate::dht::DEFAULT_DHT_PORT;
 
 pub trait UserConfig: Send + Sync {
     fn name(&self) -> Option<&str> { None }
@@ -24,17 +25,19 @@ pub trait MessagingConfig: Send + Sync {
 pub trait Config: Send + Sync {
     fn addr4(&self) -> Option<&SocketAddr> { None }
     fn addr6(&self) -> Option<&SocketAddr> { None }
+    fn port(&self) -> u16 { DEFAULT_DHT_PORT}
 
-    fn listening_port(&self) -> u16;
-    fn storage_path(&self) -> &str;
-    fn bootstrap_nodes(&self) -> &[NodeInfo];
+    fn access_control_dir(&self) -> Option<&str> { None }
+    fn data_dir(&self) -> &str;
+
+    fn bootstrap_nodes(&self) -> Vec<NodeInfo>;
 
     fn log_level(&self) -> LevelFilter { LevelFilter::Info }
-    fn log_file(&self) -> Option<&str> { None }
+    fn log_file(&self) -> Option<String> { None }
 
-    fn user(&self) -> Option<&Box<dyn UserConfig>> { None }
-    fn activeproxy(&self) -> Option<&Box<dyn ActiveProxyConfig>> { None }
-    fn messaging(&self) -> Option<&Box<dyn MessagingConfig>> { None }
+    fn user(&self) -> Option<Box<dyn UserConfig>> { None }
+    fn activeproxy(&self) -> Option<Box<dyn ActiveProxyConfig>> { None }
+    fn messaging(&self) -> Option<Box<dyn MessagingConfig>> { None }
 
     #[cfg(feature = "inspect")]
     fn dump(&self);

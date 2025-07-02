@@ -189,7 +189,7 @@ fn test_peer() {
     // create a new peerinfo
     let nodeid = Id::random();
     let peer = PeerBuilder::new(&nodeid)
-        .with_port(39001)
+        .with_port(32222)
         .build();
     let peer_id = peer.id();
 
@@ -240,7 +240,7 @@ fn test_peers() {
     // create a new peerinfo
     let nodeid1 = Id::random();
     let peer1 = PeerBuilder::new(&nodeid1)
-        .with_port(39001)
+        .with_port(32222)
         .build();
 
     let peer1_id = peer1.id();
@@ -251,7 +251,7 @@ fn test_peers() {
 
     let peer2 = PeerBuilder::new(&nodeid2)
         .with_origin(Some(&origin2))
-        .with_port(39001)
+        .with_port(32222)
         .build();
     let peer2_id = peer2.id();
 
@@ -261,7 +261,7 @@ fn test_peers() {
 
     let peer3 = PeerBuilder::new(&nodeid3)
         .with_origin(Some(&origin3))
-        .with_port(39001)
+        .with_port(32222)
         .with_alternative_url(Some("https://myexample.com"))
         .build();
     let peer3_id = peer3.id();

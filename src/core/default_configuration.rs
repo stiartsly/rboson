@@ -2,7 +2,6 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::net::{
-    IpAddr,
     Ipv4Addr,
     Ipv6Addr,
     SocketAddr
@@ -16,68 +15,106 @@ use crate::{
     NodeInfo,
     Error,
     core::{
-        logger,
-        config,
         config::Config,
+        config::UserConfig,
+        config::MessagingConfig,
+        config::ActiveProxyConfig,
         Result
     },
+    dht::DEFAULT_DHT_PORT,
 };
 
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
+#[derive(Clone, Deserialize)]
 struct NodeItem {
-    id      : String,
-    address : String,
-    port    : u16,
+    #[serde(rename = "id")]
+    #[serde(deserialize_with = "Id::deserialize")]
+    id      :Id,
+    #[serde(rename = "address")]
+    addr    :String,
+    #[serde(rename = "port")]
+    port    :u16,
 }
 
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct LoggerItem {
+impl fmt::Display for NodeItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.id, self.addr)
+    }
+}
+
+#[derive(Clone, Deserialize)]
+struct LogCfg {
+    #[serde(rename = "level")]
     level   : String,
-    logFile : Option<String>,
-    // pattern: String
+    #[serde(rename = "logFile")]
+    file    : Option<String>,
+
+    #[serde(skip)]
+    deserde_level: Option<LevelFilter>,
 }
 
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct UserItem {
-    name:   Option<String>,
+#[derive(Clone, Deserialize)]
+struct UserCfg {
+    #[serde(rename = "name")]
+    name    :   Option<String>,
+    #[serde(rename = "password")]
     password: Option<String>,
-    privateKey  : String,
+    #[serde(rename = "privateKey")]
+    sk      : String
 }
 
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct ActiveProxyItem {
-    serverPeerId    : String,
-    peerPrivateKey  : Option<String>,
-    domainName      : Option<String>,
-    upstreamHost    : String,
-    upstreamPort    : u16
+#[derive(Clone, Deserialize)]
+struct ActiveProxyCfg {
+    #[serde(rename = "serverPeerId")]
+    server_peerid   : String,
+
+    #[serde(rename = "peerPrivateKey")]
+    peer_sk         : Option<String>,
+    #[serde(rename = "domainName")]
+    domain          : Option<String>,
+    #[serde(rename = "upstreamHost")]
+    upstream_host   : String,
+    #[serde(rename = "upstreamPort")]
+    upstream_port   : u16
 }
 
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct MessagingItem {
-    serverPeerId: String,
+#[derive(Clone, Deserialize)]
+struct MessagingCfg {
+    #[serde(rename = "serverPeerId")]
+    server_peerid: String,
 }
 
-const DEFAULT_DHT_PORT: u16 = 39001;
-
-#[derive(Deserialize)]
-#[allow(non_snake_case)]
-struct Cfg {
+#[derive(Clone, Deserialize)]
+struct Configuration {
+    #[serde(rename = "ipv4")]
     ipv4        : bool,
+    #[serde(rename = "ipv6")]
     ipv6        : bool,
+    #[serde(rename = "port")]
     port        : u16,
-    dataDir     : String,
-    logger      : Option<LoggerItem>,
+    #[serde(rename = "dataDir")]
+    data_dir    : String,
+
+    #[serde(rename = "logger")]
+    logger      : Option<LogCfg>,
+
+    #[serde(rename = "user")]
+    user        : Option<UserCfg>,
+
+    #[serde(rename = "bootstraps")]
     bootstraps  : Vec<NodeItem>,
 
-    user        : Option<UserItem>,
-    activeproxy : Option<ActiveProxyItem>,
-    messaging   : Option<MessagingItem>
+    #[serde(rename = "activeproxy")]
+    activeproxy : Option<ActiveProxyCfg>,
+    #[serde(rename = "messaging")]
+    messaging   : Option<MessagingCfg>,
+
+
+    #[serde(skip)]
+    deserde_addr4   : Option<SocketAddr>,
+    #[serde(skip)]
+    deserde_addr6   : Option<SocketAddr>,
+    #[serde(skip)]
+    deserde_nodes   : Option<Vec<NodeInfo>>,
 }
 
 pub struct Builder<'a> {
@@ -86,19 +123,14 @@ pub struct Builder<'a> {
     ipv4_str    : Option<&'a str>,
     ipv6_str    : Option<&'a str>,
 
-    ipv4_addr   : Option<IpAddr>,
-    ipv6_addr   : Option<IpAddr>,
-
     port        : u16,
-    data_dir    : String,
+    data_dir    : Option<String>,
 
-    log_level   : LevelFilter,
-    log_file    : Option<String>,
+    log_level   : Option<LevelFilter>,
+    log_file    : Option<&'a str>,
 
-    bootstrap_nodes : Vec<NodeInfo>,
-    activeproxy : Option<ActiveProxyItem>,
-    messaging   : Option<MessagingItem>,
-    user        : Option<UserItem>,
+    bootstraps  : Vec<NodeInfo>,
+    cfg         : Option<Configuration>,
 }
 
 impl<'a> Builder<'a> {
@@ -108,17 +140,12 @@ impl<'a> Builder<'a> {
             auto_ipv6   : false,
             ipv4_str    : None,
             ipv6_str    : None,
-            ipv4_addr   : None,
-            ipv6_addr   : None,
             port        : DEFAULT_DHT_PORT,
-            data_dir    : env::var("HOME").unwrap_or_else(|_| ".".into()),
-            log_level   : LevelFilter::Info,
+            data_dir    : None, //env::var("HOME").unwrap_or_else(|_| ".".into()),
+            log_level   : None,
             log_file    : None,
-            bootstrap_nodes : Vec::new(),
-
-            user        : None,
-            activeproxy : None,
-            messaging   : None,
+            bootstraps  : Vec::new(),
+            cfg         : None,
         }
     }
 
@@ -134,41 +161,47 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn with_ipv4(&mut self, input: &'a str) -> &mut Self {
+    pub fn with_ipv4(&mut self, ipv4: &'a str) -> &mut Self {
         self.auto_ipv4 = false;
-        self.ipv4_str = Some(input);
+        self.ipv4_str = Some(ipv4);
         self
     }
 
-    pub fn with_ipv6(&mut self, input: &'a str) -> &mut Self {
+    pub fn with_ipv6(&mut self, ipv6: &'a str) -> &mut Self {
         self.auto_ipv6 = false;
-        self.ipv6_str = Some(input);
+        self.ipv6_str = Some(ipv6);
         self
     }
 
-    pub fn with_listening_port(&mut self, port: u16) -> &mut Self {
+    pub fn with_port(&mut self, port: u16) -> &mut Self {
         self.port = port;
         self
     }
 
-    pub fn with_storage_path(&mut self, input: &str) -> &mut Self {
+    pub fn with_data_dir(&mut self, input: &str) -> &mut Self {
+        let mut data_dir = String::new();
         if input.starts_with("~") {
-            self.data_dir += &input[1..];
+            data_dir += &input[1..];
         } else {
-            self.data_dir = input.to_string();
+            data_dir += input;
         }
+        self.data_dir = Some(data_dir);
         self
     }
 
-    pub fn add_bootstrap_node(&mut self, node: &NodeInfo) -> &mut Self {
-        self.bootstrap_nodes.push(node.clone());
+    pub fn with_logger(&mut self, level: LevelFilter, file: Option<&'a str>) -> &mut Self {
+        self.log_level = Some(level);
+        self.log_file = file;
         self
     }
 
-    pub fn add_bootstrap_nodes(&mut self, nodes: &[NodeInfo]) ->&mut Self {
-        _ = nodes.into_iter().map(|item| {
-            self.bootstrap_nodes.push(item.clone())
-        });
+    pub fn with_bootstrap_node(&mut self, node: &NodeInfo) -> &mut Self {
+        self.bootstraps.push(node.clone());
+        self
+    }
+
+    pub fn with_bootstrap_nodes(&mut self, nodes: Vec<NodeInfo>) ->&mut Self {
+        self.bootstraps.extend(nodes);
         self
     }
 
@@ -177,80 +210,190 @@ impl<'a> Builder<'a> {
             Error::Io(format!("Reading config error: {}", e))
         })?;
 
-        let cfg: Cfg = serde_json::from_str(&data).map_err(|e| {
+        let cfg = serde_json::from_str::<Configuration>(&data).map_err(|e| {
             Error::Argument(format!("bad config, error: {}", e))
         })?;
 
-        self.auto_ipv4 = cfg.ipv4;
-        self.auto_ipv6 = cfg.ipv6;
-        self.port = if cfg.port > 0 { cfg.port } else { self.port};
-        self.data_dir = cfg.dataDir.clone();
-
-        for item in cfg.bootstraps {
-            let id = Id::try_from(item.id.as_str()).map_err(|e|{
-                Error::Argument(format!("bad node id {} with error {}", item.id, e))
-            })?;
-            let ip = item.address.parse::<IpAddr>().map_err(|e| {
-                Error::Argument(format!("bad address {}, error: {}", item.address, e))
-            })?;
-            self.bootstrap_nodes.push(
-                NodeInfo::new(id, SocketAddr::new(ip, item.port))
-            )
-        }
-
-        if let Some(logger) = cfg.logger {
-            self.log_level = logger::convert_loglevel(&logger.level);
-            self.log_file = logger.logFile;
-        }
-
-        self.activeproxy = cfg.activeproxy;
-        self.user = cfg.user;
-        self.messaging = cfg.messaging;
+        self.cfg = Some(cfg);
         Ok(self)
     }
 
     pub fn build(&mut self) -> Result<Box<dyn Config>> {
-        if let Some(addr) = self.ipv4_str.as_ref() {
-            self.ipv4_addr = Some(IpAddr::V4(addr.parse::<Ipv4Addr>()?));
-        }
-        if let Some(addr) = self.ipv6_str.as_ref() {
-            self.ipv6_addr = Some(IpAddr::V6(addr.parse::<Ipv6Addr>()?));
-        }
-
-        if self.auto_ipv4 {
-            self.ipv4_addr = Some(local_addr(true)?);
-        }
-        if self.auto_ipv6 {
-            self.ipv6_addr = Some(local_addr(false)?);
-        }
-
-        if self.ipv4_addr.is_none() && self.ipv6_addr.is_none() {
-            return Err(Error::Argument(format!(
-                "No valid IPv4 or IPv6 address was specified."
-            )));
-        }
-
-        Ok(Box::new(DefaultConfiguration::new(self)))
+        Ok(Box::new(Configuration::new(self)?))
     }
 }
 
-pub(crate) struct UserConfiguration {
-    name: Option<String>,
-    password: Option<String>,
-    sk: String,
-}
+impl Configuration {
+    fn new(b: &Builder) -> Result<Self>{
+        let mut cfg = match b.cfg.as_ref() {
+            Some(cfg) => cfg.clone(),
+            None => Self {
+                ipv4            : true,
+                ipv6            : false,
+                port            : DEFAULT_DHT_PORT,
+                data_dir        : env::var("HOME").unwrap_or_else(|_| ".".into()),
+                logger          : None,
+                bootstraps      : Vec::new(),
+                activeproxy     : None,
+                messaging       : None,
+                user            : None,
+                deserde_addr4   : None,
+                deserde_addr6   : None,
+                deserde_nodes   : None,
 
-impl UserConfiguration {
-    fn new(b: &UserItem) -> Self {
-        Self {
-            name    : b.name.clone(),
-            password: b.password.clone(),
-            sk      : b.privateKey.clone()
+            }
+        };
+
+        if b.port != DEFAULT_DHT_PORT && b.port != cfg.port {
+            cfg.port = b.port
+        };
+
+        if cfg.ipv4 {
+            let ipv4 = if b.auto_ipv4 {
+                Some(local_addr(true)?)
+            } else if let Some(addr) = b.ipv4_str {
+                Some(addr.parse::<Ipv4Addr>()?.into())
+            } else {
+                Some(local_addr(true)?)
+            };
+
+            cfg.deserde_addr4 = ipv4.map(|addr| {
+                SocketAddr::new(addr, b.port)
+            });
         }
+
+        if cfg.ipv6 {
+            let ipv6 = if b.auto_ipv6 {
+                Some(local_addr(false)?)
+            } else if let Some(addr) = b.ipv6_str {
+                Some(addr.parse::<Ipv6Addr>()?.into())
+            } else {
+                None
+            };
+
+            cfg.deserde_addr6 = ipv6.map(|addr| {
+                SocketAddr::new(addr, b.port)
+            });
+        }
+
+        if let Some(dir) = b.data_dir.as_ref() {
+            cfg.data_dir = dir.to_string();
+        }
+
+        cfg.deserde_nodes = Some(b.bootstraps.iter()
+            .map(|v| v.clone())
+            .collect::<Vec<NodeInfo>>());
+
+        cfg.deserde_nodes.as_mut().unwrap().extend(
+            cfg.bootstraps.iter().filter_map(|v| {
+                let saddr = format!("{}:{}", v.addr, v.port).parse().ok()?;
+                Some(NodeInfo::new(v.id.clone(), saddr))
+            })
+        );
+
+        if let Some(ref mut logger) = cfg.logger {
+            if let Some(level) = logger.level.parse::<LevelFilter>().ok() {
+                logger.deserde_level = Some(level);
+            } else {
+                logger.deserde_level = Some(LevelFilter::Info);
+            }
+        } else {
+            cfg.logger = Some(LogCfg {
+                level: b.log_level.unwrap_or(LevelFilter::Info).to_string(),
+                file: b.log_file.map(|f| f.to_string()),
+                deserde_level: Some(b.log_level.unwrap_or(LevelFilter::Info)),
+            });
+        }
+
+        Ok(cfg)
     }
 }
 
-impl config::UserConfig for UserConfiguration {
+impl Config for Configuration {
+    fn addr4(&self) -> Option<&SocketAddr> {
+        self.deserde_addr4.as_ref()
+    }
+
+    fn addr6(&self) -> Option<&SocketAddr> {
+        self.deserde_addr6.as_ref()
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+
+    fn access_control_dir(&self) -> Option<&str> {
+        unimplemented!()
+    }
+
+    fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+
+    fn bootstrap_nodes(&self) -> Vec<NodeInfo> {
+        self.bootstraps.iter().filter_map(|v| {
+            let saddr = format!("{}:{}", v.addr, v.port).parse().ok()?;
+            Some(NodeInfo::new(v.id.clone(), saddr))
+        }).collect::<Vec<NodeInfo>>()
+    }
+
+    fn log_level(&self) -> LevelFilter {
+        self.logger.as_ref()
+            .and_then(|v| v.deserde_level)
+            .unwrap_or(LevelFilter::Info)
+    }
+
+    fn log_file(&self) -> Option<String> {
+        self.logger.as_ref().and_then(|v| v.file.clone())
+    }
+
+    fn activeproxy(&self) -> Option<Box<dyn ActiveProxyConfig>> {
+        self.activeproxy.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn ActiveProxyConfig>
+        )
+    }
+
+    fn user(&self) -> Option<Box<dyn UserConfig>> {
+        self.user.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn UserConfig>
+        )
+    }
+
+    fn messaging(&self) -> Option<Box<dyn MessagingConfig>> {
+        self.messaging.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn MessagingConfig>
+        )
+    }
+
+    #[cfg(feature = "inspect")]
+    fn dump(&self) {
+        println!("config: {}", self);
+    }
+}
+
+impl ActiveProxyConfig for ActiveProxyCfg {
+    fn server_peerid(&self) -> &str {
+        &self.server_peerid
+    }
+
+    fn peer_private_key(&self) -> Option<&str> {
+        self.peer_sk.as_deref()
+    }
+
+    fn domain_name(&self) -> Option<&str> {
+        self.domain.as_deref()
+    }
+
+    fn upstream_host(&self) -> &str {
+        &self.upstream_host
+    }
+
+    fn upstream_port(&self) -> u16 {
+        self.upstream_port
+    }
+}
+
+impl UserConfig for UserCfg {
     fn private_key(&self) -> &str {
         &self.sk
     }
@@ -264,182 +407,24 @@ impl config::UserConfig for UserConfiguration {
     }
 }
 
-pub(crate) struct ActiveProxyConfiguration {
-    server_peerid: String,
-    peer_sk: Option<String>,
-    domain_name: Option<String>,
-    upstream_host: String,
-    upstream_port: u16
-}
-
-impl ActiveProxyConfiguration {
-    fn new(b: &ActiveProxyItem) -> Self {
-        Self {
-            server_peerid:  b.serverPeerId.clone(),
-            peer_sk:        b.peerPrivateKey.clone(),
-            domain_name:    b.domainName.clone(),
-            upstream_host:  b.upstreamHost.clone(),
-            upstream_port:  b.upstreamPort
-        }
-    }
-}
-
-impl config::ActiveProxyConfig for ActiveProxyConfiguration {
-    fn server_peerid(&self) -> &str {
-        &self.server_peerid
-    }
-
-    fn peer_private_key(&self) -> Option<&str> {
-        self.peer_sk.as_deref()
-    }
-
-    fn domain_name(&self) -> Option<&str> {
-        self.domain_name.as_deref()
-    }
-
-    fn upstream_host(&self) -> &str {
-        &self.upstream_host
-    }
-
-    fn upstream_port(&self) -> u16 {
-        self.upstream_port
-    }
-}
-
-pub(crate) struct MessagingConfiguration {
-    server_peerid: String
-}
-
-impl MessagingConfiguration {
-    fn new(b: &MessagingItem) -> Self {
-        Self {
-            server_peerid:  b.serverPeerId.clone()
-        }
-    }
-}
-
-impl config::MessagingConfig for MessagingConfiguration {
+impl MessagingConfig for MessagingCfg {
     fn server_peerid(&self) -> &str {
         &self.server_peerid
     }
 }
 
-pub(crate) struct DefaultConfiguration {
-    addr4: Option<SocketAddr>,
-    addr6: Option<SocketAddr>,
-
-    port: u16,
-
-    log_level: LevelFilter,
-    log_file: Option<String>,
-
-    storage_path: String,
-    bootstrap_nodes: Vec<NodeInfo>,
-
-    activeproxy: Option<Box<dyn config::ActiveProxyConfig>>,
-    messaging: Option<Box<dyn config::MessagingConfig>>,
-    user: Option<Box<dyn config::UserConfig>>
-}
-
-impl DefaultConfiguration {
-    fn new(b: &Builder) -> Self {
-        let addr4 = b.ipv4_addr.as_ref().map(|ip| {
-            SocketAddr::new(ip.clone(), b.port)
-        });
-
-        let addr6 = b.ipv6_addr.as_ref().map(|ip| {
-            SocketAddr::new(ip.clone(), b.port)
-        });
-
-        let activeproxy = match b.activeproxy.as_ref() {
-            Some(ap) => Some(Box::new(ActiveProxyConfiguration::new(ap))),
-            None => None
-        };
-
-        let messaging = match b.messaging.as_ref() {
-            Some(m) => Some(Box::new(MessagingConfiguration::new(m))),
-            None => None
-        };
-
-        let user = match b.user.as_ref() {
-            Some(user) => Some(Box::new(UserConfiguration::new(user))),
-            None => None
-        };
-
-        Self {
-            addr4,
-            addr6,
-            port    : b.port,
-            log_level   : b.log_level,
-            log_file    : b.log_file.clone(),
-            storage_path: b.data_dir.to_string(),
-            bootstrap_nodes: b.bootstrap_nodes.clone(),
-            activeproxy : activeproxy.map(|v| v as Box<dyn config::ActiveProxyConfig>),
-            messaging   : messaging.map(|v| v as Box<dyn config::MessagingConfig>),
-            user        : user.map(|v| v as Box<dyn config::UserConfig>)
-        }
-    }
-}
-
-impl Config for DefaultConfiguration {
-    fn addr4(&self) -> Option<&SocketAddr> {
-        self.addr4.as_ref()
-    }
-
-    fn addr6(&self) -> Option<&SocketAddr> {
-        self.addr6.as_ref()
-    }
-
-    fn listening_port(&self) -> u16 {
-        self.port
-    }
-
-    fn storage_path(&self) -> &str {
-        self.storage_path.as_str()
-    }
-
-    fn bootstrap_nodes(&self) -> &[NodeInfo] {
-        &self.bootstrap_nodes
-    }
-
-    fn log_level(&self) -> LevelFilter {
-        self.log_level
-    }
-
-    fn log_file(&self) -> Option<&str> {
-        self.log_file.as_deref()
-    }
-
-    fn activeproxy(&self) -> Option<&Box<dyn config::ActiveProxyConfig>> {
-        self.activeproxy.as_ref()
-    }
-
-    fn user(&self) -> Option<&Box<dyn config::UserConfig>> {
-        self.user.as_ref()
-    }
-
-    fn messaging(&self) -> Option<&Box<dyn config::MessagingConfig>> {
-        self.messaging.as_ref()
-    }
-
-    #[cfg(feature = "inspect")]
-    fn dump(&self) {
-        println!("config: {}", self);
-    }
-}
-
-impl fmt::Display for DefaultConfiguration {
+impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.addr4.as_ref().map(|addr| {
+        self.deserde_addr4.as_ref().map(|addr| {
             write!(f, "ipv4:{},", addr).ok();
         });
-        self.addr6.as_ref().map(|addr| {
+        self.deserde_addr6.as_ref().map(|addr| {
             write!(f, "ipv6:{},", addr).ok();
         });
 
-        write!(f, "\tstorage:{},", self.storage_path)?;
+        write!(f, "\tstore:{},", self.data_dir)?;
         write!(f, "\tbootstraps: [")?;
-        for item in self.bootstrap_nodes.iter() {
+        for item in self.bootstraps.iter() {
             write!(f, "\t{}, ", item)?;
         }
         // TODO:

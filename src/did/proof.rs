@@ -1,5 +1,6 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -61,7 +62,7 @@ pub struct Proof {
     #[serde(rename = "proofPurpose")]
     proof_purpose: ProofPurpose,
 
-    #[serde(rename = "proofValue", skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "proofValue")]
     proof_value: Vec<u8>,
 }
 
@@ -107,18 +108,17 @@ impl Proof {
             return false ;
         }
 
-        if self.proof_purpose != ProofPurpose::AssertionMethod &&
-            self.proof_purpose != ProofPurpose::Authentication {
-            return false;
+        match self.proof_purpose {
+            ProofPurpose::AssertionMethod   => {},
+            ProofPurpose::Authentication    => {},
+            _ => return false
         }
 
-        match DIDUrl::try_from(self.verification_method.id()) {
-            Ok(url) => {
-                if url.id() != subject {
-                    return false;
-                }
-            },
-            Err(_) => return false
+        let Ok(url) = DIDUrl::try_from(self.verification_method.id()) else {
+            return false;
+        };
+        if url.id().unwrap() != subject {
+            return false;
         }
 
         signature::verify(
@@ -142,12 +142,12 @@ impl PartialEq<Self> for Proof {
 impl fmt::Display for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "Proof{{type={},created={},verificationMethod:{:?},proofPurpose={},proofValue={}}}",
+            "proof{{type={},created={},verificationMethod:{},proofPurpose={},proofValue={}}}",
             self.proof_type,
             self.created,
             self.verification_method,
             self.proof_purpose,
-            hex::encode(&self.proof_value)
+            general_purpose::URL_SAFE_NO_PAD.encode(self.proof_value.as_slice()).as_str()
         )
     }
 }

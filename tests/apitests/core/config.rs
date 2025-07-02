@@ -34,9 +34,9 @@ fn test_build_cfg() {
     let cfg: Box<dyn Config>;
 
     cfg = configuration::Builder::new()
-        .with_listening_port(port)
+        .with_port(port)
         .with_ipv4(ipv4_str)
-        .with_storage_path("tests")
+        .with_data_dir("tests")
         .build()
         .map_err(|_| assert!(false))
         .unwrap();
@@ -46,9 +46,9 @@ fn test_build_cfg() {
     assert_eq!(cfg.addr4().unwrap().is_ipv4(), true);
     assert_eq!(cfg.addr4().unwrap().port(), port);
     assert_eq!(cfg.addr4().unwrap().ip(), IpAddr::V4(ipv4_str.parse().unwrap()));
-    assert_eq!(cfg.listening_port(), port);
+    assert_eq!(cfg.port(), port);
     assert_eq!(cfg.bootstrap_nodes().len(), 0);
-    assert_eq!(cfg.storage_path(), "tests");
+    assert_eq!(cfg.data_dir(), "tests");
 
     #[cfg(feature = "inspect")]
     cfg.dump();
@@ -73,9 +73,9 @@ fn test_load_cfg() {
 
     assert_eq!(cfg.addr4().is_some(), true);
     assert_eq!(cfg.addr6().is_some(), false);
-    assert_eq!(cfg.listening_port(), 39003);
+    assert_eq!(cfg.port(), 39003);
     assert_eq!(cfg.bootstrap_nodes().len(), 1);
-    assert_eq!(cfg.storage_path(), "apitests1_data");
+    assert_eq!(cfg.data_dir(), "apitests1_data");
     assert_eq!(cfg.log_level(), LevelFilter::Info);
     assert_eq!(cfg.log_file(), None);
     assert_eq!(cfg.activeproxy().is_some(), false);
@@ -111,9 +111,9 @@ fn test_load_cfg_full(){
 
     assert_eq!(cfg.addr4().is_some(), true);
     assert_eq!(cfg.addr6().is_some(), false);
-    assert_eq!(cfg.listening_port(), 39004);
+    assert_eq!(cfg.port(), 39004);
     assert_eq!(cfg.bootstrap_nodes().len(), 1);
-    assert_eq!(cfg.storage_path(), "apitests2_data");
+    assert_eq!(cfg.data_dir(), "apitests2_data");
     assert_eq!(cfg.activeproxy().is_some(), true);
 
     let nodes = cfg.bootstrap_nodes();
@@ -123,7 +123,7 @@ fn test_load_cfg_full(){
     assert_eq!(n1.port(), 39001);
 
     assert_eq!(cfg.log_level(), LevelFilter::Debug);
-    assert_eq!(cfg.log_file(), Some("apitests2.log"));
+    assert_eq!(cfg.log_file(), Some("apitests2.log".to_string()));
 
     let result = cfg.activeproxy();
     assert!(result.is_some());

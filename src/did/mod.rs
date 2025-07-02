@@ -1,24 +1,24 @@
 
-pub(crate) mod did_constants;
+pub mod did_constants;
 pub mod didurl;
 pub mod verification_method;
 pub mod proof;
 
 pub mod w3c {
-    mod verifiable_credential;
-    mod verifiable_credential_builder;
-    mod verifiable_presentation;
-    mod verifiable_presentation_builder;
-    mod did_document;
-    mod did_document_builder;
+    mod vc;
+    mod vc_builder;
+    mod vp;
+    mod vp_builder;
+    mod diddoc;
+    mod diddoc_builder;
 
     pub use self::{
-        verifiable_credential::VerifiableCredential,
-        verifiable_credential_builder::VerifiableCredentialBuilder,
-        verifiable_presentation::VerifiablePresentation,
-        verifiable_presentation_builder::VerifiablePresentationBuilder,
-        did_document::DIDDocument,
-        did_document_builder::DIDDocumentBuilder
+        vc::VerifiableCredential,
+        vc_builder::VerifiableCredentialBuilder,
+        vp::VerifiablePresentation,
+        vp_builder::VerifiablePresentationBuilder,
+        diddoc::DIDDocument,
+        diddoc_builder::DIDDocumentBuilder
     };
 }
 
@@ -50,16 +50,36 @@ pub use crate::did::{
     vouch_builder::VouchBuilder,
 
     did_constants::{
+        self as constants,
         DID_SCHEME,
-        DID_METHOD
+        DID_METHOD,
     }
 };
 
-pub(crate) fn is_none_or_empty(v: &Option<String>) -> bool {
+pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
     v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
 }
-pub(crate) fn is_none_or_zero<T: PartialEq + Default>(v: &Option<T>) -> bool {
-    v.as_ref().map(|s| *s == T::default()).unwrap_or(true)
+
+pub trait IsEmpty {
+    fn is_empty(&self) -> bool;
+}
+
+impl IsEmpty for String {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> IsEmpty for Vec<T> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl IsEmpty for u64 {
+    fn is_empty(&self) -> bool {
+        *self == 0
+    }
 }
 
 #[cfg(test)]

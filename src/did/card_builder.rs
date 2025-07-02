@@ -1,82 +1,90 @@
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
-use serde::Serialize;
 use serde_json::Map;
 
 use crate::{
     Error,
-    error::Result,
-    CryptoIdentity
+    CryptoIdentity,
+    Identity,
+    core::Result,
 };
 
 use crate::did::{
     Card,
     card::Service,
     Credential,
-    CredentialBuilder,
     BosonIdentityObjectBuilder
 };
 
 pub struct CardBuilder {
     identity    : CryptoIdentity,
-    credentials : Vec<Credential>,
-    services    : Vec<Service>,
+    credentials : HashMap<String, Credential>,
+    services    : HashMap<String, Service>,
 }
 
 impl CardBuilder {
     pub(crate) fn new(identity: CryptoIdentity) -> Self {
         Self {
             identity,
-            credentials: Vec::new(),
-            services: Vec::new(),
+            credentials : HashMap::new(),
+            services    : HashMap::new(),
         }
     }
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            return Err(Error::Argument("Credential subject does not match identity".into()));
+            Err(Error::Argument("Credential subject does not match identity".into()))?;
         }
-        self.credentials.push(credential);
+
+        self.credentials.insert(credential.id().to_string(), credential);
         Ok(self)
     }
 
     pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> Result<&mut Self> {
+        if credentials.is_empty() {
+            Err(Error::Argument("Credentials cannot be empty".into()))?;
+        }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                return Err(Error::Argument("The subject of one Credential does not match identity".into()));
+                Err(Error::Argument("The subject of one Credential does not match identity".into()))?;
             }
         }
-        self.credentials.extend(credentials);
+
+        for credential in credentials {
+            self.credentials.insert(credential.id().to_string(), credential);
+        }
         Ok(self)
     }
 
-    pub fn add_credentials_by_claims<T>(&mut self,
+    pub fn with_credential_by_claims<T>(&mut self,
         id: &str,
         credential_type: &str,
         claims: HashMap<&str, T>
     ) -> Result<&mut Self>
-        where T: Serialize {
-
-        self.with_credential(CredentialBuilder::new(self.identity.clone())
-            .with_id(id)
-            .with_types(vec![credential_type.into()])
-            .with_claims(claims)
-            .build()?
+    where T: serde::Serialize
+    {
+        if claims.is_empty() {
+            Err(Error::Argument("Claims cannot be empty".into()))?;
+        }
+        self.with_credential(
+            Credential::builder(self.identity.clone())
+                .with_id(id)
+                .with_type(credential_type)
+                .with_claims(claims)
+                .build()?
         )
     }
 
-    pub fn add_service<T>(&mut self,
+    pub fn with_service<T>(&mut self,
         id: &str,
         service_type: &str,
         endpoint: &str,
         properties: HashMap<&str, T>
     ) -> Result<&mut Self>
-        where T: Serialize {
-
-        if properties.keys().any(|key|
-            key == &"id" || key == &"t" || key == &"e"
-        ) {
-            return Err(Error::Argument("Service properties cannot contain 'id', 't' or 'e'".into()));
+        where T: serde::Serialize
+    {
+        if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
+            Err(Error::Argument("Service id, type and endpoint cannot be empty".into()))?;
         }
 
         let mut map = Map::new();
@@ -87,7 +95,8 @@ impl CardBuilder {
             );
         }
 
-        self.services.push(
+        self.services.insert(
+            id.to_string(),
             Service::new(
                 id.to_string(),
                 service_type.to_string(),
@@ -111,17 +120,27 @@ impl BosonIdentityObjectBuilder for CardBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
+        let creds = match self.credentials.is_empty() {
+            true => None,
+            false => Some(self.credentials.values().cloned().collect()),
+        };
+        let services = match self.services.is_empty() {
+            true => None,
+            false => Some(self.services.values().cloned().collect()),
+        };
+
         let unsigned = Card::unsigned(
             self.identity.id().clone(),
-            self.credentials.clone(),
-            self.services.clone(),
+            creds,
+            services,
+            None,
         );
 
-        let data = unsigned.to_sign_data();
+        let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
         Ok(Card::signed(
             unsigned,
             Some(Self::now()),
-            Some(data)
+            Some(signature)
         ))
     }
 }

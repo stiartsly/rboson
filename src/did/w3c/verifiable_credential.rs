@@ -41,10 +41,10 @@ pub struct VerifiableCredential {
     #[serde(rename = "issuer")]
     issuer: Id,
 
-    #[serde(rename = "validFrom", skip_serializing_if = "crate::did::is_none_or_zero")]
+    #[serde(rename = "validFrom", skip_serializing_if = "crate::did::is_none_or_empty")]
     valid_from: Option<u64>,
 
-    #[serde(rename = "validUntil", skip_serializing_if = "crate::did::is_none_or_zero")]
+    #[serde(rename = "validUntil", skip_serializing_if = "crate::did::is_none_or_empty")]
     valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]
@@ -103,9 +103,7 @@ impl VerifiableCredential {
         type_contexts: HashMap<String, Vec<String>>
     ) -> Self {
 
-        if let Some(vc) = credential.vc() {
-            return vc;
-        }
+        // TODO:
 
         let mut types: Vec<String> = vec![
             did_constants::DEFAULT_VC_TYPE.into()
@@ -231,7 +229,7 @@ impl VerifiableCredential {
         true
     }
 
-    pub fn is_geniune(&self) -> bool {
+    pub fn is_genuine(&self) -> bool {
         self.proof.as_ref().map(|v|v.verify(
             &self.issuer,
             &self.to_sign_data()
@@ -239,14 +237,26 @@ impl VerifiableCredential {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !self.is_geniune() {
-            return Err(Error::Signature("Credential proof is not valid".into()));
+        let now = as_secs!(SystemTime::now());
+        if self.valid_from.is_some() && self.valid_from.unwrap() > now {
+            return Err(Error::BeforeValidPeriod("VC is not yet valid".into()));
         }
-        Ok(())
+        if self.valid_until.is_some() && self.valid_until.unwrap() < now {
+            return Err(Error::Expired("VC has expired".into()));
+        }
+
+        match self.is_genuine() {
+            true => Ok(()),
+            false => Err(Error::Signature("VC signature is not valid".into())),
+        }
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
         unimplemented!()
+    }
+
+    pub fn to_credential(&self) -> Credential {
+        Credential::from(self)
     }
 
     pub fn builder(issuer: CryptoIdentity) -> VerifiableCredentialBuilder {

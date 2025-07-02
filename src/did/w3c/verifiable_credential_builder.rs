@@ -12,7 +12,7 @@ use crate::{
 };
 
 use crate::did::{
-    did_constants,
+    did_constants::DID_SCHEME as did_scheme,
     DIDUrl,
     Proof,
     proof::{ProofType, ProofPurpose},
@@ -50,49 +50,54 @@ impl VerifiableCredentialBuilder {
         }
     }
 
-    pub fn with_id(&mut self, id: &str) -> &mut Self {
+    pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            return self;
+            return Err(Error::Argument("Credential Id cannot be empty".into()));
         }
 
-        let scheme = format!("{}:", did_constants::DID_SCHEME);
-        if id.starts_with(&scheme) {
-            let Ok(uri) = DIDUrl::parse(id) else {
-                return self;
-            };
+        let id = id.nfc().collect::<String>();
+        if id.starts_with(did_scheme) {
+            let url = DIDUrl::parse(&id).map_err(|_| {
+                Error::Argument(format!("Id must has the fragment part: {}", id))
+            })?;
 
-            if uri.fragment().is_none() {
-                return self;
+            if url.id() != self.issuer.id() {
+                return Err(Error::Argument(format!(
+                    "Invalid credential id: should be the subject id based DIDURL: {}",
+                    url
+                )));
             }
         }
 
-        self.id = Some(id.nfc().collect::<String>());
-        self
+        self.id = Some(id);
+        Ok(self)
     }
 
-    pub fn with_types(&mut self, credential_type: &str,  contexts: Vec<String>) -> &mut Self {
+    pub fn with_types(
+        &mut self,
+        credential_type: &str,
+        contexts: Vec<String>
+    ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            return self;
+            return Err(Error::Argument("Credential type cannot be empty".into()));
         }
 
-        let type_ = credential_type.nfc().collect::<String>();
-        if !self.types.contains(&type_) {
-            self.types.push(type_);
+        let t = credential_type.nfc().collect::<String>();
+        if !self.types.contains(&t) {
+            self.types.push(t);
         }
 
         for ctx in contexts {
             if ctx.is_empty() {
                 continue;
             }
-
             let ctx = ctx.nfc().collect::<String>();
             if self.contexts.contains(&ctx) {
                 continue;
             }
             self.types.push(ctx);
         }
-
-        self
+        Ok(self)
     }
 
     pub fn with_name(&mut self, name: &str) -> &mut Self {
@@ -132,43 +137,32 @@ impl VerifiableCredentialBuilder {
         self
     }
 
-    pub fn with_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
-        where T: serde::Serialize {
-        if claims.is_empty() {
+    pub fn with_claim<T>(&mut self, name: &str, value: T) -> &mut Self
+    where T: serde::Serialize
+    {
+        if name.is_empty() {
             return self;
         }
-        let mut values_map = Map::new();
-        for (k, v) in claims {
-            if k.is_empty() {
-                continue;
-            }
 
-            let value = serde_json::to_value(v).unwrap();
-            let key = k.nfc().collect::<String>();
-            let val = Self::normalize(value);
-            values_map.insert(key, val);
+        let key = name.nfc().collect::<String>();
+        if !self.claims.contains_key(&key) {
+            let val = Self::normalize(serde_json::to_value(value).unwrap());
+            self.claims.insert(key, val);
         }
-
-        self.claims = values_map;
         self
     }
 
-    pub fn add_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
-    where T: serde::Serialize {
+    pub fn with_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
+    where T: serde::Serialize
+    {
         if claims.is_empty() {
             return self;
         }
 
         for (k, v) in claims {
-            if k.is_empty() {
-                continue;
-            }
-
-            let value = serde_json::to_value(v).unwrap();
             let key = k.nfc().collect::<String>();
-            let val = Self::normalize(value);
-
             if !self.claims.contains_key(&key) {
+                let val = Self::normalize(serde_json::to_value(v).unwrap());
                 self.claims.insert(key, val);
             }
         }
@@ -188,30 +182,23 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
     }
 
     fn build(&self) -> Result<VerifiableCredential> {
-        let Some(id) = self.id.as_deref() else {
-            return Err(Error::Argument("Credenital Id is missing".into()));
+        if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
+            return Err(Error::Argument("VC Id cannot be empty".into()));
+        }
+        let Some(id) = self.id.as_ref() else {
+            return Err(Error::Argument("VC Id cannot be empty".into()));
         };
 
-        let did_url;
-        let scheme = did_constants::DID_SCHEME;
-        if id.starts_with(scheme) {
-            let Ok(url) = DIDUrl::parse(id) else {
-                return Err(Error::Argument(format!("Invalid specs to create DIDUrl: {}", id)));
-            };
-            if url.id() != self.issuer.id() {
-                return Err(Error::State(format!("Invalid credential id: should be the subject id based DIDURL: {}", url)));
-            }
-            if url.fragment().is_none() {
-                return Err(Error::State(format!("Invalid credential id: must contain the fragment part: {}", url)));
-            }
-            did_url = Some(url);
+        let did_url: DIDUrl;
+        if id.starts_with(did_scheme) {
+            did_url = DIDUrl::parse(id).unwrap();
         } else {
-            did_url = Some(DIDUrl::new(
-                self.subject.as_ref().unwrap(),
+            did_url = DIDUrl::new(
+                self.subject.as_ref().unwrap_or(self.issuer.id()),
                 None,
                 None,
                 Some(id)
-            ));
+            );
         }
 
         if self.claims.is_empty() {
@@ -220,7 +207,7 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
 
         let unsigned = VerifiableCredential::unsigned(
             self.contexts.clone(),
-            did_url.unwrap().to_string(),
+            did_url.to_string(),
             self.types.clone(),
             self.name.clone(),
             self.description.clone(),
@@ -231,8 +218,7 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
             self.claims.clone(),
         );
 
-        let data = unsigned.to_sign_data();
-        let signature = self.identity().sign_into(&data).unwrap();
+        let signature = self.identity().sign_into(&unsigned.to_sign_data())?;
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
             VerifiableCredentialBuilder::now(),

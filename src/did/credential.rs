@@ -36,19 +36,19 @@ pub struct Credential {
     #[serde(rename = "i")]
     issuer: Id,
 
-    #[serde(rename = "v", skip_serializing_if = "super::is_none_or_zero")]
+    #[serde(rename = "v", skip_serializing_if = "super::is_none_or_empty")]
     valid_from: Option<u64>,
 
-    #[serde(rename = "e", skip_serializing_if = "super::is_none_or_zero")]
+    #[serde(rename = "e", skip_serializing_if = "super::is_none_or_empty")]
     valid_until: Option<u64>,
 
     #[serde(rename = "s")]
     subject: Subject,
 
-    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_zero")]
+    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_empty")]
     signed_at: Option<u64>,
 
-    #[serde(rename = "sig")]
+    #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
     #[serde(with="super::serde_bytes_with_base64")]
     signature: Vec<u8>
 }
@@ -188,8 +188,12 @@ impl Credential {
         }
     }
 
-    pub(crate) fn vc(&self) -> Option<VerifiableCredential> {
+    pub fn to_verifiable_credential(&self) -> VerifiableCredential {
         unimplemented!()
+    }
+
+    pub fn builder(issuer: CryptoIdentity) -> CredentialBuilder {
+        CredentialBuilder::new(issuer)
     }
 }
 
@@ -244,12 +248,6 @@ impl From<&Credential> for String {
 impl From<&Credential> for Vec<u8> {
     fn from(cred: &Credential) -> Self {
         serde_json::to_vec(cred).unwrap()
-    }
-}
-
-impl Credential {
-    pub fn builder(issuer: CryptoIdentity) -> CredentialBuilder {
-        CredentialBuilder::new(issuer)
     }
 }
 

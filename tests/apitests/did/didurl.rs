@@ -1,8 +1,10 @@
-use boson::Id;
-use boson::did::{
-    DID_SCHEME,
-    DID_METHOD,
-    DIDUrl
+use boson::{
+    Id,
+    did::{
+        DID_SCHEME,
+        DID_METHOD,
+        DIDUrl
+    }
 };
 
 /*  APIs for testcase

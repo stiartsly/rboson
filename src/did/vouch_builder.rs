@@ -5,6 +5,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     error::{Error, Result},
     CryptoIdentity,
+    Identity,
 };
 
 use crate::did::{
@@ -16,16 +17,16 @@ use crate::did::{
 pub struct VouchBuilder {
     identity    : CryptoIdentity,
     id          : Option<String>,
-    types       : Vec<String>,
+    types       : Option<Vec<String>>,
     credentials : HashMap<String, Credential>,
 }
 
 impl VouchBuilder {
-    pub fn new(holder: &CryptoIdentity) -> Self {
+    pub(crate) fn new(holder: CryptoIdentity) -> Self {
         Self {
-            identity: holder.clone(),
+            identity: holder,
             id: None,
-            types: Vec::new(),
+            types: None,
             credentials: HashMap::new(),
         }
     }
@@ -35,30 +36,71 @@ impl VouchBuilder {
         self
     }
 
-    pub fn with_types(&mut self, types: Vec<String>) -> &mut Self {
+    pub fn with_type(&mut self, credential_type: &str) -> &mut Self {
+        if credential_type.is_empty() {
+            return self;
+        }
+
+        if self.types.is_none() {
+            self.types = Some(Vec::new());
+        }
+
+        let types = self.types.as_mut().unwrap();
+        let t = credential_type.nfc().collect::<String>();
+        if !types.contains(&t) {
+            types.push(t);
+        }
+        self
+    }
+
+    pub fn with_types(&mut self, types: Vec<&str>) -> &mut Self {
         for t in types {
             if t.is_empty() {
                 continue;
             }
 
-            let normalized = t.nfc().collect::<String>();
-            if self.types.iter().any(|v| v == &normalized) {
+            if self.types.is_none() {
+                self.types = Some(Vec::new());
+            }
+            let types = self.types.as_mut().unwrap();
+            let t = t.nfc().collect::<String>();
+            if types.contains(&t) {
                 continue;
             }
-
-            self.types.push(normalized);
+            types.push(t);
         }
         self
     }
 
-    pub fn add_crendetial(&mut self, credential: Credential) -> &mut Self {
+    pub fn with_credential_by_claims<T>(&mut self,
+        id: &str,
+        credential_type: &str,
+        claims: HashMap<&str, T>
+    ) -> Result<&mut Self>
+    where T: serde::Serialize {
+
+        if claims.is_empty() {
+            return Err(Error::Argument("Claims cannot be empty".into()));
+        }
+
+        self.with_credential(
+            Credential::builder(self.identity.clone())
+                .with_id(id)
+                .with_type(credential_type)
+                .with_claims(claims)
+                .build()?
+        );
+        Ok(self)
+    }
+
+    pub fn with_credential(&mut self, credential: Credential) -> &mut Self {
         self.credentials.insert(credential.id().to_string(), credential);
         self
     }
 
-    pub fn add_credentials(&mut self, credentials: Vec<Credential>) -> &mut Self {
+    pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> &mut Self {
         for credential in credentials {
-            self.add_crendetial(credential);
+            self.with_credential(credential);
         }
         self
     }
@@ -76,26 +118,22 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
-        if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            return Err(Error::Argument("Id cannot be empty".into()));
-        }
-
         if self.credentials.is_empty() {
             return Err(Error::Argument("Claims cannot be empty".into()));
         }
 
         let unsigned = Vouch::unsigned(
-            self.id.as_ref().unwrap().clone(),
+            self.id.clone(),
             self.types.clone(),
             self.identity.id().clone(),
             self.credentials.values().cloned().collect()
         );
 
-        let data = unsigned.to_sign_data();
+        let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
         Ok(Vouch::signed(
             unsigned,
             Some(Self::now()),
-            Some(data)
+            Some(signature)
         ))
     }
 }

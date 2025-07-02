@@ -4,10 +4,7 @@ use std::time::{SystemTime, Duration};
 use boson::{
     Id,
     CryptoIdentity,
-    did::{
-        Credential,
-        CredentialBuilder,
-    }
+    did::Credential,
 };
 
 const DAY: u64= 24 * 60 * 60;
@@ -15,7 +12,7 @@ const DAY: u64= 24 * 60 * 60;
 #[test]
 fn test_simple_credential() {
     let issuer = CryptoIdentity::new();
-    let rc = CredentialBuilder::new(issuer.clone())
+    let rc = Credential::builder(issuer.clone())
         .with_id("profile")
         .with_types(vec!["ProfileCredential"])
 		.with_claims({
@@ -60,7 +57,7 @@ fn test_complex_credential() {
     let issuer = CryptoIdentity::new();
     let subject = Id::random();
     let now = SystemTime::now();
-    let rc = CredentialBuilder::new(issuer.clone())
+    let rc = Credential::builder(issuer.clone())
         .with_id("profile")
         .with_types(vec!["Profile", "Test"])
         .with_name("Jane's Profile")
@@ -124,7 +121,7 @@ fn test_before_valid_period() {
     let issuer = CryptoIdentity::new();
     let subject = Id::random();
     let now = SystemTime::now();
-    let rc = CredentialBuilder::new(issuer.clone())
+    let rc = Credential::builder(issuer.clone())
         .with_id("profile")
         .with_type("Profile")
         .with_type("Test")
@@ -166,7 +163,7 @@ fn test_expired() {
     let issuer = CryptoIdentity::new();
     let now = SystemTime::now();
 
-    let rc = CredentialBuilder::new(issuer.clone())
+    let rc = Credential::builder(issuer.clone())
         .with_id("emailCredential")
         .with_types(vec!["Email"])
         .with_valid_from(now - Duration::from_secs(15 * DAY))   // 15 days ago
@@ -203,7 +200,7 @@ fn test_invalid_signature() {
         data[i] = i as u8;
     }
 
-    let rc = CredentialBuilder::new(issuer.clone())
+    let rc = Credential::builder(issuer.clone())
         .with_id("testCredential")
         .with_types(vec!["Binary"])
         .with_claims({

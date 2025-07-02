@@ -1,5 +1,5 @@
 
-pub(crate) mod did_constants;
+pub mod did_constants;
 pub mod didurl;
 pub mod verification_method;
 pub mod proof;
@@ -50,16 +50,36 @@ pub use crate::did::{
     vouch_builder::VouchBuilder,
 
     did_constants::{
+        self as constants,
         DID_SCHEME,
-        DID_METHOD
+        DID_METHOD,
     }
 };
 
-pub(crate) fn is_none_or_empty(v: &Option<String>) -> bool {
+pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
     v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
 }
-pub(crate) fn is_none_or_zero<T: PartialEq + Default>(v: &Option<T>) -> bool {
-    v.as_ref().map(|s| *s == T::default()).unwrap_or(true)
+
+pub trait IsEmpty {
+    fn is_empty(&self) -> bool;
+}
+
+impl IsEmpty for String {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> IsEmpty for Vec<T> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl IsEmpty for u64 {
+    fn is_empty(&self) -> bool {
+        *self == 0
+    }
 }
 
 #[cfg(test)]

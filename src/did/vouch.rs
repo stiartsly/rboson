@@ -17,11 +17,11 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
-    #[serde(rename = "id")]
-    id: String,
+    #[serde(rename = "id", skip_serializing_if = "super::is_none_or_empty")]
+    id: Option<String>,
 
-    #[serde(rename = "t", skip_serializing_if = "Vec::is_empty")]
-    types: Vec<String>,
+    #[serde(rename = "t", skip_serializing_if = "super::is_none_or_empty")]
+    types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
     holder: Id,
@@ -29,18 +29,19 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_zero")]
+    #[serde(rename = "sat", skip_serializing_if = "super::is_none_or_empty")]
     signed_at: Option<u64>,
 
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
+    #[serde(with="super::serde_bytes_with_base64")]
     signature: Vec<u8>,
 }
 
 #[allow(unused)]
 impl Vouch {
     pub(crate) fn unsigned(
-        id: String,
-        types: Vec<String>,
+        id: Option<String>,
+        types: Option<Vec<String>>,
         holder: Id,
         credentials: Vec<Credential>
     ) -> Self {
@@ -64,12 +65,14 @@ impl Vouch {
         unsigned
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 
     pub fn types(&self) -> Vec<&str> {
-        self.types.iter().map(|v| v.as_str()).collect()
+        self.types.as_ref().map(|t|
+            t.iter().map(|v| v.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn holder(&self) -> &Id {
@@ -78,6 +81,18 @@ impl Vouch {
 
     pub fn credentials(&self) -> Vec<&Credential> {
         self.credentials.iter().collect()
+    }
+
+    pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&Credential> {
+        self.credentials.iter()
+            .filter(|c| c.types().contains(&credential_type))
+            .collect()
+    }
+
+    pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
+        self.credentials.iter()
+            .filter(|c| c.id() == id)
+            .collect()
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
@@ -90,7 +105,7 @@ impl Vouch {
         &self.signature
     }
 
-    pub fn is_geniune(&self) -> bool {
+    pub fn is_genuine(&self) -> bool {
         if self.signature.len() != signature::Signature::BYTES {
             return false;
         }
@@ -107,22 +122,20 @@ impl Vouch {
             return Err(Error::Signature("Vouch signature is empty".into()));
         }
 
-        match self.is_geniune() {
+        match self.is_genuine() {
             true => Ok(()),
             false => Err(Error::Signature("Vouch signature is not valid".into())),
         }
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        if self.signature.is_empty() {
-            let card = Self::signed(self.clone(), None, None);
-            Vec::from(&card)
-        } else {
-            Vec::from(self)
+        match self.signature.is_empty() {
+            true    => Vec::from(self),
+            false   => Vec::from(&Self::signed(self.clone(), None, None))
         }
     }
 
-    pub fn builder(holder: &CryptoIdentity) -> VouchBuilder {
+    pub fn builder(holder: CryptoIdentity) -> VouchBuilder {
         VouchBuilder::new(holder)
     }
 }

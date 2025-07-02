@@ -28,7 +28,7 @@ pub struct CredentialBuilder {
 }
 
 impl CredentialBuilder {
-    pub fn new(issuer: CryptoIdentity) -> Self {
+    pub(crate) fn new(issuer: CryptoIdentity) -> Self {
         Self {
             identity    : issuer,
             id          : None,
@@ -80,9 +80,7 @@ impl CredentialBuilder {
         if name.is_empty() {
             return self;
         }
-
-        let name = name.nfc().collect::<String>();
-        self.name = Some(name);
+        self.name = Some(name.nfc().collect::<String>());
         self
     }
 
@@ -91,8 +89,9 @@ impl CredentialBuilder {
             return self;
         }
 
-        let descr = description.nfc().collect::<String>();
-        self.description = Some(descr);
+        self.description = Some(
+            description.nfc().collect::<String>()
+        );
         self
     }
 
@@ -122,7 +121,8 @@ impl CredentialBuilder {
     }
 
     pub fn with_claims<T>(&mut self, claims: HashMap<&str, T>) -> &mut Self
-    where T: serde::Serialize {
+    where T: serde::Serialize
+    {
         if claims.is_empty() {
             return self;
         }
@@ -153,7 +153,6 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
         if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
             return Err(Error::Argument("Id cannot be empty".into()));
         }
-
         if self.claims.is_empty() {
             return Err(Error::Argument("Claims cannot be empty".into()));
         }

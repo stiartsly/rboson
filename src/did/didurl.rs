@@ -23,7 +23,7 @@ pub struct DIDUrl {
 }
 
 impl DIDUrl {
-    pub(crate) fn new(id: &Id,
+    pub fn new(id: &Id,
         path: Option<&str>,
         query: Option<&str>,
         fragment: Option<&str>

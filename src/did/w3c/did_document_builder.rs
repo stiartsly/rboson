@@ -89,8 +89,8 @@ impl DIDDocumentBuilder {
         where T: Serialize {
 
         self.with_credential(VerifiableCredentialBuilder::new(self.identity.clone())
-            .with_id(id)
-            .with_types(credential_type, contexts)
+            .with_id(id)?
+            .with_types(credential_type, contexts)?
             .with_claims(claims)
             .build()?
         )

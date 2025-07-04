@@ -5,20 +5,20 @@ pub mod verification_method;
 pub mod proof;
 
 pub mod w3c {
-    mod verifiable_credential;
-    mod verifiable_credential_builder;
-    mod verifiable_presentation;
-    mod verifiable_presentation_builder;
-    mod did_document;
-    mod did_document_builder;
+    mod vc;
+    mod vc_builder;
+    mod vp;
+    mod vp_builder;
+    mod diddoc;
+    mod diddoc_builder;
 
     pub use self::{
-        verifiable_credential::VerifiableCredential,
-        verifiable_credential_builder::VerifiableCredentialBuilder,
-        verifiable_presentation::VerifiablePresentation,
-        verifiable_presentation_builder::VerifiablePresentationBuilder,
-        did_document::DIDDocument,
-        did_document_builder::DIDDocumentBuilder
+        vc::VerifiableCredential,
+        vc_builder::VerifiableCredentialBuilder,
+        vp::VerifiablePresentation,
+        vp_builder::VerifiablePresentationBuilder,
+        diddoc::DIDDocument,
+        diddoc_builder::DIDDocumentBuilder
     };
 }
 

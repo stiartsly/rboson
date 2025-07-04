@@ -119,14 +119,15 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.credentials.is_empty() {
-            return Err(Error::Argument("Claims cannot be empty".into()));
+            return Err(Error::Argument("Credentials cannot be empty".into()));
         }
 
         let unsigned = Vouch::unsigned(
             self.id.clone(),
             self.types.clone(),
             self.identity.id().clone(),
-            self.credentials.values().cloned().collect()
+            self.credentials.values().cloned().collect(),
+            None,
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;

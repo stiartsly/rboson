@@ -12,7 +12,7 @@ use crate::{
 };
 
 use crate::did::{
-    did_constants,
+    did_constants as constants,
     proof::{Proof, ProofType, ProofPurpose},
     Credential,
     VerificationMethod,
@@ -51,26 +51,26 @@ pub struct VerifiableCredential {
     subject: CredentialSubject,
 
     #[serde(rename = "proof")]
-    proof: Option<Proof>,
+    proof: Option<Proof>
 }
 
 impl VerifiableCredential {
     pub(crate) fn unsigned(
-        contexts: Vec<String>,
-        id: String,
-        types: Vec<String>,
-        name: Option<String>,
-        description: Option<String>,
-        issuer: Id,
-        valid_from: Option<SystemTime>,
-        valid_until: Option<SystemTime>,
-        subject: Option<Id>,
-        claims: Map<String, Value>
+        contexts    : Vec<String>,
+        id          : String,
+        types       : Vec<String>,
+        name        : Option<String>,
+        description : Option<String>,
+        issuer      : Id,
+        valid_from  : Option<SystemTime>,
+        valid_until : Option<SystemTime>,
+        subject     : Option<Id>,
+        claims      : Map<String, Value>
     ) -> Self {
 
         let subject = CredentialSubject::new(
             subject.unwrap_or(issuer.clone()),
-            claims
+            claims,
         );
         Self {
             contexts,
@@ -79,10 +79,10 @@ impl VerifiableCredential {
             name,
             description,
             issuer,
+            subject,
             valid_from  : valid_from.map(|v| as_secs!(v)),
             valid_until : valid_until.map(|v| as_secs!(v)),
-            subject,
-            proof: None,
+            proof       : None
         }
     }
 
@@ -94,40 +94,42 @@ impl VerifiableCredential {
         vc
     }
 
-    pub(crate) fn from_credential(credential: &Credential) -> Self {
-        Self::from_credential_with_type_contexts(credential, HashMap::new())
+    pub(crate) fn from_cred(credential: &Credential) -> Self {
+        Self::from_cred_with_type_contexts(credential, None)
     }
 
-    pub(crate) fn from_credential_with_type_contexts(
+    pub(crate) fn from_cred_with_type_contexts(
         credential: &Credential,
-        type_contexts: HashMap<String, Vec<String>>
+        type_contexts: Option<HashMap<String, Vec<String>>>
     ) -> Self {
+        if let Some(vc) = credential.vc() {
+            return vc.clone(); // If already a VC in credential, return it
+        }
 
-        // TODO:
-
-        let mut types: Vec<String> = vec![
-            did_constants::DEFAULT_VC_TYPE.into()
+        let mut types: Vec<&str> = vec![
+            constants::DEFAULT_VC_TYPE
         ];
-        let mut contexts: Vec<String> = vec![
-            did_constants::W3C_VC_CONTEXT.into(),
-            did_constants::BOSON_VC_CONTEXT.into(),
-            did_constants::W3C_ED25519_CONTEXT.into()
+        let mut contexts: Vec<&str> = vec![
+            constants::W3C_VC_CONTEXT,
+            constants::BOSON_VC_CONTEXT,
+            constants::W3C_ED25519_CONTEXT
         ];
 
-        for type_ in &credential.types() {
-            if type_ == &did_constants::DEFAULT_VC_TYPE {
+        for t in credential.types() {
+            if t == constants::DEFAULT_VC_TYPE {
                 continue; // Skip default type
             }
+            types.push(t);
 
-            let t = type_.to_string();
-            types.push(t.clone());
-            let Some(type_contexts) = type_contexts.get(&t) else {
-                continue; // Skip if no contexts for this type
+            let Some(extra_contexts) = type_contexts.as_ref() else {
+                continue;
             };
-
-            for ctx in type_contexts {
-                if !contexts.contains(ctx) {
-                    contexts.push(ctx.clone());
+            let Some(ctxs) = extra_contexts.get(t) else {
+                continue;
+            };
+            for ctx in ctxs {
+                if !contexts.contains(&ctx.as_str()) {
+                    contexts.push(ctx);
                 }
             }
         }
@@ -153,16 +155,16 @@ impl VerifiableCredential {
         );
 
         Self {
-            contexts,
+            contexts    : contexts.iter().map(|s| s.to_string()).collect(),
             id          : did_url.to_string(),
-            types,
+            types       : types.iter().map(|s| s.to_string()).collect(),
             name        : credential.name().map(|v| v.to_string()),
             description : credential.description().map(|v| v.to_string()),
             issuer      : credential.issuer().clone(),
             valid_from  : credential.valid_from().map(|v| as_secs!(v)),
             valid_until : credential.valid_until().map(|v| as_secs!(v)),
             subject,
-            proof       : Some(proof),
+            proof       : Some(proof)
         }
     }
 
@@ -230,10 +232,9 @@ impl VerifiableCredential {
     }
 
     pub fn is_genuine(&self) -> bool {
-        self.proof.as_ref().map(|v|v.verify(
-            &self.issuer,
-            &self.to_sign_data()
-        )).unwrap_or(false)
+        self.proof.as_ref().map(|v|
+            v.verify(&self.issuer,&self.to_sign_data())
+        ).unwrap_or(false)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -252,11 +253,29 @@ impl VerifiableCredential {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        unimplemented!()
+        self.to_credential().to_sign_data()
     }
 
     pub fn to_credential(&self) -> Credential {
-        Credential::from(self)
+        println!("self.id: {}", self.id);
+        let unsigned = Credential::unsigned(
+            DIDUrl::parse(&self.id).unwrap().fragment().unwrap().to_string(),
+            self.types.iter().filter(|t| *t != constants::DEFAULT_VC_TYPE).map(|s| s.to_string()).collect(),
+            self.name.clone(),
+            self.description.clone(),
+            Some(self.issuer.clone()),
+            self.valid_from,
+            self.valid_until,
+            self.subject.id.clone(),
+            self.subject.claims.clone(),
+            Some(self.clone()),
+        );
+
+        Credential::signed(
+            unsigned,
+            self.proof.as_ref().map(|p| as_secs!(p.created())),
+            self.proof.as_ref().map(|p| p.proof_value().to_vec())
+        )
     }
 
     pub fn builder(issuer: CryptoIdentity) -> VerifiableCredentialBuilder {
@@ -297,14 +316,14 @@ impl From<&VerifiableCredential> for Vec<u8> {
 }
 
 impl From<&VerifiableCredential> for Credential {
-    fn from(_vc: &VerifiableCredential) -> Self {
-        unimplemented!()
+    fn from(vc: &VerifiableCredential) -> Self {
+        vc.to_credential()
     }
 }
 
 impl From<&Credential> for VerifiableCredential {
     fn from(credential: &Credential) -> Self {
-        Self::from_credential(&credential)
+        Self::from_cred(&credential)
     }
 }
 
@@ -321,7 +340,6 @@ impl Hash for VerifiableCredential {
         if let Some(description) = &self.description {
             description.hash(state);
         }
-
         self.issuer.hash(state);
         self.valid_from.hash(state);
         self.valid_until.hash(state);

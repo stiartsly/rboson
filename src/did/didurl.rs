@@ -28,7 +28,6 @@ impl DIDUrl {
         query: Option<&str>,
         fragment: Option<&str>
     ) -> Self {
-        let path = path.map(|v| v.nfc().collect::<String>());
         let query = query.map(|v| {
             let q = match v.starts_with("?") {
                 true => &v[1..],
@@ -36,9 +35,9 @@ impl DIDUrl {
             };
             match q.is_empty() {
                 true => None,
-                false => Some(q.nfc().collect::<String>())
+                false => Some(q),
             }
-        }).unwrap_or_default();
+        }).flatten();
 
         let fragment = fragment.map(|v| {
             let f = match v.starts_with("#") {
@@ -47,17 +46,17 @@ impl DIDUrl {
             };
             match f.is_empty() {
                 true => None,
-                false => Some(f.nfc().collect::<String>())
+                false => Some(f),
             }
         }).unwrap_or_default();
 
         Self {
-            scheme: DID_SCHEME.to_string(),
-            method: DID_METHOD.to_string(),
-            id: id.clone(),
-            path,
-            query,
-            fragment
+            scheme  : DID_SCHEME.to_string(),
+            method  : DID_METHOD.to_string(),
+            id      : id.clone(),
+            path    : path.map(|v| v.nfc().collect::<String>()),
+            query   : query.map(|v| v.nfc().collect::<String>()),
+            fragment: fragment.map(|v| v.nfc().collect::<String>())
         }
     }
 

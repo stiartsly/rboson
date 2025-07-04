@@ -9,7 +9,7 @@ use crate::{
 };
 
 use crate::did::{
-	did_constants::DID_SCHEME as did_scheme,
+	did_constants as constants,
     VerificationMethod,
 	VerificationMethodType,
     Proof,
@@ -23,50 +23,74 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct DIDDocument {
-    #[serde(rename = "@context", skip_serializing_if = "Vec::is_empty")]
-    contexts: Vec<String>,
+    #[serde(rename = "@context")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: Id,
 
-    #[serde(rename = "verificationMethod", skip_serializing_if = "Vec::is_empty")]
-    verification_methods: Vec<VerificationMethod>,
+    #[serde(rename = "verificationMethod")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    verification_methods: Option<Vec<VerificationMethod>>,
 
-    #[serde(rename = "authentication", skip_serializing_if = "Vec::is_empty")]
-    authentications: Vec<VerificationMethod>,
+    #[serde(rename = "authentication")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    authentications: Option<Vec<VerificationMethod>>,
 
-    #[serde(rename = "assertion", skip_serializing_if = "Vec::is_empty")]
-    assertions: Vec<VerificationMethod>,
+    #[serde(rename = "assertion")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    assertions: Option<Vec<VerificationMethod>>,
 
-    #[serde(rename = "verifiableCredential", skip_serializing_if = "Vec::is_empty")]
-    credentials: Vec<VerifiableCredential>,
+    #[serde(rename = "verifiableCredential")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    credentials: Option<Vec<VerifiableCredential>>,
 
-    #[serde(rename = "service", skip_serializing_if = "Vec::is_empty")]
-    services: Vec<Service>, // Assuming Service is a String for simplicity
+    #[serde(rename = "service")]
+	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    services: Option<Vec<Service>>,
 
     #[serde(rename = "proof")]
+	#[serde(skip_serializing_if = "Option::is_none")]
     proof: Option<Proof>,
 }
 
-#[allow(unused)]
 impl DIDDocument {
 	pub(crate) fn unsigned(
-		contexts: Vec<String>,
-		id: Id,
-		verification_methods: Vec<VerificationMethod>,
-		authentications: Vec<VerificationMethod>,
-		assertions: Vec<VerificationMethod>,
-		credentials: Vec<VerifiableCredential>,
-		services: Vec<Service>
+		contexts	: Vec<String>,
+		id			: Id,
+		vms			: Vec<VerificationMethod>,
+		authentications	: Vec<VerificationMethod>,
+		assertions	: Vec<VerificationMethod>,
+		credentials	: Vec<VerifiableCredential>,
+		services	: Vec<Service>
 	) -> Self {
 		Self {
-			contexts,
+			contexts: match !contexts.is_empty() {
+				true => Some(contexts),
+				false => None,
+			},
 			id,
-			verification_methods,
-			authentications,
-			assertions,
-			credentials,
-			services,
+			verification_methods: match !vms.is_empty() {
+				true => Some(vms),
+				false => None,
+			},
+			authentications: match !authentications.is_empty() {
+				true => Some(authentications),
+				false => None,
+			},
+			assertions: match !assertions.is_empty() {
+				true => Some(assertions),
+				false => None,
+			},
+			credentials: match !credentials.is_empty() {
+				true => Some(credentials),
+				false => None,
+			},
+			services: match !services.is_empty() {
+				true => Some(services),
+				false => None,
+			},
 			proof: None,
 		}
 	}
@@ -92,7 +116,10 @@ impl DIDDocument {
 	}
 
 	pub fn contexts(&self) -> Vec<&str> {
-		self.contexts.iter().map(|v| v.as_str()).collect()
+		self.contexts.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().map(|s| s.as_str()).collect()
+		)
 	}
 
     pub fn id(&self) -> &Id {
@@ -100,24 +127,29 @@ impl DIDDocument {
     }
 
     pub fn verification_methods(&self) -> Vec<&VerificationMethod> {
-		self.verification_methods.iter().collect()
-    }
+		self.verification_methods.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().collect()
+		)
+	}
 
-    pub fn verification_methods_by_type(
+	pub fn verification_methods_by_type(
 		&self,
 		method_type: VerificationMethodType
 	) -> Vec<&VerificationMethod> {
-        self.verification_methods
-            .iter()
-            .filter(|v| v.method_type().map(|v| v== method_type).unwrap_or(false))
-			.collect()
+        self.verification_methods.as_ref().map_or(
+			Vec::new(),
+			|vs| vs.iter().filter(|v|
+				v.method_type() == Some(method_type)
+			).collect()
+		)
     }
 
 	pub fn verification_method_by_id(
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(did_scheme) {
+		let didurl = match id.starts_with(constants::DID_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -129,19 +161,23 @@ impl DIDDocument {
 		id: &DIDUrl
 	) -> Option<&VerificationMethod> {
 		let id_str = id.to_string();
-		self.verification_methods.iter()
-			.find(|v| v.id() == id_str)
+		self.verification_methods.as_ref().and_then(|vs|
+			vs.iter().find(|v| v.id() == id_str)
+		)
 	}
 
 	pub fn authentications(&self) -> Vec<&VerificationMethod> {
-		self.authentications.iter().collect()
+		self.authentications.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().collect()
+		)
 	}
 
 	pub fn authentication_by_id(
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(did_scheme) {
+		let didurl = match id.starts_with(constants::DID_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -153,19 +189,23 @@ impl DIDDocument {
 		id: &DIDUrl
 	) -> Option<&VerificationMethod> {
 		let id_str = id.to_string();
-		self.authentications.iter()
-			.find(|v| v.id() == id_str)
+		self.authentications.as_ref().map(|v|
+			v.iter().find(|v| v.id() == id_str)
+		).flatten()
 	}
 
 	pub fn assertions(&self) -> Vec<&VerificationMethod> {
-		self.assertions.iter().collect()
+		self.assertions.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().collect()
+		)
 	}
 
 	pub fn assertion_by_id(
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(did_scheme) {
+		let didurl = match id.starts_with(constants::DID_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -177,28 +217,35 @@ impl DIDDocument {
 		id: &DIDUrl
 	) -> Option<&VerificationMethod> {
 		let id_str = id.to_string();
-		self.assertions.iter()
-			.find(|v| v.id() == id_str)
+		self.assertions.as_ref().map(|v|
+			v.iter().find(|v| v.id() == id_str)
+		).flatten()
 	}
 
 	pub fn credentials(&self) -> Vec<&VerifiableCredential> {
-		self.credentials.iter().collect()
+		self.credentials.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().collect()
+		)
 	}
 
 	pub fn credentials_by_type(
 		&self,
 		credential_type: &str
 	) -> Vec<&VerifiableCredential> {
-		self.credentials.iter()
-			.filter(|vc| vc.types().contains(&credential_type))
-			.collect()
+		self.credentials.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().filter(|vc|
+				vc.types().contains(&credential_type)
+			).collect()
+		)
 	}
 
 	pub fn credential_by_id(
 		&self,
 		id: &str
 	) -> Option<&VerifiableCredential> {
-		let didurl = match id.starts_with(did_scheme) {
+		let didurl = match id.starts_with(constants::DID_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -210,28 +257,32 @@ impl DIDDocument {
 		id: &DIDUrl
 	) -> Option<&VerifiableCredential> {
 		let id_str = id.to_string();
-		self.credentials.iter()
-			.find(|vc| vc.id() == id_str)
+		self.credentials.as_ref().map(|v|
+			v.iter().find(|vc| vc.id() == id_str)
+		).flatten()
 	}
 
 	pub fn services(&self) -> Vec<&Service> {
-		self.services.iter().collect()
+		self.services.as_ref().map_or(Vec::new(), |v| v.iter().collect())
 	}
 
 	pub fn services_by_type(
 		&self,
 		service_type: &str
 	) -> Vec<&Service> {
-		self.services.iter()
-			.filter(|s| s.service_type() == service_type)
-			.collect()
+		self.services.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().filter(|s|
+				s.service_type() == service_type
+			).collect()
+		)
 	}
 
 	pub fn service_by_id(
 		&self,
 		id: &str
 	) -> Option<&Service> {
-		let didurl = match id.starts_with(did_scheme) {
+		let didurl = match id.starts_with(constants::DID_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -243,8 +294,9 @@ impl DIDDocument {
 		id: &DIDUrl
 	) -> Option<&Service> {
 		let id_str = id.to_string();
-		self.services.iter()
-			.find(|s| s.id() == id_str)
+		self.services.as_ref().map(|v|
+			v.iter().find(|s| s.id() == id_str)
+		).flatten()
 	}
 
 	pub fn proof(&self) -> &Proof {

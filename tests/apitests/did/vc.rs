@@ -67,6 +67,4 @@ fn test_simple_credential() {
 	println!("Credential: {}", cred);
 	let vc2 = VC::from(&cred);
 	assert_eq!(vc, vc2);
-	let vc3 = cred.to_verifiable_credential();
-	assert_eq!(vc, vc3);
 }

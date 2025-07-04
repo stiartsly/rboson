@@ -13,6 +13,7 @@ use crate::{
 use crate::did::{
     Credential,
     VouchBuilder,
+    w3c::VerifiablePresentation as VP,
 };
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
@@ -35,6 +36,9 @@ pub struct Vouch {
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
     #[serde(with="super::serde_bytes_with_base64")]
     signature: Vec<u8>,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    vp: Option<VP>,
 }
 
 #[allow(unused)]
@@ -43,7 +47,8 @@ impl Vouch {
         id: Option<String>,
         types: Option<Vec<String>>,
         holder: Id,
-        credentials: Vec<Credential>
+        credentials: Vec<Credential>,
+        vp: Option<VP>
     ) -> Self {
         Self {
             id,
@@ -52,6 +57,7 @@ impl Vouch {
             credentials,
             signed_at: None, // unsigned vouch has no signed_at
             signature: vec![],
+            vp,
         }
     }
 
@@ -133,6 +139,10 @@ impl Vouch {
             true    => Vec::from(self),
             false   => Vec::from(&Self::signed(self.clone(), None, None))
         }
+    }
+
+    pub(crate) fn vp(&self) -> Option<&VP> {
+        self.vp.as_ref()
     }
 
     pub fn builder(holder: CryptoIdentity) -> VouchBuilder {

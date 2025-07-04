@@ -37,38 +37,37 @@ pub enum VerificationMethod {
 }
 
 impl VerificationMethod {
-    pub fn entity(id: String,
+    pub fn entity(id: &str,
         method_type: VerificationMethodType,
-        controller: Id,
+        controller: &Id,
         public_key_multibase: String
     ) -> Self {
         Self::Entity(Entity {
-            id,
+            id: id.into(),
             method_type,
-            controller: Some(controller),
+            controller: Some(controller.clone()),
             public_key_multibase: Some(public_key_multibase),
         })
     }
 
-    pub(crate) fn reference(id: String) -> Self {
+    pub(crate) fn reference(id: &str) -> Self {
         Self::Reference(Reference {
-            id,
+            id      : id.into(),
             entity  : None,
         })
     }
 
-    pub(crate) fn default_entity(id: Id) -> Self {
-        let pk_multibase = id.to_base58();
+    pub(crate) fn default_entity(id: &Id) -> Self {
         Self::entity(
-            Self::to_default_method_id(&id),
+            &Self::to_default_method_id(id),
             VerificationMethodType::Ed25519VerificationKey2020,
             id,
-            pk_multibase,
+            id.to_base58(),
         )
     }
 
     pub(crate) fn default_reference(id: &Id) -> Self {
-        Self::reference(Self::to_default_method_id(id))
+        Self::reference(&Self::to_default_method_id(id))
     }
 
     fn to_default_method_id(id: &Id) -> String {

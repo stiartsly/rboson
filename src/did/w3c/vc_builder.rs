@@ -55,21 +55,24 @@ impl VerifiableCredentialBuilder {
             return Err(Error::Argument("Credential Id cannot be empty".into()));
         }
 
-        let id = id.nfc().collect::<String>();
         if id.starts_with(did_scheme) {
             let url = DIDUrl::parse(&id).map_err(|_| {
                 Error::Argument(format!("Id must has the fragment part: {}", id))
             })?;
 
+            if url.fragment().is_none() {
+                Err(Error::Argument("Id must has the fragment part".into()))?;
+            }
+
             if url.id() != self.issuer.id() {
-                return Err(Error::Argument(format!(
+                Err(Error::Argument(format!(
                     "Invalid credential id: should be the subject id based DIDURL: {}",
                     url
-                )));
+                )))?;
             }
         }
 
-        self.id = Some(id);
+        self.id = Some(id.nfc().collect::<String>());
         Ok(self)
     }
 
@@ -152,7 +155,7 @@ impl VerifiableCredentialBuilder {
         self
     }
 
-    pub fn with_claims<T>(&mut self, claims: HashMap<String, T>) -> &mut Self
+    pub fn with_claims<T>(&mut self, claims: HashMap<&str, T>) -> &mut Self
     where T: serde::Serialize
     {
         if claims.is_empty() {

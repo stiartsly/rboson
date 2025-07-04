@@ -16,7 +16,7 @@ use crate::{
 
 use crate::did::{
     CredentialBuilder,
-    w3c::VerifiableCredential,
+    w3c::VerifiableCredential as VC,
 };
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
@@ -50,7 +50,10 @@ pub struct Credential {
 
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
     #[serde(with="super::serde_bytes_with_base64")]
-    signature: Vec<u8>
+    signature: Vec<u8>,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    vc: Option<VC>,
 }
 
 impl Credential {
@@ -60,10 +63,11 @@ impl Credential {
         name: Option<String>,
         description: Option<String>,
         issuer: Option<Id>,
-        valid_from: Option<SystemTime>,
-        valid_until: Option<SystemTime>,
+        valid_from: Option<u64>,
+        valid_until: Option<u64>,
         subject: Id,
-        claims: Map<String, Value>
+        claims: Map<String, Value>,
+        vc: Option<VC>,
     ) -> Self {
         Self {
             id,
@@ -71,20 +75,21 @@ impl Credential {
             name,
             description,
             issuer      : issuer.unwrap_or_else(|| subject.clone()),
-            valid_from  : valid_from.map(|t| as_secs!(t)),
-            valid_until : valid_until.map(|t| as_secs!(t)),
+            valid_from,
+            valid_until,
             subject     : Subject::new(subject, claims),
             signed_at   : None,
-            signature   : vec![]
+            signature   : vec![],
+            vc,
         }
     }
 
     pub(crate) fn signed(
         mut unsigned: Credential,
-        signed_at: Option<SystemTime>,
+        signed_at: Option<u64>,
         signature: Option<Vec<u8>>
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
+        unsigned.signed_at = signed_at;
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
         unsigned
     }
@@ -188,8 +193,8 @@ impl Credential {
         }
     }
 
-    pub fn to_verifiable_credential(&self) -> VerifiableCredential {
-        unimplemented!()
+    pub(crate) fn vc(&self) -> Option<&VC> {
+        self.vc.as_ref()
     }
 
     pub fn builder(issuer: CryptoIdentity) -> CredentialBuilder {

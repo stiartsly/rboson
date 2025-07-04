@@ -9,9 +9,9 @@ fn test_verification_method_serde_entity() {
     let controller = Id::random();
     let id = format!("{}#key-1", controller.to_did_string());
     let vm = VerificationMethod::entity(
-        id.clone(),
+        id.as_str(),
         VerificationMethodType::Ed25519VerificationKey2020,
-        controller.clone(),
+        &controller,
         controller.to_base58()
     );
 
@@ -40,7 +40,7 @@ fn test_verification_method_serde_entity() {
 fn test_verification_method_serde_reference() {
     let controller = Id::random();
     let id = format!("{}#key-1", controller.to_did_string());
-    let vm = VerificationMethod::reference(id.clone());
+    let vm = VerificationMethod::reference(id.as_str());
     assert_eq!(vm.is_reference(), true);
     assert_eq!(vm.id(), &id);
     assert_eq!(vm.method_type(), None);
@@ -66,9 +66,9 @@ fn test_verification_method_default_entity() {
     let id = format!("{}#key-1", controller.to_did_string());
 
     let vm = VerificationMethod::entity(
-        id.clone(),
+        &id,
         VerificationMethodType::Ed25519VerificationKey2020,
-        controller.clone(),
+        &controller,
         controller.to_base58()
     );
     assert_eq!(vm.is_reference(), false);
@@ -77,7 +77,7 @@ fn test_verification_method_default_entity() {
     assert_eq!(vm.controller(), Some(&controller));
     assert_eq!(vm.public_key_multibase(), Some(controller.to_base58().as_str()));
 
-    let mut vmr = VerificationMethod::reference(id.clone());
+    let mut vmr = VerificationMethod::reference(&id);
     assert_eq!(vmr.is_reference(), true);
     assert_eq!(vmr.id(), &id);
     assert_eq!(vmr.method_type(), None);

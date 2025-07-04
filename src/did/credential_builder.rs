@@ -4,6 +4,7 @@ use unicode_normalization::UnicodeNormalization;
 use serde_json::{Map, Value};
 
 use crate::{
+    as_secs,
     Id,
     error::{Error, Result},
     CryptoIdentity,
@@ -164,16 +165,17 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
             self.name.clone(),
             self.description.clone(),
             Some(id.clone()),
-            self.valid_from,
-            self.valid_until,
+            self.valid_from.as_ref().map(|v| as_secs!(v)),
+            self.valid_until.as_ref().map(|v| as_secs!(v)),
             self.subject.as_ref().map(|s| s.clone()).unwrap_or(id),
-            self.claims.clone()
+            self.claims.clone(),
+            None,
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
         Ok(Credential::signed(
             unsigned,
-            Some(Self::now()),
+            Some(as_secs!(Self::now())),
             Some(signature)
         ))
     }

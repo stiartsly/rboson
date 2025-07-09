@@ -59,7 +59,7 @@ impl ProxyClient {
         };
 
         let cached_dir = {
-            let path = cfg.storage_path();
+            let path = cfg.data_dir();
             let mut path = if path.is_empty() {
                 PathBuf::from(".")
             } else {

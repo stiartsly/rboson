@@ -1,4 +1,4 @@
-pub(crate) const DEFAULT_DHT_PORT: u16 = 39001;
+pub const DEFAULT_DHT_PORT: u16 = 39001;
 
 pub(crate) const MAX_ENTRIES_PER_BUCKET: usize = 8;
 

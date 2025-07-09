@@ -77,13 +77,13 @@ pub struct Node {
 
 impl Node {
     pub fn new(cfg: &Box<dyn Config>) -> Result<Self> {
-        logger::setup(cfg.log_level(), cfg.log_file());
+        logger::setup(cfg.log_level(), cfg.log_file().as_deref());
 
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
 
         let path = {
-            let mut path = cfg.storage_path().to_string();
+            let mut path = cfg.data_dir().to_string();
             if path.is_empty() {
                 path.push_str(".")
             }
@@ -112,7 +112,7 @@ impl Node {
         };
 
         let port = {
-            let port = cfg.listening_port();
+            let port = cfg.port();
             match port > 0 && port < u16::MAX {
                 true => port,
                 false => constants::DEFAULT_DHT_PORT

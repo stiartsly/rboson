@@ -35,9 +35,9 @@ fn create_node(port: u16, path: &str) -> Result<Node> {
 
     let ipstr = ip.to_string();
     let cfg = cfg::Builder::new()
-        .with_listening_port(port)
+        .with_port(port)
         .with_ipv4(&ipstr)
-        .with_storage_path(path)
+        .with_data_dir(path)
         .build()
         .unwrap();
 

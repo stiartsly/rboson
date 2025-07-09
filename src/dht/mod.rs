@@ -73,6 +73,7 @@ pub use crate::dht::{
     node_status::NodeStatus,
     node_status_listener::NodeStatusListener,
     node::Node,
+    constants::DEFAULT_DHT_PORT,
 };
 
 #[cfg(test)]

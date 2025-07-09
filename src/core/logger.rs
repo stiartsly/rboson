@@ -100,14 +100,3 @@ pub(crate) fn revert_console_output() {
         }
     }
 }
-
-#[allow(unused)]
-pub(crate) fn convert_loglevel(loglevel: &str) -> LevelFilter {
-    match loglevel {
-        "trace" => LevelFilter::Trace,
-        "debug" => LevelFilter::Debug,
-        "info"  => LevelFilter::Info,
-        "err" | "critical"   => LevelFilter::Error,
-        "off" | _ => LevelFilter::Off
-    }
-}

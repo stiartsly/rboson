@@ -23,7 +23,7 @@ fn test_put() {
     assert_eq!(rt.random_entries(8).len(), 0);
 
     let id1 = Id::random();
-    let addr1 = "192.168.1.100:39001".parse::<SocketAddr>().unwrap();
+    let addr1 = "192.168.1.100:32222".parse::<SocketAddr>().unwrap();
     let mut entry = KBucketEntry::new(id1.clone(), addr1);
     entry.signal_response();
     entry.merge_request_time(SystemTime::now());

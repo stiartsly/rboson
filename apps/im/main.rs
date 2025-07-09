@@ -63,7 +63,7 @@ async fn main() {
     thread::sleep(Duration::from_secs(1));
 
     let mut path = String::new();
-    path.push_str(cfg.storage_path());
+    path.push_str(cfg.data_dir());
     path.push_str("/messaging");
 
     let mut appdata_store = AppDataStoreBuilder::new("im")

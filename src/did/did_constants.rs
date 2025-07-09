@@ -1,4 +1,6 @@
-pub const DID_SCHEME        : &str = "did:";
+pub(crate) const DID_SUFFIXED_SCHEME   : &str = "did:";
+
+pub const DID_SCHEME        : &str = "did";
 pub const DID_METHOD        : &str = "boson";
 
 #[allow(unused)]

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::str::FromStr;
 use std::fmt;
 use core::result;
 use ciborium::value::Value;
@@ -216,6 +217,13 @@ impl TryFrom<&str> for Id {
             true => Self::try_from_hexstr(str),
             false => Self::try_from_base58(str)
         }
+    }
+}
+
+impl FromStr for Id {
+    type Err = Error;
+    fn from_str(str: &str) -> Result<Self> {
+        Self::try_from(str)
     }
 }
 

@@ -149,7 +149,7 @@ impl DIDDocument {
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(constants::DID_SCHEME) {
+		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -177,7 +177,7 @@ impl DIDDocument {
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(constants::DID_SCHEME) {
+		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -205,7 +205,7 @@ impl DIDDocument {
 		&self,
 		id: &str
 	) -> Option<&VerificationMethod> {
-		let didurl = match id.starts_with(constants::DID_SCHEME) {
+		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -245,7 +245,7 @@ impl DIDDocument {
 		&self,
 		id: &str
 	) -> Option<&VerifiableCredential> {
-		let didurl = match id.starts_with(constants::DID_SCHEME) {
+		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
@@ -282,7 +282,7 @@ impl DIDDocument {
 		&self,
 		id: &str
 	) -> Option<&Service> {
-		let didurl = match id.starts_with(constants::DID_SCHEME) {
+		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};

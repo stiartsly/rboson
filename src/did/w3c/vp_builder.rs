@@ -53,7 +53,7 @@ impl VerifiablePresentationBuilder {
             return Err(Error::Argument("Credential Id cannot be empty".into()));
         }
 
-        if id.starts_with(constants::DID_SCHEME) {
+        if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = DIDUrl::parse(&id).map_err(|_| {
                 Error::Argument(format!("Id must has the fragment part: {}", id))
             })?;

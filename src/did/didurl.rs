@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
@@ -64,110 +65,67 @@ impl DIDUrl {
         Self::new(id, None, None, None)
     }
 
-    fn scan(spec: &str, start: usize, limit: usize, delimiters: &[char]) -> usize {
-        for i in start..limit {
-            let ch = spec.chars().nth(i).unwrap();
-            if delimiters.contains(&ch) {
-                return i;
-            }
-        }
-        limit
-    }
-
-    pub fn parse(spec: &str) -> Result<Self> {
-        let trimmed: &str = spec.trim();
+    // did:<method>:<method-specific-id><path>?<query>#<fragment>
+    pub fn parse(did_url: &str) -> Result<Self>{
+        let trimmed: &str = did_url.trim();
         if trimmed.is_empty() {
             return Err(Error::State("DIDUrl cannot be empty".into()));
         }
 
-        let mut start = 0;
-        let limit = trimmed.len();
-
-        let ch = trimmed.chars().nth(start).unwrap();
-        let delimiters = &[':', '/', '?', '#'];
-
-        let mut id: Option<Id> = None;
-        let mut path: Option<String> = None;
-        let mut query: Option<String> = None;
-        let mut fragment: Option<String> = None;
-
-        if ch != '/' && ch != '#' { // not relative url or fragment/reference
-            // scan scheme
-            let pos = Self::scan(trimmed, start, limit, &delimiters[..]);
-            if pos > start {
-                let s = &trimmed[start..pos].to_lowercase();
-                if s != "did" {
-                    return Err(Error::Malformed(format!("Invalid DIDUrl scheme: {}", s)));
-                }
-
-                start = match trimmed.chars().nth(pos) == Some(':') {
-                    true => pos + 1,
-                    false => pos
-                };
-            } else {
-                return Err(Error::Malformed("Missing DIDUrl scheme".into()));
-            }
-
-            // scan method
-            let pos = Self::scan(trimmed, start, limit, &[':', '/', '?', '#']);
-            if pos > start {
-                let s = &trimmed[start..pos].to_lowercase();
-                if s != "boson" {
-                    return Err(Error::Malformed(format!("Unsupported method: {}", s)));
-                }
-
-                start = match trimmed.chars().nth(pos) == Some(':') {
-                    true => pos + 1,
-                    false => pos
-                };
-            } else {
-                return Err(Error::Malformed("Missing DIDURL method".into()));
-            }
-
-            // scan method specific id
-            let pos = Self::scan(trimmed, start, limit, &['/', '?', '#']);
-            if pos > start {
-                let s = &trimmed[start..pos];
-                id = Id::try_from(s).map_err(|_|
-                    Error::Malformed(format!("Invalid method specific id: {}", s))
-                ).ok();
-                start = pos;
-            } else {
-                return Err(Error::Malformed("Missing method specific id".into()));
-            }
+        let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
+        println!("parts.len() = {}", parts.len());
+        if parts.len() != 3 {
+            return Err(Error::Malformed(format!("Invalid DIDUrl {}, must contain scheme, method and method-specific-id", trimmed)));
         }
 
-        if start < limit && trimmed.chars().nth(start) == Some('/') {
-            // scan path
-            let pos = Self::scan(trimmed, start + 1, limit, &['?', '#']);
-            path = Some(trimmed[start..pos].nfc().collect::<String>());
-            start = pos;
+        let scheme = parts[0].to_lowercase();
+        if scheme != DID_SCHEME {
+            return Err(Error::Malformed(format!("Invalid DIDUrl scheme: {}", scheme)));
         }
 
-        if start < limit && trimmed.chars().nth(start) == Some('?') {
-            // scan query
-            let pos = Self::scan(trimmed, start + 1, limit, &['#']);
-            query = if pos > start + 1 {
-                Some(trimmed[start + 1..pos].nfc().collect::<String>())
-            } else {
-                None
-            };
-            start = pos;
+        let method = parts[1];
+        if method != DID_METHOD {
+            return Err(Error::Malformed(format!("Unsupported DIDUrl method: {}", method)));
         }
 
-        if start < limit && trimmed.chars().nth(start) == Some('#') {
-            // scan fragment
-            fragment = if start + 1< limit {
-                 Some(trimmed[start + 1..limit].nfc().collect::<String>())
-            } else {
-                None
-            }
-        }
+        let mut remainder = parts[parts.len() - 1];
+
+        // Find and remove fragment
+        let fragment = match remainder.find('#') {
+            Some(idx) => Some({
+                let frag = &remainder[idx + 1..];
+                remainder = &remainder[..idx];
+                frag.nfc().collect::<String>()
+            }),
+            None => None,
+        };
+
+        // Find and remove query
+        let query = match remainder.find('?') {
+            Some(idx) => Some({
+                let query = &remainder[idx + 1..];
+                remainder = &remainder[..idx];
+                query.nfc().collect::<String>()
+            }),
+            None => None
+        };
+
+        let path = match remainder.find('/') {
+            Some(idx) => Some({
+                let path = &remainder[idx + 1..];
+                remainder = &remainder[..idx];
+                path.nfc().collect::<String>()
+            }),
+            None => None,
+        };
+
+        let id = remainder.parse::<Id>()
+            .map_err(|_| Error::Malformed(format!("Invalid DIDUrl method specific id: {}", remainder)))?;
 
         Ok(Self {
             scheme: DID_SCHEME.into(),
             method: DID_METHOD.into(),
-            id: id.unwrap(),
+            id,
             path,
             query,
             fragment
@@ -178,6 +136,10 @@ impl DIDUrl {
         let mut did_url = Self::parse(spec)?;
         did_url.id = id.clone();
         Ok(did_url)
+    }
+
+    pub fn create(url: &str) -> Result<Self> {
+        Self::parse(url)
     }
 
     pub fn scheme(&self) -> &str {
@@ -213,6 +175,14 @@ impl TryFrom<&str> for DIDUrl {
     }
 }
 
+impl FromStr for DIDUrl {
+    type Err = Error;
+
+    fn from_str(spec: &str) -> Result<Self> {
+        Self::parse(spec)
+    }
+}
+
 impl From<&Id> for DIDUrl {
     fn from(id: &Id) -> Self {
         Self::from_id(id)
@@ -234,7 +204,7 @@ impl fmt::Display for DIDUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}:{}", self.scheme, self.method, self.id)?;
         if let Some(path) = &self.path {
-            write!(f, "{}", path)?;
+            write!(f, "/{}", path)?;
         }
         if let Some(query) = &self.query {
             write!(f, "?{}", query)?;

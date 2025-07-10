@@ -16,7 +16,6 @@ use crate::did::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum VerificationMethodType {
     Ed25519VerificationKey2020,
 }
@@ -38,14 +37,14 @@ pub enum VerificationMethod {
 
 impl VerificationMethod {
     pub fn entity(id: &str,
-        method_type: VerificationMethodType,
-        controller: &Id,
+        method_type : VerificationMethodType,
+        controller  : &Id,
         public_key_multibase: String
     ) -> Self {
         Self::Entity(Entity {
-            id: id.into(),
-            method_type,
-            controller: Some(controller.clone()),
+            id          : id.into(),
+            method_type : Some(method_type),
+            controller  : Some(controller.clone()),
             public_key_multibase: Some(public_key_multibase),
         })
     }
@@ -171,8 +170,8 @@ pub struct Entity {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "type")]
-    method_type: VerificationMethodType,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    method_type: Option<VerificationMethodType>,
 
     #[serde(rename = "controller", skip_serializing_if = "Option::is_none")]
     controller: Option<Id>,
@@ -187,7 +186,7 @@ impl Entity {
     }
 
     pub(crate) fn method_type(&self) -> Option<VerificationMethodType> {
-        Some(self.method_type)
+        self.method_type
     }
 
     pub(crate) fn controller(&self) -> Option<&Id> {
@@ -235,15 +234,15 @@ impl Reference {
     }
 
     pub(crate) fn method_type(&self) -> Option<VerificationMethodType> {
-        self.entity.as_ref().map(|e| e.method_type().unwrap())
+        self.entity.as_ref().and_then(|v| v.method_type())
     }
 
     pub(crate) fn controller(&self) -> Option<&Id> {
-        self.entity.as_ref().and_then(|e| e.controller())
+        self.entity.as_ref().and_then(|v| v.controller())
     }
 
     pub(crate) fn public_key_multibase(&self) -> Option<&str> {
-        self.entity.as_ref().and_then(|e| e.public_key_multibase.as_deref())
+        self.entity.as_ref().and_then(|v| v.public_key_multibase.as_deref())
     }
 
     pub(crate) fn is_reference(&self) -> bool {

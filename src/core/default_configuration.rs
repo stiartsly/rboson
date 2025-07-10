@@ -344,31 +344,25 @@ impl Config for Configuration {
     }
 
     fn log_file(&self) -> Option<String> {
-        match self.logger.as_ref() {
-            Some(v) => v.file.clone(),
-            None => None,
-        }
+        self.logger.as_ref().and_then(|v| v.file.clone())
     }
 
     fn activeproxy(&self) -> Option<Box<dyn ActiveProxyConfig>> {
-        match self.activeproxy.as_ref() {
-            Some(v) => Some(Box::new(v.clone())),
-            None => None
-        }
+        self.activeproxy.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn ActiveProxyConfig>
+        )
     }
 
     fn user(&self) -> Option<Box<dyn UserConfig>> {
-        match self.user.as_ref() {
-            Some(v) => Some(Box::new(v.clone())),
-            None => None
-        }
+        self.user.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn UserConfig>
+        )
     }
 
     fn messaging(&self) -> Option<Box<dyn MessagingConfig>> {
-        match self.messaging.as_ref() {
-            Some(v) => Some(Box::new(v.clone())),
-            None => None
-        }
+        self.messaging.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn MessagingConfig>
+        )
     }
 
     #[cfg(feature = "inspect")]

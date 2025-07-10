@@ -26,14 +26,14 @@ impl CardBuilder {
     pub(crate) fn new(identity: CryptoIdentity) -> Self {
         Self {
             identity,
-            credentials: HashMap::new(),
-            services: HashMap::new(),
+            credentials : HashMap::new(),
+            services    : HashMap::new(),
         }
     }
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            return Err(Error::Argument("Credential subject does not match identity".into()));
+            Err(Error::Argument("Credential subject does not match identity".into()))?;
         }
 
         self.credentials.insert(credential.id().to_string(), credential);
@@ -42,11 +42,11 @@ impl CardBuilder {
 
     pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> Result<&mut Self> {
         if credentials.is_empty() {
-            return Err(Error::Argument("Credentials cannot be empty".into()));
+            Err(Error::Argument("Credentials cannot be empty".into()))?;
         }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                return Err(Error::Argument("The subject of one Credential does not match identity".into()));
+                Err(Error::Argument("The subject of one Credential does not match identity".into()))?;
             }
         }
 
@@ -64,7 +64,7 @@ impl CardBuilder {
     where T: serde::Serialize
     {
         if claims.is_empty() {
-            return Err(Error::Argument("Claims cannot be empty".into()));
+            Err(Error::Argument("Claims cannot be empty".into()))?;
         }
         self.with_credential(
             Credential::builder(self.identity.clone())
@@ -84,7 +84,7 @@ impl CardBuilder {
         where T: serde::Serialize
     {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
-            return Err(Error::Argument("Service id, type and endpoint cannot be empty".into()));
+            Err(Error::Argument("Service id, type and endpoint cannot be empty".into()))?;
         }
 
         let mut map = Map::new();
@@ -120,10 +120,19 @@ impl BosonIdentityObjectBuilder for CardBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
+        let creds = match self.credentials.is_empty() {
+            true => None,
+            false => Some(self.credentials.values().cloned().collect()),
+        };
+        let services = match self.services.is_empty() {
+            true => None,
+            false => Some(self.services.values().cloned().collect()),
+        };
+
         let unsigned = Card::unsigned(
             self.identity.id().clone(),
-            self.credentials.values().cloned().collect(),
-            self.services.values().cloned().collect(),
+            creds,
+            services,
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;

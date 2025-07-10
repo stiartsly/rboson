@@ -46,10 +46,17 @@ fn test_simple_credential() {
     println!("Credential JSON: {}", json);
     let rc = serde_json::from_str::<Credential>(&json);
     assert!(rc.is_ok());
-
     let cred2 = rc.unwrap();
     assert_eq!(cred, cred2);
     assert_eq!(cred.to_string(), cred2.to_string());
+
+    let cbor = serde_cbor::to_vec(&cred).unwrap();
+    println!("Credential CBOR: {:?}", cbor);
+    let rc = serde_cbor::from_slice::<Credential>(&cbor);
+    assert!(rc.is_ok());
+    let cred3 = rc.unwrap();
+    assert_eq!(cred, cred3);
+    assert_eq!(cred.to_string(), cred3.to_string());
 }
 
 #[test]
@@ -114,6 +121,14 @@ fn test_complex_credential() {
     let cred2 = rc.unwrap();
     assert_eq!(cred, cred2);
     assert_eq!(cred.to_string(), cred2.to_string());
+
+    let cbor = serde_cbor::to_vec(&cred).unwrap();
+    println!("Credential CBOR: {:?}", cbor);
+    let rc = serde_cbor::from_slice::<Credential>(&cbor);
+    assert!(rc.is_ok());
+    let cred3 = rc.unwrap();
+    assert_eq!(cred, cred3);
+    assert_eq!(cred.to_string(), cred3.to_string());
 }
 
 #[test]

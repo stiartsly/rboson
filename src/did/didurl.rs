@@ -73,7 +73,6 @@ impl DIDUrl {
         }
 
         let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
-        println!("parts.len() = {}", parts.len());
         if parts.len() != 3 {
             return Err(Error::Malformed(format!("Invalid DIDUrl {}, must contain scheme, method and method-specific-id", trimmed)));
         }

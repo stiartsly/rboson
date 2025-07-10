@@ -159,9 +159,13 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
         }
 
         let id = self.identity.id().clone();
+        let types = match self.types.is_empty() {
+            true => None,
+            false => Some(self.types.clone()),
+        };
         let unsigned = Credential::unsigned(
             self.id.as_ref().unwrap().clone(),
-            self.types.clone(),
+            types,
             self.name.clone(),
             self.description.clone(),
             Some(id.clone()),

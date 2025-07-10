@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    error::{Error, Result},
+    core::{Error, Result},
     CryptoIdentity,
     Identity,
 };
@@ -17,17 +17,17 @@ use crate::did::{
 pub struct VouchBuilder {
     identity    : CryptoIdentity,
     id          : Option<String>,
-    types       : Option<Vec<String>>,
+    types       : Vec<String>,
     credentials : HashMap<String, Credential>,
 }
 
 impl VouchBuilder {
     pub(crate) fn new(holder: CryptoIdentity) -> Self {
         Self {
-            identity: holder,
-            id: None,
-            types: None,
-            credentials: HashMap::new(),
+            identity    : holder,
+            id          : None,
+            types       : Vec::new(),
+            credentials : HashMap::new(),
         }
     }
 
@@ -41,14 +41,9 @@ impl VouchBuilder {
             return self;
         }
 
-        if self.types.is_none() {
-            self.types = Some(Vec::new());
-        }
-
-        let types = self.types.as_mut().unwrap();
         let t = credential_type.nfc().collect::<String>();
-        if !types.contains(&t) {
-            types.push(t);
+        if !self.types.contains(&t) {
+            self.types.push(t);
         }
         self
     }
@@ -59,15 +54,10 @@ impl VouchBuilder {
                 continue;
             }
 
-            if self.types.is_none() {
-                self.types = Some(Vec::new());
-            }
-            let types = self.types.as_mut().unwrap();
             let t = t.nfc().collect::<String>();
-            if types.contains(&t) {
-                continue;
+            if !self.types.contains(&t) {
+                self.types.push(t);
             }
-            types.push(t);
         }
         self
     }
@@ -83,7 +73,8 @@ impl VouchBuilder {
             return Err(Error::Argument("Claims cannot be empty".into()));
         }
 
-        self.with_credential(
+        self.credentials.insert(
+            id.to_string(),
             Credential::builder(self.identity.clone())
                 .with_id(id)
                 .with_type(credential_type)
@@ -93,14 +84,14 @@ impl VouchBuilder {
         Ok(self)
     }
 
-    pub fn with_credential(&mut self, credential: Credential) -> &mut Self {
-        self.credentials.insert(credential.id().to_string(), credential);
+    pub fn with_credential(&mut self, cred: Credential) -> &mut Self {
+        self.credentials.insert(cred.id().to_string(), cred);
         self
     }
 
     pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> &mut Self {
-        for credential in credentials {
-            self.with_credential(credential);
+        for cred in credentials {
+            self.credentials.insert(cred.id().to_string(), cred);
         }
         self
     }
@@ -122,9 +113,13 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
             return Err(Error::Argument("Credentials cannot be empty".into()));
         }
 
+        let types = match self.types.is_empty() {
+            true => None,
+            false => Some(self.types.clone()),
+        };
         let unsigned = Vouch::unsigned(
             self.id.clone(),
-            self.types.clone(),
+            types,
             self.identity.id().clone(),
             self.credentials.values().cloned().collect(),
             None,

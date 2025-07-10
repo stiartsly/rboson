@@ -139,7 +139,7 @@ impl DIDDocumentBuilder {
     pub fn with_credentials_by_claims<T>(&mut self,
         id: &str,
         credential_type: &str,
-        contexts: Vec<String>,
+        contexts: Vec<&str>,
         claims: HashMap<&str, T>
     ) -> Result<&mut Self>
         where T: Serialize {

@@ -46,13 +46,13 @@ pub struct Card {
 impl Card {
     pub(crate) fn unsigned(
         id: Id,
-        credentials: Vec<Credential>,
-        services: Vec<Service>
+        credentials: Option<Vec<Credential>>,
+        services: Option<Vec<Service>>,
     ) -> Self {
         Self {
             id,
-            credentials: if credentials.is_empty() { None } else { Some(credentials) },
-            services: if services.is_empty() { None } else { Some(services) },
+            credentials,
+            services,
             signed_at: None,
             signature: vec![0u8;0],
         }
@@ -73,20 +73,21 @@ impl Card {
     }
 
     pub fn credentials(&self) -> Vec<&Credential> {
-        self.credentials.as_ref().map_or(Vec::new(), |v| v.iter().collect())
+        self.credentials.as_ref().map(|v|
+            v.iter().collect()
+        ).unwrap_or_default()
     }
 
     pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&Credential> {
-        self.credentials.as_ref().map_or( Vec::new(), |v| {
-            v.iter().filter(|c| c.types().contains(&credential_type))
-                .collect()
-        })
+        self.credentials.as_ref().map(|v|
+            v.iter().filter(|c| c.types().contains(&credential_type)).collect()
+        ).unwrap_or_default()
     }
 
     pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
-        self.credentials.as_ref().map_or(Vec::new(), |v| {
+        self.credentials.as_ref().map(|v|
             v.iter().filter(|c| c.id() == id).collect()
-        })
+        ).unwrap_or_default()
     }
 
     pub fn profile_credential(&self) -> Option<&Credential> {
@@ -99,22 +100,21 @@ impl Card {
     }
 
     pub fn services(&self) -> Vec<&Service> {
-        self.services.as_ref().map_or(Vec::new(), |v| {
+        self.services.as_ref().map(|v|
             v.iter().collect()
-        })
+        ).unwrap_or_default()
     }
 
     pub fn services_by_type(&self, service_type: &str) -> Vec<&Service> {
-        self.services.as_ref().map_or(Vec::new(), |v| {
-            v.iter().filter(|s| s.service_type() == service_type)
-                .collect()
-        })
+        self.services.as_ref().map(|v|
+            v.iter().filter(|s| s.service_type() == service_type).collect()
+        ).unwrap_or_default()
     }
 
     pub fn services_by_id(&self, id: &str) -> Vec<&Service> {
-        self.services.as_ref().map_or(Vec::new(), |v| {
+        self.services.as_ref().map(|v|
             v.iter().filter(|s| s.id() == id).collect()
-        })
+        ).unwrap_or_default()
     }
 
     pub fn  homenode_service(&self) -> Option<&Service> {
@@ -161,7 +161,7 @@ impl Card {
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
         match self.signature.is_empty() {
-            true    => Vec::from(self),
+            true    => self.into(),
             false   => Vec::from(&Self::signed(self.clone(), None, None))
         }
     }
@@ -203,21 +203,15 @@ impl TryFrom<&[u8]> for Card {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e| {
+        serde_cbor::from_slice(data).map_err(|e| {
             Error::Argument(format!("Failed to parse Card from bytes: {}", e))
         })
     }
 }
 
-impl From<&Card> for String {
-    fn from(card: &Card) -> Self {
-        serde_json::to_string(&card).unwrap()
-    }
-}
-
 impl From<&Card> for Vec<u8> {
     fn from(card: &Card) -> Self {
-        serde_json::to_vec(card).unwrap()
+        serde_cbor::to_vec(card).unwrap()
     }
 }
 
@@ -264,20 +258,18 @@ impl Service {
     pub fn properties<T>(&self) -> HashMap<&str, T>
     where T: Serialize + DeserializeOwned
     {
-        self.properties.iter()
-            .filter_map(|(k, v)| {
+        self.properties.iter().filter_map(|(k, v)| {
                 serde_json::from_value(v.clone())
                     .ok()
                     .map(|value| (k.as_str(), value))
-            })
-            .collect()
+            }).collect()
     }
 
     pub fn property<T>(&self, key: &str) -> Option<T>
     where T: Serialize + DeserializeOwned
     {
         self.properties.get(key)
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }
 

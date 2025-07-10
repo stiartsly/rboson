@@ -48,12 +48,20 @@ fn test_simple_vouch() {
 	let vouch2 = rc.unwrap();
 	assert_eq!(vouch, vouch2);
 	assert_eq!(vouch.to_string(), vouch2.to_string());
+
+	let cbor = serde_cbor::to_vec(&vouch).unwrap();
+	println!("vouch cbor: {:?}", cbor);
+	let rc = serde_cbor::from_slice::<Vouch>(&cbor);
+	assert!(rc.is_ok());
+	let vouch3 = rc.unwrap();
+	assert_eq!(vouch, vouch3);
+	assert_eq!(vouch.to_string(), vouch3.to_string());
 }
 
 #[test]
 fn test_complex_vouch() {
 	let identity = CryptoIdentity::new();
-	let day: u64 = 24 * 60 * 60 * 1000;
+	let day: u64 = 24 * 60 * 60;
 
 	let rc = Credential::builder(identity.clone())
 		.with_id("profile")
@@ -62,7 +70,7 @@ fn test_complex_vouch() {
 		.with_name("John's Profile")
 		.with_description("This is a test profile")
 		.with_valid_from(SystemTime::now())
-		.with_valid_until(SystemTime::now() + Duration::from_millis(day * 30))
+		.with_valid_until(SystemTime::now() + Duration::from_secs(day * 30))
 		.with_claim("name", "John Doe")
 		.with_claim("avatar", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==")
 		.with_claim("email", "cV9dX@example.com")
@@ -135,6 +143,14 @@ fn test_complex_vouch() {
 	let vouch2 = rc.unwrap();
 	assert_eq!(vouch, vouch2);
 	assert_eq!(vouch.to_string(), vouch2.to_string());
+
+	let cbor = serde_cbor::to_vec(&vouch).unwrap();
+	println!("vouch cbor: {:?}", cbor);
+	let rc = serde_cbor::from_slice::<Vouch>(&cbor);
+	assert!(rc.is_ok());
+	let vouch3 = rc.unwrap();
+	assert_eq!(vouch, vouch3);
+	assert_eq!(vouch.to_string(), vouch3.to_string());
 }
 
 #[test]

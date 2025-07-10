@@ -1,7 +1,9 @@
+use std::fmt;
+use std::str::FromStr;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use std::hash::{Hash, Hasher};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -18,7 +20,6 @@ use crate::did::{
     VerificationMethod,
     DIDUrl,
     w3c::VerifiableCredentialBuilder
-
 };
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct VerifiableCredential {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "type", skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "type")]
     types: Vec<String>,
 
     #[serde(rename = "name", skip_serializing_if = "crate::did::is_none_or_empty")]
@@ -253,14 +254,19 @@ impl VerifiableCredential {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        self.to_credential().to_sign_data()
+        self.to_boson_credential().to_sign_data()
     }
 
-    pub fn to_credential(&self) -> Credential {
-        println!("self.id: {}", self.id);
+    pub fn to_boson_credential(&self) -> Credential {
+        let id = self.id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string();
+        let types: Option<Vec<String>> = if self.types.is_empty() {
+            None
+        } else {
+            Some(self.types.iter().filter(|t| *t != constants::DEFAULT_VC_TYPE).cloned().collect())
+        };
         let unsigned = Credential::unsigned(
-            DIDUrl::parse(&self.id).unwrap().fragment().unwrap().to_string(),
-            self.types.iter().filter(|t| *t != constants::DEFAULT_VC_TYPE).map(|s| s.to_string()).collect(),
+            id,
+            types,
             self.name.clone(),
             self.description.clone(),
             Some(self.issuer.clone()),
@@ -293,37 +299,49 @@ impl TryFrom<&str> for VerifiableCredential {
     }
 }
 
+impl FromStr for VerifiableCredential {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        serde_json::from_str(s).map_err(|e|
+            Error::Argument(format!("Failed to parse VC from string: {}", e))
+        )
+    }
+}
+
 impl TryFrom<&[u8]> for VerifiableCredential {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e|
+        serde_cbor::from_slice(data).map_err(|e|
             Error::Argument(format!("Failed to parse VC from bytes: {}", e))
         )
     }
 }
 
-impl From<&VerifiableCredential> for String {
-    fn from(vc: &VerifiableCredential) -> Self {
-        serde_json::to_string(&vc).unwrap()
-    }
-}
-
 impl From<&VerifiableCredential> for Vec<u8> {
     fn from(vc: &VerifiableCredential) -> Self {
-        serde_json::to_vec(&vc).unwrap()
+        serde_cbor::to_vec(&vc).unwrap()
     }
 }
 
 impl From<&VerifiableCredential> for Credential {
     fn from(vc: &VerifiableCredential) -> Self {
-        vc.to_credential()
+        vc.to_boson_credential()
     }
 }
 
 impl From<&Credential> for VerifiableCredential {
     fn from(credential: &Credential) -> Self {
         Self::from_cred(&credential)
+    }
+}
+
+impl fmt::Display for VerifiableCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| fmt::Error)?
+            .fmt(f)
     }
 }
 
@@ -379,11 +397,28 @@ impl CredentialSubject {
         &self.id
     }
 
-    pub fn claims(&self) -> &Map<String, Value> {
-        &self.claims
+    pub fn claims<'a, T>(&'a self) -> HashMap<&'a str, T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let mut map: HashMap<&str, T> = HashMap::new();
+        for (k, v) in &self.claims {
+            if let Ok(val) = serde_json::from_value(v.clone()) {
+                map.insert(k.as_str(), val);
+            }
+        }
+        map
     }
 
-    pub fn claim(&self, key: &str) -> Option<&Value> {
-        self.claims.get(key)
+    pub fn claim<T>(&self, key: &str) -> Option<T>
+    where
+        T:  serde::de::DeserializeOwned,
+    {
+        self.claims.iter().find_map(|(k, v)| {
+            match k == key {
+                true => serde_json::from_value(v.clone()).ok(),
+                false => None,
+            }
+        })
     }
 }

@@ -1,13 +1,14 @@
 use std::fmt;
+use std::str::FromStr;
 use std::time::{SystemTime, Duration};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     as_secs,
     Id,
-    error::{Error, Result},
     signature,
     CryptoIdentity,
+    core::{Error, Result},
 };
 
 use crate::did::{
@@ -37,11 +38,10 @@ pub struct Vouch {
     #[serde(with="super::serde_bytes_with_base64")]
     signature: Vec<u8>,
 
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip)]
     vp: Option<VP>,
 }
 
-#[allow(unused)]
 impl Vouch {
     pub(crate) fn unsigned(
         id: Option<String>,
@@ -55,7 +55,7 @@ impl Vouch {
             types,
             holder,
             credentials,
-            signed_at: None, // unsigned vouch has no signed_at
+            signed_at: None,
             signature: vec![],
             vp,
         }
@@ -67,7 +67,7 @@ impl Vouch {
         signature: Option<Vec<u8>>
     )-> Self {
         unsigned.signed_at = signed_at.map(|v|as_secs!(v));
-        unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
+        unsigned.signature = signature.unwrap_or_else(|| vec![]);
         unsigned
     }
 
@@ -135,9 +135,10 @@ impl Vouch {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        match self.signature.is_empty() {
-            true    => Vec::from(self),
-            false   => Vec::from(&Self::signed(self.clone(), None, None))
+        if self.signature.is_empty() {
+            self.into()
+        } else {
+            Vec::from(&Self::signed(self.clone(), None, None))
         }
     }
 
@@ -161,21 +162,21 @@ impl PartialEq<Vouch> for Vouch {
     }
 }
 
-impl fmt::Display for Vouch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        serde_json::to_string(self)
-            .map_err(|_| std::fmt::Error)?
-            .fmt(f)
-    }
-}
-
 impl TryFrom<&str> for Vouch {
     type Error = Error;
 
-    fn try_from(data: &str) -> Result<Self> {
-        serde_json::from_str(data).map_err(|e| {
+    fn try_from(input: &str) -> Result<Self> {
+        serde_json::from_str(input).map_err(|e| {
             Error::Argument(format!("Failed to parse Vouch from string: {}", e))
         })
+    }
+}
+
+impl FromStr for Vouch {
+    type Err = Error;
+
+    fn from_str(data: &str) -> Result<Self> {
+        Self::try_from(data)
     }
 }
 
@@ -183,20 +184,22 @@ impl TryFrom<&[u8]> for Vouch {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e| {
+        serde_cbor::from_slice(data).map_err(|e| {
             Error::Argument(format!("Failed to parse Vouch from bytes: {}", e))
         })
     }
 }
 
-impl From<&Vouch> for String {
+impl From<&Vouch> for Vec<u8> {
     fn from(vouch: &Vouch) -> Self {
-        serde_json::to_string(&vouch).unwrap()
+        serde_cbor::to_vec(vouch).unwrap()
     }
 }
 
-impl From<&Vouch> for Vec<u8> {
-    fn from(vouch: &Vouch) -> Self {
-        serde_json::to_vec(vouch).unwrap()
+impl fmt::Display for Vouch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| std::fmt::Error)?
+            .fmt(f)
     }
 }

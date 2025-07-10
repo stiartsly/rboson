@@ -113,7 +113,7 @@ impl VerifiablePresentationBuilder {
         &mut self,
         id: &str,
         credential_type: &str,
-        contexts: Vec<String>,
+        contexts: Vec<&str>,
         claims: HashMap<&str, T>
     ) -> Result<&mut Self>
     where

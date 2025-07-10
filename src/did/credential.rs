@@ -24,8 +24,8 @@ pub struct Credential {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "t", skip_serializing_if = "Vec::is_empty")]
-    types: Vec<String>,
+    #[serde(rename = "t", skip_serializing_if = "super::is_none_or_empty")]
+    types: Option<Vec<String>>,
 
     #[serde(rename = "n", skip_serializing_if = "super::is_none_or_empty")]
     name: Option<String>,
@@ -59,7 +59,7 @@ pub struct Credential {
 impl Credential {
     pub(crate) fn unsigned(
         id: String,
-        types: Vec<String>,
+        types: Option<Vec<String>>,
         name: Option<String>,
         description: Option<String>,
         issuer: Option<Id>,
@@ -99,7 +99,9 @@ impl Credential {
     }
 
     pub fn types(&self) -> Vec<&str> {
-        self.types.iter().map(|v| v.as_str()).collect()
+        self.types.as_ref().map(|t|
+            t.iter().map(|v| v.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -193,7 +195,7 @@ impl Credential {
         }
     }
 
-    pub(crate) fn vc(&self) -> Option<&VC> {
+    pub fn vc(&self) -> Option<&VC> {
         self.vc.as_ref()
     }
 
@@ -279,24 +281,27 @@ impl Subject {
 
     pub fn claims<'a, T>(&'a self) -> HashMap<&'a str, T>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::de::DeserializeOwned,
     {
         let mut claims_map: HashMap<&str, T> = HashMap::new();
-        for (key, value) in &self.claims {
-            if let Ok(val) = serde_json::from_value(value.clone()) {
-                claims_map.insert(key.as_str(), val);
+        for (k, v) in &self.claims {
+            if let Ok(val) = serde_json::from_value(v.clone()) {
+                claims_map.insert(k.as_str(), val);
             }
         }
         claims_map
     }
 
-    pub fn claim(&self, key: &str) -> Option<&Value> {
-        self.claims.iter().find_map(|(k, v)|
+    pub fn claim<T>(&self, key: &str) -> Option<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.claims.iter().find_map(|(k, v)| {
             match k == key {
-                true => Some(v),
+                true => serde_json::from_value(v.clone()).ok(),
                 false => None,
             }
-        )
+        })
     }
 }
 

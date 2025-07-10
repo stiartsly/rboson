@@ -185,6 +185,14 @@ fn test_complex_card() {
     let card2 = rc.unwrap();
     assert_eq!(card, card2);
     assert_eq!(card.to_string(), card2.to_string());
+
+    let cbor = serde_cbor::to_vec(&card).unwrap();
+    println!("Card CBOR: {:?}", cbor);
+    let rc = serde_cbor::from_slice::<Card>(&cbor);
+    assert!(rc.is_ok());
+    let card3 = rc.unwrap();
+    assert_eq!(card, card3);
+    assert_eq!(card.to_string(), card3.to_string());
 }
 
 #[test]
@@ -208,4 +216,12 @@ fn test_card_builder() {
     let card2 = rc.unwrap();
     assert_eq!(card, card2);
     assert_eq!(card.to_string(), card2.to_string());
+
+    let cbor = serde_cbor::to_vec(&card).unwrap();
+    println!("Card CBOR: {:?}", cbor);
+    let rc = serde_cbor::from_slice::<Card>(&cbor);
+    assert!(rc.is_ok());
+    let card3 = rc.unwrap();
+    assert_eq!(card, card3);
+    assert_eq!(card.to_string(), card3.to_string());
 }

@@ -11,7 +11,7 @@ use boson::{
 };
 
 #[test]
-fn test_simple_credential() {
+fn test_simple_vc() {
     let identity = CryptoIdentity::new();
     let rc = VC::builder(identity.clone())
         .with_id("test").unwrap()
@@ -72,24 +72,34 @@ fn test_simple_credential() {
 	//println!("VC json: {}", json);
 	let rc = serde_json::from_str::<VC>(&json);
 	assert!(rc.is_ok());
-	let vc2 = rc.unwrap();
-	assert_eq!(vc, vc2);
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
+
+	let rc = json.parse::<VC>();
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
+
+	let rc = VC::try_from(json.as_str());
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
 
 	let cbor = serde_cbor::to_vec(&vc).unwrap();
 	//println!("VC cbor: {:?}", cbor);
-	let vc3 = serde_cbor::from_slice::<VC>(&cbor);
-	assert!(vc3.is_ok());
-	let vc3 = vc3.unwrap();
-	assert_eq!(vc, vc3);
+	let rc = serde_cbor::from_slice::<VC>(&cbor);
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
 
 	let cred = vc.to_boson_credential();
 	//println!("Credential: {}", cred);
-	let vc2 = VC::from(&cred);
-	assert_eq!(vc, vc2);
+	let vc_new = VC::from(&cred);
+	assert_eq!(vc, vc_new);
 }
 
 #[test]
-fn test_complex_credential() {
+fn test_complex_vc() {
 	let identity = CryptoIdentity::new();
 	let subject = Id::random();
 	let day: u64 = 24 * 60 * 60;
@@ -129,6 +139,7 @@ fn test_complex_credential() {
 		None,
 		Some("fullProfile")
 	);
+
 	// TODO: assert_eq!(vc.id(), canonical_id.to_string());
 
 	let mut types = vc.types();
@@ -190,29 +201,39 @@ fn test_complex_credential() {
 	//println!("VC json: {}", json);
 	let rc = serde_json::from_str::<VC>(&json);
 	assert!(rc.is_ok());
-	let vc2 = rc.unwrap();
-	assert_eq!(vc, vc2);
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
+
+	let rc = json.parse::<VC>();
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
+
+	let rc = VC::try_from(json.as_str());
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
 
 	let cbor = serde_cbor::to_vec(&vc).unwrap();
 	//println!("VC cbor: {:?}", cbor);
-	let vc3 = serde_cbor::from_slice::<VC>(&cbor);
-	assert!(vc3.is_ok());
-	let vc3 = vc3.unwrap();
-	assert_eq!(vc, vc3);
+	let rc = serde_cbor::from_slice::<VC>(&cbor);
+	assert!(rc.is_ok());
+	let vc_new = rc.unwrap();
+	assert_eq!(vc, vc_new);
 
 	let bcv = vc.to_boson_credential();
-	let vc2 = VC::from(&bcv);
-	assert_eq!(vc, vc2);
+	let vc_new = VC::from(&bcv);
+	assert_eq!(vc, vc_new);
 
-	let vc3 = bcv.vc();
-	assert!(vc3.is_some());
-	let vc3 = vc3.unwrap().clone();
-	assert_eq!(vc, vc3);
+	let vc_new = bcv.vc();
+	assert!(vc_new.is_some());
+	let vc_new = vc_new.unwrap().clone();
+	assert_eq!(vc, vc_new);
 
 	assert!(!bcv.self_issued());
 	assert!(bcv.is_genuine());
 	assert!(bcv.is_valid());
 	assert!(bcv.validate().is_ok());
 
-
+	// TODO:
 }

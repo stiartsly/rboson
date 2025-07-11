@@ -24,28 +24,34 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct VerifiableCredential {
-    #[serde(rename = "@context", skip_serializing_if = "Vec::is_empty")]
-    contexts: Vec<String>,
+    #[serde(rename = "@context")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: String,
 
     #[serde(rename = "type")]
-    types: Vec<String>,
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    types: Option<Vec<String>>,
 
-    #[serde(rename = "name", skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(rename = "name")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
     name: Option<String>,
 
-    #[serde(rename = "description", skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(rename = "description")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
     description: Option<String>,
 
     #[serde(rename = "issuer")]
     issuer: Id,
 
-    #[serde(rename = "validFrom", skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(rename = "validFrom")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
     valid_from: Option<u64>,
 
-    #[serde(rename = "validUntil", skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(rename = "validUntil")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
     valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]
@@ -68,7 +74,14 @@ impl VerifiableCredential {
         subject     : Option<Id>,
         claims      : Map<String, Value>
     ) -> Self {
-
+        let contexts = match contexts.is_empty() {
+            true => None,
+            false => Some(contexts),
+        };
+        let types = match types.is_empty() {
+            true => None,
+            false => Some(types),
+        };
         let subject = CredentialSubject::new(
             subject.unwrap_or(issuer.clone()),
             claims,
@@ -156,9 +169,9 @@ impl VerifiableCredential {
         );
 
         Self {
-            contexts    : contexts.iter().map(|s| s.to_string()).collect(),
+            contexts    : Some(contexts.iter().map(|s| s.to_string()).collect()),
             id          : did_url.to_string(),
-            types       : types.iter().map(|s| s.to_string()).collect(),
+            types       : Some(types.iter().map(|s| s.to_string()).collect()),
             name        : credential.name().map(|v| v.to_string()),
             description : credential.description().map(|v| v.to_string()),
             issuer      : credential.issuer().clone(),
@@ -170,7 +183,9 @@ impl VerifiableCredential {
     }
 
     pub fn contexts(&self) -> Vec<&str> {
-        self.contexts.iter().map(|s| s.as_str()).collect()
+        self.contexts.as_ref().map(|v|
+            v.iter().map(|s| s.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn id(&self) -> &str {
@@ -178,7 +193,9 @@ impl VerifiableCredential {
     }
 
     pub fn types(&self) -> Vec<&str>{
-        self.types.iter().map(|s| s.as_str()).collect()
+        self.types.as_ref().map(|v|
+            v.iter().map(|s| s.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -259,11 +276,15 @@ impl VerifiableCredential {
 
     pub fn to_boson_credential(&self) -> Credential {
         let id = self.id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string();
-        let types: Option<Vec<String>> = if self.types.is_empty() {
-            None
+        let types = if let Some(ref t) = self.types {
+            match t.is_empty() {
+                true => None,
+                false => Some(t.iter().map(|s| s.to_string()).collect()),
+            }
         } else {
-            Some(self.types.iter().filter(|t| *t != constants::DEFAULT_VC_TYPE).cloned().collect())
+            None
         };
+
         let unsigned = Credential::unsigned(
             id,
             types,
@@ -349,8 +370,10 @@ impl Hash for VerifiableCredential {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "boson.did.vc".hash(state);
         self.id.hash(state);
-        for t in &self.types {
-            t.hash(state);
+        if let Some(types) = &self.types {
+            for t in types {
+                t.hash(state);
+            }
         }
         if let Some(name) = &self.name {
             name.hash(state);

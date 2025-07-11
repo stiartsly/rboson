@@ -33,17 +33,24 @@ pub struct VerifiablePresentationBuilder {
 impl VerifiablePresentationBuilder {
     pub(crate) fn new(holder: CryptoIdentity) -> Self {
         let types = vec![
-            constants::DEFAULT_VP_TYPE,
+            constants::DEFAULT_VP_TYPE
+        ].iter().map(|s|
+            s.nfc().collect::<String>()
+        ).collect();
+
+        let contexts = vec![
             constants::W3C_VC_CONTEXT,
             constants::BOSON_VC_CONTEXT,
             constants::W3C_ED25519_CONTEXT
-        ];
+        ].iter().map(|s|
+            s.nfc().collect::<String>()
+        ).collect();
 
         Self {
             holder,
-            contexts    : Vec::new(),
+            contexts,
             id          : None,
-            types       : types.iter().map(|s| s.to_string()).collect(),
+            types,
             credentials : HashMap::new(),
         }
     }
@@ -53,24 +60,31 @@ impl VerifiablePresentationBuilder {
             return Err(Error::Argument("Credential Id cannot be empty".into()));
         }
 
-        if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
+        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = DIDUrl::parse(&id).map_err(|_| {
                 Error::Argument(format!("Id must has the fragment part: {}", id))
             })?;
-
             if url.fragment().is_none() {
                 Err(Error::Argument("Id must has the fragment part".into()))?;
             }
-        }
+            url
+        } else {
+            DIDUrl::new(
+                self.holder.id(),
+                None,
+                None,
+                Some(id)
+            )
+        };
 
-        self.id = Some(id.nfc().collect::<String>());
+        self.id = Some(did_url.to_string());
         Ok(self)
     }
 
     pub fn with_types(
         &mut self,
         credential_type: &str,
-        contexts: Vec<String>
+        contexts: Vec<&str>
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
             return Err(Error::Argument("Credential type cannot be empty".into()));
@@ -86,10 +100,9 @@ impl VerifiablePresentationBuilder {
                 continue;
             }
             let ctx = ctx.nfc().collect::<String>();
-            if self.contexts.contains(&ctx) {
-                continue;
+            if !self.contexts.contains(&ctx) {
+                self.contexts.push(ctx);
             }
-            self.types.push(ctx);
         }
         Ok(self)
     }

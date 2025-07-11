@@ -27,7 +27,7 @@ use boson::{
 
     assert_eq!(url1.scheme(), DID_SCHEME);
     assert_eq!(url1.method(), DID_METHOD);
-    assert_eq!(url1.id(), &id);
+    assert_eq!(url1.id(), Some(&id));
     assert_eq!(url1.path(), None);
     assert_eq!(url1.query(), None);
     assert_eq!(url1.fragment(), None);
@@ -35,7 +35,7 @@ use boson::{
     let url2 = DIDUrl::from_id(&id);
     assert_eq!(url1.scheme(), DID_SCHEME);
     assert_eq!(url1.method(), DID_METHOD);
-    assert_eq!(url1.id(), &id);
+    assert_eq!(url1.id(), Some(&id));
     assert_eq!(url1.path(), None);
     assert_eq!(url1.query(), None);
     assert_eq!(url1.fragment(), None);
@@ -48,7 +48,7 @@ fn test_from_id() {
     let url = DIDUrl::from(&id);
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), None);
     assert_eq!(url.query(), None);
     assert_eq!(url.fragment(), None);
@@ -63,7 +63,7 @@ fn test_from_str() {
     let url = rc.unwrap();
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), None);
     assert_eq!(url.query(), None);
     assert_eq!(url.fragment(), None);
@@ -79,7 +79,7 @@ fn test_full_didurl() {
     let url = rc.unwrap();
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), Some("path"));
     assert_eq!(url.query(), Some("query"));
     assert_eq!(url.fragment(), Some("key-1"));
@@ -100,7 +100,7 @@ fn test_didurl_with_path_only() {
     let url = rc.unwrap();
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), Some("path"));
     assert_eq!(url.query(), None);
     assert_eq!(url.fragment(), None);
@@ -121,7 +121,7 @@ fn test_didurl_with_query_only() {
     let url = rc.unwrap();
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), None);
     assert_eq!(url.query(), Some("query"));
     assert_eq!(url.fragment(), None);
@@ -142,7 +142,7 @@ fn test_didurl_with_fragment_only() {
     let url = rc.unwrap();
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), None);
     assert_eq!(url.query(), None);
     assert_eq!(url.fragment(), Some("key-1"));

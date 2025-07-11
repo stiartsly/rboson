@@ -15,9 +15,9 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash)]
 pub struct DIDUrl {
-    scheme      : String,
-    method      : String,
-    id          : Id,
+    scheme      : Option<String>,
+    method      : Option<String>,
+    id          : Option<Id>,
     path        : Option<String>,
     query       : Option<String>,
     fragment    : Option<String>
@@ -52,9 +52,9 @@ impl DIDUrl {
         }).unwrap_or_default();
 
         Self {
-            scheme  : DID_SCHEME.to_string(),
-            method  : DID_METHOD.to_string(),
-            id      : id.clone(),
+            scheme  : Some(DID_SCHEME.to_string()),
+            method  : Some(DID_METHOD.to_string()),
+            id      : Some(id.clone()),
             path    : path.map(|v| v.nfc().collect::<String>()),
             query   : query.map(|v| v.nfc().collect::<String>()),
             fragment: fragment.map(|v| v.nfc().collect::<String>())
@@ -73,19 +73,26 @@ impl DIDUrl {
         }
 
         let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
-        if parts.len() != 3 {
-            return Err(Error::Malformed(format!("Invalid DIDUrl {}, must contain scheme, method and method-specific-id", trimmed)));
+        if parts.len() != 3 && parts.len() != 1 {
+            return Err(Error::Malformed(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)));
         }
 
-        let scheme = parts[0].to_lowercase();
-        if scheme != DID_SCHEME {
-            return Err(Error::Malformed(format!("Invalid DIDUrl scheme: {}", scheme)));
-        }
-
-        let method = parts[1];
-        if method != DID_METHOD {
-            return Err(Error::Malformed(format!("Unsupported DIDUrl method: {}", method)));
-        }
+        let scheme = if parts.len() == 3 {
+            if parts[0] != DID_SCHEME {
+                return Err(Error::Malformed(format!("Invalid DIDUrl scheme: {}", parts[0])));
+            }
+            Some(DID_SCHEME)
+        } else {
+            None
+        };
+        let method = if parts.len() == 3 {
+            if parts[1] != DID_METHOD {
+                return Err(Error::Malformed(format!("Unsupported DIDUrl method: {}", parts[1])));
+            }
+            Some(DID_METHOD)
+        } else {
+            None
+        };
 
         let mut remainder = parts[parts.len() - 1];
 
@@ -122,9 +129,9 @@ impl DIDUrl {
             .map_err(|_| Error::Malformed(format!("Invalid DIDUrl method specific id: {}", remainder)))?;
 
         Ok(Self {
-            scheme: DID_SCHEME.into(),
-            method: DID_METHOD.into(),
-            id,
+            scheme: scheme.map(|s| s.to_string()),
+            method: method.map(|m| m.to_string()),
+            id: Some(id),
             path,
             query,
             fragment
@@ -133,7 +140,7 @@ impl DIDUrl {
 
     pub fn parse_with_id(id: &Id, spec: &str) -> Result<Self> {
         let mut did_url = Self::parse(spec)?;
-        did_url.id = id.clone();
+        did_url.id = Some(id.clone());
         Ok(did_url)
     }
 
@@ -142,15 +149,15 @@ impl DIDUrl {
     }
 
     pub fn scheme(&self) -> &str {
-        &self.scheme
+        self.scheme.as_ref().map_or(DID_SCHEME, |s| s.as_str())
     }
 
     pub fn method(&self) -> &str {
-        &self.method
+        self.method.as_ref().map_or(DID_METHOD, |m| m.as_str())
     }
 
-    pub fn id(&self) -> &Id {
-        &self.id
+    pub fn id(&self) -> Option<&Id> {
+        self.id.as_ref()
     }
 
     pub fn path(&self) -> Option<&str> {
@@ -190,8 +197,8 @@ impl From<&Id> for DIDUrl {
 
 impl PartialEq for DIDUrl {
     fn eq(&self, other: &Self) -> bool {
-        self.scheme == other.scheme &&
-        self.method == other.method &&
+        self.scheme.as_deref().unwrap_or(DID_SCHEME) == other.scheme.as_deref().unwrap_or(DID_SCHEME) &&
+        self.method.as_deref().unwrap_or(DID_METHOD) == other.method.as_deref().unwrap_or(DID_METHOD) &&
         self.id == other.id &&
         self.path == other.path &&
         self.query == other.query &&
@@ -201,7 +208,15 @@ impl PartialEq for DIDUrl {
 
 impl fmt::Display for DIDUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}", self.scheme, self.method, self.id)?;
+        if let Some(scheme) = &self.scheme {
+            write!(f, "{}:", scheme)?;
+        }
+        if let Some(method) = &self.method {
+            write!(f, "{}:", method)?;
+        }
+        if let Some(id) = &self.id {
+            write!(f, "{}", id)?;
+        }
         if let Some(path) = &self.path {
             write!(f, "/{}", path)?;
         }

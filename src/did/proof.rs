@@ -117,7 +117,7 @@ impl Proof {
         let Ok(url) = DIDUrl::try_from(self.verification_method.id()) else {
             return false;
         };
-        if url.id() != subject {
+        if url.id().unwrap() != subject {
             return false;
         }
 

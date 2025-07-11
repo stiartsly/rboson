@@ -23,6 +23,7 @@ mod did {
     mod vouch;
     mod card;
     mod vc;
+    mod vp;
 }
 
 // helper functions

@@ -72,9 +72,10 @@ impl Id {
         bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
-            .map_err(|e|
+            .map_err(|e| {
+                println!(">>> e: {}, input:{}", e, input);
                 Error::Argument(format!("Invalid base58 format string: {e}"))
-            )?;
+        })?;
         Ok(Id(bytes))
     }
 

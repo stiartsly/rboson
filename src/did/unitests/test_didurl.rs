@@ -11,7 +11,7 @@ fn test_didurl() {
     let url = DIDUrl::new(&id, None, None, None);
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), None);
     assert_eq!(url.query(), None);
     assert_eq!(url.fragment(), None);
@@ -29,7 +29,7 @@ fn test_didurl_full() {
     let url = DIDUrl::new(&id, Some(path), Some(query), Some(fragment));
     assert_eq!(url.scheme(), DID_SCHEME);
     assert_eq!(url.method(), DID_METHOD);
-    assert_eq!(url.id(), &id);
+    assert_eq!(url.id(), Some(&id));
     assert_eq!(url.path(), Some(path));
     assert_eq!(url.query(), Some(query));
     assert_eq!(url.fragment(), Some(fragment));

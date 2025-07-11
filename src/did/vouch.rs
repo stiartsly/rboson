@@ -142,7 +142,7 @@ impl Vouch {
         }
     }
 
-    pub(crate) fn vp(&self) -> Option<&VP> {
+    pub fn vp(&self) -> Option<&VP> {
         self.vp.as_ref()
     }
 

@@ -1,3 +1,5 @@
+use std::fmt;
+use std::str::FromStr;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
@@ -12,7 +14,8 @@ use crate::{
 use crate::did::{
     did_constants as constants,
     DIDUrl,
-    Proof,
+    proof::{Proof, ProofType, ProofPurpose},
+    VerificationMethod,
     Vouch,
     w3c::{
         VerifiableCredential as VC,
@@ -22,19 +25,23 @@ use crate::did::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiablePresentation {
-    #[serde(rename = "@context", skip_serializing_if = "Vec::is_empty")]
-    contexts: Vec<String>,
+    #[serde(rename = "@context")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    contexts: Option<Vec<String>>,
 
-    #[serde(rename = "id", skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(rename = "id")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
     id: Option<String>,
 
-    #[serde(rename = "type", skip_serializing_if = "Vec::is_empty")]
-    types: Vec<String>,
+    #[serde(rename = "type")]
+    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    types: Option<Vec<String>>,
 
     #[serde(rename = "holder")]
     holder: Id,
 
-    #[serde(rename = "verifiableCredential", skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "verifiableCredential")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<VC>,
 
     #[serde(rename = "proof", skip_serializing_if = "Option::is_none")]
@@ -49,6 +56,15 @@ impl VerifiablePresentation {
         holder: Id,
         credentials: Vec<VC>,
     ) -> Self {
+
+        let contexts = match contexts.is_empty() {
+            true => None,
+            false => Some(contexts),
+        };
+        let types = match types.is_empty() {
+            true => None,
+            false => Some(types),
+        };
         Self {
             contexts,
             id,
@@ -73,16 +89,16 @@ impl VerifiablePresentation {
 
     pub fn from_vouch_with_type_contexts(
         vouch: &Vouch,
-        type_contexts: HashMap<String, Vec<String>>
+        type_contexts: HashMap<&str, Vec<String>>
     ) -> Self{
         if let Some(vp) = vouch.vp() {
             return vp.clone();
         }
 
-        let mut types = vec![
+        let mut types: Vec<&str> = vec![
             constants::DEFAULT_VP_TYPE
         ];
-        let mut contexts = vec![
+        let mut contexts: Vec<&str> = vec![
             constants::W3C_VC_CONTEXT,
             constants::BOSON_VC_CONTEXT,
             constants::W3C_ED25519_CONTEXT
@@ -90,33 +106,54 @@ impl VerifiablePresentation {
 
         for t in vouch.types() {
             if t == constants::DEFAULT_VP_TYPE {
-                continue;
+                continue;   // skip default VP type
             }
             types.push(t);
 
-            if let Some(ctxts) = type_contexts.get(t) {
-                ctxts.iter().for_each(|c| {
-                    if !contexts.contains(&c.as_str()) {
-                        contexts.push(c.as_str());
-                    }
-                });
-            }
+            let Some(ctxs) = type_contexts.get(t) else {
+                continue;
+            };
+
+            for ctxt in ctxs {
+                if !contexts.contains(&ctxt.as_str()) {
+                    contexts.push(ctxt.as_str());
+                };
+            };
         }
 
+        let id = if let Some(id) = vouch.id() {
+            let did_url = DIDUrl::new(vouch.holder(), None, None, Some(id));
+            Some(did_url.to_string())
+        } else {
+            None
+        };
+
+        let credentials = vouch.credentials().iter()
+            .map(|c| VC::from(*c))
+            .collect::<Vec<_>>();
+
+        let proof = Proof::new(
+            ProofType::Ed25519Signature2020,
+            vouch.signed_at().unwrap(),
+            VerificationMethod::default_reference(vouch.holder()),
+            ProofPurpose::AssertionMethod,
+            vouch.signature().to_vec(),
+        );
+
         Self {
-            contexts    : contexts.iter().map(|c| c.to_string()).collect(),
-            id          : vouch.id().map(|id| id.to_string()),
-            types       : types.iter().map(|t| t.to_string()).collect(),
+            contexts    : Some(contexts.iter().map(|s| s.to_string()).collect()),
+            id,
+            types       : Some(types.iter().map(|t| t.to_string()).collect()),
             holder      : vouch.holder().clone(),
-            credentials : vouch.credentials().iter()
-                            .map(|c| VC::from(*c))
-                            .collect(),
-            proof       : None, // unsigned VP has no proof
+            credentials,
+            proof       : Some(proof)
         }
     }
 
     pub fn contexts(&self) -> Vec<&str> {
-        self.contexts.iter().map(|c| c.as_str()).collect()
+        self.contexts.as_ref().map(|v|
+            v.iter().map(|c| c.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn id(&self) -> Option<&str> {
@@ -124,7 +161,9 @@ impl VerifiablePresentation {
     }
 
     pub fn types(&self) -> Vec<&str> {
-        self.types.iter().map(|t| t.as_str()).collect()
+        self.types.as_ref().map(|v|
+            v.iter().map(|t| t.as_str()).collect()
+        ).unwrap_or_default()
     }
 
     pub fn holder(&self) -> &Id {
@@ -135,20 +174,25 @@ impl VerifiablePresentation {
         self.credentials.iter().collect()
     }
 
-    pub fn credential_by_type(&self, credential_type: &str) -> Option<&VC> {
-        self.credentials.iter().find(|vc|
-            vc.types().iter().any(|t| t == &credential_type)
-        )
+    pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&VC> {
+        self.credentials.iter().filter(|vc|
+            vc.types().contains(&credential_type)
+        ).collect()
     }
 
-    pub fn credential_by_id(&self, _id: &str) -> Option<&VC> {
-        unimplemented!()
+    pub fn credential(&self, id: &str) -> Option<&VC> {
+        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
+            id.parse::<DIDUrl>().ok()?
+        } else {
+            DIDUrl::new(self.holder(), None, None, Some(id))
+        };
+        self.credential_by_didurl(&did_url)
     }
 
     pub fn credential_by_didurl(&self, id: &DIDUrl) -> Option<&VC> {
-        self.credentials.iter().find(|vc|
-            vc.id() == id.to_string().as_str()
-        )
+        self.credentials.iter().find(|&vc| {
+            vc.id() == &id.to_string()
+        })
     }
 
     pub fn proof(&self) -> Option<&Proof> {
@@ -156,13 +200,13 @@ impl VerifiablePresentation {
     }
 
     pub fn validate(&self) -> Result<()> {
-         match self.is_geniune() {
+         match self.is_genuine() {
             true => Ok(()),
             false => Err(Error::Signature("VP signature is not valid".to_string())),
         }
     }
 
-    pub fn is_geniune(&self) -> bool {
+    pub fn is_genuine(&self) -> bool {
         self.proof.as_ref().map(|v|v.verify(
             self.holder(),
             &self.to_sign_data()
@@ -170,11 +214,37 @@ impl VerifiablePresentation {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        unimplemented!()
+        self.to_boson_vouch().to_sign_data()
     }
 
-    pub(crate) fn to_vouch(&self) -> Vouch {
-        unimplemented!()
+    pub fn to_boson_vouch(&self) -> Vouch {
+        let id = if let Some(id) = self.id.as_ref() {
+            Some(id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string()) // TODO:
+        } else {
+            None
+        };
+        let types = if let Some(ref t) = self.types {
+            match t.is_empty() {
+                true => None,
+                false => Some(t.iter().filter(|t| t.as_str() != constants::DEFAULT_VP_TYPE).cloned().collect()),
+            }
+        } else {
+            None
+        };
+
+        let unsigned = Vouch::unsigned(
+            id,
+            types,
+            self.holder.clone(),
+            self.credentials.iter().map(|c| c.to_boson_credential()).collect(),
+            Some(self.clone()),
+        );
+
+        Vouch::signed(
+            unsigned,
+            self.proof.as_ref().map(|p| p.created()),
+            self.proof.as_ref().map(|p| p.proof_value().to_vec())
+        )
     }
 
     pub fn builder(holder: CryptoIdentity) -> VerifiablePresentationBuilder {
@@ -192,37 +262,47 @@ impl TryFrom<&str> for VerifiablePresentation {
     }
 }
 
+impl FromStr for VerifiablePresentation {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
+    }
+}
+
 impl TryFrom<&[u8]> for VerifiablePresentation {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e|
+        serde_cbor::from_slice(data).map_err(|e|
             Error::Argument(format!("Failed to parse VP from bytes: {}", e))
         )
     }
 }
 
-impl From<&VerifiablePresentation> for String {
-    fn from(vp: &VerifiablePresentation) -> Self {
-        serde_json::to_string(&vp).unwrap()
-    }
-}
-
 impl From<&VerifiablePresentation> for Vec<u8> {
     fn from(vp: &VerifiablePresentation) -> Self {
-        serde_json::to_vec(&vp).unwrap()
+        serde_cbor::to_vec(&vp).unwrap()
     }
 }
 
 impl From<&VerifiablePresentation> for Vouch {
     fn from(vp: &VerifiablePresentation) -> Self {
-        vp.to_vouch()
+        vp.to_boson_vouch()
     }
 }
 
 impl From<&Vouch> for VerifiablePresentation {
     fn from(vouch: &Vouch) -> Self {
         Self::from_vouch(&vouch)
+    }
+}
+
+impl fmt::Display for VerifiablePresentation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| fmt::Error)?
+            .fmt(f)
     }
 }
 
@@ -236,33 +316,3 @@ impl Hash for VerifiablePresentation {
         }
     }
 }
-
-/*
-pub(crate) struct BosonVouch {
-    vouch: Vouch,
-    vp: Option<VerifiablePresentation>,
-}
-
-impl BosonVouch {
-    fn unsigned(vp: VerifiablePresentation) -> Self {
-        let vouch = Vouch::unsigned(
-                vp.id().as_ref()
-                    .and_then(|id| DIDUrl::parse(id).ok().and_then(|did| did.fragment().map(|frag| frag.to_string())))
-                    .unwrap_or_else(|| "".to_string()),
-                vp.types().iter()
-                    .filter(|t| *t == &did_constants::DEFAULT_VP_TYPE)
-                    .map(|t| t.to_string())
-                    .collect(),
-                vp.holder().clone(),
-                vp.credentials().iter().map(|c| Credential::from(*c)).collect()
-        );
-
-        Self {
-            vouch,
-            vp: Some(vp),
-        }
-    }
-
-    fn to_sign_data(&self) -> Vec<u8> {
-        self.vouch.to_sign_data()
-*/

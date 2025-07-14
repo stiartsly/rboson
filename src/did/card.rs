@@ -16,7 +16,8 @@ use crate::{
 
 use super::{
     Credential,
-    CardBuilder
+    CardBuilder,
+    w3c::DIDDocument
 };
 
 const DEFAULT_PROFILE_CREDENTIAL_ID     : &str = "profile";
@@ -40,7 +41,10 @@ pub struct Card {
 
     #[serde(rename = "sig")]
     #[serde(with = "super::serde_bytes_with_base64")]
-    signature: Vec<u8>
+    signature: Vec<u8>,
+
+    #[serde(skip)]
+    doc: Option<DIDDocument>,
 }
 
 impl Card {
@@ -48,6 +52,7 @@ impl Card {
         id: Id,
         credentials: Option<Vec<Credential>>,
         services: Option<Vec<Service>>,
+        doc: Option<DIDDocument>
     ) -> Self {
         Self {
             id,
@@ -55,6 +60,7 @@ impl Card {
             services,
             signed_at: None,
             signature: vec![0u8;0],
+            doc,
         }
     }
 
@@ -166,6 +172,10 @@ impl Card {
         }
     }
 
+    pub fn did_doc(&self) -> Option<&DIDDocument> {
+        self.doc.as_ref()
+    }
+
     pub fn builder(subject: CryptoIdentity) -> CardBuilder {
         CardBuilder::new(subject)
     }
@@ -253,6 +263,10 @@ impl Service {
 
     pub fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    pub fn properties_map(&self) -> &Map<String, Value> {
+        &self.properties
     }
 
     pub fn properties<T>(&self) -> HashMap<&str, T>

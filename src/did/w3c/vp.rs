@@ -214,10 +214,10 @@ impl VerifiablePresentation {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        self.to_boson_vouch().to_sign_data()
+        self.to_unsigned_boson_vouch().to_sign_data()
     }
 
-    pub fn to_boson_vouch(&self) -> Vouch {
+    pub fn to_unsigned_boson_vouch(&self) -> Vouch {
         let id = if let Some(id) = self.id.as_ref() {
             Some(id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string()) // TODO:
         } else {
@@ -232,16 +232,19 @@ impl VerifiablePresentation {
             None
         };
 
-        let unsigned = Vouch::unsigned(
+        Vouch::unsigned(
             id,
             types,
             self.holder.clone(),
             self.credentials.iter().map(|c| c.to_boson_credential()).collect(),
             Some(self.clone()),
-        );
+        )
+    }
+
+    pub fn to_boson_vouch(&self) -> Vouch {
 
         Vouch::signed(
-            unsigned,
+            self.to_unsigned_boson_vouch(),
             self.proof.as_ref().map(|p| p.created()),
             self.proof.as_ref().map(|p| p.proof_value().to_vec())
         )

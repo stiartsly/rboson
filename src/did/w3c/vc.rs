@@ -114,7 +114,7 @@ impl VerifiableCredential {
 
     pub(crate) fn from_cred_with_type_contexts(
         credential: &Credential,
-        type_contexts: Option<HashMap<String, Vec<String>>>
+        type_contexts: Option<HashMap<&str, Vec<&str>>>
     ) -> Self {
         if let Some(vc) = credential.vc() {
             return vc.clone(); // If already a VC in credential, return it
@@ -142,7 +142,7 @@ impl VerifiableCredential {
                 continue;
             };
             for ctx in ctxs {
-                if !contexts.contains(&ctx.as_str()) {
+                if !contexts.contains(&ctx) {
                     contexts.push(ctx);
                 }
             }
@@ -271,10 +271,10 @@ impl VerifiableCredential {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        self.to_boson_credential().to_sign_data()
+        self.to_unsigned_boson_credential().to_sign_data()
     }
 
-    pub fn to_boson_credential(&self) -> Credential {
+    fn to_unsigned_boson_credential(&self) -> Credential {
         let id = self.id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string();
         let types = if let Some(ref t) = self.types {
             match t.is_empty() {
@@ -285,7 +285,7 @@ impl VerifiableCredential {
             None
         };
 
-        let unsigned = Credential::unsigned(
+        Credential::unsigned(
             id,
             types,
             self.name.clone(),
@@ -296,10 +296,12 @@ impl VerifiableCredential {
             self.subject.id.clone(),
             self.subject.claims.clone(),
             Some(self.clone()),
-        );
+        )
+    }
 
+    pub fn to_boson_credential(&self) -> Credential {
         Credential::signed(
-            unsigned,
+            self.to_unsigned_boson_credential(),
             self.proof.as_ref().map(|p| as_secs!(p.created())),
             self.proof.as_ref().map(|p| p.proof_value().to_vec())
         )

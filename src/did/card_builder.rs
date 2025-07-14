@@ -133,6 +133,7 @@ impl BosonIdentityObjectBuilder for CardBuilder {
             self.identity.id().clone(),
             creds,
             services,
+            None,
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;

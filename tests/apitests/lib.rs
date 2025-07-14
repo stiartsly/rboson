@@ -24,6 +24,7 @@ mod did {
     mod card;
     mod vc;
     mod vp;
+    mod diddoc;
 }
 
 // helper functions

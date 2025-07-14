@@ -1,3 +1,6 @@
+use std::fmt;
+use std::str::FromStr;
+use std::time::SystemTime;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -10,13 +13,13 @@ use crate::{
 
 use crate::did::{
 	did_constants as constants,
-    VerificationMethod,
+    VerificationMethod as VM,
 	VerificationMethodType,
-    Proof,
+    proof::{Proof, ProofType, ProofPurpose},
 	DIDUrl,
-	Card,
+	card::{Card, Service as CardService},
 	w3c::{
-		VerifiableCredential,
+		VerifiableCredential as VC,
 		DIDDocumentBuilder,
 	}
 };
@@ -32,19 +35,19 @@ pub struct DIDDocument {
 
     #[serde(rename = "verificationMethod")]
 	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
-    verification_methods: Option<Vec<VerificationMethod>>,
+    verification_methods: Option<Vec<VM>>,
 
     #[serde(rename = "authentication")]
 	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
-    authentications: Option<Vec<VerificationMethod>>,
+    authentications: Option<Vec<VM>>,
 
     #[serde(rename = "assertion")]
 	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
-    assertions: Option<Vec<VerificationMethod>>,
+    assertions: Option<Vec<VM>>,
 
     #[serde(rename = "verifiableCredential")]
 	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
-    credentials: Option<Vec<VerifiableCredential>>,
+    credentials: Option<Vec<VC>>,
 
     #[serde(rename = "service")]
 	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
@@ -59,38 +62,45 @@ impl DIDDocument {
 	pub(crate) fn unsigned(
 		contexts	: Vec<String>,
 		id			: Id,
-		vms			: Vec<VerificationMethod>,
-		authentications	: Vec<VerificationMethod>,
-		assertions	: Vec<VerificationMethod>,
-		credentials	: Vec<VerifiableCredential>,
+		vms			: Vec<VM>,
+		auths		: Vec<VM>,
+		assertions	: Vec<VM>,
+		credentials	: Vec<VC>,
 		services	: Vec<Service>
 	) -> Self {
+		let contexts = match !contexts.is_empty() {
+			true => Some(contexts),
+			false => None,
+		};
+		let verification_methods = match !vms.is_empty() {
+			true => Some(vms),
+			false => None,
+		};
+		let authentications = match !auths.is_empty() {
+			true => Some(auths),
+			false => None,
+		};
+		let assertions = match !assertions.is_empty() {
+			true => Some(assertions),
+			false => None,
+		};
+		let credentials = match !credentials.is_empty() {
+			true => Some(credentials),
+			false => None,
+		};
+		let services = match !services.is_empty() {
+			true => Some(services),
+			false => None,
+		};
+
 		Self {
-			contexts: match !contexts.is_empty() {
-				true => Some(contexts),
-				false => None,
-			},
+			contexts,
 			id,
-			verification_methods: match !vms.is_empty() {
-				true => Some(vms),
-				false => None,
-			},
-			authentications: match !authentications.is_empty() {
-				true => Some(authentications),
-				false => None,
-			},
-			assertions: match !assertions.is_empty() {
-				true => Some(assertions),
-				false => None,
-			},
-			credentials: match !credentials.is_empty() {
-				true => Some(credentials),
-				false => None,
-			},
-			services: match !services.is_empty() {
-				true => Some(services),
-				false => None,
-			},
+			verification_methods,
+			authentications,
+			assertions,
+			credentials,
+			services,
 			proof: None,
 		}
 	}
@@ -104,15 +114,62 @@ impl DIDDocument {
 	}
 
 	pub fn from_card(card: &Card) -> Self {
-		Self::from_card_with_contexts(card, None, None)
+		Self::from_card_with_contexts(card, Vec::new(), HashMap::new())
 	}
 
 	pub fn from_card_with_contexts(
-		_card: &Card,
-		_doc_contexts: Option<Vec<String>>,
-		_vctype_contexts: Option<HashMap<String, Vec<String>>>
+		card: &Card,
+		doc_contexts: Vec<&str>,
+		vctype_contexts: HashMap<&str, Vec<&str>>
 	) -> Self {
-		unimplemented!()
+		if let Some(doc) = card.did_doc() {
+			return doc.clone()
+		}
+
+		let mut contexts = vec![
+			constants::W3C_DID_CONTEXT,
+			constants::BOSON_DID_CONTEXT,
+			constants::W3C_ED25519_CONTEXT
+		];
+
+		for context in doc_contexts {
+			if !contexts.contains(&context) {
+				contexts.push(context);
+			}
+		}
+
+		let default_method = VM::default_entity(card.id());
+		let default_method_ref = default_method.to_reference();
+
+		let unsigned = Self::unsigned(
+			contexts.iter().map(|s| s.to_string()).collect(),
+			card.id().clone(),
+			vec![default_method],
+			vec![default_method_ref.clone()],
+			vec![default_method_ref.clone()],
+			card.credentials().iter()
+				.map(|c| VC::from_cred_with_type_contexts(c, Some(vctype_contexts.clone())))
+				.collect(),
+			card.services().iter()
+				.map(|s| Service::new(
+					s.id().to_string(),
+					s.service_type().to_string(),
+					s.endpoint().to_string(),
+					s.properties_map().clone(),
+				))
+				.collect()
+		);
+		let proof = Proof::new(
+			ProofType::Ed25519Signature2020,
+			card.signed_at().unwrap_or(SystemTime::now()),
+			default_method_ref,
+			ProofPurpose::AssertionMethod,
+			card.signature().to_vec()
+		);
+		Self::signed(
+			unsigned,
+			Some(proof)
+		)
 	}
 
 	pub fn contexts(&self) -> Vec<&str> {
@@ -126,7 +183,7 @@ impl DIDDocument {
         &self.id
     }
 
-    pub fn verification_methods(&self) -> Vec<&VerificationMethod> {
+    pub fn verification_methods(&self) -> Vec<&VM> {
 		self.verification_methods.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().collect()
@@ -136,7 +193,7 @@ impl DIDDocument {
 	pub fn verification_methods_by_type(
 		&self,
 		method_type: VerificationMethodType
-	) -> Vec<&VerificationMethod> {
+	) -> Vec<&VM> {
         self.verification_methods.as_ref().map_or(
 			Vec::new(),
 			|vs| vs.iter().filter(|v|
@@ -145,10 +202,7 @@ impl DIDDocument {
 		)
     }
 
-	pub fn verification_method_by_id(
-		&self,
-		id: &str
-	) -> Option<&VerificationMethod> {
+	pub fn verification_method(&self, id: &str) -> Option<&VM> {
 		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
@@ -156,83 +210,65 @@ impl DIDDocument {
 		self.verification_method_by_didurl(&didurl)
 	}
 
-	pub fn verification_method_by_didurl(
-		&self,
-		id: &DIDUrl
-	) -> Option<&VerificationMethod> {
+	pub fn verification_method_by_didurl(&self, id: &DIDUrl) -> Option<&VM> {
 		let id_str = id.to_string();
 		self.verification_methods.as_ref().and_then(|vs|
 			vs.iter().find(|v| v.id() == id_str)
 		)
 	}
 
-	pub fn authentications(&self) -> Vec<&VerificationMethod> {
+	pub fn authentications(&self) -> Vec<&VM> {
 		self.authentications.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().collect()
 		)
 	}
 
-	pub fn authentication_by_id(
-		&self,
-		id: &str
-	) -> Option<&VerificationMethod> {
+	pub fn authentication(&self, id: &str) -> Option<&VM> {
 		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
-		self.authentication_by_url(&didurl)
+		self.authentication_by_didurl(&didurl)
 	}
 
-	pub fn authentication_by_url(
-		&self,
-		id: &DIDUrl
-	) -> Option<&VerificationMethod> {
+	pub fn authentication_by_didurl(&self, id: &DIDUrl) -> Option<&VM> {
 		let id_str = id.to_string();
 		self.authentications.as_ref().map(|v|
 			v.iter().find(|v| v.id() == id_str)
 		).flatten()
 	}
 
-	pub fn assertions(&self) -> Vec<&VerificationMethod> {
+	pub fn assertions(&self) -> Vec<&VM> {
 		self.assertions.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().collect()
 		)
 	}
 
-	pub fn assertion_by_id(
-		&self,
-		id: &str
-	) -> Option<&VerificationMethod> {
+	pub fn assertion(&self, id: &str) -> Option<&VM> {
 		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
 		};
-		self.assertion_by_url(&didurl)
+		self.assertion_by_didurl(&didurl)
 	}
 
-	pub fn assertion_by_url(
-		&self,
-		id: &DIDUrl
-	) -> Option<&VerificationMethod> {
+	pub fn assertion_by_didurl(&self,id: &DIDUrl) -> Option<&VM> {
 		let id_str = id.to_string();
 		self.assertions.as_ref().map(|v|
 			v.iter().find(|v| v.id() == id_str)
 		).flatten()
 	}
 
-	pub fn credentials(&self) -> Vec<&VerifiableCredential> {
+	pub fn credentials(&self) -> Vec<&VC> {
 		self.credentials.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().collect()
 		)
 	}
 
-	pub fn credentials_by_type(
-		&self,
-		credential_type: &str
-	) -> Vec<&VerifiableCredential> {
+	pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&VC> {
 		self.credentials.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().filter(|vc|
@@ -241,10 +277,7 @@ impl DIDDocument {
 		)
 	}
 
-	pub fn credential_by_id(
-		&self,
-		id: &str
-	) -> Option<&VerifiableCredential> {
+	pub fn credential(&self, id: &str) -> Option<&VC> {
 		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
@@ -252,10 +285,7 @@ impl DIDDocument {
 		self.credential_by_didurl(&didurl)
 	}
 
-	pub fn credential_by_didurl(
-		&self,
-		id: &DIDUrl
-	) -> Option<&VerifiableCredential> {
+	pub fn credential_by_didurl(&self, id: &DIDUrl) -> Option<&VC> {
 		let id_str = id.to_string();
 		self.credentials.as_ref().map(|v|
 			v.iter().find(|vc| vc.id() == id_str)
@@ -278,10 +308,7 @@ impl DIDDocument {
 		)
 	}
 
-	pub fn service_by_id(
-		&self,
-		id: &str
-	) -> Option<&Service> {
+	pub fn service(&self, id: &str) -> Option<&Service> {
 		let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
 			true => DIDUrl::parse(id).unwrap(),
 			false => DIDUrl::new(&self.id, None, None, Some(id))
@@ -303,7 +330,7 @@ impl DIDDocument {
 		self.proof.as_ref().unwrap()
 	}
 
-	pub fn is_geniune(&self) -> bool {
+	pub fn is_genuine(&self) -> bool {
 		self.proof.as_ref().map(|v| v.verify(
 			&self.id,
 			&self.to_sign_data()
@@ -311,17 +338,48 @@ impl DIDDocument {
 	}
 
 	pub fn validate(&self) -> Result<()> {
-		match self.is_geniune() {
+		match self.is_genuine() {
             true => Ok(()),
             false => Err(Error::Signature("Document signature is not valid".into())),
         }
 	}
 
 	pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-		unimplemented!()
+		self.to_unsigned_boson_card().to_sign_data()
 	}
 
-	pub fn builder(&self, subject: CryptoIdentity) -> DIDDocumentBuilder {
+	fn to_unsigned_boson_card(&self) -> Card {
+		let creds = self.credentials.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().map(|c| c.to_boson_credential()).collect()
+		);
+		let services = self.services.as_ref().map_or(
+			Vec::new(),
+			|v| v.iter().map(|s| CardService::new(
+				s.id.clone(),
+				s.service_type.clone(),
+				s.service_endpoint.clone(),
+				s.properties.clone()
+			)).collect()
+		);
+
+		Card::unsigned(
+			self.id.clone(),
+			Some(creds),
+			Some(services),
+			Some(self.clone())
+		)
+	}
+
+	pub fn to_boson_card(&self) -> Card {
+		Card::signed(
+			self.to_unsigned_boson_card(),
+			self.proof.as_ref().map(|p| p.created()),
+			self.proof.as_ref().map(|p| p.proof_value().to_vec())
+		)
+	}
+
+	pub fn builder(subject: CryptoIdentity) -> DIDDocumentBuilder {
 		DIDDocumentBuilder::new(subject)
 	}
 }
@@ -349,25 +407,27 @@ impl TryFrom<&str> for DIDDocument {
     }
 }
 
+impl FromStr for DIDDocument {
+	type Err = Error;
+
+	fn from_str(s: &str) -> Result<Self> {
+		Self::try_from(s)
+	}
+}
+
 impl TryFrom<&[u8]> for DIDDocument {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e| {
+        serde_cbor::from_slice(data).map_err(|e| {
             Error::Argument(format!("Failed to parse DIDDocument from bytes: {}", e))
         })
     }
 }
 
-impl From<&DIDDocument> for String {
-    fn from(doc: &DIDDocument) -> Self {
-        serde_json::to_string(&doc).unwrap()
-    }
-}
-
 impl From<&DIDDocument> for Vec<u8> {
     fn from(doc: &DIDDocument) -> Self {
-        serde_json::to_vec(doc).unwrap()
+        serde_cbor::to_vec(doc).unwrap()
     }
 }
 
@@ -378,9 +438,17 @@ impl From<&Card> for DIDDocument {
 }
 
 impl From<&DIDDocument> for Card {
-	fn from(_doc: &DIDDocument) -> Self {
-		unimplemented!()
+	fn from(doc: &DIDDocument) -> Self {
+		doc.to_boson_card()
 	}
+}
+
+impl fmt::Display for DIDDocument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| fmt::Error)?
+            .fmt(f)
+    }
 }
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
@@ -397,7 +465,6 @@ pub struct Service {
 	properties: Map<String, Value>,
 }
 
-#[allow(unused)]
 impl Service {
 	pub(crate) fn new(
 		id: String,

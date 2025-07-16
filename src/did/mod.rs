@@ -56,32 +56,6 @@ pub use crate::did::{
     }
 };
 
-pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
-    v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-}
-
-pub trait IsEmpty {
-    fn is_empty(&self) -> bool;
-}
-
-impl IsEmpty for String {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
-
-impl<T> IsEmpty for Vec<T> {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
-
-impl IsEmpty for u64 {
-    fn is_empty(&self) -> bool {
-        *self == 0
-    }
-}
-
 #[cfg(test)]
 mod unitests {
     mod test_didurl;
@@ -95,10 +69,10 @@ mod serde_bytes_with_base64 {
     use serde::de::{Error, Deserialize};
     use base64::{engine::general_purpose, Engine as _};
 
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer,
     {
-        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes.as_slice());
         serializer.serialize_str(&encoded)
     }
 

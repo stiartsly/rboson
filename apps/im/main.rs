@@ -107,17 +107,17 @@ async fn main() {
     let device_key = signature::KeyPair::random();
 
     let result = messaging::ClientBuilder::new()
-        .with_user_name(ucfg.name().unwrap_or("guest"))
-        .with_user_key(&user_key)
+        .with_user_name(ucfg.name().unwrap_or("guest")).unwrap()
+        .with_user_key(user_key)
         .with_device_node(node.clone())
-        .with_device_key(&device_key)
-        .with_device_name("testing")
-        .with_app_name("im")
+        .with_device_key(device_key)
+        .with_device_name("testing").unwrap()
+        .with_app_name("im").unwrap()
+        .with_messaging_peer(peer.clone()).unwrap()
+        .with_messaging_nodeid(ni.id())
+        .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
         .with_messaging_repository(path.as_str())
         .register_user_and_device(ucfg.password().map_or("secret", |v|v))
-        .with_peerid(peer.id())
-        .with_nodeid(ni.id())
-        .with_api_url(peer.alternative_url().as_ref().unwrap())
         .build()
         .await;
 

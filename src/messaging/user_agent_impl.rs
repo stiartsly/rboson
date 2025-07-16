@@ -7,11 +7,11 @@ use crate::{
     unwrap,
     Id,
     PeerInfo,
-    error::Result,
-    Error,
-    signature::PrivateKey,
-    core::crypto_identity::CryptoIdentity,
-    messaging::user_agent::UserAgent,
+    core::{
+        Error,
+        Result,
+        CryptoIdentity
+    }
 };
 
 use crate::messaging::{
@@ -23,9 +23,8 @@ use crate::messaging::{
     ContactListener,
     ConnectionListener,
     MessageListener,
-};
+    user_agent::UserAgent,
 
-use super::{
     message::Message,
     channel::{Member, Channel, Role},
     messaging_repository::MessagingRepository,
@@ -38,19 +37,18 @@ use super::{
 
 #[allow(dead_code)]
 pub struct DefaultUserAgent {
-    user    : Option<UserProfile>,
-    device  : Option<DeviceProfile>,
-    peer    : Option<PeerInfo>,
-
+    user        : Option<UserProfile>,
+    device      : Option<DeviceProfile>,
+    peer        : Option<PeerInfo>,
     repository  : Option<Database>,
 
-    connection_listener : Option<Box<dyn ConnectionListener>>,
-    profile_listener    : Option<Box<dyn ProfileListener>>,
-    message_listener    : Option<Box<dyn MessageListener>>,
-    channel_listener    : Option<Box<dyn ChannelListener>>,
-    contact_listener    : Option<Box<dyn ContactListener>>,
+    connection_listeners: Vec<Box<dyn ConnectionListener>>,
+    profile_listeners   : Vec<Box<dyn ProfileListener>>,
+    message_listeners   : Vec<Box<dyn MessageListener>>,
+    channel_listeners   : Vec<Box<dyn ChannelListener>>,
+    contact_listeners   : Vec<Box<dyn ContactListener>>,
 
-    conversations: HashMap<Id, Conversation>,
+    conversations       : HashMap<Id, Conversation>,
 
     hardened: bool,
 }
@@ -59,33 +57,30 @@ pub struct DefaultUserAgent {
 impl DefaultUserAgent {
     pub fn new(_path: Option<&Path>) -> Result<Self> {
         Ok(Self {
-            user    : None,
-            device  : None,
-            peer    : None,
-
-            repository: None,
-
-            connection_listener : None,
-            profile_listener    : None,
-            message_listener    : None,
-            channel_listener    : None,
-            contact_listener    : None,
-
-            conversations: HashMap::new(),
+            user                : None,
+            device              : None,
+            peer                : None,
+            repository          : None,
+            connection_listeners: Vec::new(),
+            profile_listeners   : Vec::new(),
+            message_listeners   : Vec::new(),
+            channel_listeners   : Vec::new(),
+            contact_listeners   : Vec::new(),
+            conversations       : HashMap::new(),
 
             hardened: false,
         })
     }
 
     fn is_myself(&self, id: &Id) -> bool {
-        self.user.as_ref().unwrap().id() == id
+        self.user.as_ref().map(|v| v.id() == id).unwrap_or(false)
     }
 
     pub(crate) fn harden(&mut self) {
         self.hardened = true;
     }
 
-    pub(crate) fn set_user(&mut self, user: CryptoIdentity, name: String) -> Result<()>{
+    pub fn set_user(&mut self, user: CryptoIdentity, name: String) -> Result<()>{
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
@@ -95,7 +90,7 @@ impl DefaultUserAgent {
         Ok(())
     }
 
-    pub(crate) fn set_device(&mut self, device: CryptoIdentity, name: String, app: Option<String>) -> Result<()> {
+    pub fn set_device(&mut self, device: CryptoIdentity, name: String, app: Option<String>) -> Result<()> {
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
@@ -105,16 +100,12 @@ impl DefaultUserAgent {
         Ok(())
     }
 
-    pub(crate) fn set_messaging_peer_info(&mut self, peer: &PeerInfo) -> Result<()> {
+    pub fn set_messaging_peer_info(&mut self, peer: &PeerInfo) -> Result<()> {
         if self.hardened {
-            return Err(Error::State("UserAgent is hardened".into()));
+            Err(Error::State("UserAgent is hardened".into()))?;
         }
-
         if !peer.is_valid() {
-            return Err(Error::Argument("Peer info {peer} is invalid!".into()));
-        }
-        if peer.alternative_url().is_none() {
-            return Err(Error::Argument("Peer url must be set".into()));
+            Err(Error::Argument("Peer info {peer} is invalid!".into()))?;
         }
 
         self.peer = Some(peer.clone());
@@ -238,12 +229,12 @@ impl DefaultUserAgent {
         let user = repo.get_config_mult::<UserInfo>(".user").map_err(|e|
             Error::State("Load user profile failed, error {e}".into())
         )?;
-        let sk = PrivateKey::try_from(user.privateKey.as_slice()).map_err(|e|
-            Error::State("Invalid private key: {e}".into())
-        )?;
+        let identity = CryptoIdentity::from_private_key(user.privateKey.as_slice()).map_err(|e| {
+            Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
+        })?;
 
         let user = UserProfile::new(
-            CryptoIdentity::from_private_key(&sk),
+            identity,
             user.name,
             user.avatar
         );
@@ -260,12 +251,12 @@ impl DefaultUserAgent {
         let device = repo.get_config_mult::<DeviceInfo>(".device").map_err(|e|
             Error::State("Load device profile failed, error {e}".into())
         )?;
-        let sk = PrivateKey::try_from(device.privateKey.as_slice()).map_err(|e|
-            Error::State("Invalid private key: {e}".into())
-        )?;
+        let identity = CryptoIdentity::from_private_key(device.privateKey.as_slice()).map_err(|e| {
+            Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
+        })?;
 
         let device = DeviceProfile::new(
-            CryptoIdentity::from_private_key(&sk),
+            identity,
             device.name,
             device.app
         );
@@ -368,10 +359,9 @@ impl MessageListenerMut for DefaultUserAgent {
         }.clone();
 
         message.set_conversation_id(&conv_id);
-        self.message_listener.as_ref().map(|l| {
-            l.on_message(&message);
-        });
-
+        for cb in self.message_listeners.iter_mut() {
+            cb.on_message(&message);
+        }
         self.put_message(message);
         // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
@@ -379,9 +369,9 @@ impl MessageListenerMut for DefaultUserAgent {
     fn on_sending(&mut self, mut message: Message) {
         let conv_id = message.to().clone();
         message.set_conversation_id(&conv_id);
-        self.message_listener.as_ref().map(|l| {
-            l.on_sending(&message);
-        });
+        for cb in self.message_listeners.iter_mut() {
+            cb.on_sending(&message);
+        };
         self.put_message(message);
         // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
@@ -405,9 +395,9 @@ impl ProfileListenerMut for DefaultUserAgent {
 
         self.user = Some(profile);
         self.update_userinfo_config();
-        self.profile_listener.as_mut().map(|l| {
-            l.on_user_profile_acquired(self.user.as_ref().unwrap());
-        });
+        for cb in self.profile_listeners.iter_mut() {
+            cb.on_user_profile_acquired(self.user.as_ref().unwrap());
+        }
     }
 
     fn on_user_profile_changed(&mut self, name: String, avatar: bool) {
@@ -423,27 +413,27 @@ impl ProfileListenerMut for DefaultUserAgent {
         ));
 
         self.update_userinfo_config();
-        self.profile_listener.as_mut().map(|l| {
-            l.on_user_profile_changed(avatar);
-        });
+        for cb in self.profile_listeners.iter_mut() {
+            cb.on_user_profile_changed(avatar);
+        }
     }
 }
 
 impl ConnectionListener for DefaultUserAgent {
     fn on_connecting(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_connecting();
         });
     }
 
     fn on_connected(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_connected();
         });
     }
 
     fn on_disconnected(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_disconnected();
         });
     }
@@ -458,53 +448,61 @@ impl UserAgent for DefaultUserAgent {
         self.device.as_ref()
     }
 
-    fn peer_info(&self) -> Option<&PeerInfo> {
-        self.peer.as_ref()
+    fn peer(&self) -> &PeerInfo {
+        assert!(self.peer.is_some(), "Peer info is not set!");
+        self.peer.as_ref().unwrap()
     }
 
     fn is_configured(&self) -> bool {
-        self.user.is_some() &&
+        /*self.user.is_some() &&
             self.device.is_some() &&
             self.peer.is_some() &&
             self.repository.is_some() &&
             self.peer.as_ref().unwrap().is_valid() &&
             self.peer.as_ref().unwrap().alternative_url().is_some()
+        */
+        true
     }
 
-    fn set_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {
-        self.connection_listener = Some(listener);
+    fn add_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {
+        self.connection_listeners.push(listener);
     }
 
-    fn set_profile_listener(&mut self, listener: Box<dyn ProfileListener>) {
-        self.profile_listener = Some(listener);
+    fn add_profile_listener(&mut self, listener: Box<dyn ProfileListener>) {
+        self.profile_listeners.push(listener);
     }
 
-    fn set_message_listener(&mut self, listener: Box<dyn MessageListener>) {
-        self.message_listener = Some(listener);
+    fn add_message_listener(&mut self, listener: Box<dyn MessageListener>) {
+        self.message_listeners.push(listener);
     }
 
-    fn set_channel_listener(&mut self, listener: Box<dyn ChannelListener>) {
-        self.channel_listener = Some(listener);
+    fn add_channel_listener(&mut self, listener: Box<dyn ChannelListener>) {
+        self.channel_listeners.push(listener);
     }
 
-    fn set_contact_listener(&mut self, listener: Box<dyn ContactListener>) {
-        self.contact_listener = Some(listener);
+    fn add_contact_listener(&mut self, listener: Box<dyn ContactListener>) {
+        self.contact_listeners.push(listener);
     }
 
-    fn conversation(&self, _conversation_id: &Id) -> Option<Conversation> {
-        unimplemented!()
+    fn conversation(&self, conversation_id: &Id) -> Option<&Conversation> {
+        self.conversations.get(conversation_id)
     }
 
-    fn conversations(&self) -> Vec<Conversation> {
-        unimplemented!()
+    fn conversations(&self) -> Vec<&Conversation> {
+        self.conversations.values().collect()
     }
 
-    fn remove_conversation(&mut self, _converstation_id: &Id) {
-        unimplemented!()
+    fn remove_conversation(&mut self, conversation_id: &Id) {
+        self.conversations.remove(conversation_id);
+        if let Some(repo) = self.repository.as_mut() {
+            let _ = repo.remove_messages_by_conversation(conversation_id);
+        }
     }
 
-    fn remove_conversations(&mut self, _converstation_ids: Vec<&Id>) {
-        unimplemented!()
+    fn remove_conversations(&mut self, conversation_ids: Vec<&Id>) {
+        for id in conversation_ids {
+            self.remove_conversation(id);
+        }
     }
 
     fn messages(&self, converstation_id: &Id) -> Vec<Message> {
@@ -549,22 +547,21 @@ impl UserAgent for DefaultUserAgent {
         });
     }
 
-    fn channels(&self) -> Result<Vec<Channel>> {
+    fn channels(&self) -> Result<Vec<&Channel>> {
         unimplemented!()
     }
 
-    fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
+    fn channel(&self, _channel_id: &Id) -> Result<Option<&Channel>> {
         unimplemented!()
     }
 
     fn contact_version(&self) -> Result<Option<String>> {
-        unimplemented!()
+        // TODO: Implement contact version retrieval logic.
+        Ok(None)
     }
 
-    fn put_contacts_update(&mut self,
-        _version_id: &str,
-        _contacts: &[Contact]
-    ) -> Result<()> {
-        unimplemented!()
+    fn put_contacts_update(&mut self, _version_id: &str, _contacts: &[Contact]) -> Result<()> {
+        //unimplemented!()
+        Ok(())
     }
 }

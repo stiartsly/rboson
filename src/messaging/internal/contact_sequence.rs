@@ -1,12 +1,15 @@
 
 use std::fmt;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 use hex;
 
-use crate::random_bytes;
+use crate::{
+    as_ms,
+    random_bytes
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ContactSequence {
     #[serde(rename = "id")]
     id: String,
@@ -17,19 +20,16 @@ pub(crate) struct ContactSequence {
 
 #[allow(unused)]
 impl ContactSequence {
-    pub(crate) fn new() -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH).unwrap()
-            .as_secs();
-
+    pub(crate) fn default() -> Self {
+        let generate_id = || hex::encode(random_bytes(16).as_slice());
         Self {
             id: generate_id(),
-            timestamp
+            timestamp: as_ms!(SystemTime::now()) as u64
         }
     }
-    pub(crate) fn from_id(id: &str, timestamp: u64) -> Self {
+    pub(crate) fn new(id: &str, timestamp: u64) -> Self {
         Self {
-            id: id.into(),
+            id: id.to_string(),
             timestamp
         }
     }
@@ -39,17 +39,12 @@ impl ContactSequence {
     }
 
     pub(crate) fn timestamp(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.timestamp)
+        SystemTime::UNIX_EPOCH + Duration::from_millis(self.timestamp)
     }
 }
 
 impl fmt::Display for ContactSequence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Seq: {}/{}", self.id, self.timestamp)?;
-        Ok(())
+        write!(f, "Seq: {}/{}", self.id, self.timestamp)
     }
-}
-
-fn generate_id() -> String {
-    hex::encode(random_bytes(16).as_slice())
 }

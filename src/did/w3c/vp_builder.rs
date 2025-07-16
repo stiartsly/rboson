@@ -4,7 +4,6 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     Error,
-    Identity,
     CryptoIdentity,
     core::Result,
 };

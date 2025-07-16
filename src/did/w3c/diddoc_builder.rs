@@ -6,7 +6,6 @@ use crate::{
     unwrap,
     Error,
     core::Result,
-    Identity,
     CryptoIdentity,
 };
 

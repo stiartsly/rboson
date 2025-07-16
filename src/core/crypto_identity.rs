@@ -14,13 +14,21 @@ pub struct CryptoIdentity {
     signature_keypair: signature::KeyPair,
 }
 
+impl AsRef<CryptoIdentity> for CryptoIdentity {
+    fn as_ref(&self) -> &CryptoIdentity {
+        self
+    }
+}
+
 impl CryptoIdentity {
     pub fn new() -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())
     }
 
-    pub fn from_private_key(private_key: &signature::PrivateKey) -> CryptoIdentity {
-        Self::from_keypair(signature::KeyPair::from(private_key))
+    pub fn from_private_key(private_key: &[u8]) -> Result<CryptoIdentity> {
+        Ok(Self::from_keypair(
+            signature::KeyPair::try_from(private_key)?
+        ))
     }
 
     pub fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
@@ -41,6 +49,22 @@ impl CryptoIdentity {
 
     pub fn id(&self) -> &Id {
         Identity::id(self)
+    }
+
+    pub fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Identity::sign_into(self, data)
+    }
+
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        Identity::verify(self, data, signature)
+    }
+
+    pub fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        Identity::encrypt_into(self, recipient, plain)
+    }
+
+    pub fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        Identity::decrypt_into(self, sender, cipher)
     }
 }
 

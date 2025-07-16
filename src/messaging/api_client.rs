@@ -1,26 +1,23 @@
+use std::time::Duration;
 use reqwest::Client;
 use url::Url;
 use serde::{Serialize, Deserialize};
+use serde_json::Map;
 
 use crate::{
     Id,
     Error,
-    error::Result,
-    Identity,
-    PeerInfo,
     cryptobox::Nonce,
-    core::crypto_identity::CryptoIdentity,
+    core::Result,
+    core::CryptoIdentity,
 };
 
 use crate::messaging::{
     UserProfile,
     ServiceIds,
-};
-
-use crate::messaging::{
     profile::{self, Profile},
     service_ids::JsonServiceIds,
-    internal::contact_update::ContactsUpdate,
+    internal::ContactsUpdate,
 };
 
 static HTTP_HEADER_ACCEPT: &str = "Accept";
@@ -28,44 +25,60 @@ static HTTP_HEADER_CONTENT_TYPE: &str = "Content-Type";
 static HTTP_BODY_FORMAT_JSON: &str = "application/json";
 
 pub(crate) struct Builder<'a> {
-    home_peerid : Option<&'a Id>,
-    base_url    : Option<&'a str>,
+    peerid      : Option<&'a Id>,   // home peerid.
+    base_url    : Option<&'a Url>,
     user        : Option<&'a CryptoIdentity>,
     device      : Option<&'a CryptoIdentity>,
+
+    access_token: Option<&'a str>,
+    access_token_refresh_handler: Option<Box<dyn Fn(&str)>>,
 }
 
 impl<'a> Builder<'a> {
     pub(crate) fn new() -> Self {
         Self {
-            home_peerid : None,
+            peerid      : None,
             base_url    : None,
-            user    : None,
-            device  : None,
+            user        : None,
+            device      : None,
+
+            access_token: None,
+            access_token_refresh_handler: None,
         }
     }
 
-    pub(crate) fn with_home_peerid(mut self, peerid: &'a Id) -> Self {
-        self.home_peerid = Some(peerid);
+    pub(crate) fn with_home_peerid(&mut self, peerid: &'a Id) -> &mut Self {
+        self.peerid = Some(peerid);
         self
     }
 
-    pub(crate) fn with_base_url(mut self, base_url: &'a str) -> Self {
+    pub(crate) fn with_base_url(&mut self, base_url: &'a Url) ->&mut Self {
         self.base_url = Some(base_url);
         self
     }
 
-    pub(crate) fn with_user_identity(mut self, user: &'a CryptoIdentity) -> Self {
+    pub(crate) fn with_user_identity(&mut self, user: &'a CryptoIdentity) -> &mut Self {
         self.user = Some(user);
         self
     }
 
-    pub(crate) fn with_device_identity(mut self, device: &'a CryptoIdentity) -> Self {
+    pub(crate) fn with_device_identity(&mut self, device: &'a CryptoIdentity) -> &mut Self {
         self.device = Some(device);
         self
     }
 
-    pub(crate) fn build(self) -> Result<APIClient> {
-        if self.home_peerid.is_none() {
+    pub(crate) fn with_access_token(&mut self, token: &'a str) -> &mut Self {
+        self.access_token = Some(token);
+        self
+    }
+
+    pub(crate) fn with_access_token_refresh_handler(&mut self, handler: fn(&str)) -> &mut Self {
+        self.access_token_refresh_handler = Some(Box::new(handler));
+        self
+    }
+
+    pub(crate) fn build(&mut self) -> Result<APIClient> {
+        if self.peerid.is_none() {
             return Err(Error::Argument("Home peer id is required".into()));
         };
         if self.user.is_none() {
@@ -75,17 +88,14 @@ impl<'a> Builder<'a> {
             return Err(Error::Argument("Device identity is required".into()));
         };
 
-        let Some(base_url) = self.base_url else {
+        let Some(base_url) = self.base_url.as_ref() else {
             return Err(Error::Argument("Base url is required".into()));
         };
-        let base_url = Url::parse(base_url).map_err(|e| {
-            Error::Argument(format!("Invalid base url: {e}"))
-        })?;
         if base_url.scheme() != "http" && base_url.scheme() != "https" {
             return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
         }
 
-        APIClient::new(self, base_url)
+        APIClient::new(self)
     }
 }
 
@@ -104,25 +114,24 @@ pub(crate) struct APIClient {
 
 #[allow(unused)]
 impl APIClient {
-    pub(crate) fn new(b: Builder, base_url: Url) -> Result<Self> {
-        let result = Client::builder()
+    pub(crate) fn new(b: &mut Builder) -> Result<Self> {
+        let client = Client::builder()
             .user_agent("rboson")
-            .timeout(std::time::Duration::from_secs(30))
-            .build();
-
-        let client = result.map_err(|e|
-            Error::Argument(format!("Failed to create http client: {e}"))
-        )?;
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e|
+                Error::Argument(format!("Failed to create http client: {e}"))
+            )?;
 
         Ok(Self {
             client,
-            base_url,
-            peerid  : b.home_peerid.unwrap().clone(),
-            user    : b.user.unwrap().clone(),
-            device  : b.device.unwrap().clone(),
+            base_url: b.base_url.unwrap().clone(),
+            peerid  : b.peerid  .unwrap().clone(),
+            user    : b.user    .unwrap().clone(),
+            device  : b.device  .unwrap().clone(),
 
-            access_token: None,
-            access_token_refresh_handler: None,
+            access_token: b.access_token.map(|v| v.to_string()),
+            access_token_refresh_handler: b.access_token_refresh_handler.take(),
 
             nonce   : Nonce::random(),
         })
@@ -185,7 +194,7 @@ impl APIClient {
             deviceSig   : &'a [u8],
         }
 
-        #[derive(Deserialize)]
+        #[derive(Debug, Deserialize)]
         struct ResponseData {
             token       : String,
         }
@@ -203,7 +212,6 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/auth").unwrap();
         let rsp = self.client.post(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
@@ -357,9 +365,9 @@ impl APIClient {
         })?;
 
         let token = data.token;
-        self.access_token_refresh_handler.as_ref().map(|v| {
-            v(&token);
-        });
+        //self.access_token_refresh_handler.as_ref().map(|v| {
+        //    v(&token);
+        //});
 
         Ok(UserProfile::new(
             self.user.clone(),
@@ -466,8 +474,26 @@ impl APIClient {
         Ok(data.registrationId)
     }
 
-    pub(crate) async fn service_info(&self) -> Result<PeerInfo> {
-        unimplemented!()
+    pub(crate) async fn service_info(&mut self) -> Result<MessagingServiceInfo> {
+        let url = self.base_url.join("api/v1/service/info").unwrap();
+        let rsp = self.client.get(url)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .bearer_auth( {
+                self.refresh_access_token().await?;
+                self.access_token().unwrap()
+            })
+            .send()
+            .await;
+
+        let data = rsp.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<MessagingServiceInfo>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
+        Ok(data)
     }
 
     pub(crate) async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
@@ -548,6 +574,57 @@ impl APIClient {
     pub(crate) async fn fetch_contacts_update(&mut self,
         version_id: Option<&str>
     ) -> Result<ContactsUpdate> {
-        unimplemented!()
+        let path = match version_id {
+            Some(id) => format!("/api/v1/contacts/{}", id),
+            None => format!("/api/v1/contacts")
+        };
+        let url = self.base_url.join(path.as_str()).unwrap();
+        let rsp = self.client.get(url)
+            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .bearer_auth( {
+                self.refresh_access_token().await?;
+                self.access_token().unwrap()
+            })
+            .send()
+            .await;
+
+        let data = rsp.map_err(|e| {
+            Error::State(format!("Http error: sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Http error: invalid http response {e}"))
+        )?.json::<ContactsUpdate>().await.map_err(|e| {
+            Error::State(format!("Http error: deserialize json error {e}"))
+        })?;
+
+        Ok(data)
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct MessagingServiceInfo {
+    #[serde(rename = "peerId")]
+    peerid: Id,
+
+    #[serde(rename = "nodeId")]
+    nodeid: Id,
+
+    #[serde(rename = "version")]
+    version: String,
+
+    #[serde(rename = "endpoints")]
+    endpoints: Map<String, serde_json::Value>,
+
+    #[serde(rename = "sslCert")]
+    ssl_cert: String,
+
+    #[serde(rename = "features")]
+    features: Map<String, serde_json::Value>,
+}
+
+use std::fmt;
+impl fmt::Display for MessagingServiceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MessagingServiceInfo {{ peerid: {}, nodeid: {}, version: {}, endpoints: {:?}, ssl_cert: {}, features: {:?} }}",
+            self.peerid, self.nodeid, self.version, self.endpoints, self.ssl_cert, self.features)
     }
 }

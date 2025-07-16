@@ -1,6 +1,26 @@
-pub(crate) mod internal;
-pub(crate) mod rpc;
-pub(crate) mod persistence;
+pub(crate) mod persistence {
+    pub(crate) mod database;
+}
+
+pub(crate) mod internal {
+    pub(crate) mod contact_sequence;
+    pub(crate) mod contacts_update;
+    pub(crate) mod contact_sync_result;
+
+    pub(crate) use self::{
+        contacts_update::ContactsUpdate,
+        // contact_sequence::ContactSequence,
+        // contact_sync_result::ContactSyncResult
+    };
+}
+
+pub(crate) mod rpc {
+    pub(crate) mod method;
+    pub(crate) mod error;
+    pub(crate) mod parameters;
+    pub(crate) mod request;
+    pub(crate) mod response;
+}
 
 pub(crate) mod contact;
 pub(crate) mod contact_listener;
@@ -30,12 +50,12 @@ pub mod client_device;
 pub mod messaging_repository;
 pub mod service_ids;
 
-pub(crate) mod client;
+pub(crate) mod messaging_client;
 pub(crate) mod client_impl;
 pub(crate) mod client_builder;
 
-pub mod messaging_client {
-    pub use crate::messaging::client::MessagingClient;
+pub mod client {
+    pub use crate::messaging::messaging_client::MessagingClient;
     pub use crate::messaging::client_impl::Client;
     pub use crate::messaging::client_builder::Builder;
 }
@@ -48,10 +68,11 @@ pub mod user_agent_ {
 }
 
 pub use crate::{
+    messaging::client_device::ClientDevice,
     messaging::service_ids::ServiceIds,
-    messaging::messaging_client::MessagingClient,
-    messaging::messaging_client::Client,
-    messaging::messaging_client::Builder as ClientBuilder,
+    messaging::client::MessagingClient,
+    messaging::client::Client,
+    messaging::client::Builder as ClientBuilder,
 
     messaging::user_agent_::UserAgent,
     messaging::user_agent_::DefaultUserAgent,
@@ -69,23 +90,56 @@ pub use crate::{
     messaging::invite_ticket::InviteTicket,
 
     messaging::channel::{Role, Member, Permission, Channel},
+    messaging::message::{
+        Message,
+        ContentType,
+        ContentDisposition
+    },
 };
 
 #[cfg(test)]
-mod unitests;
+mod unitests {
+    mod test_api_client;
+    mod test_user_profile;
+    mod test_client_device;
+    mod test_user_agent;
+    mod test_invite_ticket;
+    mod test_conversation;
+    // mod test_contact;
+    mod test_channel;
+    mod test_client;
+}
 
-pub(crate) fn is_none_or_empty_string(opt: &Option<String>) -> bool {
-    match opt {
-        Some(s) => s.is_empty(),
-        None => true,
+fn is_default<T: IsDefault>(v: &T) -> bool {
+    v.is_default()
+}
+
+trait IsDefault {
+    fn is_default(&self) -> bool;
+}
+
+impl IsDefault for u64 {
+    fn is_default(&self) -> bool {
+        *self == 0
     }
 }
-pub(crate) fn is_false(b: &bool) -> bool {
-    !b
+
+impl IsDefault for bool {
+    fn is_default(&self) -> bool {
+        !*self
+    }
 }
 
-pub(crate) fn is_zero<T: PartialEq + Default>(v: &T) -> bool {
-    *v == T::default()
+impl IsDefault for String {
+    fn is_default(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> IsDefault for Vec<T> {
+    fn is_default(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 // bytes serded as base64 URL safe without padding

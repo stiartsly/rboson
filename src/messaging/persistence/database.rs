@@ -15,25 +15,33 @@ use crate::messaging::{
 };
 
 #[allow(unused)]
+#[derive(Debug)]
 pub(crate) struct Database {
 }
 
 #[allow(unused)]
 impl Database {
     pub(crate) fn open(path: &Path) -> Result<Self> {
-        let path = fs::canonicalize(path).map_err(|e| {
-            error!("{e}");
-            Error::Argument(format!("Invalid persistent path {} with error: {e}", path.display()))
-        })?;
+        let metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                fs::create_dir_all(path).map_err(|e| {
+                    Error::Argument(format!("Failed to create directory {}: {e}", path.display()))
+                })?;
+                fs::metadata(path).map_err(|e| {
+                    Error::Argument(format!("Failed to get metadata for path {}: {e}", path.display()))
+                })?
+            }
+        };
 
-        if path.exists() {
-            // TODO:
+        if !metadata.is_dir() {
+            Err(Error::Argument(format!("Path {} is not a directory", path.display())))?;
         }
 
-        let _ = fs::metadata(path).map_err(|e| {
-            error!("{e}");
-            Error::Argument(format!("Internal error: {e}"))
-        });
+        let _path = fs::canonicalize(path).map_err(|e| {
+            error!("{e}, path: {}", path.display());
+            Error::Argument(format!("Invalid persistent path {} with error: {e}", path.display()))
+        })?;
 
         Ok(Database {})
     }

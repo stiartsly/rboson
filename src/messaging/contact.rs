@@ -6,17 +6,15 @@ use serde::{Serialize, Deserialize};
 use crate::{
     Id,
     Error,
-    error::Result,
     Identity,
-    core::crypto_context::CryptoContext,
-    signature,
-    signature::KeyPair,
-    cryptobox,
-    cryptobox::{CryptoBox, Nonce},
+    signature::{self, KeyPair},
+    cryptobox::{self, CryptoBox, Nonce},
+    core::Result,
+    core::CryptoContext,
 };
 
 use super::{
-    channel::Permission,
+    // channel::Permission,
     profile::Profile,
 };
 
@@ -27,154 +25,6 @@ pub enum ContactType {
     Unknown = 0,
     Contact = 1,
     Group   = 2,
-}
-
-#[allow(dead_code)]
-pub(crate) struct ContactBuilder {
-    id          : Id,
-    home_peerid : Option<Id>,
-    _type       : ContactType,
-
-    session_key : Option<Vec<u8>>,
-
-    remark      : Option<String>,
-    tags        : Option<String>,
-
-    muted       : bool,
-    blocked     : bool,
-    created     : SystemTime,
-    last_modified   : SystemTime,
-
-    deleted     : bool,
-    revision    : i32,
-
-    name        : Option<String>,
-    notice      : Option<String>,
-    avatar      : bool,
-
-    owner       : Option<Id>,
-    permission  : Option<Permission>,
-}
-
-#[allow(dead_code)]
-impl ContactBuilder {
-    pub(crate) fn new(id: &Id) -> Self {
-        Self {
-            id          : id.clone(),
-            home_peerid : None,
-            _type       : ContactType::Unknown,
-            session_key : None,
-            remark      : None,
-            tags        : None,
-            muted       : false,
-            blocked     : false,
-            created     : SystemTime::UNIX_EPOCH,
-            last_modified   : SystemTime::UNIX_EPOCH,
-            deleted     : false,
-            revision    : 0,
-            name        : None,
-            notice      : None,
-            avatar      : false,
-            owner       : None,
-            permission  : None,
-        }
-    }
-
-    pub(crate) fn with_home_peerid(&mut self, peer_id:&Id) -> &mut Self {
-        self.home_peerid = Some(peer_id.clone());
-        self
-    }
-
-    pub(crate) fn with_type(&mut self, _type: ContactType) -> &mut Self {
-        self._type = _type;
-        self
-    }
-
-    pub(crate) fn with_session_key(&mut self, key: &[u8]) -> &mut Self {
-        self.session_key = Some(key.to_vec());
-        self
-    }
-
-    pub(crate) fn with_remark(&mut self, remark: &str) -> &mut Self {
-        self.remark = Some(remark.to_string());
-        self
-    }
-
-    pub(crate) fn with_tags(&mut self, tags: &str) -> &mut Self {
-        self.tags = Some(tags.to_string());
-        self
-    }
-
-    pub(crate) fn with_muted(&mut self, muted: bool) -> &mut Self {
-        self.muted = muted;
-        self
-    }
-
-    pub(crate) fn with_blocked(&mut self, blocked: bool) -> &mut Self {
-        self.blocked = blocked;
-        self
-    }
-
-    pub(crate) fn with_deleted(&mut self, deleted: bool) -> &mut Self {
-        self.deleted = deleted;
-        self
-    }
-
-    pub(crate) fn with_created(&mut self, created: SystemTime) -> &mut Self {
-        self.created = created;
-        self
-    }
-
-    pub(crate) fn with_last_modified(&mut self, modified: SystemTime) -> &mut Self {
-        self.last_modified = modified;
-        self
-    }
-
-    pub(crate) fn with_revision(&mut self, revision: i32) -> &mut Self {
-        self.revision = revision;
-        self
-    }
-
-    pub(crate) fn with_name(&mut self, name: &str) -> &mut Self {
-        self.name = Some(name.to_string());
-        self
-    }
-
-    pub(crate) fn with_avatar(&mut self, avatar: bool) -> &mut Self {
-        self.avatar = avatar;
-        self
-    }
-
-    pub(crate) fn with_notice(&mut self, notice: &str) -> &mut Self {
-        self.notice = Some(notice.to_string());
-        self
-    }
-
-    pub(crate) fn with_owner(&mut self, owner: &Id) -> &mut Self {
-        self.owner = Some(owner.clone());
-        self
-    }
-
-    pub(crate) fn with_permission(&mut self, permission: &Permission) -> &mut Self {
-        self.permission = Some(permission.clone());
-        self
-    }
-
-    pub(crate) fn check_valid(&self) -> bool {
-        false
-    }
-
-    pub(crate) fn build(&mut self) -> Result<Contact> {
-        if self.check_valid() {
-            return Err(Error::Argument(format!("Invalid contact")));
-        }
-
-        match self._type {
-            ContactType::Unknown => return Err(Error::Argument(format!("Invalid contact type"))),
-            ContactType::Contact => Ok(Contact::new(self)),
-            ContactType::Group => Ok(Contact::new_group(self))
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -200,26 +50,26 @@ pub struct Contact {
     avatar          : bool,
 
     #[serde(rename="r")]
-    #[serde(skip_serializing_if = "super::is_none_or_empty_string")]
-    remark          : Option<String>,
+    #[serde(skip_serializing_if = "super::is_default")]
+    remark          : String,
     #[serde(rename="ts")]
-    #[serde(skip_serializing_if = "super::is_none_or_empty_string")]
-    tags            : Option<String>,
+    #[serde(skip_serializing_if = "super::is_default")]
+    tags            : String,
     #[serde(rename="d")]
-    #[serde(skip_serializing_if = "super::is_false")]
+    #[serde(skip_serializing_if = "super::is_default")]
     muted           : bool,
     #[serde(rename="b")]
-    #[serde(skip_serializing_if = "super::is_false")]
+    #[serde(skip_serializing_if = "super::is_default")]
     blocked         : bool,
-    #[serde(rename="e")]
-    #[serde(skip_serializing_if = "super::is_false")]
-    deleted         : bool,
     #[serde(rename="c")]
-    #[serde(skip_serializing_if = "super::is_zero")]
+    #[serde(skip_serializing_if = "super::is_default")]
     created         : u64,
     #[serde(rename="m")]
-    #[serde(skip_serializing_if = "super::is_zero")]
+    #[serde(skip_serializing_if = "super::is_default")]
     last_modified   : u64,
+    #[serde(rename="e")]
+    #[serde(skip_serializing_if = "super::is_default")]
+    deleted         : bool,
     #[serde(rename="v")]
     revision        : i32,
 
@@ -233,15 +83,16 @@ pub struct Contact {
 
 #[allow(unused)]
 impl Contact {
-    pub(crate) fn new(b: &ContactBuilder) -> Self {
+    /*
+    pub(crate) fn new(b: &mut ContactBuilder) -> Self {
         Self {
             id          : b.id.clone(),
             auto        : false,
             home_peerid : b.home_peerid.clone().unwrap(),
             name        : b.name.clone(),
             avatar      : b.avatar,
-            remark      : b.remark.clone(),
-            tags        : b.tags.clone(),
+            remark      : b.remark.take().unwrap_or_default(),
+            tags        : b.tags.take().unwrap_or_default(),
             muted       : b.muted,
             blocked     : b.blocked,
             deleted     : b.deleted,
@@ -262,9 +113,34 @@ impl Contact {
         }
     }
 
-    pub(crate) fn new_group(_b: &mut ContactBuilder) -> Self {
-        unimplemented!()
+    pub(crate) fn new(id: Id, home_peerid: Id) -> Self {
+        Self {
+            id,
+            auto: true,
+            session_keypair: None,
+            encryption_keypair: None,
+            session_id: None,
+            home_peerid,
+            name: None,
+            avatar: false,
+            remark: String::new(),
+            tags: String::new(),
+            muted: false,
+            blocked: false,
+            created: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            last_modified: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            deleted: false,
+            revision: 1,
+            modified: false,
+            last_updated: None,
+            display_name: None,
+        }
     }
+    */
 
     pub fn id(&self) -> &Id {
         &self.id
@@ -272,6 +148,14 @@ impl Contact {
 
     pub fn home_peerid(&self) -> &Id {
         &self.home_peerid
+    }
+
+    pub fn is_auto(&self) -> bool {
+        self.auto
+    }
+
+    pub fn set_auto(&mut self, auto: bool) {
+        self.auto = auto;
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -299,30 +183,28 @@ impl Contact {
         }
     }
 
-    pub fn remark(&self) -> Option<&str> {
-        self.remark.as_ref().map(|v| v.as_str())
+    pub fn remark(&self) -> &str {
+        self.remark.as_str()
     }
 
     pub fn set_remark(&mut self, remark: &str) {
-        if remark.is_empty() {
-            self.remark = None;
-        }else {
-            self.remark = Some(remark.into());
-        }
+        self.remark = match remark.is_empty() {
+            true => String::new(),
+            false => remark.to_string()
+        };
         self.display_name = None;
         self.touch();
     }
 
-    pub fn tags(&self) -> Option<&str> {
-        self.tags.as_ref().map(|v| v.as_str())
+    pub fn tags(&self) -> &str {
+        self.tags.as_str()
     }
 
     pub fn set_tags(&mut self, tags: &str) {
-        if tags.is_empty() {
-            self.tags = None;
-        } else {
-            self.tags = Some(tags.into());
-        }
+        self.tags = match tags.is_empty() {
+            true => String::new(),
+            false => tags.to_string()
+        };
         self.display_name = None;
         self.touch();
     }

@@ -1,25 +1,22 @@
 use crate::{
     Id,
-    Error,
-    error::Result,
+    core::{Error, Result},
+    core::CryptoIdentity,
 };
 
-use crate::core::{
-    crypto_identity::CryptoIdentity,
-};
-
+#[derive(Debug, Clone)]
 pub struct DeviceProfile {
-    identity    : Option<CryptoIdentity>,
-    name        : String,
-    app         : Option<String>
+    identity: Option<CryptoIdentity>,
+    name    : String,
+    app     : Option<String>
 }
 
 impl DeviceProfile {
     pub(crate) fn new(identity: CryptoIdentity, name: String, app: Option<String>) -> Self {
         Self {
             identity: Some(identity),
-            name: name.to_string(),
-            app: app.map(|v| v.to_string())
+            name,
+            app
         }
     }
 

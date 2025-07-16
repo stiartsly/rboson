@@ -1,7 +1,7 @@
 use crate::{
     Id,
-    core::crypto_identity::CryptoIdentity,
-    signature
+    signature,
+    core::CryptoIdentity,
 };
 
 use crate::messaging::{
@@ -32,9 +32,10 @@ async fn test_register_user_and_device() {
     let peerid  = Id::try_from(PEERID).unwrap();
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
 
     let client = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device)
@@ -54,9 +55,10 @@ async fn test_register_device_with_user() {
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device1 = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device2 = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
 
     let client1 = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device1)
@@ -68,7 +70,7 @@ async fn test_register_device_with_user() {
     assert!(result.is_ok());
 
     let client2 = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device2)
@@ -93,9 +95,10 @@ async fn test_regsister_device_request() {
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device1 = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device2 = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
 
     let mut client1 = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device1)
@@ -111,7 +114,7 @@ async fn test_regsister_device_request() {
     assert!(result.is_ok());
 
     let mut client2 = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device2)
@@ -132,9 +135,10 @@ async fn test_update_profile() {
     let peerid  = Id::try_from(PEERID).unwrap();
     let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
     let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
 
     let mut client = Builder::new()
-        .with_base_url(BASE_URL)
+        .with_base_url(&url)
         .with_home_peerid(&peerid)
         .with_user_identity(&user)
         .with_device_identity(&device)
@@ -147,6 +151,7 @@ async fn test_update_profile() {
         "test-Device1",
         "test-App"
     ).await;
+    // println!("result: {:?}", result);
     assert!(result.is_ok());
 
     // Get profile and check initial values
@@ -173,4 +178,59 @@ async fn test_update_profile() {
     assert_eq!(profile.notice(), None);
     assert_eq!(profile.sig().len(), 64);
     assert!(profile.is_genuine());
+}
+
+#[tokio::test]
+async fn test_service_info() {
+    let peerid  = Id::try_from(PEERID).unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
+
+    let result = Builder::new()
+        .with_base_url(&url)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device)
+        .build();
+
+    assert!(result.is_ok());
+    let mut client = result.unwrap();
+
+    let result = client.register_user_with_device("password", "Alice", "test-Device", "test-App").await;
+    assert!(result.is_ok());
+
+    let result = client.service_info().await;
+    assert!(result.is_ok());
+
+    let service_info = result.unwrap();
+    println!("Service Info: {}", service_info);
+}
+
+#[tokio::test]
+async fn test_fetch_contacts_update() {
+    let peerid  = Id::try_from(PEERID).unwrap();
+    let user    = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device  = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let url     = url::Url::parse(BASE_URL).unwrap();
+
+    let result = Builder::new()
+        .with_base_url(&url)
+        .with_home_peerid(&peerid)
+        .with_user_identity(&user)
+        .with_device_identity(&device)
+        .build();
+
+    assert!(result.is_ok());
+    let mut client = result.unwrap();
+
+    let result = client.register_user_with_device("password", "Alice", "test-Device", "test-App").await;
+    assert!(result.is_ok());
+
+    let result = client.fetch_contacts_update(None).await;
+    assert!(result.is_ok());
+
+    let mut contacts = result.unwrap();
+    //assert!(contacts.version_id().is_some());
+    assert!(contacts.contacts().is_empty());
 }

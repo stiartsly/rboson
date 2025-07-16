@@ -141,3 +141,29 @@ fn random_bytes(len: usize) -> Vec<u8> {
     };
     bytes
 }
+
+pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
+    v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+}
+
+trait IsEmpty {
+    fn is_empty(&self) -> bool;
+}
+
+impl IsEmpty for String {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> IsEmpty for Vec<T> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl IsEmpty for u64 {
+    fn is_empty(&self) -> bool {
+        *self == 0
+    }
+}

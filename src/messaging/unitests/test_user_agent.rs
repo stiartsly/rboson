@@ -1,11 +1,10 @@
 use crate::{
-    core::crypto_identity::CryptoIdentity,
     signature,
-};
-
-use crate::messaging::{
-    UserAgent,
-    DefaultUserAgent,
+    core::CryptoIdentity,
+    messaging::{
+        UserAgent,
+        DefaultUserAgent
+    }
 };
 
 #[tokio::test]

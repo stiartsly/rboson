@@ -1,7 +1,8 @@
+use std::sync::{Arc, Mutex};
 use std::future::Future;
 use crate::{
     Id,
-    error::Result,
+    core::Result,
 };
 
 use crate::messaging::{
@@ -16,7 +17,7 @@ use crate::messaging::{
 
 pub trait MessagingClient {
     fn userid(&self) -> &Id;
-    fn user_agent(&self) -> &Box<dyn UserAgent>;
+    fn user_agent(&self) -> Arc<Mutex<dyn UserAgent>> ;
 
     fn close(&mut self) -> impl Future<Output = Result<()>>;
     fn connect(&mut self) -> impl Future<Output = Result<()>>;

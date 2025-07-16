@@ -3,25 +3,44 @@ use std::time::SystemTime;
 
 use crate::{
     Id,
-    error::Result,
-    Error,
-    messaging::Contact,
-};
-
-use super::{
-    message::Message,
+    core::{Error, Result},
+    messaging::{
+        Contact,
+        message::Message
+    }
 };
 
 pub static MAX_SNIPPET_LENGTH: usize = 128;
 pub static DEFAULT_AVATAR: Option<String> = None;
 
+#[derive(Debug)]
 pub struct Conversation {
     interlocutor    : Contact,
     last_message    : Option<Message>,
     snippet         : Option<String>,
 }
 
+#[allow(unused)]
 impl Conversation {
+    pub(crate) fn new(interlocutor: Contact, last_message: Message) -> Self {
+        let mut conversation = Self {
+            interlocutor,
+            last_message: None,
+            snippet: None,
+        };
+        conversation.update(last_message)
+            .expect("Failed to update conversation with last message");
+        conversation
+    }
+
+    pub(crate) fn from_contact(interlocutor: Contact) -> Self {
+        Self {
+            interlocutor,
+            last_message: None,
+            snippet: None,
+        }
+    }
+
     pub fn id(&self) -> &Id {
         self.interlocutor.id()
     }
@@ -31,7 +50,7 @@ impl Conversation {
     }
 
     pub fn avatar(&self) -> Option<String> {
-        self.interlocutor.avatar_url()
+        self.interlocutor.avatar_url().or_else(|| DEFAULT_AVATAR.clone())
     }
 
     pub fn snippet(&self) -> String {
@@ -44,7 +63,7 @@ impl Conversation {
 
         let ctype = msg.content_type();
         if ctype.starts_with("text/") {
-            let body = msg.body_as_text().unwrap_or_else(|| "".to_string());
+            let body = msg.body_as_text().unwrap_or("".to_string());
             let trimmed = body.trim();
             let snippet = if trimmed.len() > MAX_SNIPPET_LENGTH {
                 &trimmed[0..MAX_SNIPPET_LENGTH]
@@ -71,19 +90,17 @@ impl Conversation {
         &self.interlocutor
     }
 
-    #[allow(unused)]
     pub(crate) fn update_interlocutor(&mut self, contact: Contact) -> Result<()> {
         if contact.id() != self.interlocutor.id() {
-            return Err(Error::Argument("Contact does not match the conversation".into()))
+            Err(Error::Argument("Contact does not match the conversation".into()))?;
         }
         self.interlocutor = contact;
         Ok(())
     }
 
-    #[allow(unused)]
     pub(crate) fn update(&mut self, message: Message) -> Result<()> {
         if message.conversation_id() != self.interlocutor.id() {
-            return Err(Error::Argument("Message does not match the conversation".into()))
+            Err(Error::Argument("Message does not match the conversation".into()))?;
         }
 
         self.last_message = Some(message);
@@ -108,7 +125,6 @@ impl fmt::Display for Conversation {
             self.title(),
             self.id(),
             self.snippet().as_str()
-        )?;
-        Ok(())
+        )
     }
 }

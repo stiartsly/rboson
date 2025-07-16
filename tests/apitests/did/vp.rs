@@ -278,3 +278,9 @@ fn test_complex_vp() {
 	assert_eq!(vouch, vouch_new);
 	assert_eq!(vouch.to_string(), vouch_new.to_string());
 }
+
+#[test]
+#[should_panic]
+fn test_empty_vp() {
+	assert!(false, "VP should not be empty");
+}

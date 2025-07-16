@@ -42,6 +42,22 @@ impl CryptoIdentity {
     pub fn id(&self) -> &Id {
         Identity::id(self)
     }
+
+    pub fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Identity::sign_into(self, data)
+    }
+
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        Identity::verify(self, data, signature)
+    }
+
+    pub fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        Identity::encrypt_into(self, recipient, plain)
+    }
+
+    pub fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        Identity::decrypt_into(self, sender, cipher)
+    }
 }
 
 impl PartialEq for CryptoIdentity {

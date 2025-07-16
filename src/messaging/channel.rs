@@ -7,13 +7,13 @@ use crate::{
     cryptobox,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub enum Permission {
-    Public = 0,
-    MemberInvite = 1,
+    Public          = 0,
+    MemberInvite    = 1,
     ModeratorInvite = 2,
-    OwnerInvite = 3
+    OwnerInvite     = 3
 }
 
 impl TryFrom<i32> for Permission {

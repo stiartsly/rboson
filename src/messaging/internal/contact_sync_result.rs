@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::messaging::Contact;
 use super::contact_sequence::ContactSequence;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactSyncResult {
     #[serde(rename = "s")]
     #[serde(skip_serializing_if = "Option::is_none")]

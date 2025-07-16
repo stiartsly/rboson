@@ -27,30 +27,30 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct DIDDocument {
     #[serde(rename = "@context")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: Id,
 
     #[serde(rename = "verificationMethod")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     verification_methods: Option<Vec<VM>>,
 
     #[serde(rename = "authentication")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     authentications: Option<Vec<VM>>,
 
     #[serde(rename = "assertion")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     assertions: Option<Vec<VM>>,
 
     #[serde(rename = "verifiableCredential")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     credentials: Option<Vec<VC>>,
 
     #[serde(rename = "service")]
-	#[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+	#[serde(skip_serializing_if = "crate::is_none_or_empty")]
     services: Option<Vec<Service>>,
 
     #[serde(rename = "proof")]

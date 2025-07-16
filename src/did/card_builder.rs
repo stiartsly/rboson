@@ -5,7 +5,6 @@ use serde_json::Map;
 use crate::{
     Error,
     CryptoIdentity,
-    Identity,
     core::Result,
 };
 

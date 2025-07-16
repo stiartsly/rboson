@@ -5,22 +5,18 @@ use serde::{Serialize, Deserialize};
 use crate::{
     Id,
     Error,
-    error::Result,
-    Identity,
     PeerInfo,
     cryptobox::Nonce,
-    core::crypto_identity::CryptoIdentity,
+    core::Result,
+    core::CryptoIdentity,
 };
 
 use crate::messaging::{
     UserProfile,
     ServiceIds,
-};
-
-use crate::messaging::{
     profile::{self, Profile},
     service_ids::JsonServiceIds,
-    internal::contact_update::ContactsUpdate,
+    internal::ContactsUpdate,
 };
 
 static HTTP_HEADER_ACCEPT: &str = "Accept";
@@ -39,8 +35,8 @@ impl<'a> Builder<'a> {
         Self {
             home_peerid : None,
             base_url    : None,
-            user    : None,
-            device  : None,
+            user        : None,
+            device      : None,
         }
     }
 

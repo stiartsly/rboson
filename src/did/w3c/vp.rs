@@ -26,15 +26,15 @@ use crate::did::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiablePresentation {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     id: Option<String>,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "holder")]

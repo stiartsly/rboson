@@ -1,6 +1,8 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use bs58;
 
 use crate::{
 	as_secs,
@@ -14,9 +16,9 @@ pub struct ClientDevice {
 
 	#[serde(rename = "id")]
 	id		: Id,
-	#[serde(rename = "n", skip_serializing_if = "Option::is_none")]
-	name	: Option<String>,
-    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+	#[serde(rename = "n")]
+	name 	: String,
+    #[serde(rename = "a")]
 	app_name: Option<String>,
 	#[serde(rename = "c")]
     created	: u64,
@@ -28,26 +30,29 @@ pub struct ClientDevice {
 
 impl ClientDevice {
 	#[cfg(test)]
-	pub(crate) fn new(id: &Id, device_name: Option<&str>, app_name: Option<&str>,
+	pub(crate) fn new(id: &Id, device_name: &str, app_name: Option<&str>,
 		created: u64, last_seen: u64, last_address: &str) -> Self {
-
-		use sha2::{Digest, Sha256};
-		use bs58;
-
-		let digest = Sha256::digest(id.as_bytes());
-		let client_id = bs58::encode(&digest).into_string();
 
 		Self {
 			id			: id.clone(),
-			name		: device_name.map(|v|v.to_string()),
+			name		: device_name.to_string(),
 			app_name	: app_name.map(|v|v.to_string()),
 			last_address: last_address.to_string(),
 
 			created,
 			last_seen,
-
-			client_id
+			client_id	: Self::digest(id),
 		}
+	}
+
+	fn digest(id: &Id) -> String {
+		bs58::encode(
+			&Sha256::digest(id.as_bytes())
+		).into_string()
+	}
+
+	pub fn update_client_id(&mut self) {
+		self.client_id = Self::digest(&self.id);
 	}
 
 	pub fn id(&self) -> &Id {
@@ -58,8 +63,8 @@ impl ClientDevice {
 		&self.client_id
 	}
 
-	pub fn name(&self) -> Option<&str> {
-		self.name.as_deref()
+	pub fn name(&self) -> &str {
+		&self.name
 	}
 
 	pub fn app_name(&self) -> Option<&str> {
@@ -67,11 +72,11 @@ impl ClientDevice {
 	}
 
 	pub fn created(&self) -> SystemTime {
-		SystemTime::UNIX_EPOCH + Duration::from_secs(self.created)
+		SystemTime::UNIX_EPOCH + Duration::from_millis(self.created)
 	}
 
 	pub fn last_seen(&self) -> SystemTime {
-		SystemTime::UNIX_EPOCH + Duration::from_secs(self.last_seen)
+		SystemTime::UNIX_EPOCH + Duration::from_millis(self.last_seen)
 	}
 
 	pub fn last_address(&self) -> &str {
@@ -92,10 +97,9 @@ impl fmt::Display for ClientDevice {
 			self.client_id
 		)?;
 
-		self.name.as_ref().map(|v| {
-			write!(f, ", name={}", v)
-		});
-
+		if self.name.is_empty() {
+			write!(f, ", name=default")?;
+		}
 		self.app_name.as_ref().map(|v| {
 			write!(f, ", app={}", v)
 		});

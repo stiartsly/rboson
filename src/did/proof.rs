@@ -63,6 +63,7 @@ pub struct Proof {
     proof_purpose: ProofPurpose,
 
     #[serde(rename = "proofValue")]
+    #[serde(with = "super::serde_bytes_with_base64")]
     proof_value: Vec<u8>,
 }
 

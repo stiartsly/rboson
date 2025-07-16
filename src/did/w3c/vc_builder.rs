@@ -8,7 +8,6 @@ use crate::{
     Id,
     error::{Error, Result},
     CryptoIdentity,
-    Identity,
 };
 
 use crate::did::{

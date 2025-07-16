@@ -25,33 +25,33 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct VerifiableCredential {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: String,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "name")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     name: Option<String>,
 
     #[serde(rename = "description")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     description: Option<String>,
 
     #[serde(rename = "issuer")]
     issuer: Id,
 
     #[serde(rename = "validFrom")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     valid_from: Option<u64>,
 
     #[serde(rename = "validUntil")]
-    #[serde(skip_serializing_if = "crate::did::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
     valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]

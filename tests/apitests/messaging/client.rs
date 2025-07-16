@@ -108,7 +108,7 @@ impl ProfileListener for ProfileListenerTest {
     }
 }
 
-#[ignore]
+//#[ignore]
 #[tokio::test]
 async fn test_messaing_client() {
     let peerid = Id::try_from(PEERID).unwrap();

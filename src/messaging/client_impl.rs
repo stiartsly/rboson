@@ -4,8 +4,7 @@ use unicode_normalization::UnicodeNormalization;
 use rumqttc::{
     MqttOptions,
     AsyncClient as MqttClient,
-    SubscribeFilter,
-   // Qos
+    SubscribeFilter
 };
 use tokio::runtime::Runtime;
 use serde::Serialize;

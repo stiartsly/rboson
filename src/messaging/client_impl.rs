@@ -25,13 +25,11 @@ use crate::{
 
 use crate::messaging::{
     ServiceIds,
-    DefaultUserAgent,
     UserAgent,
     InviteTicket,
     Contact,
     ClientBuilder,
     MessagingClient,
-    ConnectionListener,
 };
 
 use super::{
@@ -68,14 +66,14 @@ pub struct Client {
     mqtt_options    : Option<MqttOptions>,
     mqtt_client     : Option<MqttClient>,
 
-    user_agent      : Arc<Mutex<DefaultUserAgent>>
+    user_agent      : Arc<Mutex<dyn UserAgent>>,
 }
 
 #[allow(dead_code)]
 impl Client {
     pub(crate) fn new(b: &mut ClientBuilder) -> Result<Self> {
         let agent = b.user_agent().unwrap();
-        let mut agent_guard = agent.lock().unwrap();
+        let agent_guard = agent.lock().unwrap();
         if !agent_guard.is_configured() {
             return Err(Error::State("User agent is not configured".into()));
         }
@@ -91,7 +89,7 @@ impl Client {
             .with_device_identity(&device)
             .build()?;
 
-        agent_guard.harden();
+       // agent_guard.harden();
 
         Ok(Self {
             runtime     : Runtime::new().unwrap(),
@@ -267,7 +265,7 @@ impl Client {
         info!("Connecting ...");
 
         self.disconnect = false;
-        self.user_agent.lock().unwrap().on_connecting();
+       // self.user_agent.lock().unwrap().on_connecting();
 
         // TODO
         Ok(())

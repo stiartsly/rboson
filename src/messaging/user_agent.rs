@@ -29,11 +29,11 @@ pub trait UserAgent {
 
     fn is_configured(&self) -> bool;
 
-    fn set_connection_listener(&mut self, listener: Box<dyn ConnectionListener>);
-    fn set_profile_listener(&mut self, listener: Box<dyn ProfileListener>);
-    fn set_message_listener(&mut self, listener: Box<dyn MessageListener>);
-    fn set_channel_listener(&mut self, listener: Box<dyn ChannelListener>);
-    fn set_contact_listener(&mut self, listener: Box<dyn ContactListener>);
+    fn add_connection_listener(&mut self, listener: Box<dyn ConnectionListener>);
+    fn add_profile_listener(&mut self, listener: Box<dyn ProfileListener>);
+    fn add_message_listener(&mut self, listener: Box<dyn MessageListener>);
+    fn add_channel_listener(&mut self, listener: Box<dyn ChannelListener>);
+    fn add_contact_listener(&mut self, listener: Box<dyn ContactListener>);
 
     fn conversation(&self, _conversation_id: &Id) -> Option<Conversation>;
     fn conversations(&self) -> Vec<Conversation>;

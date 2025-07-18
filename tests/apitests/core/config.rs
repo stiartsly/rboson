@@ -56,9 +56,9 @@ fn test_build_cfg() {
 
 #[test]
 fn test_load_cfg() {
-    let path = match std::fs::metadata("apitests1.conf") {
-        Ok(_) => "apitests1.conf",
-        Err(_) => "tests/apitests/core/apitests1.conf",
+    let path = match std::fs::metadata("tests-concise.conf") {
+        Ok(_) => "tests-concise.conf",
+        Err(_) => "tests/apitests/core/tests-concise.conf",
     };
     let cfg = configuration::Builder::new()
         .load(path)
@@ -75,7 +75,7 @@ fn test_load_cfg() {
     assert_eq!(cfg.addr6().is_some(), false);
     assert_eq!(cfg.port(), 39003);
     assert_eq!(cfg.bootstrap_nodes().len(), 1);
-    assert_eq!(cfg.data_dir(), "apitests1_data");
+    assert_eq!(cfg.data_dir(), "tests-data");
     assert_eq!(cfg.log_level(), LevelFilter::Info);
     assert_eq!(cfg.log_file(), None);
     assert_eq!(cfg.activeproxy().is_some(), false);
@@ -94,9 +94,9 @@ fn test_load_cfg() {
 
 #[test]
 fn test_load_cfg_full(){
-    let path = match std::fs::metadata("apitests2.conf") {
-        Ok(_) => "apitests2.conf",
-        Err(_) => "tests/apitests/core/apitests2.conf",
+    let path = match std::fs::metadata("tests-full.conf") {
+        Ok(_) => "tests-full.conf",
+        Err(_) => "tests/apitests/core/tests-full.conf",
     };
     let cfg = configuration::Builder::new()
         .load(path)
@@ -113,7 +113,7 @@ fn test_load_cfg_full(){
     assert_eq!(cfg.addr6().is_some(), false);
     assert_eq!(cfg.port(), 39004);
     assert_eq!(cfg.bootstrap_nodes().len(), 1);
-    assert_eq!(cfg.data_dir(), "apitests2_data");
+    assert_eq!(cfg.data_dir(), "tests-data");
     assert_eq!(cfg.activeproxy().is_some(), true);
 
     let nodes = cfg.bootstrap_nodes();
@@ -123,7 +123,7 @@ fn test_load_cfg_full(){
     assert_eq!(n1.port(), 39001);
 
     assert_eq!(cfg.log_level(), LevelFilter::Debug);
-    assert_eq!(cfg.log_file(), Some("apitests2.log".to_string()));
+    assert_eq!(cfg.log_file(), Some("tests.log".to_string()));
 
     let result = cfg.activeproxy();
     assert!(result.is_some());

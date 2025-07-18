@@ -61,7 +61,7 @@ pub struct Builder<'a> {
     profile_listeners   : Vec<Box<dyn ProfileListener>>,
     contact_listeners   : Vec<Box<dyn ContactListener>>,
 
-    user_agent  : Option<Arc<Mutex<DefaultUserAgent>>>
+    user_agent  : Option<Arc<Mutex<dyn UserAgent>>>,
 }
 
 #[allow(unused)]
@@ -331,7 +331,7 @@ impl<'a> Builder<'a> {
         }
 
         if self.repository.is_none() && self.repository_db.is_none() {
-            return Err(Error::State("Messaging repository is not configured".into()));
+            Err(Error::State("Messaging repository is not configured".into()))?;
         }
 
         let mut device_checked = false;
@@ -396,18 +396,22 @@ impl<'a> Builder<'a> {
         if !agent_guard.is_configured() {
             return Err(Error::State("User agent is not configured yet".into()));
         }
-        self.connection_listeners.iter().for_each(|v| {
-            //agent_guard.set_connection_listener(v.as_ref());
-        });
-        self.message_listeners.iter().map(|v| {
-            //agent_guard.set_message_listener(v);
-        });
-        self.channel_listeners.iter().map(|v| {
-            // agent_guard.set_channel_listener(v);
-        });
-        self.contact_listeners.iter().map(|v| {
-            //agent_guard.set_contact_listener(v);
-        });
+
+        while let Some(cb) = self.connection_listeners.pop() {
+            agent_guard.add_connection_listener(cb);
+        }
+        while let Some(cb) = self.profile_listeners.pop() {
+            agent_guard.add_profile_listener(cb);
+        }
+        while let Some(cb) = self.message_listeners.pop() {
+            agent_guard.add_message_listener(cb);
+        }
+        while let Some(cb) = self.channel_listeners.pop() {
+            agent_guard.add_channel_listener(cb);
+        }
+        while let Some(cb) = self.contact_listeners.pop() {
+            agent_guard.add_contact_listener(cb);
+        }
 
         return Ok(agent.clone())
     }
@@ -426,7 +430,6 @@ impl<'a> Builder<'a> {
             }
         };
         self.repository = Some(repos);
-
         self.user.as_ref().map(|user| {
             if agent.user().is_none() {
                 agent.set_user(
@@ -442,29 +445,36 @@ impl<'a> Builder<'a> {
         //    agent.getDevice().setIdentity(deviceNode);
 
         self.device.as_ref().map(|device| {
+            println!(">>>>>1111 called.");
             if agent.device().is_none() {
-                agent.set_device(
+                println!(">>>>>2222 called.");
+                _ = agent.set_device(
                     device.clone(),
                     self.device_name.as_ref().map(|v| v.into()).unwrap_or_default(),
                     self.app_name.clone(),
-                ).unwrap();
+                );
             } else {
                 error!("Device is already set in the agent, ignoring the device profile");
             }
+
+            println!(">>>>>3333 called. agent.user():{}", agent.user().is_some());
         });
 
-        self.connection_listeners.iter().for_each(|v| {
-            //agent.set_connection_listener(v.as_ref());
-        });
-        self.message_listeners.iter().map(|v| {
-            //agent.set_message_listener(v);
-        });
-        self.channel_listeners.iter().map(|v| {
-            // agent.set_channel_listener(v);
-        });
-        self.contact_listeners.iter().map(|v| {
-            //agent.set_contact_listener(v);
-        });
+        while let Some(cb) = self.connection_listeners.pop() {
+            agent.add_connection_listener(cb);
+        }
+        while let Some(cb) = self.profile_listeners.pop() {
+            agent.add_profile_listener(cb);
+        }
+        while let Some(cb) = self.message_listeners.pop() {
+            agent.add_message_listener(cb);
+        }
+        while let Some(cb) = self.channel_listeners.pop() {
+            agent.add_channel_listener(cb);
+        }
+        while let Some(cb) = self.contact_listeners.pop() {
+            agent.add_contact_listener(cb);
+        }
 
         Ok(Arc::new(Mutex::new(agent)))
     }
@@ -503,6 +513,9 @@ impl<'a> Builder<'a> {
             false => self.build_user_agent().await
         }?;
 
+        self.user_agent = Some(agent.clone());
+
+        println!(" >>>>>4444 called. agent.user():{}", agent.lock().unwrap().user().is_some());
         self.register_agent(agent).await?;
         Client::new(self)
     }
@@ -511,7 +524,7 @@ impl<'a> Builder<'a> {
         APIClient::service_ids(url).await
     }
 
-    pub(crate) fn user_agent(&self) -> Option<Arc<Mutex<DefaultUserAgent>>> {
-        self.user_agent.clone()
+    pub(crate) fn user_agent(&self) -> Option<Arc<Mutex<dyn UserAgent>>> {
+        self.user_agent.as_ref().map(|v| v.clone())
     }
 }

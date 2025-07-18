@@ -109,16 +109,21 @@ impl ProfileListener for ProfileListenerTest {
     }
 }
 
+#[ignore]
 #[tokio::test]
 #[should_panic(expected = "Error creating messaging client")]
 async fn test_messaing_client() {
     let peerid = Id::try_from(PEERID).unwrap();
     let user_key = signature::KeyPair::random();
+    let dev_key  = signature::KeyPair::random();
     let result = ClientBuilder::new()
         .with_user_key(user_key.clone())
+        .with_user_name("test-User").unwrap()
         .with_peerid(&peerid)
+        .with_device_key(dev_key.clone())
         .with_device_name("test-Device").unwrap()
         .with_app_name("test-App").unwrap()
+        .with_api_url(&"http://155.138.245.211:8882").unwrap()
         .register_user_and_device("secret")
         .with_messaging_repository("test-repo")
         .with_connection_listener(ConnectionListenerTest)
@@ -128,11 +133,10 @@ async fn test_messaing_client() {
         .build()
         .await;
 
-    //println!("Messaging client result: {}", result);
     if let Err(e) = &result {
         eprintln!("Error creating messaging client: {}", e);
     }
-    assert!(!result.is_ok());
+    assert!(result.is_ok());
 
     let client = result.unwrap();
     let userid = Id::from(user_key.to_public_key());

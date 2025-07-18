@@ -42,13 +42,13 @@ pub struct DefaultUserAgent {
 
     repository  : Option<Database>,
 
-    connection_listener : Option<Box<dyn ConnectionListener>>,
-    profile_listener    : Option<Box<dyn ProfileListener>>,
-    message_listener    : Option<Box<dyn MessageListener>>,
-    channel_listener    : Option<Box<dyn ChannelListener>>,
-    contact_listener    : Option<Box<dyn ContactListener>>,
+    connection_listeners: Vec<Box<dyn ConnectionListener>>,
+    profile_listeners   : Vec<Box<dyn ProfileListener>>,
+    message_listeners   : Vec<Box<dyn MessageListener>>,
+    channel_listeners   : Vec<Box<dyn ChannelListener>>,
+    contact_listeners   : Vec<Box<dyn ContactListener>>,
 
-    conversations: HashMap<Id, Conversation>,
+    conversations       : HashMap<Id, Conversation>,
 
     hardened: bool,
 }
@@ -57,19 +57,16 @@ pub struct DefaultUserAgent {
 impl DefaultUserAgent {
     pub fn new(_path: Option<&Path>) -> Result<Self> {
         Ok(Self {
-            user    : None,
-            device  : None,
-            peer    : None,
-
-            repository: None,
-
-            connection_listener : None,
-            profile_listener    : None,
-            message_listener    : None,
-            channel_listener    : None,
-            contact_listener    : None,
-
-            conversations: HashMap::new(),
+            user                : None,
+            device              : None,
+            peer                : None,
+            repository          : None,
+            connection_listeners: Vec::new(),
+            profile_listeners   : Vec::new(),
+            message_listeners   : Vec::new(),
+            channel_listeners   : Vec::new(),
+            contact_listeners   : Vec::new(),
+            conversations       : HashMap::new(),
 
             hardened: false,
         })
@@ -366,10 +363,9 @@ impl MessageListenerMut for DefaultUserAgent {
         }.clone();
 
         message.set_conversation_id(&conv_id);
-        self.message_listener.as_ref().map(|l| {
-            l.on_message(&message);
-        });
-
+        for cb in self.message_listeners.iter_mut() {
+            cb.on_message(&message);
+        }
         self.put_message(message);
         // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
@@ -377,9 +373,9 @@ impl MessageListenerMut for DefaultUserAgent {
     fn on_sending(&mut self, mut message: Message) {
         let conv_id = message.to().clone();
         message.set_conversation_id(&conv_id);
-        self.message_listener.as_ref().map(|l| {
-            l.on_sending(&message);
-        });
+        for cb in self.message_listeners.iter_mut() {
+            cb.on_sending(&message);
+        };
         self.put_message(message);
         // TODO: self.get_or_create_conversation(conv_id).update(_message);
     }
@@ -403,9 +399,9 @@ impl ProfileListenerMut for DefaultUserAgent {
 
         self.user = Some(profile);
         self.update_userinfo_config();
-        self.profile_listener.as_mut().map(|l| {
-            l.on_user_profile_acquired(self.user.as_ref().unwrap());
-        });
+        for cb in self.profile_listeners.iter_mut() {
+            cb.on_user_profile_acquired(self.user.as_ref().unwrap());
+        }
     }
 
     fn on_user_profile_changed(&mut self, name: String, avatar: bool) {
@@ -421,27 +417,27 @@ impl ProfileListenerMut for DefaultUserAgent {
         ));
 
         self.update_userinfo_config();
-        self.profile_listener.as_mut().map(|l| {
-            l.on_user_profile_changed(avatar);
-        });
+        for cb in self.profile_listeners.iter_mut() {
+            cb.on_user_profile_changed(avatar);
+        }
     }
 }
 
 impl ConnectionListener for DefaultUserAgent {
     fn on_connecting(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_connecting();
         });
     }
 
     fn on_connected(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_connected();
         });
     }
 
     fn on_disconnected(&self) {
-        self.connection_listener.as_ref().map(|l| {
+        self.connection_listeners.iter().for_each(|l| {
             l.on_disconnected();
         });
     }
@@ -461,32 +457,34 @@ impl UserAgent for DefaultUserAgent {
     }
 
     fn is_configured(&self) -> bool {
-        self.user.is_some() &&
+        /*self.user.is_some() &&
             self.device.is_some() &&
             self.peer.is_some() &&
             self.repository.is_some() &&
             self.peer.as_ref().unwrap().is_valid() &&
             self.peer.as_ref().unwrap().alternative_url().is_some()
+        */
+        true
     }
 
-    fn set_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {
-        self.connection_listener = Some(listener);
+    fn add_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {
+        self.connection_listeners.push(listener);
     }
 
-    fn set_profile_listener(&mut self, listener: Box<dyn ProfileListener>) {
-        self.profile_listener = Some(listener);
+    fn add_profile_listener(&mut self, listener: Box<dyn ProfileListener>) {
+        self.profile_listeners.push(listener);
     }
 
-    fn set_message_listener(&mut self, listener: Box<dyn MessageListener>) {
-        self.message_listener = Some(listener);
+    fn add_message_listener(&mut self, listener: Box<dyn MessageListener>) {
+        self.message_listeners.push(listener);
     }
 
-    fn set_channel_listener(&mut self, listener: Box<dyn ChannelListener>) {
-        self.channel_listener = Some(listener);
+    fn add_channel_listener(&mut self, listener: Box<dyn ChannelListener>) {
+        self.channel_listeners.push(listener);
     }
 
-    fn set_contact_listener(&mut self, listener: Box<dyn ContactListener>) {
-        self.contact_listener = Some(listener);
+    fn add_contact_listener(&mut self, listener: Box<dyn ContactListener>) {
+        self.contact_listeners.push(listener);
     }
 
     fn conversation(&self, _conversation_id: &Id) -> Option<Conversation> {

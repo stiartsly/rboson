@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
+use std::process::exit;
 use clap::Parser;
 
 use boson::{
@@ -41,16 +42,18 @@ struct Options {
 
 fn main() {
     let opts = Options::parse();
-    let mut b = cfg::Builder::new();
-    b.load(&opts.config)
-        .map_err(|e| panic!("{e}"))
-        .unwrap();
+    let cfg  = cfg::Builder::new()
+        .load(&opts.config).map_err(|e| {
+            println!("Error loading configuration: {}", e);
+            exit(-1)
+        }).unwrap()
+        .with_data_dir(
+            opts.storage.as_deref().unwrap_or("~/.boson")
+        ).build().map_err(|e| {
+            println!("Error building configuration: {}", e);
+            exit(-1)
+        }).unwrap();
 
-    if let Some(path) = opts.storage.as_ref() {
-        b.with_data_dir(path);
-    }
-
-    let cfg  = b.build().unwrap();
     let result = Node::new(&cfg);
     if let Err(e) = result {
         panic!("Creating Node instance error: {e}")

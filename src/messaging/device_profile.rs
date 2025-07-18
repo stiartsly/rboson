@@ -4,6 +4,7 @@ use crate::{
     core::CryptoIdentity,
 };
 
+#[derive(Debug, Clone)]
 pub struct DeviceProfile {
     identity: Option<CryptoIdentity>,
     name    : String,

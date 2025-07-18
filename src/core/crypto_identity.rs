@@ -19,8 +19,10 @@ impl CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())
     }
 
-    pub fn from_private_key(private_key: &signature::PrivateKey) -> CryptoIdentity {
-        Self::from_keypair(signature::KeyPair::from(private_key))
+    pub fn from_private_key(private_key: &[u8]) -> Result<CryptoIdentity> {
+        Ok(Self::from_keypair(
+            signature::KeyPair::try_from(private_key)?
+        ))
     }
 
     pub fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {

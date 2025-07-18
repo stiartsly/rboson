@@ -353,9 +353,9 @@ impl APIClient {
         })?;
 
         let token = data.token;
-        self.access_token_refresh_handler.as_ref().map(|v| {
-            v(&token);
-        });
+        //self.access_token_refresh_handler.as_ref().map(|v| {
+        //    v(&token);
+        //});
 
         Ok(UserProfile::new(
             self.user.clone(),

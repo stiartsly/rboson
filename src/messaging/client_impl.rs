@@ -45,7 +45,7 @@ use super::{
 };
 
 #[allow(dead_code)]
-pub struct Client{
+pub struct Client {
 
     runtime         : Runtime,
 
@@ -59,8 +59,8 @@ pub struct Client{
 
     service_info    : Option<PeerInfo>,
 
-    self_context    : CryptoContext,
     server_context  : CryptoContext,
+    self_context    : CryptoContext,
 
     api_client      : APIClient,
     disconnect      : bool,
@@ -69,7 +69,6 @@ pub struct Client{
     mqtt_client     : Option<MqttClient>,
 
     user_agent      : Arc<Mutex<DefaultUserAgent>>
-
 }
 
 #[allow(dead_code)]

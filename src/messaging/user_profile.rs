@@ -6,8 +6,8 @@ use crate::core::{
 #[derive(Debug, Clone)]
 pub struct UserProfile {
     identity: CryptoIdentity,
-    name: String,
-    avatar: bool
+    name    : String,
+    avatar  : bool
 }
 
 impl UserProfile {

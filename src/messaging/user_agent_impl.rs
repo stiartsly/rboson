@@ -7,11 +7,8 @@ use crate::{
     unwrap,
     Id,
     PeerInfo,
-    error::Result,
-    Error,
-    signature::PrivateKey,
-    core::crypto_identity::CryptoIdentity,
-    messaging::user_agent::UserAgent,
+    core::{Error, Result},
+    core::CryptoIdentity
 };
 
 use crate::messaging::{
@@ -23,6 +20,7 @@ use crate::messaging::{
     ContactListener,
     ConnectionListener,
     MessageListener,
+    user_agent::UserAgent,
 };
 
 use super::{
@@ -238,12 +236,12 @@ impl DefaultUserAgent {
         let user = repo.get_config_mult::<UserInfo>(".user").map_err(|e|
             Error::State("Load user profile failed, error {e}".into())
         )?;
-        let sk = PrivateKey::try_from(user.privateKey.as_slice()).map_err(|e|
-            Error::State("Invalid private key: {e}".into())
-        )?;
+        let identity = CryptoIdentity::from_private_key(user.privateKey.as_slice()).map_err(|e| {
+            Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
+        })?;
 
         let user = UserProfile::new(
-            CryptoIdentity::from_private_key(&sk),
+            identity,
             user.name,
             user.avatar
         );
@@ -260,12 +258,12 @@ impl DefaultUserAgent {
         let device = repo.get_config_mult::<DeviceInfo>(".device").map_err(|e|
             Error::State("Load device profile failed, error {e}".into())
         )?;
-        let sk = PrivateKey::try_from(device.privateKey.as_slice()).map_err(|e|
-            Error::State("Invalid private key: {e}".into())
-        )?;
+        let identity = CryptoIdentity::from_private_key(device.privateKey.as_slice()).map_err(|e| {
+            Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
+        })?;
 
         let device = DeviceProfile::new(
-            CryptoIdentity::from_private_key(&sk),
+            identity,
             device.name,
             device.app
         );

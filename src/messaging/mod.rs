@@ -89,6 +89,11 @@ pub use crate::{
     messaging::invite_ticket::InviteTicket,
 
     messaging::channel::{Role, Member, Permission, Channel},
+    messaging::message::{
+        Message,
+        ContentType,
+        ContentDisposition
+    },
 };
 
 #[cfg(test)]

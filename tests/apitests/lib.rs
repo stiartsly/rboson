@@ -27,6 +27,11 @@ mod did {
     mod diddoc;
 }
 
+#[cfg(test)]
+mod messaging {
+    mod client;
+}
+
 // helper functions
 fn local_addr(ipv4: bool) -> Option<std::net::IpAddr>{
     let if_addrs = match get_if_addrs::get_if_addrs() {

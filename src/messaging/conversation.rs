@@ -13,6 +13,7 @@ use crate::{
 pub static MAX_SNIPPET_LENGTH: usize = 128;
 pub static DEFAULT_AVATAR: Option<String> = None;
 
+#[derive(Debug)]
 pub struct Conversation {
     interlocutor    : Contact,
     last_message    : Option<Message>,

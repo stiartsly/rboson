@@ -55,11 +55,11 @@ pub struct Builder<'a> {
     repository  : Option<Database>,
     repository_db: Option<&'a str>,
 
-    connection_listener : Option<Box<dyn ConnectionListener>>,
-    message_listener    : Option<Box<dyn MessageListener>>,
-    channel_listener    : Option<Box<dyn ChannelListener>>,
-    profile_listener    : Option<Box<dyn ProfileListener>>,
-    contact_listener    : Option<Box<dyn ContactListener>>,
+    connection_listeners: Vec<Box<dyn ConnectionListener>>,
+    message_listeners   : Vec<Box<dyn MessageListener>>,
+    channel_listeners   : Vec<Box<dyn ChannelListener>>,
+    profile_listeners   : Vec<Box<dyn ProfileListener>>,
+    contact_listeners   : Vec<Box<dyn ContactListener>>,
 
     user_agent  : Option<Arc<Mutex<DefaultUserAgent>>>
 }
@@ -89,19 +89,24 @@ impl<'a> Builder<'a> {
             repository          : None,
             repository_db       : None,
 
-            connection_listener : None,
-            message_listener    : None,
-            profile_listener    : None,
-            channel_listener    : None,
-            contact_listener    : None,
+            connection_listeners: Vec::new(),
+            message_listeners   : Vec::new(),
+            profile_listeners   : Vec::new(),
+            channel_listeners   : Vec::new(),
+            contact_listeners   : Vec::new(),
 
             user_agent          : None,
         }
     }
 
-    pub fn with_user_key(&mut self, keypair: &KeyPair) -> &mut Self {
-        self.user = Some(CryptoIdentity::from_keypair(keypair.clone()));
+    pub fn with_user_key(&mut self, keypair: KeyPair) -> &mut Self {
+        self.user = Some(CryptoIdentity::from_keypair(keypair));
         self
+    }
+
+    pub fn with_user_key_from_sk(&mut self, sk: &[u8]) -> Result<&mut Self> {
+        self.user = Some(CryptoIdentity::from_private_key(sk)?);
+        Ok(self)
     }
 
     pub fn with_new_user_key(&mut self) -> &mut Self {
@@ -113,17 +118,25 @@ impl<'a> Builder<'a> {
         self.user.as_ref()
     }
 
-    pub fn with_user_name(&mut self, name: &str) -> &mut Self {
+    pub fn with_user_name(&mut self, name: &str) -> Result<&mut Self> {
+        if name.is_empty() {
+            return Err(Error::State("User name cannot be empty".into()));
+        }
         self.user_name = Some(name.nfc().collect::<String>());
-        self
+        Ok(self)
     }
 
     pub fn user_name(&self) -> Option<&str> {
         self.user_name.as_ref().map(|v| v.as_str())
     }
 
-    pub fn with_device_key(&mut self, keypair: &KeyPair) -> &mut Self {
-        self.device = Some(CryptoIdentity::from_keypair(keypair.clone()));
+    pub fn with_device_key_from_sk(&mut self, sk: &[u8]) -> Result<&mut Self> {
+        self.device = Some(CryptoIdentity::from_private_key(sk)?);
+        Ok(self)
+    }
+
+    pub fn with_device_key(&mut self, keypair: KeyPair) -> &mut Self {
+        self.device = Some(CryptoIdentity::from_keypair(keypair));
         self
     }
 
@@ -140,18 +153,24 @@ impl<'a> Builder<'a> {
         unimplemented!()
     }
 
-    pub fn with_device_name(&mut self, name: &str) -> &mut Self {
+    pub fn with_device_name(&mut self, name: &str) -> Result<&mut Self> {
+        if name.is_empty() {
+            Err(Error::State("Device name cannot be empty".into()))?;
+        }
         self.device_name = Some(name.nfc().collect::<String>());
-        self
+        Ok(self)
     }
 
     pub fn device_name(&self) -> Option<&str> {
         self.device_name.as_ref().map(|v| v.as_str())
     }
 
-    pub fn with_app_name(&mut self, name: &str) -> &mut Self {
+    pub fn with_app_name(&mut self, name: &str) -> Result<&mut Self> {
+        if name.is_empty() {
+            Err(Error::State("App name cannot be empty".into()))?;
+        }
         self.app_name = Some(name.nfc().collect::<String>());
-        self
+        Ok(self)
     }
 
     pub fn app_name(&self) -> Option<&str> {
@@ -170,7 +189,10 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn register_device_registration_request_handler(&mut self, handler: Box<dyn Fn(&str,bool) + Send + Sync>) -> &mut Self {
+    pub fn register_device_with_registration_request_handler(
+        &mut self,
+        handler: Box<dyn Fn(&str,bool) + Send + Sync>
+    ) -> &mut Self {
         self.registration_request_handler = Some(handler);
         self.register_device = true;
         self
@@ -185,7 +207,6 @@ impl<'a> Builder<'a> {
         self.peerid
     }
 
-    // TODO: do we need this API ?
     pub fn with_nodeid(&mut self, id: &'a Id) -> &mut Self {
         self.nodeid = Some(id);
         self
@@ -195,11 +216,16 @@ impl<'a> Builder<'a> {
         self.nodeid
     }
 
-    pub fn with_api_url(&mut self, url: &str) -> &mut Self {
-        if let Ok(url) = Url::parse(url) {
-            self.api_url = Some(url);
-        }
-        self
+    pub fn with_api_url<T>(&mut self, url: &T) -> Result<&mut Self>
+    where
+       T: AsRef<str> {
+
+        let url = Url::parse(url.as_ref()).map_err(|e| {
+            Error::State(format!("Failed to parse API URL: {e}"))
+        })?;
+
+        self.api_url = Some(url);
+        Ok(self)
     }
 
     pub fn api_url(&self) -> Option<&Url> {
@@ -211,43 +237,105 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn with_connection_listener(&mut self, listener: impl ConnectionListener + 'static) -> &mut Self {
-        self.connection_listener = Some(Box::new(listener));
+    pub fn with_connection_listener(
+        &mut self,
+        listener: impl ConnectionListener + 'static
+    ) -> &mut Self {
+        self.connection_listeners.push(Box::new(listener));
         self
     }
 
-    pub fn with_profile_listener(&mut self, listener: impl ProfileListener + 'static) -> &mut Self {
-        self.profile_listener = Some(Box::new(listener));
+    pub fn with_connection_listeners(
+        &mut self,
+        listeners: Vec<Box<dyn ConnectionListener>>
+    ) -> &mut Self {
+        self.connection_listeners.extend(listeners);
         self
     }
 
-    pub fn with_message_listener(&mut self, listener: impl MessageListener + 'static ) -> &mut Self {
-        self.message_listener = Some(Box::new(listener));
+    pub fn with_profile_listener(
+        &mut self,
+        listener: impl ProfileListener + 'static
+    ) -> &mut Self {
+        self.profile_listeners.push(Box::new(listener));
         self
     }
 
-    pub fn with_channel_listener(&mut self, listener: impl ChannelListener + 'static ) -> &mut Self {
-        self.channel_listener = Some(Box::new(listener));
+    pub fn with_profile_listeners(
+        &mut self,
+        listeners: Vec<Box<dyn ProfileListener>>
+    ) -> &mut Self {
+        self.profile_listeners.extend(listeners);
         self
     }
 
-    pub fn with_contact_listener(&mut self, listener: impl ContactListener + 'static) -> &mut Self {
-        self.contact_listener = Some(Box::new(listener));
+    pub fn with_message_listener(
+        &mut self,
+        listener: impl MessageListener + 'static
+    ) -> &mut Self {
+        self.message_listeners.push(Box::new(listener));
         self
     }
 
-    pub(crate) fn with_user_agent(&mut self, agent: Arc<Mutex<DefaultUserAgent>>) -> &mut Self {
+    pub fn with_message_listeners(
+        &mut self,
+        listeners: Vec<Box<dyn MessageListener>>
+    ) -> &mut Self {
+        self.message_listeners.extend(listeners);
+        self
+    }
+
+    pub fn with_channel_listener(
+        &mut self,
+        listener: impl ChannelListener + 'static
+    ) -> &mut Self {
+        self.channel_listeners.push(Box::new(listener));
+        self
+    }
+
+    pub fn with_channel_listeners(
+        &mut self,
+        listeners: Vec<Box<dyn ChannelListener>>
+    ) -> &mut Self {
+        self.channel_listeners.extend(listeners);
+        self
+    }
+
+    pub fn with_contact_listener(
+        &mut self,
+        listener: impl ContactListener + 'static
+    ) -> &mut Self {
+        self.contact_listeners.push(Box::new(listener));
+        self
+    }
+
+    pub fn with_contact_listeners(
+        &mut self,
+        listeners: Vec<Box<dyn ContactListener>>
+    ) -> &mut Self {
+        self.contact_listeners.extend(listeners);
+        self
+    }
+
+    pub(crate) fn with_user_agent(
+        &mut self,
+        agent: Arc<Mutex<DefaultUserAgent>>
+    ) -> &mut Self {
         self.user_agent = Some(agent);
         self
     }
 
     async fn eligible_check(&self) -> Result<()> {
-        if self.repository.is_none() || self.repository_db.is_none() {
+        if self.user_agent.is_some() {
+            return Ok(())   // assuming the userAgent is configured
+        }
+
+        if self.repository.is_none() && self.repository_db.is_none() {
             return Err(Error::State("Messaging repository is not configured".into()));
         }
 
-        let mut device_check = false;
-        let mut peer_check = false;
+        let mut device_checked = false;
+        let mut peer_checked = false;
 
         if self.register_user_and_device {
             if self.user.is_none() {
@@ -257,11 +345,11 @@ impl<'a> Builder<'a> {
                 return Err(Error::State("Passphrase is not configured".into()));
             }
 
-            device_check = true;
-            peer_check = true;
+            device_checked = true;
+            peer_checked = true;
         }
 
-        if self.register_device || device_check {
+        if self.register_device || device_checked {
             if self.device.is_none() {
                 return Err(Error::State("Device key is not configured".into()));
             }
@@ -275,14 +363,14 @@ impl<'a> Builder<'a> {
                 return Err(Error::State("User name is not configured".into()));
             }
             if self.user.is_none() && self.registration_request_handler.is_none() {
-                return Err(Error::State("User registration request handler is set".into()));
+                return Err(Error::State("User registration request handler is not configured".into()));
             }
-            peer_check = true;
+            peer_checked = true;
         }
 
-        if peer_check {
+        if peer_checked {
             if self.peerid.is_none() {
-                return Err(Error::State("Peer ID is not configured".into()));
+                return Err(Error::State("Peer id is not configured".into()));
             }
             if self.device_node.is_none() &&  self.api_url.is_none() {
                 return Err(Error::State("API URL is not configured".into()));
@@ -292,10 +380,8 @@ impl<'a> Builder<'a> {
                 if self.device_node.is_none() && self.api_url.is_none() {
                     return Err(Error::State("API URL is not configured".into()));
                 }
-            } else {
-                if self.api_url.is_some() {
-                    return Err(Error::State("Peer id is not configured".into()));
-                }
+            } else if self.api_url.is_some() {
+                return Err(Error::State("Peer id is not configured".into()));
             }
         }
         Ok(())
@@ -303,30 +389,30 @@ impl<'a> Builder<'a> {
 
     async fn setup_user_agent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>>  {
         let Some(agent) = self.user_agent.as_ref() else {
-            return Err(Error::State("User agent is not set up yet".into()));
+            panic!("User agent is not set up yet");
         };
 
         let mut agent_guard = agent.lock().unwrap();
         if !agent_guard.is_configured() {
             return Err(Error::State("User agent is not configured yet".into()));
         }
-        self.connection_listener.take().map(|v|{
-            agent_guard.set_connection_listener(v);
+        self.connection_listeners.iter().for_each(|v| {
+            //agent_guard.set_connection_listener(v.as_ref());
         });
-        self.message_listener.take().map(|v| {
-            agent_guard.set_message_listener(v);
+        self.message_listeners.iter().map(|v| {
+            //agent_guard.set_message_listener(v);
         });
-        self.channel_listener.take().map(|v| {
-            agent_guard.set_channel_listener(v);
+        self.channel_listeners.iter().map(|v| {
+            // agent_guard.set_channel_listener(v);
         });
-        self.contact_listener.take().map(|v| {
-            agent_guard.set_contact_listener(v);
+        self.contact_listeners.iter().map(|v| {
+            //agent_guard.set_contact_listener(v);
         });
 
         return Ok(agent.clone())
     }
 
-    async fn build_default_user_agent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
+    async fn build_user_agent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
         let mut agent = DefaultUserAgent::new(None)?;
         let repos = match self.repository.take() {
             Some(r) => r,
@@ -342,33 +428,44 @@ impl<'a> Builder<'a> {
         self.repository = Some(repos);
 
         self.user.as_ref().map(|user| {
-            agent.set_user(user.clone(), self.user_name.as_ref().map(|v|v.into()).unwrap())
+            if agent.user().is_none() {
+                agent.set_user(
+                    user.clone(),
+                    self.user_name.as_ref().map(|v| v.into()).unwrap_or_default()
+                );
+            } else {
+                error!("User is already set in the agent, ignoring the user profile");
+            }
         });
 
-        /*
-        if (deviceNode != null && agent.getDevice() != null)
-            agent.getDevice().setIdentity(deviceNode);
+        // if (deviceNode != null && agent.getDevice() != null)
+        //    agent.getDevice().setIdentity(deviceNode);
 
-        if (device != null) {
-            if (agent.getDevice() == null)
-                agent.setDevice(device, deviceName, appName);
-            else
-                log.warn("Messaging repository is configured, device profile will be ignored");
-        }
-         */
+        self.device.as_ref().map(|device| {
+            if agent.device().is_none() {
+                agent.set_device(
+                    device.clone(),
+                    self.device_name.as_ref().map(|v| v.into()).unwrap_or_default(),
+                    self.app_name.clone(),
+                ).unwrap();
+            } else {
+                error!("Device is already set in the agent, ignoring the device profile");
+            }
+        });
 
-        if let Some(listener) = self.connection_listener.take() {
-            agent.set_connection_listener(listener);
-        }
-        if let Some(listener) = self.message_listener.take() {
-            agent.set_message_listener(listener);
-        }
-        if let Some(listener) = self.channel_listener.take() {
-            agent.set_channel_listener(listener);
-        }
-        if let Some(listener) = self.contact_listener.take() {
-            agent.set_contact_listener(listener);
-        }
+        self.connection_listeners.iter().for_each(|v| {
+            //agent.set_connection_listener(v.as_ref());
+        });
+        self.message_listeners.iter().map(|v| {
+            //agent.set_message_listener(v);
+        });
+        self.channel_listeners.iter().map(|v| {
+            // agent.set_channel_listener(v);
+        });
+        self.contact_listeners.iter().map(|v| {
+            //agent.set_contact_listener(v);
+        });
+
         Ok(Arc::new(Mutex::new(agent)))
     }
 
@@ -392,7 +489,6 @@ impl<'a> Builder<'a> {
                 self.app_name.as_ref().unwrap(),
             ).await?;
         }
-
         Ok(())
     }
 
@@ -404,18 +500,18 @@ impl<'a> Builder<'a> {
 
         let agent = match self.user_agent.is_some() {
             true => self.setup_user_agent().await,
-            false => self.build_default_user_agent().await
+            false => self.build_user_agent().await
         }?;
 
         self.register_agent(agent).await?;
         Client::new(self)
     }
 
-    pub(crate) fn user_agent(&self) -> Option<Arc<Mutex<DefaultUserAgent>>> {
-        self.user_agent.as_ref().map(|v| v.clone())
-    }
-
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
         APIClient::service_ids(url).await
+    }
+
+    pub(crate) fn user_agent(&self) -> Option<Arc<Mutex<DefaultUserAgent>>> {
+        self.user_agent.clone()
     }
 }

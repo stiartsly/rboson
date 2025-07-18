@@ -15,6 +15,7 @@ use crate::messaging::{
 };
 
 #[allow(unused)]
+#[derive(Debug)]
 pub(crate) struct Database {
 }
 

@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use static_assertions::const_assert;
 use std::fmt;
 use std::mem;
@@ -35,60 +36,6 @@ const_assert!(Signature::BYTES == crypto_sign_BYTES as usize);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivateKey([u8; Self::BYTES]);
-
-impl TryFrom<&[u8]> for PrivateKey {
-    type Error = Error;
-    fn try_from(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
-                "Incorrect private key size {}, should be {}",
-                bytes.len(),
-                Self::BYTES
-            )));
-        }
-        Ok(PrivateKey(bytes.try_into().unwrap()))
-    }
-}
-
-impl TryFrom<&str> for PrivateKey {
-    type Error = Error;
-    fn try_from(input: &str) -> Result<Self> {
-        let mut bytes = vec![0u8; Self::BYTES];
-        match input.starts_with("0x") {
-            true => {
-                _ = hex::decode_to_slice(&input[2..], &mut bytes[..])
-                .map_err(|e| match e {
-                    FromHexError::InvalidHexCharacter { c, index } => {
-                        Error::Argument(format!("Invalid hex character {} at position {}", c, index))
-                    },
-                    FromHexError::OddLength => {
-                        Error::Argument(format!("Odd hex string length {}", input.len()))
-                    },
-                    FromHexError::InvalidStringLength => {
-                        Error::Argument(format!("Invalid hex string length"))
-                    }
-                })?;
-            },
-            false => {
-                _ = bs58::decode(input)
-                .with_alphabet(bs58::Alphabet::DEFAULT)
-                .onto(&mut bytes[..])
-                .map_err(|e| match e {
-                    decode::Error::BufferTooSmall => {
-                        Error::Argument(format!("Invalid base58 string length"))
-                    },
-                    decode::Error::InvalidCharacter { character, index } => {
-                        Error::Argument(format!("Invalid base58 character {} at {}", character, index))
-                    },
-                    _ => {
-                        Error::Argument(format!("Invalid base58 with unknown error"))
-                    }
-                })?
-            }
-        };
-        Ok(PrivateKey(bytes.try_into().unwrap()))
-    }
-}
 
 impl PrivateKey {
     pub const BYTES: usize = 64;
@@ -139,6 +86,67 @@ impl PrivateKey {
 
     pub fn to_hexstr(&self) -> String {
         format!("0x{}", hex::encode(self.0))
+    }
+}
+
+impl TryFrom<&[u8]> for PrivateKey {
+    type Error = Error;
+    fn try_from(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != Self::BYTES {
+            return Err(Error::Argument(format!(
+                "Incorrect private key size {}, should be {}",
+                bytes.len(),
+                Self::BYTES
+            )));
+        }
+        Ok(PrivateKey(bytes.try_into().unwrap()))
+    }
+}
+
+impl TryFrom<&str> for PrivateKey {
+    type Error = Error;
+    fn try_from(input: &str) -> Result<Self> {
+        let mut bytes = vec![0u8; Self::BYTES];
+        match input.starts_with("0x") {
+            true => {
+                hex::decode_to_slice(&input[2..], &mut bytes[..])
+                .map_err(|e| match e {
+                    FromHexError::InvalidHexCharacter { c, index } => {
+                        Error::Argument(format!("Invalid hex character {} at position {}", c, index))
+                    },
+                    FromHexError::OddLength => {
+                        Error::Argument(format!("Odd hex string length {}", input.len()))
+                    },
+                    FromHexError::InvalidStringLength => {
+                        Error::Argument(format!("Invalid hex string length"))
+                    }
+                })?;
+            },
+            false => {
+                bs58::decode(input)
+                .with_alphabet(bs58::Alphabet::DEFAULT)
+                .onto(&mut bytes[..])
+                .map_err(|e| match e {
+                    decode::Error::BufferTooSmall => {
+                        Error::Argument(format!("Invalid base58 string length"))
+                    },
+                    decode::Error::InvalidCharacter { character, index } => {
+                        Error::Argument(format!("Invalid base58 character {} at {}", character, index))
+                    },
+                    _ => {
+                        Error::Argument(format!("Invalid base58 with unknown error"))
+                    }
+                })?;
+            }
+        };
+        Ok(PrivateKey(bytes.try_into().unwrap()))
+    }
+}
+
+impl FromStr for PrivateKey {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
     }
 }
 
@@ -229,7 +237,6 @@ impl fmt::Display for PublicKey {
 #[derive(Clone, Debug)]
 pub struct KeyPair(PrivateKey, PublicKey);
 
-//pub fn from_private_key_bytes(input: &[u8]) -> Self {
 impl TryFrom<&[u8]> for KeyPair {
     type Error = Error;
 
@@ -254,20 +261,6 @@ impl TryFrom<&[u8]> for KeyPair {
             PrivateKey::try_from(sk).unwrap(),
             PublicKey(pk)
         ))
-    }
-}
-
-impl From<&PrivateKey> for KeyPair {
-    fn from(sk: &PrivateKey) -> Self {
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe { // Always success
-            crypto_sign_ed25519_sk_to_pk(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk.as_bytes())
-            );
-        }
-        KeyPair(sk.clone(), PublicKey(pk))
     }
 }
 
@@ -353,6 +346,29 @@ impl KeyPair {
     pub fn clear(&mut self) {
         self.0.clear();
         self.1.clear();
+    }
+}
+
+impl From<&PrivateKey> for KeyPair {
+    fn from(sk: &PrivateKey) -> Self {
+        let mut pk = [0u8; PublicKey::BYTES];
+
+        unsafe { // Always success
+            crypto_sign_ed25519_sk_to_pk(
+                as_uchar_ptr_mut!(pk),
+                as_uchar_ptr!(sk.as_bytes())
+            );
+        }
+        KeyPair(sk.clone(), PublicKey(pk))
+    }
+}
+
+impl FromStr for KeyPair {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let sk = PrivateKey::try_from(s)?;
+        Ok(KeyPair::from(&sk))
     }
 }
 

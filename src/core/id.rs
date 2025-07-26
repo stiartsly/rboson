@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::str::FromStr;
+use std::ops::Deref;
 use std::fmt;
 use core::result;
 use ciborium::value::Value;
@@ -232,6 +233,12 @@ impl FromStr for Id {
 impl From<signature::PublicKey> for Id {
     fn from(pk: signature::PublicKey) -> Self {
         Id(pk.0)
+    }
+}
+impl Deref for Id {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

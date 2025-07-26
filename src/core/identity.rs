@@ -1,7 +1,8 @@
-use super::{
+use crate::{
     Id,
-    Error, Result,
-    CryptoContext
+    Error,
+    CryptoContext,
+    core::Result,
 };
 
 pub trait Identity {

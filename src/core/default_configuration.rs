@@ -6,7 +6,7 @@ use std::net::{
     Ipv6Addr,
     SocketAddr
 };
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use log::LevelFilter;
 
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
     dht::DEFAULT_DHT_PORT,
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct NodeItem {
     #[serde(rename = "id")]
     #[serde(deserialize_with = "Id::deserialize")]
@@ -41,7 +41,7 @@ impl fmt::Display for NodeItem {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct LogCfg {
     #[serde(rename = "level")]
     level   : String,
@@ -52,7 +52,7 @@ struct LogCfg {
     deserde_level: Option<LevelFilter>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct UserCfg {
     #[serde(rename = "name")]
     name    :   Option<String>,
@@ -62,7 +62,7 @@ struct UserCfg {
     sk      : String
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ActiveProxyCfg {
     #[serde(rename = "serverPeerId")]
     server_peerid   : String,
@@ -77,13 +77,13 @@ struct ActiveProxyCfg {
     upstream_port   : u16
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct MessagingCfg {
     #[serde(rename = "serverPeerId")]
     server_peerid: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Configuration {
     #[serde(rename = "ipv4")]
     ipv4        : bool,
@@ -141,7 +141,7 @@ impl<'a> Builder<'a> {
             ipv4_str    : None,
             ipv6_str    : None,
             port        : DEFAULT_DHT_PORT,
-            data_dir    : None, //env::var("HOME").unwrap_or_else(|_| ".".into()),
+            data_dir    : None,
             log_level   : None,
             log_file    : None,
             bootstraps  : Vec::new(),
@@ -415,20 +415,9 @@ impl MessagingConfig for MessagingCfg {
 
 impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.deserde_addr4.as_ref().map(|addr| {
-            write!(f, "ipv4:{},", addr).ok();
-        });
-        self.deserde_addr6.as_ref().map(|addr| {
-            write!(f, "ipv6:{},", addr).ok();
-        });
-
-        write!(f, "\tstore:{},", self.data_dir)?;
-        write!(f, "\tbootstraps: [")?;
-        for item in self.bootstraps.iter() {
-            write!(f, "\t{}, ", item)?;
+        match serde_json::to_string(&self) {
+            Ok(s) => write!(f, "{}", s),
+            Err(_) => Err(fmt::Error),
         }
-        // TODO:
-        write!(f, "]")?;
-        Ok(())
     }
 }

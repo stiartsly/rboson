@@ -41,6 +41,22 @@ const_assert!(CryptoBox::MAC_BYTES == crypto_box_MACBYTES as usize);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivateKey([u8; Self::BYTES]);
 
+impl PrivateKey {
+    pub const BYTES: usize = 32;
+
+    pub const fn size(&self) -> usize {
+        Self::BYTES
+    }
+
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.fill(0);
+    }
+}
+
 impl TryFrom<&[u8]> for PrivateKey {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
@@ -75,22 +91,6 @@ impl TryFrom<&signature::PrivateKey> for PrivateKey {
     }
 }
 
-impl PrivateKey {
-    pub const BYTES: usize = 32;
-
-    pub const fn size(&self) -> usize {
-        Self::BYTES
-    }
-
-    pub const fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-
-    pub fn clear(&mut self) {
-        self.0.fill(0);
-    }
-}
-
 impl Drop for PrivateKey {
     fn drop(&mut self) {
         self.clear();
@@ -107,6 +107,22 @@ impl fmt::Display for PrivateKey {
 pub struct PublicKey(
     pub(crate) [u8; Self::BYTES]
 );
+
+impl PublicKey {
+    pub const BYTES: usize = 32;
+
+    pub const fn size(&self) -> usize {
+        Self::BYTES
+    }
+
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.fill(0);
+    }
+}
 
 impl TryFrom<&[u8]> for PublicKey {
     type Error = Error;
@@ -142,22 +158,6 @@ impl TryFrom<&signature::PublicKey> for PublicKey {
     }
 }
 
-impl PublicKey {
-    pub const BYTES: usize = 32;
-
-    pub const fn size(&self) -> usize {
-        Self::BYTES
-    }
-
-    pub const fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-
-    pub fn clear(&mut self) {
-        self.0.fill(0);
-    }
-}
-
 impl Drop for PublicKey {
     fn drop(&mut self) {
         self.clear();
@@ -173,20 +173,6 @@ impl fmt::Display for PublicKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Nonce([u8; Self::BYTES]);
-
-impl TryFrom<&[u8]> for Nonce {
-    type Error = Error;
-    fn try_from(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
-                "Incorrect nonce key size {}, expected {}",
-                bytes.len(),
-                Self::BYTES
-            )));
-        }
-        Ok(Nonce(bytes.try_into().unwrap()))
-    }
-}
 
 impl Nonce {
     pub const BYTES: usize = 24;
@@ -220,6 +206,20 @@ impl Nonce {
     }
 }
 
+impl TryFrom<&[u8]> for Nonce {
+    type Error = Error;
+    fn try_from(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != Self::BYTES {
+            return Err(Error::Argument(format!(
+                "Incorrect nonce key size {}, expected {}",
+                bytes.len(),
+                Self::BYTES
+            )));
+        }
+        Ok(Nonce(bytes.try_into().unwrap()))
+    }
+}
+
 impl Drop for Nonce {
     fn drop(&mut self) {
         self.clear();
@@ -235,65 +235,6 @@ impl std::fmt::Display for Nonce {
 
 #[derive(Debug, Clone)]
 pub struct KeyPair(PrivateKey, PublicKey);
-
-impl TryFrom<&[u8]> for KeyPair {
-    type Error = Error;
-    fn try_from(sk: &[u8]) -> Result<Self> {
-        if sk.len() != PrivateKey::BYTES {
-            return Err(Error::Argument(
-                format!("Invalid private key size {}, expected: {}",
-                    sk.len(),
-                    PrivateKey::BYTES
-                )
-            ));
-        }
-
-        let mut pk = [0u8; PublicKey::BYTES];
-        unsafe {
-            crypto_scalarmult_base(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk)
-            );
-        }
-
-        Ok(KeyPair(
-            PrivateKey::try_from(sk).unwrap(),
-            PublicKey(pk)
-        ))
-    }
-}
-
-impl From<&PrivateKey> for KeyPair {
-    fn from(sk: &PrivateKey) -> Self {
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            crypto_scalarmult_base(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk.as_bytes())
-            );
-        }
-
-        KeyPair(
-            sk.clone(),
-            PublicKey(pk)
-        )
-    }
-}
-
-impl From<&signature::KeyPair> for KeyPair {
-    fn from(kp: &signature::KeyPair) -> Self {
-        let mut x25519 = [0u8; PrivateKey::BYTES];
-
-        unsafe {
-            crypto_sign_ed25519_sk_to_curve25519(
-                as_uchar_ptr_mut!(x25519),
-                as_uchar_ptr!(kp.private_key().as_bytes()),
-            );
-        }
-        Self::try_from(x25519.as_slice()).unwrap()
-    }
-}
 
 impl KeyPair {
     pub const SEED_BYTES: usize = 32;
@@ -374,6 +315,65 @@ impl KeyPair {
     }
 }
 
+impl TryFrom<&[u8]> for KeyPair {
+    type Error = Error;
+    fn try_from(sk: &[u8]) -> Result<Self> {
+        if sk.len() != PrivateKey::BYTES {
+            return Err(Error::Argument(
+                format!("Invalid private key size {}, expected: {}",
+                    sk.len(),
+                    PrivateKey::BYTES
+                )
+            ));
+        }
+
+        let mut pk = [0u8; PublicKey::BYTES];
+        unsafe {
+            crypto_scalarmult_base(
+                as_uchar_ptr_mut!(pk),
+                as_uchar_ptr!(sk)
+            );
+        }
+
+        Ok(KeyPair(
+            PrivateKey::try_from(sk).unwrap(),
+            PublicKey(pk)
+        ))
+    }
+}
+
+impl From<&PrivateKey> for KeyPair {
+    fn from(sk: &PrivateKey) -> Self {
+        let mut pk = [0u8; PublicKey::BYTES];
+
+        unsafe {
+            crypto_scalarmult_base(
+                as_uchar_ptr_mut!(pk),
+                as_uchar_ptr!(sk.as_bytes())
+            );
+        }
+
+        KeyPair(
+            sk.clone(),
+            PublicKey(pk)
+        )
+    }
+}
+
+impl From<&signature::KeyPair> for KeyPair {
+    fn from(kp: &signature::KeyPair) -> Self {
+        let mut x25519 = [0u8; PrivateKey::BYTES];
+
+        unsafe {
+            crypto_sign_ed25519_sk_to_curve25519(
+                as_uchar_ptr_mut!(x25519),
+                as_uchar_ptr!(kp.private_key().as_bytes()),
+            );
+        }
+        Self::try_from(x25519.as_slice()).unwrap()
+    }
+}
+
 impl Drop for KeyPair {
     fn drop(&mut self) {
         self.clear();
@@ -382,27 +382,6 @@ impl Drop for KeyPair {
 
 #[derive(Debug)]
 pub struct CryptoBox([u8; Self::SYMMETRIC_KEY_BYTES]);
-
-impl TryFrom<(&PublicKey, &PrivateKey)> for CryptoBox {
-    type Error = Error;
-    fn try_from(kp: (&PublicKey, &PrivateKey)) -> Result<Self> {
-        let mut key = [0u8; Self::SYMMETRIC_KEY_BYTES];
-        let rc = unsafe {
-            crypto_box_beforenm(
-                as_uchar_ptr_mut!(key),
-                as_uchar_ptr!(kp.0.as_bytes()),
-                as_uchar_ptr!(kp.1.as_bytes()),
-            )
-        };
-        if rc != 0 {
-            return Err(Error::Crypto(format!(
-                "Compute symmetric key failed, wrong public key or private key"
-            )));
-        }
-
-        Ok(CryptoBox(key))
-    }
-}
 
 impl CryptoBox {
     pub const SYMMETRIC_KEY_BYTES: usize = 32;
@@ -487,6 +466,27 @@ impl CryptoBox {
     ) -> Result<Vec<u8>> {
         let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
         self.decrypt(cipher, plain.as_mut()).map(|_| plain)
+    }
+}
+
+impl TryFrom<(&PublicKey, &PrivateKey)> for CryptoBox {
+    type Error = Error;
+    fn try_from(kp: (&PublicKey, &PrivateKey)) -> Result<Self> {
+        let mut key = [0u8; Self::SYMMETRIC_KEY_BYTES];
+        let rc = unsafe {
+            crypto_box_beforenm(
+                as_uchar_ptr_mut!(key),
+                as_uchar_ptr!(kp.0.as_bytes()),
+                as_uchar_ptr!(kp.1.as_bytes()),
+            )
+        };
+        if rc != 0 {
+            return Err(Error::Crypto(format!(
+                "Compute symmetric key failed, wrong public key or private key"
+            )));
+        }
+
+        Ok(CryptoBox(key))
     }
 }
 

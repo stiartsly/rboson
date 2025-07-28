@@ -1,7 +1,10 @@
+use std::sync::{Arc, Mutex};
 use crate::{
     Id,
     signature,
-    PeerBuilder
+    configuration as cfg,
+    config::Config,
+    dht::Node,
 };
 
 use crate::messaging::{
@@ -114,29 +117,39 @@ impl ProfileListener for ProfileListenerTest {
     }
 }
 
-#[ignore]
 #[tokio::test]
-async fn test_messaing_client() {
-    let nodeid = Id::random();
-    let url = "http://155.138.245.211:8882";
-    let peer = PeerBuilder::new(&nodeid)
-        .with_port(65534)
-        .with_alternative_url(Some(url))
-        .build();
+async fn test_messaging_client() {
+    let cfg  = cfg().expect("Failed to load configuration");
+    let node = node(&cfg).await.expect("Failed to create node");
+
+    let Some(mcfg) = cfg.messaging() else {
+        panic!("Messaging item not found in config file");
+    };
+
+    let peerid = Id::try_from(mcfg.server_peerid())
+        .map_err(|e| panic!("{e}"))
+        .unwrap();
+
+    let peer = node.lock().unwrap()
+        .find_peer(&peerid, Some(4), None)
+        .await
+        .expect("Failed to find peer")
+        .pop()
+        .expect("No peer found");
 
     let user_key = signature::KeyPair::random();
     let dev_key  = signature::KeyPair::random();
     let result = ClientBuilder::new()
         .with_user_key(user_key.clone())
         .with_user_name("test-User").unwrap()
-        .with_messaging_peer(peer).unwrap()
-        .with_messaging_nodeid(&nodeid)
+        .with_messaging_peer(peer.clone()).unwrap()
         .with_device_key(dev_key.clone())
         .with_device_name("test-Device").unwrap()
         .with_app_name("test-App").unwrap()
-        .with_api_url(&"http://155.138.245.211:8882").unwrap()
-        .register_user_and_device("secret")
+        .with_api_url(peer.alternative_url().as_ref().unwrap_or(&BASE_URL)).unwrap()
+        .with_registering_user("secret")
         .with_messaging_repository("test-repo")
+        .with_device_node(node.clone())
         .with_connection_listener(ConnectionListenerTest)
         .with_message_listener(MessageListenerTest)
         .with_contact_listener(ContactListenerTest)
@@ -164,6 +177,34 @@ async fn test_messaing_client() {
         eprintln!("Error connecting messaging client: {}", e);
     }
     assert!(result.is_ok());
+    println!(">>>>> finished connecting");
+    sleep(Duration::from_secs(2)).await;
 
-    sleep(Duration::from_secs(10)).await;
+    client.stop(true).await;
+    node.lock().unwrap().stop();
+    crate::remove_working_path(".test-client");
+}
+
+fn cfg() -> Option<Box<dyn Config>> {
+    cfg::Builder::new()
+            .load_json(r#"{"ipv4":true,"ipv6":false,"port":39013,"dataDir":".test-client","logger":{"level":"debug","logFile":"im.log"},"user":{"name":"test","password":"password","privateKey":"0xee37341d0b203a4d2616ef22ba1ee92555c228a71c26e76f12c8b6b3c91872d928097a509df05df3c95d7c1516ec03bf9d387b7c29016defb7d0f1f7a2c9227f"},"bootstraps":[{"id":"HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ","address":"155.138.245.211","port":39001},{"id":"6o6LkHgLyD5sYyW9iN5LNRYnUoX29jiYauQ5cDjhCpWQ","address":"45.32.138.246","port":39001},{"id":"8grFdb2f6LLJajHwARvXC95y73WXEanNS1rbBAZYbC5L","address":"140.82.57.197","port":39001}],"messaging":{"serverPeerId":"G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ"}}"#)
+            .map_err(|e| panic!("{e}"))
+            .unwrap()
+            .build()
+            .map_err(|e| panic!("{e}"))
+            .ok()
+}
+
+async fn node(cfg: &Box<dyn Config>) -> Option<Arc<Mutex<Node>>> {
+    let node = Node::new(cfg)
+        .map_err(|e| {
+            panic!("Creating boson Node instance error: {e}")
+        }).ok()
+        .map(|node| {
+            node.start();
+            node
+        });
+
+    sleep(Duration::from_secs(2)).await;
+    node.map(Mutex::new).map(Arc::new)
 }

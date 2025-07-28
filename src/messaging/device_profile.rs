@@ -45,7 +45,7 @@ impl DeviceProfile {
         &self.name
     }
 
-    pub fn app(&self) -> Option<&str> {
+    pub fn app_name(&self) -> Option<&str> {
         self.app.as_deref()
     }
 }

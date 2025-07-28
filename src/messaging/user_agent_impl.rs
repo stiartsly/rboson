@@ -174,7 +174,7 @@ impl DefaultUserAgent {
         let user = DeviceInfo {
             privateKey: unwrap!(unwrap!(self.device).identity()).keypair().private_key().as_bytes(),
             name: unwrap!(self.device).name(),
-            app: unwrap!(self.device).app()
+            app: unwrap!(self.device).app_name()
         };
 
         self.repository.as_ref().map(|v| {
@@ -454,14 +454,16 @@ impl UserAgent for DefaultUserAgent {
     }
 
     fn is_configured(&self) -> bool {
-        /*self.user.is_some() &&
+        self.user.is_some() &&
             self.device.is_some() &&
             self.peer.is_some() &&
-            self.repository.is_some() &&
-            self.peer.as_ref().unwrap().is_valid() &&
-            self.peer.as_ref().unwrap().alternative_url().is_some()
-        */
-        true
+            //self.repository.is_some() &&
+            self.peer().is_valid() &&
+            self.peer().alternative_url().is_some()
+    }
+
+    fn harden(&mut self) {
+        self.hardened = true;
     }
 
     fn add_connection_listener(&mut self, listener: Box<dyn ConnectionListener>) {

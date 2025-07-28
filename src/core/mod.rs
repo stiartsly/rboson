@@ -50,6 +50,8 @@ pub use crate::core::{
         SignedBuilder,
         EncryptedBuilder
     },
+
+    config::Config,
 };
 
 #[cfg(test)]

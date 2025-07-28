@@ -1,16 +1,19 @@
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
-use tokio::runtime::Runtime;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 use log::{debug, info, error};
+use tokio::task::JoinHandle;
 use rumqttc::{
     MqttOptions,
     AsyncClient,
-    SubscribeFilter
+    SubscribeFilter,
+    Event,
+    Packet
 };
+use md5;
 
 use crate::{
     Id,
@@ -40,8 +43,6 @@ use crate::{
 
 #[allow(dead_code)]
 pub struct Client {
-    runtime         : Option<Runtime>,
-
     peer            : PeerInfo,
     user            : CryptoIdentity,
     device          : CryptoIdentity,
@@ -59,6 +60,7 @@ pub struct Client {
     disconnect      : bool,
 
     mqtt_client     : Option<AsyncClient>,
+    task_handler    : Option<JoinHandle<()>>,
 
     user_agent      : Arc<Mutex<dyn UserAgent>>,
 }
@@ -77,10 +79,9 @@ impl Client {
         let device = agent.device().unwrap().identity().unwrap().clone();
 
         drop(agent);
-        user_agent.lock().unwrap().harden();
 
         let api_client = api_client::Builder::new()
-            .with_base_url(b.api_url().unwrap())
+            .with_base_url(b.api_url())
             .with_home_peerid(peer.id())
             .with_user_identity(&user)
             .with_device_identity(&device)
@@ -89,9 +90,7 @@ impl Client {
             .build()?;
 
         let client_id = bs58::encode({
-            let mut sha256 = Sha256::new();
-            sha256.update(device.id().as_bytes());
-            sha256.finalize().as_slice()
+            md5::compute(device.id().as_bytes()).0
         }).into_string();
 
         let bs58_userid = user.id().to_base58();
@@ -113,15 +112,17 @@ impl Client {
             api_client,
 
             mqtt_client : None,
+            task_handler: None,
 
             self_context,
             server_context,
-            runtime     : None,
         })
     }
 
     fn mqttc(&mut self) -> &AsyncClient {
-        self.mqtt_client.as_ref().expect("MQTT Async client should be created")
+        self.mqtt_client
+            .as_ref()
+            .expect("MQTT Async client should be created")
     }
 
     fn next_index(&mut self) -> u32 { 0 }
@@ -157,9 +158,19 @@ impl Client {
         Ok(())
     }
 
-    pub async fn stop(&mut self) {
+    pub async fn stop(&mut self, forced: bool) {
         // TODO: server context cleanup if needed.
 
+        info!("Stopping messaging client ...");
+        if let Some(handle) = self.task_handler.take() {
+            if forced {
+                handle.abort()
+            };
+            handle.await.ok();
+        };
+
+        info!("Messaging client stopped ...");
+        self.task_handler = None;
         self.mqtt_client = None;
     }
 
@@ -177,8 +188,8 @@ impl Client {
         );
 
         pswd.extend_from_slice(nonce.as_bytes());
-        pswd.extend_from_slice(&usr_sig);
-        pswd.extend_from_slice(&dev_sig);
+        pswd.extend_from_slice(usr_sig.as_slice());
+        pswd.extend_from_slice(dev_sig.as_slice());
 
         bs58::encode(pswd).into_string()
     }
@@ -268,17 +279,40 @@ impl Client {
         );
 
         self.mqtt_client = Some(mqtt_client);
-        tokio::spawn(async move {
+        self.task_handler = Some(tokio::spawn(async move {
             loop {
                 let result = eventloop.poll().await;
                 if let Err(e) = result {
                     error!("MQTT event loop error: {}", e);
                     break;
                 }
-                let events = result.unwrap();
-                println!("Received = {:?}", events);
+                let event = result.unwrap();
+                println!("Received = {:?}", event);
+                match event {
+                    Event::Incoming(event) => {
+                        match event {
+                            Packet::SubAck(ack) => {
+                                info!("Subscription acknowledged: {:?}", ack);
+                            },
+                            Packet::UnsubAck(ack) => {
+                                info!("Unsubscription acknowledged: {:?}", ack);
+                            },
+                            Packet::Disconnect => {
+                                info!("Disconnected from the MQTT broker");
+                                break;
+                            },
+                            Packet::PingResp => {
+                                info!("Ping response received");
+                            },
+                            _ => {
+                                info!("Unknown Mqtt event: {:?}", event);
+                            }
+                        }
+                    },
+                    _ => {}
+                }
             }
-        });
+        }));
         Ok(())
     }
 
@@ -306,13 +340,13 @@ impl Client {
             SubscribeFilter::new("broadcast".to_string(), rumqttc::QoS::AtLeastOnce),
         ];
         self.mqttc().subscribe_many(topics).await.map(|_| {
-                info!("Subscribed to the messages successfully");
-            }).map_err(|e| {
-                let errstr = format!("Failed to connect to the messaging server: {}", e);
-                error!("{}", errstr);
-                self.user_agent.lock().unwrap().on_disconnected();
-                Error::State(errstr)
-            })
+            info!("Subscribed to the messages successfully");
+        }).map_err(|e| {
+            let errstr = format!("Failed to connect to the messaging server: {}", e);
+            error!("{}", errstr);
+            self.user_agent.lock().unwrap().on_disconnected();
+            Error::State(errstr)
+        })
     }
 }
 

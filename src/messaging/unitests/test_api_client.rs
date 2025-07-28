@@ -77,7 +77,7 @@ async fn test_register_device_with_user() {
         .build();
 
     let result = client2.unwrap()
-        .register_device_with_user("password", "test-Device2", "test-App")
+        .register_device("password", "test-Device2", "test-App")
         .await;
     assert!(result.is_ok());
 
@@ -125,7 +125,7 @@ async fn test_regsister_device_request() {
     assert!(result.is_ok());
 
     let registration_id = result.unwrap();
-    let result = client2.finish_register_device_request(&registration_id, 0).await;
+    let result = client2.finish_register_device_request(&registration_id, None).await;
     println!("result: {:?}", result);
     assert!(result.is_ok());
 }

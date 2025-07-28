@@ -5,7 +5,7 @@ use crate::unwrap;
 use super::{
     cryptobox,
     signature,
-    Id, ID_BYTES,
+    Id,
     signature::{
         KeyPair,
         PrivateKey
@@ -360,25 +360,18 @@ impl Value {
     }
 
     pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
-        let mut len = 0;
+        let mut sha256 = Sha256::new();
+        if let Some(pk) = self.pk.as_ref() {
+            sha256.update(pk.as_bytes());
 
-        len += match self.is_encrypted() {
-            true => ID_BYTES,
-            false => 0,
-        };
-        len += cryptobox::Nonce::BYTES;
-        len += std::mem::size_of::<i32>();
-        len += self.data.len();
-
-        let mut input = Vec::with_capacity(len);
-        if self.is_encrypted() {
-            input.extend_from_slice(unwrap!(self.recipient).as_bytes());
+            if let Some(rec) = self.recipient.as_ref() {
+                sha256.update(rec.as_bytes());
+            }
+            sha256.update(self.nonce.as_ref().unwrap().as_bytes());
+            sha256.update(self.seq.to_le_bytes().as_ref());
         }
-        input.extend_from_slice(unwrap!(self.nonce).as_bytes());
-        input.extend_from_slice(self.seq.to_le_bytes().as_ref());
-        input.extend_from_slice(self.data.as_ref());
-
-        input
+        sha256.update(self.data.as_slice());
+        sha256.finalize().to_vec()
     }
 }
 

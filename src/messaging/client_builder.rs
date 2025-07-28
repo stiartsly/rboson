@@ -45,7 +45,7 @@ pub struct Builder {
     register_device     : bool,
 
     // handler for device registration to acquire user's keypair
-    registration_request_handler: Option<Box<dyn Fn(&str, bool) + Send + Sync>>,
+    registration_request_handler: Option<Box<dyn Fn(&str) -> Result<bool> + Send + Sync>>,
 
     messaging_peer      : Option<PeerInfo>,
     messaging_nodeid    : Option<Id>,
@@ -60,7 +60,8 @@ pub struct Builder {
     profile_listeners   : Vec<Box<dyn ProfileListener>>,
     contact_listeners   : Vec<Box<dyn ContactListener>>,
 
-    user_agent          : Option<Arc<Mutex<DefaultUserAgent>>>,
+    node                : Option<Arc<Mutex<Node>>>,
+    user_agent          : Option<Arc<Mutex<dyn UserAgent>>>
 }
 
 #[allow(unused)]
@@ -95,6 +96,7 @@ impl Builder {
             contact_listeners   : Vec::new(),
 
             user_agent          : None,
+            node                : None,
         }
     }
 
@@ -103,7 +105,7 @@ impl Builder {
         self
     }
 
-    pub fn with_user_key_from_sk(&mut self, sk: &[u8]) -> Result<&mut Self> {
+    pub fn with_user_private_key(&mut self, sk: &[u8]) -> Result<&mut Self> {
         self.user = Some(CryptoIdentity::from_private_key(sk)?);
         Ok(self)
     }
@@ -129,7 +131,7 @@ impl Builder {
         self.user_name.as_ref().map(|v| v.as_str())
     }
 
-    pub fn with_device_key_from_sk(&mut self, sk: &[u8]) -> Result<&mut Self> {
+    pub fn with_device_private_key(&mut self, sk: &[u8]) -> Result<&mut Self> {
         self.device = Some(CryptoIdentity::from_private_key(sk)?);
         Ok(self)
     }
@@ -149,7 +151,8 @@ impl Builder {
     }
 
     pub fn with_device_node(&mut self, node: Arc<Mutex<Node>>) -> &mut Self {
-        unimplemented!()
+        self.node = Some(node.clone());
+        self
     }
 
     pub fn with_device_name(&mut self, name: &str) -> Result<&mut Self> {
@@ -176,21 +179,21 @@ impl Builder {
         self.app_name.as_ref().map(|v| v.as_str())
     }
 
-    pub fn register_user_and_device(&mut self, passphrase: &str) -> &mut Self {
+    pub fn with_registering_user(&mut self, passphrase: &str) -> &mut Self {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_user_and_device = true;
         self
     }
 
-    pub fn register_device(&mut self, passphrase: &str) -> &mut Self  {
+    pub fn with_registering_device(&mut self, passphrase: &str) -> &mut Self  {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_device = true;
         self
     }
 
-    pub fn register_device_with_registration_request_handler(
+    pub fn with_device_registering_request_handler(
         &mut self,
-        handler: Box<dyn Fn(&str,bool) + Send + Sync>
+        handler: Box<dyn Fn(&str) -> Result<bool> + Send + Sync>
     ) -> &mut Self {
         self.registration_request_handler = Some(handler);
         self.register_device = true;
@@ -208,25 +211,29 @@ impl Builder {
     }
 
     pub fn peer(&self) -> Option<&PeerInfo> {
+        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
         self.messaging_peer.as_ref()
     }
 
-    pub fn peerid(&self) -> Option<&Id> {
-        self.messaging_peer.as_ref().map(|p| p.id())
+    pub fn peerid(&self) -> &Id {
+        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
+        self.messaging_peer.as_ref().unwrap().id()
     }
 
-    pub fn with_messaging_nodeid(&mut self, id: &Id) -> &mut Self {
+    /*pub fn with_messaging_nodeid(&mut self, id: &Id) -> &mut Self {
         self.messaging_nodeid = Some(id.clone());
         self
     }
+    */
 
-    pub fn nodeid(&self) -> Option<&Id> {
-        self.messaging_nodeid.as_ref()
+    pub fn nodeid(&self) -> &Id {
+        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
+        unwrap!(self.messaging_peer).id()
     }
 
-    pub fn with_api_url<T>(&mut self, url: &T) -> Result<&mut Self>
+    pub fn with_api_url<S>(&mut self, url: S) -> Result<&mut Self>
     where
-       T: AsRef<str> {
+       S: AsRef<str> {
 
         let url = Url::parse(url.as_ref()).map_err(|e| {
             Error::State(format!("Failed to parse API URL: {e}"))
@@ -236,8 +243,9 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn api_url(&self) -> Option<&Url> {
-        self.api_url.as_ref()
+    pub fn api_url(&self) -> &Url {
+        assert!(self.api_url.is_some(), "API URL is not set");
+        unwrap!(self.api_url)
     }
 
     pub fn with_messaging_repository(&mut self, path: &str) -> &mut Self {
@@ -255,9 +263,9 @@ impl Builder {
 
     pub fn with_connection_listeners(
         &mut self,
-        listeners: Vec<Box<dyn ConnectionListener>>
+        listeners: &mut Vec<Box<dyn ConnectionListener>>
     ) -> &mut Self {
-        self.connection_listeners.extend(listeners);
+        self.connection_listeners.append(listeners);
         self
     }
 
@@ -271,9 +279,9 @@ impl Builder {
 
     pub fn with_profile_listeners(
         &mut self,
-        listeners: Vec<Box<dyn ProfileListener>>
+        listeners: &mut Vec<Box<dyn ProfileListener>>
     ) -> &mut Self {
-        self.profile_listeners.extend(listeners);
+        self.profile_listeners.append(listeners);
         self
     }
 
@@ -287,9 +295,9 @@ impl Builder {
 
     pub fn with_message_listeners(
         &mut self,
-        listeners: Vec<Box<dyn MessageListener>>
+        listeners: &mut Vec<Box<dyn MessageListener>>
     ) -> &mut Self {
-        self.message_listeners.extend(listeners);
+        self.message_listeners.append(listeners);
         self
     }
 
@@ -303,9 +311,9 @@ impl Builder {
 
     pub fn with_channel_listeners(
         &mut self,
-        listeners: Vec<Box<dyn ChannelListener>>
+        listeners: &mut Vec<Box<dyn ChannelListener>>
     ) -> &mut Self {
-        self.channel_listeners.extend(listeners);
+        self.channel_listeners.append(listeners);
         self
     }
 
@@ -319,21 +327,22 @@ impl Builder {
 
     pub fn with_contact_listeners(
         &mut self,
-        listeners: Vec<Box<dyn ContactListener>>
+        listeners: &mut Vec<Box<dyn ContactListener>>
     ) -> &mut Self {
-        self.contact_listeners.extend(listeners);
+        self.contact_listeners.append(listeners);
         self
     }
 
-    /*
-    pub(crate) fn with_user_agent(
+    pub(crate) fn with_user_agent<T>(
         &mut self,
-        agent: Arc<Mutex<DefaultUserAgent>>
-    ) -> &mut Self {
+        agent: Arc<Mutex<T>>
+    ) -> &mut Self
+    where
+        T: UserAgent + 'static,
+    {
         self.user_agent = Some(agent);
         self
     }
-    */
 
     async fn eligible_check(&self) -> Result<()> {
         if self.user_agent.is_some() {
@@ -349,10 +358,10 @@ impl Builder {
 
         if self.register_user_and_device {
             if self.user.is_none() {
-                return Err(Error::State("User key is not configured".into()));
+                Err(Error::State("User key is not configured".into()))?;
             }
             if self.passphrase.is_none() {
-                return Err(Error::State("Passphrase is not configured".into()));
+                Err(Error::State("Passphrase is not configured".into()))?;
             }
             device_check = true;
             peer_check = true;
@@ -360,16 +369,16 @@ impl Builder {
 
         if self.register_device || device_check {
             if self.device.is_none() {
-                return Err(Error::State("Device key is not configured".into()));
+                Err(Error::State("Device key is not configured".into()))?;
             }
             if self.device_name.is_none() {
-                return Err(Error::State("Device name is not configured".into()));
+                Err(Error::State("Device name is not configured".into()))?;
             }
             if self.app_name.is_none() {
-                return Err(Error::State("App name is not configured".into()));
+                Err(Error::State("App name is not configured".into()))?;
             }
             if self.user.is_some() && self.user_name.is_none() {
-                return Err(Error::State("User name is not configured".into()));
+                Err(Error::State("User name is not configured".into()))?;
             }
             if self.user.is_none() && self.registration_request_handler.is_none() {
                 return Err(Error::State("User registration request handler is not configured".into()));
@@ -381,47 +390,44 @@ impl Builder {
             if self.messaging_peer.is_none() {
                 return Err(Error::State("Peer id is not configured".into()));
             }
-            //if self.device_node.is_none() &&  self.api_url.is_none() {
             if self.api_url.is_none() {
                 return Err(Error::State("API URL is not configured".into()));
             }
-        } else {
-            // TODO:
-            panic!("Peer id is not configured, but it is required for the user agent");
         }
+
         Ok(())
     }
 
-    /*
-    async fn setup_user_agent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>>  {
-        let agent = self.user_agent.as_ref()
-                        .expect("User agent is not set up yet");
+    async fn setup_useragent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
+        let Some(agent) = self.user_agent.as_ref() else {
+            panic!("User agent is not set");
+        };
 
-        let mut agent_locked = agent.lock().unwrap();
-        if !agent_locked.is_configured() {
+        let mut locked = agent.lock().unwrap();
+        if !locked.is_configured() {
             Err(Error::State("User agent is not configured yet".into()))?;
         }
 
         while let Some(cb) = self.connection_listeners.pop() {
-            agent_locked.add_connection_listener(cb);
+            locked.add_connection_listener(cb);
         }
         while let Some(cb) = self.profile_listeners.pop() {
-            agent_locked.add_profile_listener(cb);
+            locked.add_profile_listener(cb);
         }
         while let Some(cb) = self.message_listeners.pop() {
-            agent_locked.add_message_listener(cb);
+            locked.add_message_listener(cb);
         }
         while let Some(cb) = self.channel_listeners.pop() {
-            agent_locked.add_channel_listener(cb);
+            locked.add_channel_listener(cb);
         }
         while let Some(cb) = self.contact_listeners.pop() {
-            agent_locked.add_contact_listener(cb);
+            locked.add_contact_listener(cb);
         }
 
-        return Ok(agent.clone())
-    }*/
+        Ok(agent.clone())
+    }
 
-    async fn build_user_agent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>> {
+    async fn build_useragent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
         let mut agent = DefaultUserAgent::new(None)?;
         let repos = match self.repository.take() {
             Some(r) => r,
@@ -434,6 +440,7 @@ impl Builder {
                 db
             }
         };
+
         self.repository = Some(repos);
         self.user.as_ref().map(|user| {
             if agent.user().is_none() {
@@ -446,8 +453,9 @@ impl Builder {
             }
         });
 
-        // if (deviceNode != null && agent.getDevice() != null)
-        //    agent.getDevice().setIdentity(deviceNode);
+        if self.device_node.is_some() && agent.device().is_none() {
+            //agent.getDevice().setIdentity(deviceNode);
+        }
 
         self.device.as_ref().map(|device| {
             if agent.device().is_none() {
@@ -485,39 +493,96 @@ impl Builder {
         Ok(Arc::new(Mutex::new(agent)))
     }
 
-    async fn register_agent(&self, _: Arc<Mutex<DefaultUserAgent>>) -> Result<()> {
+    async fn register_client(&mut self, agent: Arc<Mutex<dyn UserAgent>>) -> Result<()> {
+        self.user_agent = Some(agent.clone());
+
+        if !self.register_user_and_device && !self.register_device {
+            return Ok(()); // No registration needed
+        }
+
         let mut api_client = api_client::Builder::new()
-            .with_base_url(self.api_url.as_ref().unwrap())
-            .with_home_peerid(self.peerid().as_ref().unwrap())
+            .with_base_url(self.api_url())
+            .with_home_peerid(self.peerid())
             .with_user_identity(self.user.as_ref().unwrap())
             .with_device_identity(self.device.as_ref().unwrap())
             .build()
             .unwrap();
 
-        let user = unwrap!(self.user_agent).lock().unwrap().user();
-        let device = unwrap!(self.user_agent).lock().unwrap().device();
+        let user    = agent.lock().unwrap().user().cloned();
+        let device  = agent.lock().unwrap().device().cloned();
 
         if self.register_user_and_device {
             api_client.register_user_with_device(
-                self.passphrase.as_ref().unwrap(),
-                self.user_name.as_ref().unwrap(),
-                self.device_name.as_ref().unwrap(),
-                self.app_name.as_ref().unwrap(),
-            ).await?;
+                unwrap!(self.passphrase),
+                unwrap!(self.user_name),
+                unwrap!(self.device_name),
+                unwrap!(self.app_name),
+            ).await.map_err(|e| {
+                error!("Failed to register user and device: {{{e}}}");
+                e
+            })?;
+        }
+
+        if self.register_device {
+            if user.is_some() {
+                api_client.register_device(
+                    unwrap!(self.passphrase),
+                    unwrap!(device).name(),
+                    unwrap!(device).app_name().unwrap_or("")
+                ).await.map(|cred| {
+                    //agent.lock().unwrap().on_user_profile_acquired(cred.user());
+                    //agent.clone()
+                }).map_err(|e| {
+                    error!("Failed to register device with error : {{{e}}}");
+                    e
+                })?;
+            } else {
+                let rid = api_client.register_device_request(
+                    unwrap!(self.device_name),
+                    unwrap!(self.app_name)
+                ).await.map_err(|e| {
+                    error!("Failed to register device request: {e}");
+                    e
+                })?;
+
+                self.registration_request_handler.as_ref().map(
+                    |cb| cb(rid.as_str())
+                ).unwrap_or(Ok(true)).map(|finished| {
+                    match finished {
+                        true => {
+                            rid.clone();
+                            Ok(())
+                        },
+                        false => {
+                            error!("User cancelled the registration request");
+                            Err(Error::State("User cancelled the registration request".into()))
+                        }
+                    }
+                })?.map_err(|e| {
+                    error!("Failed to handle registration request: {e}");
+                    e
+                })?;
+
+                api_client.finish_register_device_request(&rid, None).await.map_err(|e| {
+                    error!("Failed to finish device registration request: {e}");
+                    e
+                })?;
+                //agent.lock().unwrap().on_user_profile_acquired(cred.user());
+            }
         }
         Ok(())
     }
 
     pub async fn build(&mut self) -> Result<Client> {
-        self.eligible_check().await.map_err(|e| {
-            error!("{e}");
-            e
-        })?;
+        self.eligible_check().await?;
 
-        let user_agent = self.build_user_agent().await?;
-        self.user_agent = Some(user_agent.clone());
-        self.register_agent(user_agent).await?;
+        let agent = match self.user_agent.is_some() {
+            true  => self.setup_useragent().await,
+            false => self.build_useragent().await,
+        }?;
 
+        self.register_client(agent.clone()).await?;
+        agent.lock().unwrap().harden();
         Client::new(self)
     }
 
@@ -525,7 +590,7 @@ impl Builder {
         APIClient::service_ids(url).await
     }
 
-    pub(crate) fn user_agent(&self) -> Arc<Mutex<DefaultUserAgent>> {
+    pub(crate) fn user_agent(&self) -> Arc<Mutex<dyn UserAgent>> {
         self.user_agent.as_ref().unwrap().clone()
     }
 }

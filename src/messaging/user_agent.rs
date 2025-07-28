@@ -24,6 +24,7 @@ pub trait UserAgent: ConnectionListener {
     fn peer(&self) -> &PeerInfo;
 
     fn is_configured(&self) -> bool;
+    fn harden(&mut self);
 
     fn add_connection_listener(&mut self, listener: Box<dyn ConnectionListener>);
     fn add_profile_listener(&mut self, listener: Box<dyn ProfileListener>);

@@ -1,8 +1,9 @@
 use std::time::Duration;
-use reqwest::Client;
-use url::Url;
+use reqwest::{StatusCode, Client};
 use serde::{Serialize, Deserialize};
 use serde_json::Map;
+use url::Url;
+use log::warn;
 
 use crate::{
     Id,
@@ -79,17 +80,17 @@ impl<'a> Builder<'a> {
 
     pub(crate) fn build(&mut self) -> Result<APIClient> {
         if self.peerid.is_none() {
-            return Err(Error::Argument("Home peer id is required".into()));
+            return Err(Error::Argument("Home peerid is missing".into()));
         };
         if self.user.is_none() {
-            return Err(Error::Argument("User identity is required".into()));
+            return Err(Error::Argument("User identity is missing".into()));
         };
         if self.device.is_none() {
-            return Err(Error::Argument("Device identity is required".into()));
+            return Err(Error::Argument("Device identity is missing".into()));
         };
 
         let Some(base_url) = self.base_url.as_ref() else {
-            return Err(Error::Argument("Base url is required".into()));
+            return Err(Error::Argument("Base url is missing".into()));
         };
         if base_url.scheme() != "http" && base_url.scheme() != "https" {
             return Err(Error::Argument("Invalid base url: scheme must be http or https".into()));
@@ -137,7 +138,7 @@ impl APIClient {
         })
     }
 
-     pub(crate) fn access_token(&self) -> Option<&str> {
+    pub(crate) fn access_token(&self) -> Option<&str> {
         self.access_token.as_deref()
     }
 
@@ -158,7 +159,7 @@ impl APIClient {
         let url = base_url.join("/api/v1/service/id").unwrap();
         let result = Client::builder()
             .user_agent("rboson")
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(Duration::from_secs(30))
             .build();
 
         let client = result.map_err(|e|
@@ -171,11 +172,11 @@ impl APIClient {
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
+            Error::State(format!("Sending http request error {e}"))
         })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
+            Error::State(format!("Received invalid http response {e}"))
         )?.json::<JsonServiceIds>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Deserialize json error {e}"))
         })?;
         data.ids()
     }
@@ -263,6 +264,7 @@ impl APIClient {
         let nonce = self.increment_nonce();
         let usr_sig = self.user.sign_into(nonce.as_bytes()).unwrap();
         let dev_sig = self.device.sign_into(nonce.as_bytes()).unwrap();
+
         let profile_sig = self.user.sign_into(&profile::digest(
             self.user.id(),
             &self.peerid,
@@ -293,18 +295,33 @@ impl APIClient {
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Sending http request error: {e}"))
         })?;
 
-        self.access_token = Some(data.token);
+        match data.error_for_status() {
+            Ok(v) => {
+                let data = v.json::<ResponseData>().await.map_err(|e| {
+                    Error::State(format!("Deserializing json error: {e}"))
+                })?;
+                self.access_token = Some(data.token);
+            },
+            Err(e) => {
+                match e.status().unwrap() {
+                    StatusCode::CONFLICT => {
+                        warn!("User already exists, trying to refresh access token");
+                        self.refresh_access_token().await?;
+                    },
+                    StatusCode::BAD_REQUEST |_ => {
+                        warn!("This may be caused by an invalid passphrase or device name, please check your input and try again.");
+                        Err(Error::State(format!("Received invalid http response with error: {e}")))?;
+                    },
+                }
+            }
+        }
         Ok(())
     }
 
-    pub(crate) async fn register_device_with_user(&mut self,
+    pub(crate) async fn register_device(&mut self,
         passphrase: &str,
         device_name: &str,
         app_name: &str
@@ -357,23 +374,26 @@ impl APIClient {
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Sending http request error {e}"))
         })?;
 
-        let token = data.token;
-        //self.access_token_refresh_handler.as_ref().map(|v| {
-        //    v(&token);
-        //});
-
-        Ok(UserProfile::new(
-            self.user.clone(),
-            data.userName,
-            data.avatar
-        ))
+        let profile = match data.error_for_status() {
+            Ok(v) => {
+                let data = v.json::<ResponseData>().await.map_err(|e| {
+                    Error::State(format!("Deserializing json error: {e}"))
+                })?;
+                self.access_token = Some(data.token);
+                UserProfile::new(
+                    self.user.clone(),
+                    data.userName,
+                    data.avatar
+                )
+            },
+            Err(e) => {
+                Err(Error::State(format!("Received invalid http response with error: {e}")))?
+            }
+        };
+        Ok(profile)
     }
 
     pub(crate) async fn register_device_request(&mut self,
@@ -418,18 +438,18 @@ impl APIClient {
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
+            Error::State(format!("Sending http request error {e}"))
         })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
+            Error::State(format!("Received invalid http response {e}"))
         )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Deserialize json error {e}"))
         })?;
         Ok(data.registrationId)
     }
 
     pub(crate) async fn finish_register_device_request(&mut self,
         registration_id: &str,
-        _timeout: u64
+        _timeout: Option<Duration>,
     ) -> Result<String> {
         #[derive(Serialize)]
         #[allow(non_snake_case)]

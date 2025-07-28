@@ -86,35 +86,31 @@ impl Msg for Message {
                             },
                             "p" => {
                                 let v = v.as_array()?;
-                                let peer_id = Id::from_cbor(v.get(0)?)?;
+                                let mut leading_peer = true;
+                                let mut peerid = None;
                                 for item in v.iter() {
-                                    if item.is_null() {
-                                        // Skip
-                                    } else if item.is_bytes() {
-                                        // Skip
-                                    } else if item.is_array() {
-                                        let v = item.as_array()?;
-                                        let id = Id::from_cbor(v.get(0)?)?;
-                                        let origin = match v.get(1)?.is_null() {
-                                            true => None,
-                                            false => Id::from_cbor(v.get(1)?)
-                                        };
-                                        let port = v.get(2)?.as_integer()?.try_into().unwrap();
-                                        let alt = v.get(3)?.as_text();
-                                        let sig = v.get(4)?.as_bytes()?;
-
-                                        let peer = PackBuilder::new(id)
-                                            .with_peerid(Some(peer_id.clone()))
-                                            .with_origin(origin)
-                                            .with_port(port)
-                                            .with_url(alt.map(|v|v.to_string()))
-                                            .with_sig(Some(sig.to_vec()))
-                                            .build();
-
-                                        self.peers.push(peer);
-                                    } else {
-                                        return None;
+                                    let v = item.as_array()?;
+                                    if leading_peer {
+                                        peerid = Some(Id::from_cbor(v.get(0)?)?);
+                                        leading_peer = false;
                                     }
+                                    let nodeid = Id::from_cbor(v.get(1)?)?;
+                                    let origin = match v.get(2)?.is_null() {
+                                        true => None,
+                                        false => Id::from_cbor(v.get(2)?)
+                                    };
+                                    let port = v.get(3)?.as_integer()?.try_into().unwrap();
+                                    let alt = v.get(4)?.as_text();
+                                    let sig = v.get(5)?.as_bytes()?;
+
+                                    let peer = PackBuilder::new(nodeid)
+                                        .with_peerid(peerid.clone())
+                                        .with_origin(origin)
+                                        .with_port(port)
+                                        .with_url(alt.map(|v|v.to_string()))
+                                        .with_sig(Some(sig.to_vec()))
+                                        .build();
+                                    self.peers.push(peer);
                                 };
                             }
                             _ => return None
@@ -130,12 +126,15 @@ impl Msg for Message {
     fn ser(&self) -> CVal {
         let mut array = vec![];
 
-        if self.peers.len() > 0 {
-            let peer_id = self.peers[0].id();
-            array.push(peer_id.to_cbor());
-        }
-
+        let mut leading_peer = true;
         self.peers.iter().for_each(|item| {
+            let peer_id = if leading_peer {
+                leading_peer = false;
+                item.id().to_cbor()
+            } else {
+                CVal::Null
+            };
+
             let nodeid  = item.nodeid().to_cbor();
             let port    = CVal::Integer(item.port().into());
             let sig     = CVal::Bytes(item.signature().to_vec());
@@ -147,6 +146,7 @@ impl Msg for Message {
                 .map_or(CVal::Null, |url|CVal::Text(url.to_string()));
 
             let mut peer = vec![];
+            peer.push(peer_id);
             peer.push(nodeid);
             peer.push(origin);
             peer.push(port);

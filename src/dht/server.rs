@@ -260,7 +260,7 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
     let plain = match decrypt(&from_id, &mut buf[id::ID_BYTES .. len]) {
         Ok(v) => v,
         Err(err) => {
-            warn!("Decrypt packet from {} error {}, ignored it", err, from);
+            warn!("Decrypt packet from {} error: {}, ignored it", from, err);
             return Ok(None);
         }
     };
@@ -394,7 +394,7 @@ where F: FnMut(&Id, &[u8]) -> Result<Vec<u8>, Error>
     let encrypted = match encrypt(msg.borrow().remote_id(), &plain) {
         Ok(v) => v,
         Err(e) => {
-            error!("Encrypting packet error {} for message {}", e, msg.borrow());
+            error!("Encrypting packet for message {} error: {}", msg.borrow(), e);
             return Ok(())
         },
     };

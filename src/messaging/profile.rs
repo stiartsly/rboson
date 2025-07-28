@@ -94,7 +94,7 @@ impl fmt::Display for Profile {
 }
 
 pub(crate) fn digest(id: &Id,
-    home_peerid: &Id,
+    peerid: &Id,
     name: Option<&str>,
     avatar: bool,
     notice: Option<&str>
@@ -102,14 +102,14 @@ pub(crate) fn digest(id: &Id,
 
     let mut sha256 = Sha256::new();
     sha256.update(id.as_bytes());
-    sha256.update(home_peerid.as_bytes());
+    sha256.update(peerid.as_bytes());
 
     name.map(|v| {
         sha256.update(v.nfc().collect::<String>().as_bytes());
     });
 
     let avatar: u8 = avatar as u8;
-    sha256.update(std::slice::from_ref(&avatar));
+    sha256.update(&[avatar]);
     notice.map(|v| {
         sha256.update(v.nfc().collect::<String>().as_bytes());
     });

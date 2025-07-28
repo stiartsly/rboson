@@ -2,12 +2,12 @@ use std::fmt;
 use std::mem;
 use std::hash::{Hash, Hasher};
 
+use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use ciborium::Value;
 
 use super::{
     Id,
-    ID_BYTES,
     signature,
     signature::{KeyPair, PrivateKey}
 };
@@ -147,7 +147,7 @@ impl PeerInfo {
         };
 
         peer.sig = signature::sign_into(
-            &peer.serialize_signature_data(),
+            &peer.digest(),
             peer.sk.as_ref().unwrap()
         ).unwrap();
         peer
@@ -254,30 +254,24 @@ impl PeerInfo {
         );
 
         signature::verify(
-            self.serialize_signature_data().as_ref(),
+            self.digest().as_ref(),
             self.sig.as_slice(),
             &self.pk.to_signature_key()
         ).is_ok()
     }
 
-    pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
-        let len = {
-            let mut sz = 0;
-            sz += ID_BYTES * 2;            // nodeid and origin.
-            sz += mem::size_of::<u16>();   // padding port
-            sz += self.url.as_ref().map_or(0, |v|v.len());
-            sz
-        };
-
-        let mut data = Vec::with_capacity(len);
-        data.extend_from_slice(self.nodeid.as_bytes());
-        data.extend_from_slice(self.origin().as_bytes());
-        data.extend_from_slice(self.port.to_be_bytes().as_ref());
-
-        if let Some(url) = self.url.as_ref() {
-            data.extend_from_slice(url.as_ref());
+    pub(crate) fn digest(&self) -> Vec<u8> {
+        let mut sha256 = Sha256::new();
+        sha256.update(self.pk.as_bytes());
+        sha256.update(self.nodeid.as_bytes());
+        if let Some(origin) = self.origin.as_ref() {
+            sha256.update(origin.as_bytes())
         }
-        data
+        sha256.update(self.port.to_be_bytes().as_ref());
+        if let Some(url) = self.url.as_ref() {
+            sha256.update(url.nfc().collect::<String>().as_bytes());
+        };
+        sha256.finalize().to_vec()
     }
 
     #[allow(unused)]

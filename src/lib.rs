@@ -122,6 +122,18 @@ fn create_dirs(input: &str) -> crate::core::Result<()> {
     )
 }
 
+#[cfg(test)]
+fn remove_working_path(input: &str) {
+    if std::fs::metadata(&input).is_ok() {
+        match std::fs::remove_dir_all(&input) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Failed to remove directory: {}", e);
+            }
+        }
+    }
+}
+
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     unsafe {
         libsodium_sys::randombytes_buf(

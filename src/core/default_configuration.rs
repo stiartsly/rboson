@@ -17,6 +17,7 @@ use crate::{
     core::{
         config::Config,
         config::UserConfig,
+        config::DeviceConfig,
         config::MessagingConfig,
         config::ActiveProxyConfig,
         Result
@@ -55,7 +56,19 @@ struct LogCfg {
 #[derive(Clone, Serialize, Deserialize)]
 struct UserCfg {
     #[serde(rename = "name")]
-    name    :   Option<String>,
+    name    : Option<String>,
+    #[serde(rename = "password")]
+    password: Option<String>,
+    #[serde(rename = "privateKey")]
+    sk      : String
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct DeviceCfg {
+    #[serde(rename = "name")]
+    name    : Option<String>,
+    #[serde(rename = "appName")]
+    app_name: Option<String>,
     #[serde(rename = "password")]
     password: Option<String>,
     #[serde(rename = "privateKey")]
@@ -99,6 +112,9 @@ struct Configuration {
 
     #[serde(rename = "user")]
     user        : Option<UserCfg>,
+
+    #[serde(rename = "device")]
+    device      : Option<DeviceCfg>,
 
     #[serde(rename = "bootstraps")]
     bootstraps  : Vec<NodeItem>,
@@ -241,6 +257,7 @@ impl Configuration {
                 activeproxy     : None,
                 messaging       : None,
                 user            : None,
+                device          : None,
                 deserde_addr4   : None,
                 deserde_addr6   : None,
                 deserde_nodes   : None,
@@ -261,8 +278,14 @@ impl Configuration {
                 Some(local_addr(true)?)
             };
 
+            let port = if cfg.port > 0 {
+                cfg.port
+            } else {
+                b.port
+            };
+
             cfg.deserde_addr4 = ipv4.map(|addr| {
-                SocketAddr::new(addr, b.port)
+                SocketAddr::new(addr, port)
             });
         }
 
@@ -275,8 +298,14 @@ impl Configuration {
                 None
             };
 
+            let port = if cfg.port > 0 {
+                cfg.port
+            } else {
+                b.port
+            };
+
             cfg.deserde_addr6 = ipv6.map(|addr| {
-                SocketAddr::new(addr, b.port)
+                SocketAddr::new(addr, port)
             });
         }
 
@@ -363,6 +392,12 @@ impl Config for Configuration {
         )
     }
 
+    fn device(&self) -> Option<Box<dyn DeviceConfig>> {
+        self.device.as_ref().map(|v|
+            Box::new(v.clone()) as Box<dyn DeviceConfig>
+        )
+    }
+
     fn messaging(&self) -> Option<Box<dyn MessagingConfig>> {
         self.messaging.as_ref().map(|v|
             Box::new(v.clone()) as Box<dyn MessagingConfig>
@@ -404,6 +439,24 @@ impl UserConfig for UserCfg {
 
     fn name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    fn password(&self) -> Option<&str> {
+        self.password.as_deref()
+    }
+}
+
+impl DeviceConfig for DeviceCfg {
+    fn private_key(&self) -> &str {
+        &self.sk
+    }
+
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    fn app_name(&self) -> Option<&str> {
+        self.app_name.as_deref()
     }
 
     fn password(&self) -> Option<&str> {

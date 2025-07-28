@@ -10,6 +10,13 @@ pub trait UserConfig: Send + Sync {
     fn private_key(&self) -> &str;
 }
 
+pub trait DeviceConfig: Send + Sync {
+    fn name(&self) -> Option<&str> { None }
+    fn app_name(&self) -> Option<&str> { None }
+    fn password(&self) -> Option<&str> { None }
+    fn private_key(&self) -> &str;
+}
+
 pub trait ActiveProxyConfig: Send + Sync {
     fn server_peerid(&self) -> &str;
     fn peer_private_key(&self) -> Option<&str>;
@@ -36,6 +43,7 @@ pub trait Config: Send + Sync {
     fn log_file(&self) -> Option<String> { None }
 
     fn user(&self) -> Option<Box<dyn UserConfig>> { None }
+    fn device(&self) -> Option<Box<dyn DeviceConfig>> { None }
     fn activeproxy(&self) -> Option<Box<dyn ActiveProxyConfig>> { None }
     fn messaging(&self) -> Option<Box<dyn MessagingConfig>> { None }
 

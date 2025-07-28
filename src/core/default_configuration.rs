@@ -205,17 +205,21 @@ impl<'a> Builder<'a> {
         self
     }
 
+    pub fn load_json(&mut self, json_input: &str) -> Result<&mut Self> {
+        let cfg = serde_json::from_str::<Configuration>(json_input).map_err(|e| {
+            Error::Argument(format!("bad json config content, error: {}", e))
+        })?;
+
+        self.cfg = Some(cfg);
+        Ok(self)
+    }
+
     pub fn load(&mut self, input: &str) -> Result<&mut Self> {
         let data = fs::read_to_string(input).map_err(|e| {
             Error::Io(format!("Reading config error: {}", e))
         })?;
 
-        let cfg = serde_json::from_str::<Configuration>(&data).map_err(|e| {
-            Error::Argument(format!("bad config, error: {}", e))
-        })?;
-
-        self.cfg = Some(cfg);
-        Ok(self)
+        self.load_json(&data)
     }
 
     pub fn build(&mut self) -> Result<Box<dyn Config>> {

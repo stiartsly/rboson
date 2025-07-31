@@ -100,26 +100,22 @@ impl Builder {
         }
     }
 
-    pub fn with_user_key(&mut self, keypair: KeyPair) -> &mut Self {
+    pub fn with_user_key(mut self, keypair: KeyPair) -> Self {
         self.user = Some(CryptoIdentity::from_keypair(keypair));
         self
     }
 
-    pub fn with_user_private_key(&mut self, sk: &[u8]) -> Result<&mut Self> {
+    pub fn with_user_private_key(mut self, sk: &[u8]) -> Result<Self> {
         self.user = Some(CryptoIdentity::from_private_key(sk)?);
         Ok(self)
     }
 
-    pub fn with_new_user_key(&mut self) -> &mut Self {
+    pub fn with_new_user_key(mut self) -> Self {
         self.user = Some(CryptoIdentity::new());
         self
     }
 
-    pub fn user_key(&self) -> Option<&CryptoIdentity> {
-        self.user.as_ref()
-    }
-
-    pub fn with_user_name(&mut self, name: &str) -> Result<&mut Self> {
+    pub fn with_user_name(mut self, name: &str) -> Result<Self> {
         if name.is_empty() {
             return Err(Error::State("User name cannot be empty".into()));
         }
@@ -127,35 +123,22 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn user_name(&self) -> Option<&str> {
-        self.user_name.as_ref().map(|v| v.as_str())
-    }
-
-    pub fn with_device_private_key(&mut self, sk: &[u8]) -> Result<&mut Self> {
+    pub fn with_device_private_key(mut self, sk: &[u8]) -> Result<Self> {
         self.device = Some(CryptoIdentity::from_private_key(sk)?);
         Ok(self)
     }
 
-    pub fn with_device_key(&mut self, keypair: KeyPair) -> &mut Self {
+    pub fn with_device_key(mut self, keypair: KeyPair) -> Self {
         self.device = Some(CryptoIdentity::from_keypair(keypair));
         self
     }
 
-    pub fn with_new_device_key(&mut self) -> &mut Self {
+    pub fn with_new_device_key(mut self) -> Self {
         self.device = Some(CryptoIdentity::new());
         self
     }
 
-    pub fn device_key(&self) -> Option<&CryptoIdentity> {
-        self.device.as_ref()
-    }
-
-    pub fn with_device_node(&mut self, node: Arc<Mutex<Node>>) -> &mut Self {
-        self.node = Some(node.clone());
-        self
-    }
-
-    pub fn with_device_name(&mut self, name: &str) -> Result<&mut Self> {
+    pub fn with_device_name(mut self, name: &str) -> Result<Self> {
         if name.is_empty() {
             Err(Error::State("Device name cannot be empty".into()))?;
         }
@@ -163,11 +146,7 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn device_name(&self) -> Option<&str> {
-        self.device_name.as_ref().map(|v| v.as_str())
-    }
-
-    pub fn with_app_name(&mut self, name: &str) -> Result<&mut Self> {
+    pub fn with_app_name(mut self, name: &str) -> Result<Self> {
         if name.is_empty() {
             Err(Error::State("App name cannot be empty".into()))?;
         }
@@ -175,32 +154,33 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn app_name(&self) -> Option<&str> {
-        self.app_name.as_ref().map(|v| v.as_str())
+    pub fn with_device_node(mut self, node: Arc<Mutex<Node>>) -> Self {
+        self.node = Some(node.clone());
+        self
     }
 
-    pub fn with_registering_user(&mut self, passphrase: &str) -> &mut Self {
+    pub fn with_user_registration(mut self, passphrase: &str) -> Self {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_user_and_device = true;
         self
     }
 
-    pub fn with_registering_device(&mut self, passphrase: &str) -> &mut Self  {
+    pub fn with_device_registration(mut self, passphrase: &str) -> Self  {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_device = true;
         self
     }
 
-    pub fn with_device_registering_request_handler(
-        &mut self,
+    pub fn with_device_registeration_request_handler(
+        mut self,
         handler: Box<dyn Fn(&str) -> Result<bool> + Send + Sync>
-    ) -> &mut Self {
+    ) -> Self {
         self.registration_request_handler = Some(handler);
         self.register_device = true;
         self
     }
 
-    pub fn with_messaging_peer(&mut self, peer: PeerInfo) -> Result<&mut Self> {
+    pub fn with_messaging_peer(mut self, peer: PeerInfo) -> Result<Self> {
         self.api_url = peer.alternative_url().map(|url|
                 Url::parse(url).map_err(|e|
                     Error::State(format!("Failed to parse API URL: {e}"))
@@ -210,31 +190,14 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn peer(&self) -> Option<&PeerInfo> {
-        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
-        self.messaging_peer.as_ref()
-    }
-
-    pub fn peerid(&self) -> &Id {
-        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
-        self.messaging_peer.as_ref().unwrap().id()
-    }
-
-    /*pub fn with_messaging_nodeid(&mut self, id: &Id) -> &mut Self {
+    /*pub fn with_messaging_nodeid(mut self, id: &Id) -> Self {
         self.messaging_nodeid = Some(id.clone());
         self
     }
     */
 
-    pub fn nodeid(&self) -> &Id {
-        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
-        unwrap!(self.messaging_peer).id()
-    }
-
-    pub fn with_api_url<S>(&mut self, url: S) -> Result<&mut Self>
-    where
-       S: AsRef<str> {
-
+    pub fn with_api_url<S>(mut self, url: S) -> Result<Self>
+    where S: AsRef<str> {
         let url = Url::parse(url.as_ref()).map_err(|e| {
             Error::State(format!("Failed to parse API URL: {e}"))
         })?;
@@ -243,92 +206,87 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn api_url(&self) -> &Url {
-        assert!(self.api_url.is_some(), "API URL is not set");
-        unwrap!(self.api_url)
-    }
-
-    pub fn with_messaging_repository(&mut self, path: &str) -> &mut Self {
+    pub fn with_messaging_repository(mut self, path: &str) -> Self {
         self.repository_db = Some(path.to_string());
         self
     }
 
     pub fn with_connection_listener(
-        &mut self,
+        mut self,
         listener: impl ConnectionListener + 'static
-    ) -> &mut Self {
+    ) -> Self {
         self.connection_listeners.push(Box::new(listener));
         self
     }
 
     pub fn with_connection_listeners(
-        &mut self,
+        mut self,
         listeners: &mut Vec<Box<dyn ConnectionListener>>
-    ) -> &mut Self {
+    ) -> Self {
         self.connection_listeners.append(listeners);
         self
     }
 
     pub fn with_profile_listener(
-        &mut self,
+        mut self,
         listener: impl ProfileListener + 'static
-    ) -> &mut Self {
+    ) -> Self {
         self.profile_listeners.push(Box::new(listener));
         self
     }
 
     pub fn with_profile_listeners(
-        &mut self,
+        mut self,
         listeners: &mut Vec<Box<dyn ProfileListener>>
-    ) -> &mut Self {
+    ) -> Self {
         self.profile_listeners.append(listeners);
         self
     }
 
     pub fn with_message_listener(
-        &mut self,
+        mut self,
         listener: impl MessageListener + 'static
-    ) -> &mut Self {
+    ) -> Self {
         self.message_listeners.push(Box::new(listener));
         self
     }
 
     pub fn with_message_listeners(
-        &mut self,
+        mut self,
         listeners: &mut Vec<Box<dyn MessageListener>>
-    ) -> &mut Self {
+    ) -> Self {
         self.message_listeners.append(listeners);
         self
     }
 
     pub fn with_channel_listener(
-        &mut self,
+        mut self,
         listener: impl ChannelListener + 'static
-    ) -> &mut Self {
+    ) -> Self {
         self.channel_listeners.push(Box::new(listener));
         self
     }
 
     pub fn with_channel_listeners(
-        &mut self,
+        mut self,
         listeners: &mut Vec<Box<dyn ChannelListener>>
-    ) -> &mut Self {
+    ) -> Self {
         self.channel_listeners.append(listeners);
         self
     }
 
     pub fn with_contact_listener(
-        &mut self,
+        mut self,
         listener: impl ContactListener + 'static
-    ) -> &mut Self {
+    ) -> Self {
         self.contact_listeners.push(Box::new(listener));
         self
     }
 
     pub fn with_contact_listeners(
-        &mut self,
+        mut self,
         listeners: &mut Vec<Box<dyn ContactListener>>
-    ) -> &mut Self {
+    ) -> Self {
         self.contact_listeners.append(listeners);
         self
     }
@@ -346,7 +304,7 @@ impl Builder {
 
     async fn eligible_check(&self) -> Result<()> {
         if self.user_agent.is_some() {
-            return Ok(())   // Assuming the userAgent is configured
+            return Ok(());
         }
 
         if self.repository.is_none() && self.repository_db.is_none() {
@@ -470,7 +428,7 @@ impl Builder {
         });
 
         let Some(peer) = self.messaging_peer.as_ref() else {
-            return Err(Error::State("Messaging peer is not set".into()));
+            panic!("Messaging peer is not set");
         };
         agent.set_messaging_peer_info(peer)?;
 
@@ -502,14 +460,14 @@ impl Builder {
 
         let mut api_client = api_client::Builder::new()
             .with_base_url(self.api_url())
-            .with_home_peerid(self.peerid())
+            .with_home_peerid(self.peer().id())
             .with_user_identity(self.user.as_ref().unwrap())
             .with_device_identity(self.device.as_ref().unwrap())
             .build()
             .unwrap();
 
-        let user    = agent.lock().unwrap().user().cloned();
-        let device  = agent.lock().unwrap().device().cloned();
+        let user = agent.lock().unwrap().user().cloned();
+        let device = agent.lock().unwrap().device().cloned();
 
         if self.register_user_and_device {
             api_client.register_user_with_device(
@@ -573,7 +531,7 @@ impl Builder {
         Ok(())
     }
 
-    pub async fn build(&mut self) -> Result<Client> {
+    pub async fn build_into(mut self) -> Result<Client> {
         self.eligible_check().await?;
 
         let agent = match self.user_agent.is_some() {
@@ -582,7 +540,6 @@ impl Builder {
         }?;
 
         self.register_client(agent.clone()).await?;
-        agent.lock().unwrap().harden();
         Client::new(self)
     }
 
@@ -591,6 +548,17 @@ impl Builder {
     }
 
     pub(crate) fn user_agent(&self) -> Arc<Mutex<dyn UserAgent>> {
-        self.user_agent.as_ref().unwrap().clone()
+        assert!(self.user_agent.is_some(), "User agent is not set");
+        unwrap!(self.user_agent).clone()
+    }
+
+    pub(crate) fn peer(&self) -> &PeerInfo {
+        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
+        unwrap!(self.messaging_peer)
+    }
+
+    pub(crate) fn api_url(&self) -> &Url {
+        assert!(self.api_url.is_some(), "API URL is not set");
+        unwrap!(self.api_url)
     }
 }

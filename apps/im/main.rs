@@ -142,13 +142,13 @@ async fn main() {
         .with_messaging_peer(peer.clone()).unwrap()
         .with_messaging_repository("test-repo")
         .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
-        .with_registering_user(ucfg.password().map_or("secret", |v|v))
-        //.with_registering_device(dcfg.password().map_or("secret", |v|v))
+        .with_user_registration(ucfg.password().map_or("secret", |v|v))
+        //.with_device_registration(dcfg.password().map_or("secret", |v|v))
         .with_connection_listener(ConnectionListenerTest)
         .with_message_listener(MessageListenerTest)
         .with_contact_listener(ContactListenerTest)
         .with_profile_listener(ProfileListenerTest)
-        .build()
+        .build_into()
         .await;
 
     let mut client = match result {

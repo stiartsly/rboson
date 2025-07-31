@@ -147,18 +147,18 @@ async fn test_messaging_client() {
         .with_device_name("test-Device").unwrap()
         .with_app_name("test-App").unwrap()
         .with_api_url(peer.alternative_url().as_ref().unwrap_or(&BASE_URL)).unwrap()
-        .with_registering_user("secret")
+        .with_user_registration("secret")
         .with_messaging_repository("test-repo")
         .with_device_node(node.clone())
         .with_connection_listener(ConnectionListenerTest)
         .with_message_listener(MessageListenerTest)
         .with_contact_listener(ContactListenerTest)
         .with_profile_listener(ProfileListenerTest)
-        .build()
+        .build_into()
         .await;
 
     if let Err(e) = &result {
-        eprintln!("Error creating messaging client: {}", e);
+        eprintln!("Creating messaging client error: {{{e}}}");
     }
     assert!(result.is_ok());
 
@@ -168,13 +168,13 @@ async fn test_messaging_client() {
 
     let result = client.start().await;
     if let Err(e) = &result {
-        eprintln!("Error starting messaging client: {}", e);
+        eprintln!("Starting messaging client error: {{{e}}}");
     }
     assert!(result.is_ok());
 
     let result = client.connect().await;
     if let Err(e) = &result {
-        eprintln!("Error connecting messaging client: {}", e);
+        eprintln!("Connecting messaging server error: {{{e}}}");
     }
     assert!(result.is_ok());
     println!(">>>>> finished connecting");

@@ -3,12 +3,8 @@ use crate::messaging::{
 };
 
 pub trait ChannelListener {
-    // Myself joined a new channel
-    // The channel object already include the member private key
     fn on_joined_channel(&self, channel: &Channel);
-
     fn on_left_channel(&self, channel: &Channel);
-
     fn on_channel_deleted(&self, channel: &Channel);
     fn on_channel_updated(&self, channel: &Channel);
 

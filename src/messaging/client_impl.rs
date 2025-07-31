@@ -67,7 +67,7 @@ pub struct Client {
 
 #[allow(dead_code)]
 impl Client {
-    pub(crate) fn new(b: &ClientBuilder) -> Result<Self> {
+    pub(crate) fn new(b: ClientBuilder) -> Result<Self> {
         let user_agent = b.user_agent();
         let agent = user_agent.lock().unwrap();
         if !agent.is_configured() {
@@ -79,6 +79,7 @@ impl Client {
         let device = agent.device().unwrap().identity().unwrap().clone();
 
         drop(agent);
+        user_agent.lock().unwrap().harden();
 
         let api_client = api_client::Builder::new()
             .with_base_url(b.api_url())

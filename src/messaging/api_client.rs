@@ -6,6 +6,7 @@ use url::Url;
 use log::warn;
 
 use crate::{
+    unwrap,
     Id,
     Error,
     cryptobox::Nonce,
@@ -68,8 +69,8 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub(crate) fn with_access_token(&mut self, token: &'a str) -> &mut Self {
-        self.access_token = Some(token);
+    pub(crate) fn with_access_token(&mut self, _token: &'a str) -> &mut Self {
+        //self.access_token = Some(token);
         self
     }
 
@@ -113,15 +114,13 @@ pub(crate) struct APIClient {
     nonce       : Nonce,
 }
 
-#[allow(unused)]
 impl APIClient {
     pub(crate) fn new(b: &mut Builder) -> Result<Self> {
         let client = Client::builder()
             .user_agent("rboson")
             .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e|
-                Error::Argument(format!("Failed to create http client: {e}"))
+            .build().map_err(|e|
+                Error::Argument(format!("Creating http client error: {{{e}}}"))
             )?;
 
         Ok(Self {
@@ -138,50 +137,16 @@ impl APIClient {
         })
     }
 
-    pub(crate) fn access_token(&self) -> Option<&str> {
-        self.access_token.as_deref()
-    }
-
-    pub(crate) fn set_access_token(&mut self, token: String) {
-        self.access_token = Some(token);
-    }
-
-    pub(crate) fn set_access_token_refresh_handler(&mut self, handler: fn(&str)) {
-        self.access_token_refresh_handler = Some(Box::new(handler));
-    }
-
     fn increment_nonce(&mut self) -> Nonce {
         self.nonce.increment();
         self.nonce.clone()
     }
 
-    pub(crate) async fn service_ids(base_url: &Url) -> Result<ServiceIds> {
-        let url = base_url.join("/api/v1/service/id").unwrap();
-        let result = Client::builder()
-            .user_agent("rboson")
-            .timeout(Duration::from_secs(30))
-            .build();
+    async fn access_token(&mut self) -> Result<String> {
+        if let Some(token) = self.access_token.as_ref() {
+            return Ok(token.to_string())
+        }
 
-        let client = result.map_err(|e|
-            Error::Argument(format!("Failed to create http client: {e}"))
-        )?;
-
-        let rsp = client.get(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
-            .send()
-            .await;
-
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Received invalid http response {e}"))
-        )?.json::<JsonServiceIds>().await.map_err(|e| {
-            Error::State(format!("Deserialize json error {e}"))
-        })?;
-        data.ids()
-    }
-
-    async fn refresh_access_token(&mut self) -> Result<()> {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
@@ -219,15 +184,19 @@ impl APIClient {
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
+            Error::State(format!("Sending http request error: {{{e}}}"))
         })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
+            Error::State(format!("{e}"))
         )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Deserialize json error: {{{e}}}"))
         })?;
 
+        if let Some(handler) = self.access_token_refresh_handler.as_ref() {
+            handler(&data.token);
+        }
+
         self.access_token = Some(data.token);
-        Ok(())
+        Ok(unwrap!(self.access_token).to_string())
     }
 
     pub(crate) async fn register_user_with_device(&mut self,
@@ -309,7 +278,7 @@ impl APIClient {
                 match e.status().unwrap() {
                     StatusCode::CONFLICT => {
                         warn!("User already exists, trying to refresh access token");
-                        self.refresh_access_token().await?;
+                        self.access_token().await?;
                     },
                     StatusCode::BAD_REQUEST |_ => {
                         warn!("This may be caused by an invalid passphrase or device name, please check your input and try again.");
@@ -499,8 +468,7 @@ impl APIClient {
         let rsp = self.client.get(url)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .bearer_auth( {
-                self.refresh_access_token().await?;
-                self.access_token().unwrap()
+                self.access_token().await?
             })
             .send()
             .await;
@@ -545,7 +513,7 @@ impl APIClient {
         let rsp = self.client.put(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
-            .bearer_auth(self.access_token().unwrap())
+            .bearer_auth(self.access_token().await?)
             .json(&data)
             .send()
             .await;
@@ -558,6 +526,7 @@ impl APIClient {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) async fn get_profile(&mut self, id: &Id) -> Result<profile::Profile> {
         let path = format!("/api/v1/profile/{}", id);
         let url = self.base_url.join(path.as_str()).unwrap();
@@ -602,21 +571,46 @@ impl APIClient {
         let rsp = self.client.get(url)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .bearer_auth( {
-                self.refresh_access_token().await?;
-                self.access_token().unwrap()
+                self.access_token().await?
             })
             .send()
             .await;
 
         let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
+            Error::State(format!("Sending http request error: {{{e}}}"))
         })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
+            Error::State(format!("{e}"))
         )?.json::<ContactsUpdate>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+            Error::State(format!("Deserialize json error {{{e}}}"))
         })?;
 
         Ok(data)
+    }
+
+    pub(crate) async fn service_ids(base_url: &Url) -> Result<ServiceIds> {
+        let url = base_url.join("/api/v1/service/id").unwrap();
+        let result = Client::builder()
+            .user_agent("rboson")
+            .timeout(Duration::from_secs(30))
+            .build();
+
+        let client = result.map_err(|e|
+            Error::Argument(format!("Failed to create http client: {e}"))
+        )?;
+
+        let rsp = client.get(url)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .send()
+            .await;
+
+        let data = rsp.map_err(|e| {
+            Error::State(format!("Sending http request error {e}"))
+        })?.error_for_status().map_err(|e|
+            Error::State(format!("Received invalid http response {e}"))
+        )?.json::<JsonServiceIds>().await.map_err(|e| {
+            Error::State(format!("Deserialize json error {e}"))
+        })?;
+        data.ids()
     }
 }
 

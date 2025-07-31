@@ -160,7 +160,7 @@ impl APIClient {
             deviceSig   : &'a [u8],
         }
 
-        #[derive(Debug, Deserialize)]
+        #[derive(Deserialize)]
         struct ResponseData {
             token       : String,
         }
@@ -183,11 +183,17 @@ impl APIClient {
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Sending http request error: {{{e}}}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("{e}"))
-        )?.json::<ResponseData>().await.map_err(|e| {
+        if let Err(e) = rsp.as_ref().map_err(|e| {
+            Error::State(format!("Sending http request error: {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
+            }
+        };
+
+        let data = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Deserialize json error: {{{e}}}"))
         })?;
 
@@ -230,10 +236,9 @@ impl APIClient {
             token       : String,
         }
 
-        let nonce = self.increment_nonce();
+        let nonce   = self.increment_nonce();
         let usr_sig = self.user.sign_into(nonce.as_bytes()).unwrap();
         let dev_sig = self.device.sign_into(nonce.as_bytes()).unwrap();
-
         let profile_sig = self.user.sign_into(&profile::digest(
             self.user.id(),
             &self.peerid,
@@ -257,36 +262,32 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/users").unwrap();
         let rsp = self.client.post(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
+        if let Err(e) = rsp.as_ref().map_err(|e| {
             Error::State(format!("Sending http request error: {e}"))
-        })?;
-
-        match data.error_for_status() {
-            Ok(v) => {
-                let data = v.json::<ResponseData>().await.map_err(|e| {
-                    Error::State(format!("Deserializing json error: {e}"))
-                })?;
-                self.access_token = Some(data.token);
-            },
-            Err(e) => {
-                match e.status().unwrap() {
-                    StatusCode::CONFLICT => {
-                        warn!("User already exists, trying to refresh access token");
-                        self.access_token().await?;
-                    },
-                    StatusCode::BAD_REQUEST |_ => {
-                        warn!("This may be caused by an invalid passphrase or device name, please check your input and try again.");
-                        Err(Error::State(format!("Received invalid http response with error: {e}")))?;
-                    },
-                }
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::CONFLICT) => {
+                    warn!("User already exists, trying to refresh access token");
+                    self.access_token().await?;
+                    return Ok(());
+                },
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
             }
-        }
+        };
+
+        let token = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
+        })?.token;
+
+        self.access_token = Some(token);
         Ok(())
     }
 
@@ -336,33 +337,32 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/devices").unwrap();
         let rsp = self.client.post(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
+        if let Err(e) = rsp.as_ref().map_err(|e| {
             Error::State(format!("Sending http request error {e}"))
-        })?;
-
-        let profile = match data.error_for_status() {
-            Ok(v) => {
-                let data = v.json::<ResponseData>().await.map_err(|e| {
-                    Error::State(format!("Deserializing json error: {e}"))
-                })?;
-                self.access_token = Some(data.token);
-                UserProfile::new(
-                    self.user.clone(),
-                    data.userName,
-                    data.avatar
-                )
-            },
-            Err(e) => {
-                Err(Error::State(format!("Received invalid http response with error: {e}")))?
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
             }
         };
-        Ok(profile)
+
+        let data = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
+        })?;
+
+        self.access_token = Some(data.token);
+        Ok(UserProfile::new(
+            self.user.clone(),
+            data.userName,
+            data.avatar
+        ))
     }
 
     pub(crate) async fn register_device_request(&mut self,
@@ -400,20 +400,26 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/devices/registrations").unwrap();
         let rsp = self.client.post(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
+        if let Err(e) = rsp.as_ref().map_err(|e| {
             Error::State(format!("Sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Received invalid http response {e}"))
-        )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Deserialize json error {e}"))
-        })?;
-        Ok(data.registrationId)
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
+            }
+        };
+        let rid = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
+        })?.registrationId;
+
+        Ok(rid)
     }
 
     pub(crate) async fn finish_register_device_request(&mut self,
@@ -437,9 +443,10 @@ impl APIClient {
         }
 
         let nonce = self.increment_nonce();
+        let device_id = self.device.id().clone();
         let sig = self.device.sign_into(nonce.as_bytes()).unwrap();
         let data = RequestData {
-            deviceId    : self.device.id(),
+            deviceId    : &device_id,
             nonce       : nonce.as_bytes(),
             sig         : sig.as_slice(),
         };
@@ -448,37 +455,47 @@ impl APIClient {
         let url = self.base_url.join(path.as_str()).unwrap();
         let rsp = self.client.post(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
-           // .bearer_auth(self.access_token().unwrap())
+            .bearer_auth(self.access_token().await?)
             .json(&data)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<ResponseData>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
-        })?;
-        Ok(data.registrationId)
+        if let Err(e) = rsp.as_ref().map_err(|e| {
+            Error::State(format!("Sending http request error {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
+            }
+        };
+        let rid = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
+        })?.registrationId;
+
+        Ok(rid)
     }
 
     pub(crate) async fn service_info(&mut self) -> Result<MessagingServiceInfo> {
         let url = self.base_url.join("api/v1/service/info").unwrap();
         let rsp = self.client.get(url)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
-            .bearer_auth( {
-                self.access_token().await?
-            })
+            .bearer_auth(self.access_token().await?)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<MessagingServiceInfo>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+        if let Err(e) = rsp.as_ref().map_err(|e| {
+            Error::State(format!("Sending http request error {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    return Err(Error::State(format!("{e}")));
+                },
+            }
+        };
+
+        let data = rsp.unwrap().json::<MessagingServiceInfo>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
         })?;
 
         Ok(data)
@@ -518,11 +535,15 @@ impl APIClient {
             .send()
             .await;
 
-        rsp.map_err(|e| {
+        if let Err(e) = rsp.map_err(|e| {
             Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?;
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    Err(Error::State("{e}".into()))?
+                },
+            }
+        };
         Ok(())
     }
 
@@ -532,15 +553,22 @@ impl APIClient {
         let url = self.base_url.join(path.as_str()).unwrap();
         let rsp = self.client.get(url)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
-            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
-            .send().await;
+            .bearer_auth(self.access_token().await?)
+            .send()
+            .await;
 
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Http error: sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Http error: invalid http response {e}"))
-        )?.json::<Profile>().await.map_err(|e| {
-            Error::State(format!("Http error: deserialize json error {e}"))
+        if let Err(e) = rsp.as_ref().map_err(|e| {
+            Error::State(format!("Sending http request error {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    return Err(Error::State(format!("{e}")));
+                },
+            }
+        };
+
+        let data = rsp.unwrap().json::<Profile>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
         })?;
 
         Ok(data)
@@ -569,21 +597,24 @@ impl APIClient {
         };
         let url = self.base_url.join(path.as_str()).unwrap();
         let rsp = self.client.get(url)
-            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
-            .bearer_auth( {
-                self.access_token().await?
-            })
+            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
+            .bearer_auth(self.access_token().await?)
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
-            Error::State(format!("Sending http request error: {{{e}}}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("{e}"))
-        )?.json::<ContactsUpdate>().await.map_err(|e| {
-            Error::State(format!("Deserialize json error {{{e}}}"))
-        })?;
+        if let Err(e) = rsp.as_ref().map_err(|e| {
+            Error::State(format!("Sending http request error {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    return Err(Error::State(format!("{e}")));
+                },
+            }
+        };
 
+        let data = rsp.unwrap().json::<ContactsUpdate>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
+        })?;
         Ok(data)
     }
 
@@ -603,12 +634,17 @@ impl APIClient {
             .send()
             .await;
 
-        let data = rsp.map_err(|e| {
+        if let Err(e) = rsp.as_ref().map_err(|e| {
             Error::State(format!("Sending http request error {e}"))
-        })?.error_for_status().map_err(|e|
-            Error::State(format!("Received invalid http response {e}"))
-        )?.json::<JsonServiceIds>().await.map_err(|e| {
-            Error::State(format!("Deserialize json error {e}"))
+        })?.error_for_status_ref() {
+            match e.status() {
+                Some(StatusCode::BAD_REQUEST) | _ => {
+                    return Err(Error::State(format!("{e}")));
+                },
+            }
+        };
+        let data = rsp.unwrap().json::<JsonServiceIds>().await.map_err(|e| {
+            Error::State(format!("Deserializing json error: {e}"))
         })?;
         data.ids()
     }

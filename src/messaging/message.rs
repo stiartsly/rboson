@@ -241,6 +241,10 @@ impl Message {
     pub(crate) fn is_encrypted(&self) -> bool {
         self.encrypted
     }
+
+    pub(crate) fn on_sent(&self) {
+        // TODO: unimplemented!()
+    }
 }
 
 impl fmt::Display for Message {

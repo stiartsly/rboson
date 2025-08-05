@@ -142,5 +142,3 @@ impl fmt::Display for InviteTicket {
         Ok(())
     }
 }
-
-

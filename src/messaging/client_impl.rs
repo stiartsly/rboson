@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use serde::Serialize;
@@ -38,6 +39,7 @@ use crate::{
         channel::{Role, Permission, Channel},
         rpc::request::RPCRequest,
         rpc::method::RPCMethod,
+        message::Message,
     }
 };
 
@@ -62,7 +64,10 @@ pub struct Client {
     mqtt_client     : Option<AsyncClient>,
     task_handler    : Option<JoinHandle<()>>,
 
+    task_proxy      : Arc<Mutex<Proxy>>,
     user_agent      : Arc<Mutex<dyn UserAgent>>,
+
+    pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
 }
 
 #[allow(dead_code)]
@@ -114,9 +119,14 @@ impl Client {
 
             mqtt_client : None,
             task_handler: None,
+            task_proxy  : Arc::new(Mutex::new(Proxy::new(
+                user_agent.clone()
+            ))),
 
             self_context,
             server_context,
+
+            pending_messages: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -162,9 +172,9 @@ impl Client {
     pub async fn stop(&mut self, forced: bool) {
         // TODO: server context cleanup if needed.
 
-        info!("Stopping messaging client ...");
         if let Some(handle) = self.task_handler.take() {
             if forced {
+                info!("Stopping messaging client ...");
                 handle.abort()
             };
             handle.await.ok();
@@ -280,37 +290,19 @@ impl Client {
         );
 
         self.mqtt_client = Some(mqtt_client);
+        let task_proxy = self.task_proxy.clone();
         self.task_handler = Some(tokio::spawn(async move {
             loop {
-                let result = eventloop.poll().await;
-                if let Err(e) = result {
-                    error!("MQTT event loop error: {}", e);
-                    break;
-                }
-                let event = result.unwrap();
-                println!("Received = {:?}", event);
-                match event {
-                    Event::Incoming(event) => {
-                        match event {
-                            Packet::SubAck(ack) => {
-                                info!("Subscription acknowledged: {:?}", ack);
-                            },
-                            Packet::UnsubAck(ack) => {
-                                info!("Unsubscription acknowledged: {:?}", ack);
-                            },
-                            Packet::Disconnect => {
-                                info!("Disconnected from the MQTT broker");
-                                break;
-                            },
-                            Packet::PingResp => {
-                                info!("Ping response received");
-                            },
-                            _ => {
-                                info!("Unknown Mqtt event: {:?}", event);
-                            }
-                        }
-                    },
-                    _ => {}
+                let event = match eventloop.poll().await {
+                    Ok(event) => event,
+                    Err(e) => {
+                        error!("MQTT event loop error: {}, break the loop.", e);
+                        break;
+                    }
+                };
+
+                if let Event::Incoming(packet) = event {
+                    task_proxy.lock().unwrap().on_mqtt_msg(packet);
                 }
             }
         }));
@@ -667,5 +659,77 @@ impl MessagingClient for Client {
 
     async fn remove_contacts(&mut self, _ids: Vec<&Id>) -> Result<()> {
         unimplemented!()
+    }
+}
+
+struct Proxy {
+    user_agent: Arc<Mutex<dyn UserAgent>>,
+    pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
+    connect_promise: Option<Box<dyn FnMut() + Send + Sync>>,
+}
+
+impl Proxy {
+    fn new(user_agent: Arc<Mutex<dyn UserAgent>>) -> Self {
+        Self {
+            user_agent,
+            pending_messages: Arc::new(Mutex::new(HashMap::new())),
+            connect_promise: None,
+        }
+    }
+
+    fn on_mqtt_msg(&mut self, packet: Packet) {
+        match packet {
+            Packet::Publish(publish) => self.on_message(publish),
+            Packet::PubAck(ack) => self.on_publish_acked(ack),
+            Packet::SubAck(ack) => self.on_subscribe_acked(ack),
+            Packet::UnsubAck(ack) => self.on_unsubscribe_acked(ack),
+            Packet::Disconnect => self.on_close(),
+            Packet::PingResp => self.on_ping_response(),
+            _ => {
+                info!("Unknown MQTT event: {:?}", packet);
+            }
+        }
+    }
+
+    fn on_publish_acked(&mut self, ack: rumqttc::PubAck) {
+        match self.pending_messages.lock().unwrap().remove(&ack.pkid) {
+            Some(msg) => {
+                msg.on_sent()
+            },
+            None => {
+                error!("INTERNAL ERROR: no message associated with packet {}", ack.pkid);
+            }
+        }
+    }
+
+    fn on_subscribe_acked(&mut self, ack: rumqttc::SubAck) {
+        for rc in ack.return_codes {
+            match rc {
+                rumqttc::SubscribeReasonCode::Success(qos) =>
+                    info!("Subscription acknowledged with QoS: {:?}", qos),
+                rumqttc::SubscribeReasonCode::Failure =>
+                    error!("Subscription failed with error.")
+            }
+        }
+
+        if self.connect_promise.is_some() {
+            info!("Subscribe topics success");
+            self.user_agent.lock().unwrap().on_connected();
+            self.connect_promise.take().unwrap()();
+        }
+    }
+
+    fn on_unsubscribe_acked(&mut self, _: rumqttc::UnsubAck) {}
+
+    fn on_close(&mut self) {
+        info!("Disconnected from the MQTT broker");
+    }
+
+    fn on_ping_response(&mut self) {
+        info!("Ping response received");
+    }
+
+    fn on_message(&mut self, publish: rumqttc::Publish) {
+        info!("Received message on topic {}: {:?}", publish.topic, publish.payload);
     }
 }

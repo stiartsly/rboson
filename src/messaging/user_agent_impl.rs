@@ -439,6 +439,9 @@ impl ConnectionListener for DefaultUserAgent {
     }
 }
 
+unsafe impl Send for DefaultUserAgent {}
+unsafe impl Sync for DefaultUserAgent {}
+
 impl UserAgent for DefaultUserAgent {
     fn user(&self) -> Option<&UserProfile> {
         self.user.as_ref()

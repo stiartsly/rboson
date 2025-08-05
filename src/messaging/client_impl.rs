@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use url::Url;
 use log::{debug, info, error};
 use tokio::task::JoinHandle;
+use md5;
 use rumqttc::{
     MqttOptions,
     AsyncClient,
@@ -14,13 +15,13 @@ use rumqttc::{
     Event,
     Packet
 };
-use md5;
 
 use crate::{
     Id,
     Identity,
     PeerInfo,
     cryptobox::Nonce,
+    signature,
     core::{
         Error,
         Result,
@@ -165,7 +166,13 @@ impl Client {
             )?;
         }
 
-        self.service_info = Some(self.api_client.service_info().await?);
+        let service_info = self.api_client.service_info().await?;
+        self.server_context = self.user.create_crypto_context(
+            service_info.peerid()
+        )?;
+
+        self.service_info = Some(service_info);
+
         Ok(())
     }
 
@@ -395,11 +402,22 @@ impl MessagingClient for Client {
         unimplemented!()
     }
 
-    async fn create_channel(&mut self, _name: &str, _notice: Option<&str>) -> Result<Channel> {
-        unimplemented!()
+    async fn create_channel(&mut self,
+        name: &str,
+        notice: Option<&str>
+    ) -> Result<Channel> {
+        self.create_channel_with_permission(
+            &Permission::OwnerInvite,
+            name,
+            notice
+        ).await
     }
 
-    async fn create_channel_with_permission(&mut self, _permission: &Permission, _name: &str, _notice: Option<&str>) -> Result<Channel> {
+    async fn create_channel_with_permission(&mut self,
+        _permission: &Permission,
+        _name: &str,
+        _notice: Option<&str>
+    ) -> Result<Channel> {
         unimplemented!()
     }
 

@@ -111,7 +111,7 @@ pub(crate) struct ManagedFields {
 impl ManagedFields {
     pub(crate) fn new(keypair: &signature::KeyPair) -> Self {
         Self {
-            userid:             Id::from(keypair.to_public_key()),
+            userid:             Id::from(keypair.public_key()),
             keypair:            keypair.clone(),
             session_keypair:    cryptobox::KeyPair::from(keypair),
             cryptobox:          None,

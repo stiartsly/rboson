@@ -230,8 +230,8 @@ impl FromStr for Id {
 }
 
 // Create Id from signature public key.
-impl From<signature::PublicKey> for Id {
-    fn from(pk: signature::PublicKey) -> Self {
+impl From<&signature::PublicKey> for Id {
+    fn from(pk: &signature::PublicKey) -> Self {
         Id(pk.0)
     }
 }

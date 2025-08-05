@@ -211,7 +211,7 @@ fn test_try_from_signature_publickey() {
     let sig_pk = kp.to_public_key();
     let enc_pk: cryptobox::PublicKey = kp.public_key().try_into().unwrap();
 
-    let id = Id::from(sig_pk.clone());
+    let id = Id::from(&sig_pk);
     assert_eq!(id.to_signature_key(), sig_pk);
     assert_eq!(id.to_encryption_key(), enc_pk);
 }

@@ -140,7 +140,7 @@ impl ProxyConnection {
 
             stickybuf:          Some(Vec::with_capacity(4*1024)),
 
-            deviceid:           Id::from(keypair.to_public_key()),
+            deviceid:           Id::from(keypair.public_key()),
             signature_keypair:  keypair.clone(),
             crypto_context:     RefCell::new(CryptoContext::from_private_key(
                 srv_peer!(inners).lock().unwrap().id().clone(),

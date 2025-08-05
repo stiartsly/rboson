@@ -301,7 +301,7 @@ impl Contact {
         }
 
         let session_keypair = KeyPair::try_from(private_key.as_slice())?;
-        self.session_id = Some(Id::from(session_keypair.to_public_key()));
+        self.session_id = Some(Id::from(session_keypair.public_key()));
         self.encryption_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
         self.session_keypair = Some(session_keypair);
 

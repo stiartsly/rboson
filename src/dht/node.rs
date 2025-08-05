@@ -101,7 +101,7 @@ impl Node {
         let encryption_keypair = cryptobox::KeyPair::try_from(&signature_keypair).unwrap();
 
         let nodeid = {
-            let id = Id::from(signature_keypair.to_public_key());
+            let id = Id::from(signature_keypair.public_key());
             let id_path = path.clone() + "id";
             store_nodeid(&id_path, &id).map_err(|e| {
                 error!("Persisting node Id data error {}", e);

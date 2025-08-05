@@ -172,7 +172,7 @@ fn test_pk_verify2() {
 #[test]
 fn test_pk_into_id() {
     let kp = KeyPair::new();
-    let id: Id= kp.to_public_key().into();
+    let id: Id= kp.public_key().into();
     let pk = id.to_signature_key();
     assert_eq!(kp.to_public_key(), pk);
 }

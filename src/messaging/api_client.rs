@@ -671,6 +671,12 @@ pub(crate) struct MessagingServiceInfo {
     features: Map<String, serde_json::Value>,
 }
 
+impl MessagingServiceInfo {
+    pub(crate) fn peerid(&self) -> &Id {
+        &self.peerid
+    }
+}
+
 use std::fmt;
 impl fmt::Display for MessagingServiceInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

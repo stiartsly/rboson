@@ -96,7 +96,7 @@ fn test_signed_with_keypair() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&kp.to_public_key().into()));
+    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
     assert_eq!(val.id(), <Value as Into<Id>>::into(val));
 }
@@ -175,7 +175,7 @@ fn test_signed_full() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), seq);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&kp.to_public_key().into()));
+    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
     assert_eq!(val.nonce(), Some(nonce).as_ref());
     assert_eq!(val.id(), <Value as Into<Id>>::into(val));
@@ -185,7 +185,7 @@ fn test_signed_full() {
 fn test_encrypted_simple() {
     let data = create_random_bytes(32);
     let kp = signature::KeyPair::random();
-    let rec: Id = kp.to_public_key().into();
+    let rec: Id = kp.public_key().into();
     let rc = EncryptedBuilder::new(&data, &rec).build();
     assert_eq!(rc.is_ok(), true);
 
@@ -210,7 +210,7 @@ fn test_encrypted_with_keypair() {
     let data = create_random_bytes(32);
     let kp = signature::KeyPair::random();
     let rec: Id = signature::KeyPair::random()
-        .to_public_key()
+        .public_key()
         .into();
     let rc = EncryptedBuilder::new(&data, &rec)
         .with_keypair(&kp)
@@ -230,7 +230,7 @@ fn test_encrypted_with_keypair() {
     assert_eq!(val.sequence_number(), 0);
     assert_ne!(val.data(), &data);
     assert_eq!(val.recipient(), Some(rec).as_ref());
-    assert_eq!(val.public_key(), Some(&kp.to_public_key().into()));
+    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
     assert_eq!(val.id(), <Value as Into<Id>>::into(val));
 }
@@ -240,7 +240,7 @@ fn test_encrypted_with_nonce() {
     let data = create_random_bytes(32);
     let nonce = cryptobox::Nonce::random();
     let rec: Id = signature::KeyPair::random()
-        .to_public_key()
+        .public_key()
         .into();
     let rc = EncryptedBuilder::new(&data, &rec)
         .with_nonce(&nonce)
@@ -270,7 +270,7 @@ fn test_encrypted_with_full() {
     let kp = signature::KeyPair::random();
     let nonce = cryptobox::Nonce::random();
     let rec: Id = signature::KeyPair::random()
-        .to_public_key()
+        .public_key()
         .into();
     let rc = EncryptedBuilder::new(&data, &rec)
         .with_keypair(&kp)
@@ -293,7 +293,7 @@ fn test_encrypted_with_full() {
     assert_ne!(val.data(), &data);
     assert_eq!(val.recipient(), Some(rec).as_ref());
     assert_eq!(val.nonce(), Some(&nonce));
-    assert_eq!(val.public_key(), Some(&kp.to_public_key().into()));
+    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
     assert_eq!(val.id(), <Value as Into<Id>>::into(val));
 }

@@ -30,7 +30,7 @@ fn test_pack_builder2() {
     let data = create_random_bytes(32);
     let keypair = signature::KeyPair::random();
     let val = PackBuilder::new(data.clone())
-        .with_pk(Some(Id::from(keypair.to_public_key())))
+        .with_pk(Some(Id::from(keypair.public_key())))
         .build();
 
     assert_eq!(val.is_mutable(), true);
@@ -52,7 +52,7 @@ fn test_pack_builder3() {
     let keypair = signature::KeyPair::random();
     let nonce = cryptobox::Nonce::random();
     let val = PackBuilder::new(data.clone())
-        .with_pk(Some(Id::from(keypair.to_public_key())))
+        .with_pk(Some(Id::from(keypair.public_key())))
         .with_nonce(Some(nonce.clone()))
         .build();
 
@@ -77,7 +77,7 @@ fn test_pack_builder4() {
     let nonce = cryptobox::Nonce::random();
     let sig = create_random_bytes(64);
     let val = PackBuilder::new(data.clone())
-        .with_pk(Some(Id::from(keypair.to_public_key())))
+        .with_pk(Some(Id::from(keypair.public_key())))
         .with_nonce(Some(nonce.clone()))
         .with_sig(Some(sig.clone()))
         .with_sk(Some(keypair.private_key().clone()))
@@ -95,7 +95,7 @@ fn test_pack_builder4() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&Id::from(keypair.to_public_key())));
+    assert_eq!(val.public_key(), Some(&Id::from(keypair.public_key())));
     assert_eq!(val.private_key(), Some(keypair.private_key()));
     assert_eq!(val.nonce(), Some(nonce).as_ref());
 }
@@ -108,7 +108,7 @@ fn test_pack_builder5() {
     let nonce = cryptobox::Nonce::random();
     let sig = create_random_bytes(64);
     let val = PackBuilder::new(data.clone())
-        .with_pk(Some(Id::from(keypair.to_public_key())))
+        .with_pk(Some(Id::from(keypair.public_key())))
         .with_rec(Some(recipient.clone()))
         .with_nonce(Some(nonce.clone()))
         .with_sig(Some(sig.clone()))
@@ -127,7 +127,7 @@ fn test_pack_builder5() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&Id::from(keypair.to_public_key())));
+    assert_eq!(val.public_key(), Some(&Id::from(keypair.public_key())));
     assert_eq!(val.private_key(), Some(keypair.private_key()));
     assert_eq!(val.nonce(), Some(nonce).as_ref());
 }

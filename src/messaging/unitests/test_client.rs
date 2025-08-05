@@ -163,7 +163,7 @@ async fn test_messaging_client() {
     assert!(result.is_ok());
 
     let mut client = result.unwrap();
-    let userid = Id::from(user_key.to_public_key());
+    let userid = Id::from(user_key.public_key());
     assert_eq!(client.userid(), &userid);
 
     let result = client.start().await;

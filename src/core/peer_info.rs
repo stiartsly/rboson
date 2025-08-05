@@ -137,7 +137,7 @@ impl PeerInfo {
         };
 
         let mut peer = PeerInfo {
-            pk: Id::from(kp.to_public_key()),
+            pk: Id::from(kp.public_key()),
             sk: Some(kp.to_private_key()),
             nodeid: b.nodeid.clone(),
             origin: b.origin.map(|v|v.clone()),

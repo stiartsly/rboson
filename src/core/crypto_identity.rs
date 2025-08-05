@@ -33,7 +33,7 @@ impl CryptoIdentity {
 
     pub fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
         Self {
-            id: Id::from(keypair.to_public_key()),
+            id: Id::from(keypair.public_key()),
             encrypt_keypair: cryptobox::KeyPair::from(&keypair),
             signature_keypair: keypair,
         }

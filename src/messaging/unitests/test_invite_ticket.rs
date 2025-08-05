@@ -11,7 +11,7 @@ use crate::{
 fn test_invite_public_ticket() {
     let channel_id = Id::random();
     let inviter_keypair = KeyPair::random();
-    let inviter = Id::from(inviter_keypair.to_public_key());
+    let inviter = Id::from(inviter_keypair.public_key());
     let invitee = Id::random();
     let expire  = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
     let is_public = true;
@@ -55,7 +55,7 @@ fn test_invite_public_ticket() {
 fn test_invite_private_ticket() {
     let channel_id = Id::random();
     let inviter_keypair = KeyPair::random();
-    let inviter = Id::from(inviter_keypair.to_public_key());
+    let inviter = Id::from(inviter_keypair.public_key());
     let invitee = Id::random();
     let expire  = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
     let is_public = false;

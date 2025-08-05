@@ -111,7 +111,7 @@ fn test_values() {
     // create a encrypted value;
     let data2 = random_bytes(32);
     let keypair = KeyPair::random();
-    let recipient = Id::from(keypair.to_public_key());
+    let recipient = Id::from(keypair.public_key());
     let value3 = EncryptedBuilder::new(&data2, &recipient)
         .with_sequence_number(55)
         .build()

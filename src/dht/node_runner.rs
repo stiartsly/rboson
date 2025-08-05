@@ -77,7 +77,7 @@ impl NodeRunner {
         bootstr_channel: Arc<Mutex<BootstrapChannel>>,
         crypto_context: Arc<Mutex<CryptoCache>>
     ) -> Self {
-        let nodeid = Rc::new(Id::from(keypair.to_public_key()));
+        let nodeid = Rc::new(Id::from(keypair.public_key()));
 
         let mut dht_num = 0;
         let dht4 = addrs.v4().map(|addr| {

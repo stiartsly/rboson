@@ -212,7 +212,7 @@ impl Value {
             None => &KeyPair::random()
         };
         let mut value = Value {
-            pk: Some(Id::from(kp.to_public_key())),
+            pk: Some(Id::from(kp.public_key())),
             sk: Some(kp.to_private_key()),
             recipient: None,
             nonce: Some(b.nonce.map_or(Nonce::random(), |v|v.clone())),
@@ -239,7 +239,7 @@ impl Value {
         };
 
         let mut value = Value {
-            pk: Some(Id::from(kp.to_public_key())),
+            pk: Some(Id::from(kp.public_key())),
             sk: Some(kp.to_private_key()),
             recipient: Some(b.rec.clone()),
             nonce: Some(b.nonce.map_or(Nonce::random(), |v|v.clone())),

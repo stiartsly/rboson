@@ -32,7 +32,7 @@ fn test_with_keypair() {
         .with_port(65534)
         .build();
 
-    assert_eq!(peer.id(), &Id::from(keypair.to_public_key()));
+    assert_eq!(peer.id(), &Id::from(keypair.public_key()));
     assert_eq!(peer.has_private_key(), true);
     assert_eq!(peer.private_key().is_some(), true);
     assert_eq!(peer.private_key(), Some(keypair.private_key()));
@@ -126,7 +126,7 @@ fn test_with_keypair_and_url() {
         .with_alternative_url(Some(url))
         .build();
 
-    assert_eq!(peer.id(), &Id::from(keypair.to_public_key()));
+    assert_eq!(peer.id(), &Id::from(keypair.public_key()));
     assert_eq!(peer.has_private_key(), true);
     assert_eq!(peer.private_key().is_some(), true);
     assert_eq!(peer.private_key(), Some(keypair.private_key()));
@@ -179,7 +179,7 @@ fn test_with_keypair_proxy_and_url() {
         .with_alternative_url(Some(url))
         .build();
 
-    assert_eq!(peer.id(), &Id::from(keypair.to_public_key()));
+    assert_eq!(peer.id(), &Id::from(keypair.public_key()));
     assert_eq!(peer.has_private_key(), true);
     assert_eq!(peer.private_key().is_some(), true);
     assert_eq!(peer.private_key(), Some(keypair.private_key()));

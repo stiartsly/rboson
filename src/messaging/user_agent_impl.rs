@@ -556,7 +556,7 @@ impl UserAgent for DefaultUserAgent {
         unimplemented!()
     }
 
-    fn channel(&self, _channel_id: &Id) -> Result<Option<&Channel>> {
+    fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
         unimplemented!()
     }
 
@@ -568,5 +568,9 @@ impl UserAgent for DefaultUserAgent {
     fn put_contacts_update(&mut self, _version_id: &str, _contacts: &[Contact]) -> Result<()> {
         //unimplemented!()
         Ok(())
+    }
+
+    fn contact(&self, _id: Id) -> Result<Option<Contact>> {
+        Ok(None)
     }
 }

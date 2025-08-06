@@ -41,6 +41,8 @@ use crate::{
         rpc::request::RPCRequest,
         rpc::method::RPCMethod,
         message::Message,
+        channel,
+        rpc::parameters
     }
 };
 
@@ -378,140 +380,237 @@ impl MessagingClient for Client {
         unimplemented!()
     }
 
-    async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
-        let name = name.nfc().collect::<String>();
-        self.api_client.update_profile(&name, avatar).await
+    async fn update_profile(
+        &mut self,
+        name: Option<&str>,
+        avatar: bool
+    ) -> Result<()> {
+        let name = name.map(|n| n.nfc().collect::<String>());
+        self.api_client.update_profile(
+            name.as_deref(),
+            avatar
+        ).await
     }
 
-    async fn upload_avatar(&mut self, content_type: &str, avatar: &[u8]) -> Result<String> {
+    async fn upload_avatar(
+        &mut self,
+        content_type: &str,
+        avatar: &[u8]
+    ) -> Result<String> {
         self.api_client.upload_avatar(content_type, avatar).await
     }
 
-    async fn upload_avatar_with_filename(&mut self, content_type: &str, file_name: &str) -> Result<String> {
-        self.api_client.upload_avatar_with_filename(
+    async fn upload_avatar_from_file(
+        &mut self,
+        content_type: &str,
+        file_name: &str
+    ) -> Result<String> {
+        self.api_client.upload_avatar_from_file(
             content_type,
             file_name.into()
         ).await
     }
 
-    async fn devices(&self) -> Result<Vec<ClientDevice>> {
+    async fn devices(&mut self) -> Result<Vec<ClientDevice>> {
+        _ = RPCRequest::<(), Vec<ClientDevice>>::new(
+            self.next_index(),
+            RPCMethod::DeviceList,
+            None
+        );
+
+        // self.send_rpc_request(&self.peer.id(), request).await?;
         unimplemented!()
     }
 
-    async fn revoke_device(&mut self, _device_id: &Id) -> Result<()> {
-        unimplemented!()
-    }
+    async fn revoke_device(
+        &mut self,
+        device_id: &Id
+    ) -> Result<()> {
+        let req = RPCRequest::<Id, bool>::new(
+            self.next_index(),
+            RPCMethod::DeviceRevoke,
+            Some(device_id.clone())
+        );
 
-    async fn create_channel(&mut self,
-        name: &str,
-        notice: Option<&str>
-    ) -> Result<Channel> {
-        self.create_channel_with_permission(
-            &Permission::OwnerInvite,
-            name,
-            notice
+        self.send_rpc_request(
+            &self.peer.id().clone(),
+            req
         ).await
     }
 
-    async fn create_channel_with_permission(&mut self,
-        _permission: &Permission,
-        _name: &str,
-        _notice: Option<&str>
+    async fn create_channel(
+        &mut self,
+        permission: Option<channel::Permission>,
+        name: &str,
+        notice: Option<&str>
     ) -> Result<Channel> {
+
+        let session_kp = signature::KeyPair::random();
+        let session_id = Id::from(session_kp.public_key());
+        let permission = permission.unwrap_or(channel::Permission::OwnerInvite);
+
+        let params = parameters::ChannelCreate::new(
+            session_id,
+            permission,
+            Some(name.to_string()),
+            notice.map(|n| n.to_string()),
+        );
+
+        let mut req = RPCRequest::<parameters::ChannelCreate, bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelCreate,
+            Some(params)
+        );
+
+        req.apply_with_cookie(&session_kp, |_| {
+            Vec::<u8>::new() // TODO
+        });
+
+        // self.send_rpc_request(self.service_info.peerid(), req).await
         unimplemented!()
     }
 
-    async fn remove_channel(&mut self, _channel_id: &Id) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn join_channel(&mut self, _ticket: &InviteTicket) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn leave_channel(&mut self, _channel_id: &Id) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn create_invite_ticket(&mut self,
+    async fn remove_channel(
+        &mut self,
         channel_id: &Id
-    ) -> Result<InviteTicket> {
-        self.sign_into_invite_ticket(channel_id, None).await
+    ) -> Result<()> {
+        let req = RPCRequest::<(), bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelRemove,
+            None
+        );
+        self.send_rpc_request(channel_id, req).await
     }
 
-    async fn create_invite_ticket_with_invitee(&mut self,
+    async fn join_channel(
+        &mut self,
+        ticket: &InviteTicket
+    ) -> Result<()> {
+        if ticket.session_key().is_none() {
+            Err(Error::Argument("Invite ticket does not contain session key".into()))?
+        }
+        if ticket.is_expired() {
+            Err(Error::Argument("Invite ticket is expired".into()))?
+        }
+        if ticket.is_valid(self.user.id()) {
+            Err(Error::Argument("Invite ticket is not valid for this user".into()))?
+        }
+
+        let session_key = match ticket.is_public() {
+            true => ticket.session_key().unwrap().to_vec(),
+            false => {
+                self.user.decrypt_into(
+                    ticket.inviter(),
+                    ticket.session_key().unwrap()
+                )?
+            }
+        };
+
+        _ = signature::KeyPair::try_from(
+            session_key.as_slice()
+        ).map_err(|_| {
+            Error::Argument(format!("Invalid member private key"))
+        })?;
+
+        let mut req = RPCRequest::<InviteTicket, Channel>::new(
+            self.next_index(),
+            RPCMethod::ChannelJoin,
+            Some(ticket.proof().clone())
+        );
+        req.apply_with_cookie(session_key, |_| {
+            Vec::<u8>::new() // TODO
+        });
+        self.send_rpc_request(ticket.channel_id(), req).await
+    }
+
+    async fn leave_channel(&mut self, channel_id: &Id) -> Result<()> {
+        let request = RPCRequest::<(), bool>::new(
+            self.next_index(),
+            RPCMethod::ChannelLeave,
+            None
+        );
+        self.send_rpc_request(channel_id, request).await
+    }
+
+    async fn create_invite_ticket(
+        &mut self,
         channel_id: &Id,
-        invitee: &Id
+        invitee: Option<&Id>
     ) -> Result<InviteTicket> {
-        self.sign_into_invite_ticket(channel_id, Some(invitee)).await
+        self.sign_into_invite_ticket(channel_id, invitee).await
     }
 
-    async fn set_channel_owner(&mut self,
+    async fn set_channel_owner(
+        &mut self,
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) {
-            return Err(Error::State("Not channel owner".into()));
+        if !channel.is_owner(self.user.id()) {
+            Err(Error::State("Not channel owner".into()))?
         }
-
         if channel.is_member(new_owner) {
-            return Err(Error::State("New owner is not in the channel".into()));
+            Err(Error::State("New owner is not in the channel".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
         let req = RPCRequest::<Id, bool>::new(
             self.next_index(),
             RPCMethod::ChannelOwner,
-            new_owner.clone()
+            Some(new_owner.clone())
         );
-
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_permission(&mut self,
+    async fn set_channel_permission(
+        &mut self,
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) {
-            return Err(Error::State("Not channel owner".into()));
+        if !channel.is_owner(self.user.id()) {
+            Err(Error::State("Not channel owner".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
         let req = RPCRequest::<Permission, bool>::new(
             self.next_index(),
             RPCMethod::ChannelPermission,
-            permission
+            Some(permission)
         );
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_name(&mut self,
+    async fn set_channel_name(
+        &mut self,
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
-        let name = name.map(|n| n.nfc().collect::<String>())
-            .unwrap_or_default();
-
+        let name = name.map(|n|
+            match n.is_empty() {
+                true => None,
+                false => Some(n.nfc().collect::<String>())
+            }
+        ).flatten();
         let req = RPCRequest::<String, bool>::new(
             self.next_index(),
             RPCMethod::ChannelName,
@@ -520,23 +619,27 @@ impl MessagingClient for Client {
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_notice(&mut self,
+    async fn set_channel_notice(
+        &mut self,
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
-        let notice = notice.map(|n| n.nfc().collect::<String>())
-            .unwrap_or_default();
+        let notice = notice.map(|n|
+            match n.is_empty() {
+                true => None,
+                false => Some(n.nfc().collect::<String>())
+        }).flatten();
 
         let req = RPCRequest::<String, bool>::new(
             self.next_index(),
@@ -546,7 +649,8 @@ impl MessagingClient for Client {
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn set_channel_member_role(&mut self,
+    async fn set_channel_member_role(
+        &mut self,
         channel_id: &Id,
         members: Vec<&Id>,
         role: Role
@@ -555,115 +659,159 @@ impl MessagingClient for Client {
             return Ok(());
         }
 
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
-        let req = RPCRequest::<Role, bool>::new(
+        let role = parameters::ChannelMemberRole::new(
+            members.into_iter().map(|id| id.clone())
+                .collect::<Vec<Id>>(),
+            role,
+        );
+        let req = RPCRequest::<parameters::ChannelMemberRole, bool>::new(
             self.next_index(),
             RPCMethod::ChannelRole,
-            role
+            Some(role)
         );
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn ban_channel_members(&mut self,
+    async fn ban_channel_members(
+        &mut self,
         channel_id: &Id,
-        members: Vec<Id>,
+        members: Vec<&Id>,
     ) -> Result<()> {
         if members.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
         let req = RPCRequest::<Vec<Id>, bool>::new(
             self.next_index(),
             RPCMethod::ChannelBan,
-            members
+            Some(members)
         );
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn unban_channel_members(&mut self,
+    async fn unban_channel_members(
+        &mut self,
         channel_id: &Id,
-        members: Vec<Id>
+        members: Vec<&Id>
     ) -> Result<()> {
         if members.is_empty() {
             return Ok(());
         }
 
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
         let req = RPCRequest::<Vec<Id>, bool>::new(
             self.next_index(),
             RPCMethod::ChannelUnban,
-            members
+            Some(members)
         );
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn remove_channel_members(&mut self,
+    async fn remove_channel_members(
+        &mut self,
         channel_id: &Id,
-        members: Vec<Id>
+        members: Vec<&Id>
     ) -> Result<()> {
         if members.is_empty() {
             return Ok(());
         }
 
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+        let ua = self.user_agent.lock().unwrap();
+        let Some(channel) = ua.channel(channel_id)? else {
+            Err(Error::State("Channel does not exist".into()))?
         };
 
-        if !channel.is_owner(channel_id) && !channel.is_moderator(channel_id) {
-            return Err(Error::State("Not channel owner or moderator".into()));
+        let userid = self.user.id();
+        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(locked_agent);
+        drop(ua);
 
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
         let req = RPCRequest::<Vec<Id>, bool>::new(
             self.next_index(),
             RPCMethod::ChannelRemove,
-            members
+            Some(members)
         );
         self.send_rpc_request(channel_id, req).await
     }
 
-    async fn channel(&self, _id: &Id) -> Result<&Channel> {
+    async fn add_contact(
+        &mut self,
+        _id: &Id,
+        _home_peer_id: Option<&Id>,
+        _session_key: &[u8],
+        _remark: Option<&str>
+    ) -> Result<()> {
         unimplemented!()
     }
 
-    async fn contact(&self, _id: &Id) -> Result<&Contact> {
-        unimplemented!()
+    async fn channel(&self, id: &Id) -> Result<Option<Channel>> {
+        let ua = self.user_agent.clone();
+        let id = id.clone();
+
+        match tokio::spawn(async move {
+            ua.lock().unwrap()
+                .channel(&id)
+        }).await {
+            Ok(channel) => channel,
+            Err(e) => Err(Error::State(format!("Failed to get channel: {}", e)))
+        }
+    }
+
+    async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
+        let ua = self.user_agent.clone();
+        let id = id.clone();
+
+        match tokio::spawn(async move {
+            ua.lock().unwrap().contact(id)
+        }).await {
+            Ok(contact) => contact,
+            Err(e) => Err(Error::State(format!("Failed to get contact: {}", e)))
+        }
     }
 
     async fn contacts(&self) -> Result<Vec<&Contact>> {
-        unimplemented!()
-    }
-
-    async fn add_contact(&mut self, _id: &Id, _home_peer_id: Option<&Id>, _session_key: &[u8], _remark: Option<&str>) -> Result<()> {
         unimplemented!()
     }
 

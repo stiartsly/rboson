@@ -501,7 +501,7 @@ impl APIClient {
         Ok(data)
     }
 
-    pub(crate) async fn update_profile(&mut self, name: &str, avatar: bool) -> Result<()> {
+    pub(crate) async fn update_profile(&mut self, name: Option<&str>, avatar: bool) -> Result<()> {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
@@ -514,21 +514,19 @@ impl APIClient {
         let digest = profile::digest(
             self.user.id(),
             &self.peerid,
-            Some(name),
+            name,
             avatar,
             None
         );
-        let sig = self.user.sign_into(&digest).unwrap();
-
+        let sig  = self.user.sign_into(&digest).unwrap();
         let data = RequestData {
-            userName    : name,
-            avatar      : false, // TODO: handle avatar upload
+            userName    : name.unwrap_or(""),
+            avatar,
             profileSig  : sig.as_slice(),
         };
 
         let url = self.base_url.join("/api/v1/profile").unwrap();
         let rsp = self.client.put(url)
-            .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .bearer_auth(self.access_token().await?)
             .json(&data)
@@ -581,7 +579,7 @@ impl APIClient {
         unimplemented!()
     }
 
-    pub(crate) async fn upload_avatar_with_filename(&mut self,
+    pub(crate) async fn upload_avatar_from_file(&mut self,
         _content_type: &str,
         _file_name: String,
     ) -> Result<String> {

@@ -46,8 +46,10 @@ pub trait UserAgent: Send + ConnectionListener  {
     fn remove_messages_by_conversation(&mut self, conversation_id: &Id);
 
     fn channels(&self) -> Result<Vec<&Channel>>;
-    fn channel(&self, channel_id: &Id) -> Result<Option<&Channel>>;
+    fn channel(&self, channel_id: &Id) -> Result<Option<Channel>>;
 
     fn contact_version(&self) -> Result<Option<String>>;
     fn put_contacts_update(&mut self, version_id: &str, contacts: &[Contact]) -> Result<()>;
+
+    fn contact(&self, id: Id) -> Result<Option<Contact>>;
 }

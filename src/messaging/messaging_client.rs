@@ -21,12 +21,13 @@ pub trait MessagingClient {
 
     fn close(&mut self) -> impl Future<Output = Result<()>>;
     fn connect(&mut self) -> impl Future<Output = Result<()>>;
-
     fn disconnect(&mut self) -> impl Future<Output = Result<()>>;
     fn is_connected(&self) -> bool;
 
+    // fn message_builder() -> MessageBuilder;
+
     fn update_profile(&mut self,
-        name: &str,
+        name: Option<&str>,
         avatar: bool
     ) -> impl Future<Output = Result<()>>;
 
@@ -35,24 +36,19 @@ pub trait MessagingClient {
         avatar: &[u8]
     ) -> impl Future<Output = Result<String>>;
 
-    fn upload_avatar_with_filename(&mut self,
+    fn upload_avatar_from_file(&mut self,
         content_type: &str,
         file_name: &str
     ) -> impl Future<Output = Result<String>>;
 
-    fn devices(&self) -> impl Future<Output = Result<Vec<ClientDevice>>>;
+    fn devices(&mut self) -> impl Future<Output = Result<Vec<ClientDevice>>>;
 
     fn revoke_device(&mut self,
         device_id: &Id
     ) -> impl Future<Output = Result<()>>;
 
     fn create_channel(&mut self,
-        name: &str,
-        notice: Option<&str>
-    ) -> impl Future<Output = Result<Channel>>;
-
-    fn create_channel_with_permission(&mut self,
-        permission: &Permission,
+        permission: Option<Permission>,
         name: &str,
         notice: Option<&str>
     ) -> impl Future<Output = Result<Channel>>;
@@ -70,12 +66,8 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<()>>;
 
     fn create_invite_ticket(&mut self,
-        channel_id: &Id
-    ) -> impl Future<Output = Result<InviteTicket>>;
-
-    fn create_invite_ticket_with_invitee(&mut self,
         channel_id: &Id,
-        invitee: &Id
+        invitee: Option<&Id>
     ) -> impl Future<Output = Result<InviteTicket>>;
 
     fn set_channel_owner(&mut self,
@@ -106,22 +98,22 @@ pub trait MessagingClient {
 
     fn ban_channel_members(&mut self,
         channel_id: &Id,
-        members: Vec<Id>
+        members: Vec<&Id>
     ) -> impl Future<Output = Result<()>>;
 
     fn unban_channel_members(&mut self,
         channel_id: &Id,
-        members: Vec<Id>
+        members: Vec<&Id>
     ) -> impl Future<Output = Result<()>>;
 
     fn remove_channel_members(&mut self,
         channel_id: &Id,
-        members: Vec<Id>
+        members: Vec<&Id>
     ) -> impl Future<Output = Result<()>>;
 
-    fn channel(&self, id: &Id) -> impl Future<Output = Result<&Channel>>;
+    fn contact(&self, id: &Id) -> impl Future<Output = Result<Option<Contact>>>;
 
-    fn contact(&self, id: &Id) -> impl Future<Output = Result<&Contact>>;
+    fn channel(&self, id: &Id) -> impl Future<Output = Result<Option<Channel>>>;
 
     fn contacts(&self) ->impl Future<Output = Result<Vec<&Contact>>>;
 

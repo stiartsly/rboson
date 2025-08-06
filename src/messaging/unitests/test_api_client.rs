@@ -165,7 +165,7 @@ async fn test_update_profile() {
     assert!(profile.is_genuine());
 
     // Update profile
-    let result = client.update_profile("Bob", false).await;
+    let result = client.update_profile(Some("Bob"), false).await;
     assert!(result.is_ok());
 
     // Get profile and check updated values

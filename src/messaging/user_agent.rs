@@ -51,5 +51,9 @@ pub trait UserAgent: Send + ConnectionListener  {
     fn contact_version(&self) -> Result<Option<String>>;
     fn put_contacts_update(&mut self, version_id: &str, contacts: &[Contact]) -> Result<()>;
 
-    fn contact(&self, id: Id) -> Result<Option<Contact>>;
+    fn contact(&self, id: &Id) -> Result<Option<Contact>>;
+    fn contacts(&self) -> Result<Vec<Contact>>;
+
+    fn remove_contact(&mut self, id: &Id) -> Result<()>;
+    fn remove_contacts(&mut self, ids: Vec<&Id>) -> Result<()>;
 }

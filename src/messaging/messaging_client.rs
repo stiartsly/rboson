@@ -115,7 +115,7 @@ pub trait MessagingClient {
 
     fn channel(&self, id: &Id) -> impl Future<Output = Result<Option<Channel>>>;
 
-    fn contacts(&self) ->impl Future<Output = Result<Vec<&Contact>>>;
+    fn contacts(&self) ->impl Future<Output = Result<Vec<Contact>>>;
 
     fn add_contact(&mut self,
         id: &Id,

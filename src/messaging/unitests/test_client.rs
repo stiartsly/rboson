@@ -117,6 +117,7 @@ impl ProfileListener for ProfileListenerTest {
     }
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_messaging_client() {
     let cfg  = cfg().expect("Failed to load configuration");

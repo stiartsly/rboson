@@ -570,7 +570,18 @@ impl UserAgent for DefaultUserAgent {
         Ok(())
     }
 
-    fn contact(&self, _id: Id) -> Result<Option<Contact>> {
+    fn contact(&self, _id: &Id) -> Result<Option<Contact>> {
         Ok(None)
+    }
+
+    fn contacts(&self) -> Result<Vec<Contact>> {
+        Ok(vec![])
+    }
+
+    fn remove_contact(&mut self, _id: &Id) -> Result<()> {
+        Ok(())
+    }
+    fn remove_contacts(&mut self, _ids: Vec<&Id>) -> Result<()> {
+        Ok(())
     }
 }

@@ -27,23 +27,24 @@ use crate::{
         Result,
         CryptoIdentity,
         CryptoContext
-    },
-    messaging::{
-        ClientDevice,
-        ServiceIds,
-        UserAgent,
-        InviteTicket,
-        Contact,
-        ClientBuilder,
-        MessagingClient,
-        api_client::{self, APIClient},
-        channel::{Role, Permission, Channel},
-        rpc::request::RPCRequest,
-        rpc::method::RPCMethod,
-        message::Message,
-        channel,
-        rpc::parameters
     }
+};
+
+use crate::messaging::{
+    ClientDevice,
+    ServiceIds,
+    UserAgent,
+    InviteTicket,
+    Contact,
+    ClientBuilder,
+    MessagingClient,
+    api_client::{self, APIClient},
+    channel::{Role, Permission, Channel},
+    rpc::request::RPCRequest,
+    rpc::method::RPCMethod,
+    message::{Message, MessageType},
+    channel,
+    rpc::parameters
 };
 
 #[allow(dead_code)]
@@ -64,10 +65,10 @@ pub struct Client {
     api_client      : APIClient,
     disconnect      : bool,
 
-    mqtt_client     : Option<AsyncClient>,
-    task_handler    : Option<JoinHandle<()>>,
 
-    task_proxy      : Arc<Mutex<Proxy>>,
+    mqttc_task      : Option<JoinHandle<()>>,
+    mqttc_client    : Option<AsyncClient>,
+    mqttc_handler   : Option<Arc<Mutex<MqttcHandler>>>,
     user_agent      : Arc<Mutex<dyn UserAgent>>,
 
     pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
@@ -110,21 +111,19 @@ impl Client {
             peer,
             user,
             device,
-            service_info: None,
+            service_info    : None,
 
             client_id,
-            inbox       : format!("inbox/{}", bs58_userid),
-            outbox      : format!("outbox/{}", bs58_userid),
+            inbox           : format!("inbox/{}", bs58_userid),
+            outbox          : format!("outbox/{}", bs58_userid),
 
-            user_agent  : user_agent.clone(),
-            disconnect  : false,
+            user_agent      : user_agent.clone(),
+            disconnect      : false,
             api_client,
 
-            mqtt_client : None,
-            task_handler: None,
-            task_proxy  : Arc::new(Mutex::new(Proxy::new(
-                user_agent.clone()
-            ))),
+            mqttc_task      : None,
+            mqttc_client    : None,
+            mqttc_handler   : None,
 
             self_context,
             server_context,
@@ -134,9 +133,16 @@ impl Client {
     }
 
     fn mqttc(&mut self) -> &AsyncClient {
-        self.mqtt_client
+        self.mqttc_client
             .as_ref()
-            .expect("MQTT Async client should be created")
+            .expect("MQTT client should be created")
+    }
+
+    fn mqttc_msg_handler(&self) -> Arc<Mutex<MqttcHandler>> {
+        self.mqttc_handler
+            .as_ref()
+            .expect("MQTT client message handler should be created")
+            .clone()
     }
 
     fn next_index(&mut self) -> u32 { 0 }
@@ -181,17 +187,18 @@ impl Client {
     pub async fn stop(&mut self, forced: bool) {
         // TODO: server context cleanup if needed.
 
-        if let Some(handle) = self.task_handler.take() {
+        if let Some(task) = self.mqttc_task.take() {
             if forced {
                 info!("Stopping messaging client ...");
-                handle.abort()
+                task.abort()
             };
-            handle.await.ok();
+            task.await.ok();
         };
 
         info!("Messaging client stopped ...");
-        self.task_handler = None;
-        self.mqtt_client = None;
+        self.mqttc_task = None;
+        self.mqttc_client = None;
+        self.mqttc_handler = None;
     }
 
     pub async fn connect(&mut self) -> Result<()> {
@@ -293,14 +300,14 @@ impl Client {
             // TODO:
         }
 
-        let (mqtt_client, mut eventloop) = AsyncClient::new(
+        let (mqttc, mut eventloop) = AsyncClient::new(
             mqtt_options,
             10
         );
 
-        self.mqtt_client = Some(mqtt_client);
-        let task_proxy = self.task_proxy.clone();
-        self.task_handler = Some(tokio::spawn(async move {
+        let mqttc_handler = self.mqttc_msg_handler().clone();
+        self.mqttc_client = Some(mqttc);
+        self.mqttc_task = Some(tokio::spawn(async move {
             loop {
                 let event = match eventloop.poll().await {
                     Ok(event) => event,
@@ -311,7 +318,7 @@ impl Client {
                 };
 
                 if let Event::Incoming(packet) = event {
-                    task_proxy.lock().unwrap().on_mqtt_msg(packet);
+                    mqttc_handler.lock().unwrap().on_mqtt_msg(packet);
                 }
             }
         }));
@@ -319,7 +326,7 @@ impl Client {
     }
 
     async fn do_connect(&mut self) -> Result<()> {
-        if let Some(_) = self.mqtt_client.as_ref() {
+        if let Some(_) = self.mqttc_client.as_ref() {
             if self.is_connected() {
                 info!("Already connected to the messaging server");
                 return Ok(());
@@ -349,6 +356,10 @@ impl Client {
             self.user_agent.lock().unwrap().on_disconnected();
             Error::State(errstr)
         })
+    }
+
+    async fn push_contacts_update(&mut self, _updated_contacts: Vec<Contact>) -> Result<()> {
+        unimplemented!()
     }
 }
 
@@ -778,12 +789,39 @@ impl MessagingClient for Client {
 
     async fn add_contact(
         &mut self,
-        _id: &Id,
-        _home_peer_id: Option<&Id>,
-        _session_key: &[u8],
-        _remark: Option<&str>
+        id: &Id,
+        home_peer_id: Option<&Id>,
+        session_key: &[u8],
+        remark: Option<&str>
     ) -> Result<()> {
-        unimplemented!()
+
+        // check the session key
+        _ = signature::KeyPair::try_from(
+            session_key
+        ).map_err(|_| {
+            Error::Argument(format!("Invalid contact private key"))
+        })?;
+
+        let contact = Contact::new1(
+            id.clone(),
+            home_peer_id.cloned(),
+            session_key.to_vec(),
+            remark.map(|r| r.nfc().collect::<String>())
+        )?;
+
+        self.push_contacts_update(vec![contact]).await
+    }
+
+    async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
+        let ua = self.user_agent.clone();
+        let id = id.clone();
+
+        match tokio::spawn(async move {
+            ua.lock().unwrap().contact(&id)
+        }).await {
+            Ok(contact) => contact,
+            Err(e) => Err(Error::State(format!("Failed to get contact: {}", e)))
+        }
     }
 
     async fn channel(&self, id: &Id) -> Result<Option<Channel>> {
@@ -799,28 +837,41 @@ impl MessagingClient for Client {
         }
     }
 
-    async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
+    async fn contacts(&self) -> Result<Vec<Contact>> {
         let ua = self.user_agent.clone();
-        let id = id.clone();
 
         match tokio::spawn(async move {
-            ua.lock().unwrap().contact(id)
+            ua.lock().unwrap().contacts()
         }).await {
-            Ok(contact) => contact,
+            Ok(contacts) => contacts,
             Err(e) => Err(Error::State(format!("Failed to get contact: {}", e)))
         }
     }
 
-    async fn contacts(&self) -> Result<Vec<&Contact>> {
-        unimplemented!()
-    }
-
-    async fn update_contact(&mut self, _contact: Contact) -> Result<()> {
-        unimplemented!()
+    async fn update_contact(&mut self, contact: Contact) -> Result<()> {
+        if !contact.is_modified() {
+            Err(Error::Argument("Contact is not modified".into()))?;
+        }
+        self.push_contacts_update(vec![contact.clone()]).await
     }
 
     async fn remove_contact(&mut self, _id: &Id) -> Result<()> {
-        unimplemented!()
+        let mut ua = self.user_agent.lock().unwrap();
+        let Some(mut contact) = ua.contact(_id)? else {
+            return Err(Error::State("Contact does not exist".into()));
+        };
+
+        if contact.is_auto() {
+            ua.remove_contacts(vec![_id])?;
+            return Ok(())
+        }
+        drop(ua);
+
+        if contact.is_deleted() {
+            return Ok(())
+        }
+        contact.set_deleted(true);
+        self.push_contacts_update(vec![contact]).await
     }
 
     async fn remove_contacts(&mut self, _ids: Vec<&Id>) -> Result<()> {
@@ -828,19 +879,38 @@ impl MessagingClient for Client {
     }
 }
 
-struct Proxy {
+struct MqttcHandler {
     user_agent: Arc<Mutex<dyn UserAgent>>,
     pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
     connect_promise: Option<Box<dyn FnMut() + Send + Sync>>,
+    server_context: Option<Arc<Mutex<CryptoContext>>>,
+
+    peer: Option<PeerInfo>,
+
+    inbox: String,
+    outbox: String,
 }
 
-impl Proxy {
+impl MqttcHandler {
+    #[allow(unused)]
     fn new(user_agent: Arc<Mutex<dyn UserAgent>>) -> Self {
         Self {
             user_agent,
             pending_messages: Arc::new(Mutex::new(HashMap::new())),
-            connect_promise: None,
+            connect_promise : None,
+            server_context  : None,
+            peer       : None,
+            inbox: "inbox/".to_string(),
+            outbox: "outbox/".to_string(),
         }
+    }
+
+    fn peer(&self) -> &PeerInfo {
+        self.peer.as_ref().expect("Peer info should be set")
+    }
+
+    fn is_me(&self, _id: &Id) -> bool {
+        true // TODO
     }
 
     fn on_mqtt_msg(&mut self, packet: Packet) {
@@ -896,6 +966,84 @@ impl Proxy {
     }
 
     fn on_message(&mut self, publish: rumqttc::Publish) {
-        info!("Received message on topic {}: {:?}", publish.topic, publish.payload);
+        let topic = publish.topic.as_str();
+        debug!("Got message from: {}", topic);
+
+        let context = self.server_context.as_ref().unwrap().lock().unwrap();
+        let payload = context.decrypt_into(
+            publish.payload.as_ref()
+        ).unwrap_or_else(|_| {
+            error!("Failed to decrypt message payload");
+            Vec::new()
+        });
+        drop(context);
+
+        let Ok(mut message) = serde_cbor::from_slice::<Message>(&payload) else {
+            error!("Failed to deserialize message from {topic}, ignored");
+            return;
+        };
+
+        if message.is_valid() {
+            error!("Invalid message received: {topic}, ignored");
+            return;
+        }
+
+        message.mark_encrypted(true);
+        if topic == self.inbox {
+            self.on_inbox_message(message);
+        } else if topic == self.outbox {
+            self.on_outbox_message(message);
+        } else if topic == "broadcast" {
+            self.on_broadcast_message(message);
+        } else {
+            error!("Unknown topic: {topic}, ignored");
+            return;
+        }
+    }
+
+    fn on_inbox_message(&mut self, msg: Message) {
+        let Ok(mtype) = msg.message_type() else {
+            return;
+        };
+
+        let body  = msg.body();
+
+        body.as_ref().map(|v| {
+            if v.len() > 0 && msg.from() == self.peer().id() {
+                if self.is_me(&msg.to()) {
+                    info!("Received message from myself, ignored: {:?}", msg);
+
+                    match mtype {
+                        MessageType::Message => {
+                            let sender = self.user_agent.lock().unwrap().contact(msg.from());
+                            if let Ok(Some(sender)) = sender {
+                                if sender.has_session_key() {
+                                    //msg.decrypt_body(sender.rx_crypto_context());
+                                    info!("Decrypted message from self: {:?}", msg);
+                                } else {
+                                    error!("Sender contact does not have session key: {:?}", msg);
+                                }
+                            } else {
+                                error!("Failed to get sender contact for message: {:?}", msg);
+                            }
+                        },
+                        MessageType::Call => {}, // TODO: handle call
+                        MessageType::Notification => {}, // TODO: handle notification
+                    }
+                    return;
+                } else { // received message for channel.
+                    // Message: sender -> channel
+                }
+            }
+        });
+        unimplemented!()
+    }
+
+    fn on_outbox_message(&mut self, _message: Message) {
+        unimplemented!()
+    }
+
+    fn on_broadcast_message(&mut self, _message: Message) {
+        unimplemented!()
     }
 }

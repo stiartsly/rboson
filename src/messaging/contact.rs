@@ -83,6 +83,15 @@ pub struct Contact {
 
 #[allow(unused)]
 impl Contact {
+    pub(crate) fn new1(
+        id: Id,
+        home_peerid: Option<Id>,
+        session_key: Vec<u8>,
+        remark: Option<String>
+    ) -> Result<Self> {
+        unimplemented!()
+    }
+
     /*
     pub(crate) fn new(b: &mut ContactBuilder) -> Self {
         Self {
@@ -158,11 +167,15 @@ impl Contact {
         self.auto = auto;
     }
 
+    pub fn has_session_key(&self) -> bool {
+        self.session_keypair.is_some()
+    }
+
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|v| v.as_str())
     }
 
-    pub fn set_name(&mut self, name: &str) {
+    pub(crate) fn set_name(&mut self, name: &str) {
         self.name = Some(name.into());
         self.display_name = None;
         self.touch();
@@ -227,7 +240,7 @@ impl Contact {
         self.touch();
     }
 
-    pub fn is_delted(&self) -> bool {
+    pub fn is_deleted(&self) -> bool {
         self.deleted
     }
 
@@ -325,6 +338,14 @@ impl Contact {
         self.last_modified = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+    }
+
+    pub(crate) fn rx_crypto_context(&self) -> Result<&CryptoContext> {
+        unimplemented!()
+    }
+
+    pub(crate) fn tx_crypto_context(&self) -> Result<&CryptoContext> {
+        unimplemented!()
     }
 }
 

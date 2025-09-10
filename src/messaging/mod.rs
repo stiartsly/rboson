@@ -38,7 +38,6 @@ pub(crate) mod api_client;
 pub(crate) mod invite_ticket;
 
 pub mod message;
-pub mod message_builder;
 pub mod message_listener;
 
 pub mod connection_listener;

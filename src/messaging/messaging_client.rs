@@ -12,7 +12,7 @@ use crate::messaging::{
     Channel,
     InviteTicket,
     Contact,
-    client_device::ClientDevice,
+    client_device::ClientDevice
 };
 
 pub trait MessagingClient {
@@ -24,7 +24,7 @@ pub trait MessagingClient {
     fn disconnect(&mut self) -> impl Future<Output = Result<()>>;
     fn is_connected(&self) -> bool;
 
-    // fn message_builder() -> MessageBuilder;
+    //fn message(&mut self) -> MessageBuilder;
 
     fn update_profile(&mut self,
         name: Option<&str>,

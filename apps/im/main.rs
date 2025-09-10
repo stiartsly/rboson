@@ -21,7 +21,7 @@ use boson::messaging::{
     ConnectionListener,
     MessageListener,
     ContactListener,
-    ProfileListener
+    ProfileListener,
 };
 
 #[derive(Parser, Debug)]
@@ -160,10 +160,28 @@ async fn main() {
         }
     };
 
-    _ = client.start();
+    let rc = client.start().await;
     thread::sleep(Duration::from_secs(1));
+    if let Err(e) = rc {
+        eprintln!("Starting messaging client error: {{{e}}}");
+        node.lock().unwrap().stop();
+        return;
+    }
 
-    _ = client.connect().await;
+    let rc = client.connect().await;
+    if let Err(e) = rc {
+        eprintln!("Connecting to messaging service error: {{{e}}}");
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let rc = client.create_channel(None, "tang", Some("notice")).await;
+    if let Err(e) = rc {
+        eprintln!("Creating channel error: {{{e}}}");
+    } else {
+        println!("Channel created: {:?}", rc.unwrap());
+    }
 
     thread::sleep(Duration::from_secs(2));
     _ = client.stop(false).await;

@@ -11,10 +11,13 @@ use crate::{
         Error,
         Result,
         CryptoContext
-    }
+    },
+    messaging::{
+        MessagingClient,
+        Client,
+    },
 };
 
-#[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     Message= 0,
@@ -172,7 +175,7 @@ pub struct Message {
     #[serde(skip)]
     rid             : u64, // local message id
     #[serde(skip)]
-    conversation_id : Id,
+    conversation_id : Option<Id>,
     #[serde(skip)]
     encrypted       : bool,
     #[serde(skip)]
@@ -183,7 +186,30 @@ static VERSION: i32 = 1;
 
 #[allow(dead_code)]
 impl Message {
-    // TODO: Constructor
+    pub(crate) fn new(mut builder: MessageBuilder) -> Self {
+        Message {
+            version         : VERSION,
+            from            : builder.client.userid().clone(),
+            to              : builder.to.take().unwrap(),
+
+            serial_number   : builder.client.next_index(),
+            created         : as_ms!(SystemTime::now()) as u64,
+            message_type    : builder.msg_type as i32,
+
+            properties      : None,
+
+            content_type    : builder.content_type.map(|v| v.to_string()),
+            content_disposition: None,
+
+            body            : None,
+            orginal_body    : None,
+
+            rid             : 0,
+            conversation_id : None,
+            encrypted       : false,
+            completed       : 0,
+        }
+    }
 
     pub fn version(&self) -> i32 {
         self.version
@@ -197,12 +223,12 @@ impl Message {
         self.rid = rid;
     }
 
-    pub fn conversation_id(&self) -> &Id {
-        &self.conversation_id
+    pub fn conversation_id(&self) -> Option<&Id> {
+        self.conversation_id.as_ref()
     }
 
     pub(crate) fn set_conversation_id(&mut self, conversation_id: &Id) {
-        self.conversation_id = conversation_id.clone();
+        self.conversation_id = Some(conversation_id.clone());
     }
 
     pub fn from(&self) -> &Id {
@@ -295,58 +321,78 @@ impl fmt::Display for Message {
 }
 
 #[allow(dead_code)]
-pub(crate) struct Builder {
-    message: Option<Message>,
+pub(crate) struct MessageBuilder<'a> {
+    client      : &'a mut Client,
+    msg_type    : MessageType,
+
+    to          : Option<Id>,
+    properties  : Option<HashMap<String, serde_json::Value>>,
+    content_type: Option<ContentType>,
+    body        : Option<Vec<u8>>,
+
+    //message: Option<Message>,
 }
 
 #[allow(dead_code)]
-impl Builder {
-    pub(crate) fn clone_from(message: &Message) -> Self {
+impl<'a> MessageBuilder<'a> {
+    pub(crate) fn new(client: &'a mut Client, msg_type: MessageType) -> Self {
         Self {
-            message: Some(message.clone())
+            client,
+            msg_type,
+            to: None,
+            properties: None,
+            content_type: None,
+            body: None,
+            // Add other fields if needed
         }
     }
 
-    fn message_mut(&mut self) -> &mut Message {
-        self.message.as_mut().expect("Message is not set")
-    }
-
-    pub(crate) fn with_to(&mut self, to: Id) -> &mut Self {
-        self.message_mut().to = to;
+    pub(crate) fn with_to(mut self, to: Id) -> Self {
+        self.to = Some(to);
         self
     }
 
-    pub(crate) fn with_property(&mut self, name: &str, value: Option<serde_json::Value>) -> &mut Self {
-        let map = self.message_mut().properties
-            .get_or_insert_with(serde_json::Map::new);
-
-        _ = match value {
-            Some(v) => map.insert(name.to_string(), v),
-            None => map.remove(name)
-        };
+    pub(crate) fn with_property(mut self, name: &str, value: serde_json::Value) -> Self {
+        if let Some(map) = self.properties.as_mut() {
+            map.insert(name.to_string(), value);
+        } else {
+            let mut map = HashMap::new();
+            map.insert(name.to_string(), value);
+            self.properties = Some(map);
+        }
         self
     }
 
-    pub(crate) fn clear_properties(&mut self) -> &mut Self {
-        self.message_mut().properties.as_mut().map(|map| {
+    pub(crate) fn clear_properties(mut self) -> Self {
+        if let Some(map) = self.properties.as_mut() {
             map.clear();
-        });
-        self.message_mut().properties = None;
+        }
+        self.properties = None;
         self
     }
 
-    pub(crate) fn with_content_type(&mut self, content_type: ContentType) -> &mut Self {
-        self.message_mut().content_type = Some(content_type.to_string());
+    pub(crate) fn with_content_type(mut self, content_type: ContentType) -> Self {
+        self.content_type = Some(content_type);
         self
     }
 
-    pub(crate) fn with_body(&mut self, body: Vec<u8>) -> &mut Self {
-        self.message_mut().body = Some(body);
-        // TODO: self.message.orginal_body = None;
+    pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
+        self.body = Some(body);
+        // TODO: original body.
         self
     }
 
-    pub(crate) fn build(&mut self) -> Message {
-        self.message.take().expect("Message is not set")
+    pub(crate) fn with_body_utf8(mut self, body: &str) -> Self {
+        self.body = Some(body.as_bytes().to_vec());
+        // original body.
+        self
+    }
+
+    pub(crate) fn build(self) -> Result<Message> {
+        if self.to.is_none() {
+            Err(Error::Argument("Message 'to' field is required".into()))
+        } else {
+            Ok(Message::new(self))
+        }
     }
 }

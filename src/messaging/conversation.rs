@@ -99,7 +99,7 @@ impl Conversation {
     }
 
     pub(crate) fn update(&mut self, message: Message) -> Result<()> {
-        if message.conversation_id() != self.interlocutor.id() {
+        if message.conversation_id().unwrap() != self.interlocutor.id() {
             Err(Error::Argument("Message does not match the conversation".into()))?;
         }
 

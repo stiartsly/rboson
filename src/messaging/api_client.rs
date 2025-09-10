@@ -3,7 +3,7 @@ use reqwest::{StatusCode, Client};
 use serde::{Serialize, Deserialize};
 use serde_json::Map;
 use url::Url;
-use log::warn;
+use log::{warn,info};
 
 use crate::{
     unwrap,
@@ -275,6 +275,7 @@ impl APIClient {
                 Some(StatusCode::CONFLICT) => {
                     warn!("User already exists, trying to refresh access token");
                     self.access_token().await?;
+                    info!("Access token refreshed: {}", self.access_token.as_ref().unwrap());
                     return Ok(());
                 },
                 Some(StatusCode::BAD_REQUEST) | _ => {

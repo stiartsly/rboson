@@ -1,8 +1,9 @@
-use std::time::Duration;
 use std::collections::HashMap;
+use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use serde::Serialize;
+use serde_cbor;
 use sha2::{Digest, Sha256};
 use url::Url;
 use log::{debug, info, error};
@@ -42,7 +43,7 @@ use crate::messaging::{
     channel::{Role, Permission, Channel},
     rpc::request::RPCRequest,
     rpc::method::RPCMethod,
-    message::{Message, MessageType},
+    message::{Message, MessageType, MessageBuilder},
     channel,
     rpc::parameters
 };
@@ -69,9 +70,9 @@ pub struct Client {
     mqttc_task      : Option<JoinHandle<()>>,
     mqttc_client    : Option<AsyncClient>,
     mqttc_handler   : Option<Arc<Mutex<MqttcHandler>>>,
-    user_agent      : Arc<Mutex<dyn UserAgent>>,
 
-    pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
+    pending_msgs    : Arc<Mutex<HashMap<u16, Message>>>,
+    user_agent      : Arc<Mutex<dyn UserAgent>>,
 }
 
 #[allow(dead_code)]
@@ -117,9 +118,8 @@ impl Client {
             inbox           : format!("inbox/{}", bs58_userid),
             outbox          : format!("outbox/{}", bs58_userid),
 
-            user_agent      : user_agent.clone(),
-            disconnect      : false,
             api_client,
+            disconnect      : false,
 
             mqttc_task      : None,
             mqttc_client    : None,
@@ -128,11 +128,12 @@ impl Client {
             self_context,
             server_context,
 
-            pending_messages: Arc::new(Mutex::new(HashMap::new())),
+            pending_msgs    : Arc::new(Mutex::new(HashMap::new())),
+            user_agent      : user_agent.clone(),
         })
     }
 
-    fn mqttc(&mut self) -> &AsyncClient {
+    fn mqttc(&self) -> &AsyncClient {
         self.mqttc_client
             .as_ref()
             .expect("MQTT client should be created")
@@ -145,7 +146,15 @@ impl Client {
             .clone()
     }
 
-    fn next_index(&mut self) -> u32 { 0 }
+    fn ua(&self) -> Arc<Mutex<dyn UserAgent>> {
+        self.user_agent.clone()
+    }
+
+
+    pub(crate) fn next_index(&mut self) -> i32 {
+        // TODO
+        0
+    }
 
     pub fn load_access_token(&mut self) -> Option<String> {
         Some("TODO".into())
@@ -192,7 +201,9 @@ impl Client {
                 info!("Stopping messaging client ...");
                 task.abort()
             };
-            task.await.ok();
+            println!(">>>1111");
+            _ = task.await;
+            println!(">>>2222");
         };
 
         info!("Messaging client stopped ...");
@@ -265,8 +276,35 @@ impl Client {
         ))
     }
 
-    async fn send_rpc_request<T, R>(&mut self, _channel_id: &Id, _request: RPCRequest<T, R>) -> Result<()>
-    where T: Serialize, R: serde::de::DeserializeOwned {
+    async fn send_rpc_request<T, R>(&mut self,
+        _recipient: &Id,
+        _request: RPCRequest<T, R>
+    ) -> Result<()>
+        where T: Serialize, R: serde::de::DeserializeOwned {
+
+        let msg = MessageBuilder::new(self, MessageType::Call)
+            .with_to(_recipient.clone())
+            .with_body(serde_cbor::to_vec(&_request).unwrap())
+            .build()?;
+
+        self.send_message_intenral(msg).await?;
+        Ok(())
+    }
+
+    async fn send_message_intenral(&self, msg: Message) -> Result<()> {
+        let _type = msg.message_type();
+        //let body = msg.body();
+
+        let outbox = self.outbox.as_str();
+        let payload = b"TODO".to_vec();
+        self.mqttc().publish(
+            outbox,
+            rumqttc::QoS::AtLeastOnce,
+            false,
+            payload
+        ).await.map_err(|e| {
+            Error::State(format!("Failed to send message: {}", e))
+        })?;
         unimplemented!()
     }
 
@@ -305,7 +343,10 @@ impl Client {
             10
         );
 
-        let mqttc_handler = self.mqttc_msg_handler().clone();
+        let mqttc_handler = {
+            let handler = MqttcHandler::new(self);
+            Arc::new(Mutex::new(handler))
+        };
         self.mqttc_client = Some(mqttc);
         self.mqttc_task = Some(tokio::spawn(async move {
             loop {
@@ -361,6 +402,15 @@ impl Client {
     async fn push_contacts_update(&mut self, _updated_contacts: Vec<Contact>) -> Result<()> {
         unimplemented!()
     }
+
+    pub async fn create_channel(
+        &mut self,
+        permission: Option<channel::Permission>,
+        name: &str,
+        notice: Option<&str>
+    ) -> Result<Channel> {
+        MessagingClient::create_channel(self, permission, name, notice).await
+    }
 }
 
 unsafe impl Send for Client {}
@@ -390,6 +440,12 @@ impl MessagingClient for Client {
     fn is_connected(&self) -> bool {
         unimplemented!()
     }
+
+    /*
+    fn message(&mut self) -> MessageBuilder {
+        MessageBuilder::new(self, MessageType::Message)
+    }
+    */
 
     async fn update_profile(
         &mut self,
@@ -474,10 +530,17 @@ impl MessagingClient for Client {
         );
 
         req.apply_with_cookie(&session_kp, |_| {
-            Vec::<u8>::new() // TODO
+            b"cookie".to_vec()
         });
 
-        // self.send_rpc_request(self.service_info.peerid(), req).await
+        let peerid = self.service_info.as_ref().unwrap().peerid().clone();
+        let rc = self.send_rpc_request(&peerid, req).await;
+        if let Err(e) = rc {
+            println!("Failed to create channel: {}", e);
+            return Err(e);
+        }
+
+        // TODO
         unimplemented!()
     }
 
@@ -880,33 +943,38 @@ impl MessagingClient for Client {
 }
 
 struct MqttcHandler {
-    user_agent: Arc<Mutex<dyn UserAgent>>,
-    pending_messages: Arc<Mutex<HashMap<u16, Message>>>,
-    connect_promise: Option<Box<dyn FnMut() + Send + Sync>>,
-    server_context: Option<Arc<Mutex<CryptoContext>>>,
+    user_agent      : Arc<Mutex<dyn UserAgent>>,
+    pending_msgs    : Arc<Mutex<HashMap<u16, Message>>>,
+    connect_promise : Option<Box<dyn FnMut() + Send + Sync>>,
 
-    peer: Option<PeerInfo>,
+    server_context  : Option<CryptoContext>,    // TODO,
+    disconnect      : bool,
+    failures        : u32,
 
-    inbox: String,
-    outbox: String,
+
+    peer            : PeerInfo,
+
+    inbox           : String,
+    outbox          : String,
+    broadcast       : String,
 }
 
 impl MqttcHandler {
     #[allow(unused)]
-    fn new(user_agent: Arc<Mutex<dyn UserAgent>>) -> Self {
+    fn new(client: &Client) -> Self {
         Self {
-            user_agent,
-            pending_messages: Arc::new(Mutex::new(HashMap::new())),
+            user_agent      : client.ua(),
+            pending_msgs    : client.pending_msgs.clone(),
             connect_promise : None,
             server_context  : None,
-            peer       : None,
-            inbox: "inbox/".to_string(),
-            outbox: "outbox/".to_string(),
-        }
-    }
+            disconnect      : false,
+            failures        : 0,
+            peer            : client.peer.clone(),
 
-    fn peer(&self) -> &PeerInfo {
-        self.peer.as_ref().expect("Peer info should be set")
+            inbox           : client.inbox.clone(),
+            outbox          : client.outbox.clone(),
+            broadcast       : "broadcast".into(),
+        }
     }
 
     fn is_me(&self, _id: &Id) -> bool {
@@ -916,29 +984,26 @@ impl MqttcHandler {
     fn on_mqtt_msg(&mut self, packet: Packet) {
         match packet {
             Packet::Publish(publish) => self.on_message(publish),
-            Packet::PubAck(ack) => self.on_publish_acked(ack),
-            Packet::SubAck(ack) => self.on_subscribe_acked(ack),
-            Packet::UnsubAck(ack) => self.on_unsubscribe_acked(ack),
+            Packet::PubAck(ack) => self.on_publish_comletion(ack),
+            Packet::SubAck(ack) => self.on_subscribe_completion(ack),
+            Packet::UnsubAck(ack) => self.on_unsubscribe_completion(ack),
             Packet::Disconnect => self.on_close(),
             Packet::PingResp => self.on_ping_response(),
-            _ => {
-                info!("Unknown MQTT event: {:?}", packet);
-            }
+
+            _ => info!("Unknown MQTT event: {:?}", packet)
         }
     }
 
-    fn on_publish_acked(&mut self, ack: rumqttc::PubAck) {
-        match self.pending_messages.lock().unwrap().remove(&ack.pkid) {
-            Some(msg) => {
-                msg.on_sent()
-            },
+    fn on_publish_comletion(&mut self, ack: rumqttc::PubAck) {
+        match self.pending_msgs.lock().unwrap().remove(&ack.pkid) {
+            Some(msg) => msg.on_sent(),
             None => {
-                error!("INTERNAL ERROR: no message associated with packet {}", ack.pkid);
+                error!("INTERNAL ERROR: no message associated with packet {}, skipped pub acked event", ack.pkid);
             }
         }
     }
 
-    fn on_subscribe_acked(&mut self, ack: rumqttc::SubAck) {
+    fn on_subscribe_completion(&mut self, ack: rumqttc::SubAck) {
         for rc in ack.return_codes {
             match rc {
                 rumqttc::SubscribeReasonCode::Success(qos) =>
@@ -948,17 +1013,25 @@ impl MqttcHandler {
             }
         }
 
-        if self.connect_promise.is_some() {
+        if let Some(connect_promise) = self.connect_promise.as_mut() {
             info!("Subscribe topics success");
             self.user_agent.lock().unwrap().on_connected();
-            self.connect_promise.take().unwrap()();
+            connect_promise();
         }
     }
 
-    fn on_unsubscribe_acked(&mut self, _: rumqttc::UnsubAck) {}
+    fn on_unsubscribe_completion(&mut self, _: rumqttc::UnsubAck) {}
 
     fn on_close(&mut self) {
-        info!("Disconnected from the MQTT broker");
+        if self.disconnect {
+            self.user_agent.lock().unwrap().on_disconnected();
+            info!("disconnected!");
+            return;
+        }
+
+        self.failures += 1;
+        error!("Connection lost, attempt to reconnect in {} seconds...", 5); // TODO:
+
     }
 
     fn on_ping_response(&mut self) {
@@ -967,34 +1040,32 @@ impl MqttcHandler {
 
     fn on_message(&mut self, publish: rumqttc::Publish) {
         let topic = publish.topic.as_str();
-        debug!("Got message from: {}", topic);
+        debug!("Got message on topic: {}", topic);
 
-        let context = self.server_context.as_ref().unwrap().lock().unwrap();
-        let payload = context.decrypt_into(
+        let payload = self.server_context.as_mut().unwrap().decrypt_into(
             publish.payload.as_ref()
         ).unwrap_or_else(|_| {
             error!("Failed to decrypt message payload");
             Vec::new()
         });
-        drop(context);
 
-        let Ok(mut message) = serde_cbor::from_slice::<Message>(&payload) else {
+        let Ok(mut msg) = serde_cbor::from_slice::<Message>(&payload) else {
             error!("Failed to deserialize message from {topic}, ignored");
             return;
         };
 
-        if message.is_valid() {
+        if msg.is_valid() {
             error!("Invalid message received: {topic}, ignored");
             return;
         }
 
-        message.mark_encrypted(true);
+        msg.mark_encrypted(true);
         if topic == self.inbox {
-            self.on_inbox_message(message);
+            self.on_inbox_message(msg);
         } else if topic == self.outbox {
-            self.on_outbox_message(message);
-        } else if topic == "broadcast" {
-            self.on_broadcast_message(message);
+            self.on_outbox_message(msg);
+        } else if topic == self.broadcast {
+            self.on_broadcast_message(msg);
         } else {
             error!("Unknown topic: {topic}, ignored");
             return;
@@ -1006,10 +1077,8 @@ impl MqttcHandler {
             return;
         };
 
-        let body  = msg.body();
-
-        body.as_ref().map(|v| {
-            if v.len() > 0 && msg.from() == self.peer().id() {
+        if let Some(v) = msg.body().as_ref() {
+            if v.len() > 0 && msg.from() == self.peer.id() {
                 if self.is_me(&msg.to()) {
                     info!("Received message from myself, ignored: {:?}", msg);
 
@@ -1035,7 +1104,7 @@ impl MqttcHandler {
                     // Message: sender -> channel
                 }
             }
-        });
+        };
         unimplemented!()
     }
 

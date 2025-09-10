@@ -12,7 +12,7 @@ where
     R: Deserialize<'static>
 {
     #[serde(rename = "i")]
-    id: u32,
+    id: i32,
 
     #[serde(rename = "m")]
     method: RPCMethod,
@@ -39,7 +39,7 @@ where
     P: Serialize,
     R: Deserialize<'static>
 {
-    pub(crate) fn new(id: u32, method: RPCMethod, params: Option<P>) -> Self {
+    pub(crate) fn new(id: i32, method: RPCMethod, params: Option<P>) -> Self {
         Self {
             id,
             method,
@@ -50,7 +50,7 @@ where
         }
     }
 
-    pub(crate) fn id(&self) -> u32 {
+    pub(crate) fn id(&self) -> i32 {
         self.id
     }
 

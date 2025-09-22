@@ -8,39 +8,66 @@ pub(crate) struct UserProfile {
     name: Option<String>,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 impl UserProfile {
-    pub fn new(name: Option<String>) -> Self {
+    pub(crate) fn new(name: Option<String>) -> Self {
         Self { name }
     }
 
-    pub fn name(&self) -> Option<&String> {
-        self.name.as_ref()
+    pub(crate) fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 }
 
-#[allow(dead_code)]
-pub struct ContactRemove {}
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ContactRemove {
+    #[serde(rename = "s", skip_serializing_if = "crate::is_none_or_empty")]
+    sequence_id: Option<String>,
 
-#[allow(dead_code)]
+    #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
+    contacts: Vec<Id>,
+}
+
+#[allow(unused)]
+impl ContactRemove {
+    pub(crate) fn new(sequence_id: Option<String>, contacts: Option<Vec<Id>>) -> Self {
+        Self {
+            sequence_id,
+            contacts: contacts.unwrap_or_default()
+        }
+    }
+
+    pub(crate) fn sequence_id(&self) -> Option<&str> {
+        self.sequence_id.as_deref()
+    }
+
+    pub(crate) fn contacts(&self) -> &[Id] {
+        &self.contacts
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ChannelCreate {
     #[serde(rename = "sid")]
     session_id: Id,
+
     #[serde(rename = "p")]
     permission: channel::Permission,
+
     #[serde(rename = "n", skip_serializing_if = "crate::is_none_or_empty")]
     name: Option<String>,
+
     #[serde(rename = "d", skip_serializing_if = "crate::is_none_or_empty")]
     notice: Option<String>,
 }
 
 #[allow(unused)]
 impl ChannelCreate {
-    pub(crate) fn new(session_id: Id,
-        permission: channel::Permission,
-        name: Option<String>,
-        notice: Option<String>
+    pub(crate) fn new(
+            session_id: Id,
+            permission: channel::Permission,
+            name: Option<String>,
+            notice: Option<String>
         ) -> Self {
         Self {
             session_id,
@@ -67,11 +94,11 @@ impl ChannelCreate {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ChannelMemberRole {
     #[serde(rename = "id")]
     members: Vec<Id>,
+
     #[serde(rename = "r")]
     role: channel::Role,
 }
@@ -82,10 +109,8 @@ impl ChannelMemberRole {
         Self { members, role }
     }
 
-    pub(crate) fn members(&self) -> Vec<&Id> {
-        self.members.iter()
-            .map(|id| id)
-            .collect::<Vec<&Id>>()
+    pub(crate) fn members(&self) -> &[Id] {
+        &self.members
     }
 
     pub(crate) fn role(&self) -> channel::Role {

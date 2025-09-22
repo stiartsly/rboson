@@ -17,7 +17,6 @@ pub(crate) static NOT_UP_TO_DATE: Lazy<RPCError> = Lazy::new(|| RPCError::new(-6
 #[allow(dead_code)]
 pub(crate) static ALREADY_EXISTS: Lazy<RPCError> = Lazy::new(|| RPCError::new(-7, "Already exists", None));
 
-#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct RPCError {
     #[serde(rename = "c")]
@@ -26,11 +25,11 @@ pub(crate) struct RPCError {
     #[serde(rename = "m")]
     message: String,
 
-    #[serde(rename = "d", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "d", skip_serializing_if = "crate::is_none_or_empty")]
     data: Option<String>,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 impl RPCError {
     pub fn new(code: i32, message: &str, data: Option<String>) -> Self {
         Self {
@@ -48,8 +47,8 @@ impl RPCError {
         &self.message
     }
 
-    pub fn data(&self) -> Option<&String> {
-        self.data.as_ref()
+    pub fn data(&self) -> Option<&str> {
+        self.data.as_deref()
     }
 }
 

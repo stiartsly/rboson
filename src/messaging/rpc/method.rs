@@ -1,9 +1,8 @@
-
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize)]
 #[repr(u8)]
-#[allow(dead_code)]
 pub(crate) enum RPCMethod {
     UserProfile     = 0x01,
 
@@ -54,7 +53,7 @@ impl TryFrom<u8> for RPCMethod {
             0x3D => Ok(RPCMethod::ChannelUnban),
             0x3E => Ok(RPCMethod::ChannelRemove),
 
-            _    => Err(format!("Invalid RPC method: {:#X}", value)),
+            _    => Err(format!("Invalid method: {:#X}", value)),
         }
     }
 }

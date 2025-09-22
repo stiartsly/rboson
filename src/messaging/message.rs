@@ -211,6 +211,10 @@ impl Message {
         }
     }
 
+    pub(crate) fn dup_from(&self, _body: Vec<u8>) -> Self {
+        unimplemented!()
+    }
+
     pub fn version(&self) -> i32 {
         self.version
     }
@@ -247,8 +251,8 @@ impl Message {
         UNIX_EPOCH + Duration::from_millis(self.created)
     }
 
-    pub fn message_type(&self) -> Result<MessageType> {
-        MessageType::try_from(self.message_type)
+    pub fn message_type(&self) -> MessageType {
+        MessageType::try_from(self.message_type).unwrap()
     }
 
     pub fn is_valid(&self) -> bool {
@@ -270,6 +274,18 @@ impl Message {
         self.content_disposition.clone().unwrap_or_else(|| ContentDisposition::Inline.to_string())
     }
 
+    pub(crate) fn has_original_body(&self) -> bool {
+        self.orginal_body.as_ref().map(|v| {
+            match v {
+                serde_json::Value::Null => true,
+                serde_json::Value::Array(arr) => arr.is_empty(),
+                serde_json::Value::Object(obj) => obj.is_empty(),
+                serde_json::Value::String(s) => s.is_empty(),
+                _ => false,
+            }
+        }).unwrap_or(true)
+    }
+
     pub(crate) fn body(&self) -> Option<&[u8]> {
         self.body.as_deref()
     }
@@ -278,6 +294,10 @@ impl Message {
         self.body.as_ref().map(|b| {
             String::from_utf8_lossy(b).to_string()
         })
+    }
+
+    pub(crate) fn body_is_empty(&self) -> bool {
+        self.body.as_ref().map(|b| b.is_empty()).unwrap_or(true)
     }
 
     pub(crate) fn completed(&self) -> u64 {

@@ -1,28 +1,41 @@
 use serde::{Deserialize, Serialize};
-
+use serde_cbor::{self, Value};
 use super::error::RPCError;
 
-#[allow(dead_code)]
+use crate::{
+    Error,
+    error::Result
+};
+
+#[allow(unused)]
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Response<R>{
+pub(crate) struct RPCResponse
+{
     #[serde(rename = "i")]
     id: u32,
 
     #[serde(rename = "r", skip_serializing_if = "Option::is_none")]
-    result: Option<R>,
+    result: Option<Value>,
 
     #[serde(rename = "e", skip_serializing_if = "Option::is_none")]
-    error: Option<RPCError>,
+    error: Option<RPCError>
 }
 
-#[allow(dead_code)]
-impl<R> Response<R> {
-    pub(crate) fn with_result(id: u32, result: R) -> Self {
+#[allow(unused)]
+impl RPCResponse
+{
+    pub(crate) fn new<T>(id: u32, result: T) -> Self where T: Serialize {
         Self {
             id,
-            result: Some(result),
+            result: Some(serde_cbor::value::to_value(result).unwrap_or(Value::Null)),
             error: None,
         }
+    }
+
+    pub(crate) fn from(body: &[u8]) -> Result<Self> {
+        serde_cbor::from_slice::<RPCResponse>(body).map_err(|e|
+            Error::Protocol(format!("Failed to parse RPC response: {}", e))
+        )
     }
 
     pub(crate) fn with_error(id: u32, error: RPCError) -> Self {
@@ -41,8 +54,8 @@ impl<R> Response<R> {
         }
     }
 
-    pub(crate) fn id(&self) -> u32 {
-        self.id
+    pub(crate) fn id(&self) -> &u32 {
+        &self.id
     }
 
     pub(crate) fn succeeded(&self) -> bool {
@@ -53,8 +66,12 @@ impl<R> Response<R> {
         self.error.is_some()
     }
 
-    pub(crate) fn result(&self) -> Option<&R> {
-        self.result.as_ref()
+    pub(crate) fn result<T>(&self) -> Option<T> where T: serde::de::DeserializeOwned {
+        if let Some(ref v) = self.result {
+            serde_cbor::value::from_value(v.clone()).ok()
+        } else {
+            None
+        }
     }
 
     pub(crate) fn error(&self) -> Option<&RPCError> {

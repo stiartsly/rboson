@@ -199,7 +199,7 @@ impl Channel {
         self.touch();
     }
 
-    pub(crate) fn session_keypair(&self) -> &cryptobox::KeyPair {
+    pub(crate) fn session_keypair(&self) -> Option<&cryptobox::KeyPair> {
         unimplemented!()
     }
 
@@ -216,6 +216,14 @@ impl Channel {
     }
 
     fn touch(&mut self) {
+        unimplemented!()
+    }
+
+    pub(crate) fn rx_crypto_context(&self, id: &Id) -> &CryptoContext {
+        unimplemented!()
+    }
+
+    pub(crate) fn rx_crypto_context1(&self) -> &CryptoContext {
         unimplemented!()
     }
 }

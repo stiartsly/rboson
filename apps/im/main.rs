@@ -141,7 +141,7 @@ async fn main() {
         .with_app_name("test-im").unwrap()
         .with_messaging_peer(peer.clone()).unwrap()
         .with_messaging_repository("test-repo")
-        .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
+       // .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
         .with_user_registration(ucfg.password().map_or("secret", |v|v))
         //.with_device_registration(dcfg.password().map_or("secret", |v|v))
         .with_connection_listener(ConnectionListenerTest)

@@ -36,6 +36,7 @@ pub(crate) struct Builder<'a> {
     access_token_refresh_handler: Option<Box<dyn Fn(&str)>>,
 }
 
+#[allow(unused)]
 impl<'a> Builder<'a> {
     pub(crate) fn new() -> Self {
         Self {

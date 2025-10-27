@@ -147,7 +147,6 @@ async fn test_messaging_client() {
         .with_device_key(dev_key.clone())
         .with_device_name("test-Device").unwrap()
         .with_app_name("test-App").unwrap()
-        .with_api_url(peer.alternative_url().as_ref().unwrap_or(&BASE_URL)).unwrap()
         .with_user_registration("secret")
         .with_messaging_repository("test-repo")
         .with_device_node(node.clone())

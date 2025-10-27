@@ -79,6 +79,11 @@ pub struct Contact {
     last_updated    : Option<SystemTime>,
     #[serde(skip)]
     display_name    : Option<String>,
+
+    #[serde(skip)]
+    _rx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
+    #[serde(skip)]
+    _tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>
 }
 
 #[allow(unused)]
@@ -167,8 +172,18 @@ impl Contact {
         self.auto = auto;
     }
 
+    pub(crate) fn is_staled(&self) -> bool {
+        // TODO: unimplemented!()
+        true
+    }
+
     pub fn has_session_key(&self) -> bool {
         self.session_keypair.is_some()
+    }
+
+    pub fn session_id(&self) -> Option<Id> {
+        // TODO:
+        unimplemented!()
     }
 
     pub fn name(&self) -> Option<&str> {

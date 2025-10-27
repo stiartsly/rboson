@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_cbor;
 use sha2::{Digest, Sha256};
 use url::Url;
-use log::{debug, info, error};
+use log::{error, warn, info, debug};
 use tokio::task::JoinHandle;
 use md5;
 use rumqttc::{
@@ -14,7 +14,8 @@ use rumqttc::{
     AsyncClient,
     SubscribeFilter,
     Event,
-    Packet
+    Packet,
+    Outgoing //, Incoming
 };
 
 use crate::{
@@ -35,17 +36,30 @@ use crate::messaging::{
     ClientDevice,
     ServiceIds,
     UserAgent,
+    DefaultUserAgent,
     InviteTicket,
     Contact,
     ClientBuilder,
     MessagingClient,
+    ConnectionListener,
+    profile::Profile,
     api_client::{self, APIClient},
-    channel::{Role, Permission, Channel},
-    rpc::request::RPCRequest,
-    rpc::method::RPCMethod,
-    message::{Message, MessageType, MessageBuilder},
-    channel,
-    rpc::parameters
+    channel::{self, Role, Permission, Channel},
+    message_listener::{
+        MessageListenerMut,
+    },
+    rpc::{
+        method::RPCMethod,
+        request::RPCRequest,
+        response::RPCResponse,
+        parameters,
+        promise::{self, Ack, Promise, Waiter},
+    },
+    message::{
+        Message,
+        MessageType,
+        MessageBuilder
+    }
 };
 
 #[allow(dead_code)]
@@ -57,159 +71,187 @@ pub struct Client {
 
     inbox           : String,
     outbox          : String,
+    broadcast       : String,
 
     service_info    : Option<api_client::MessagingServiceInfo>,
 
-    server_context  : CryptoContext,
-    self_context    : CryptoContext,
+    server_context  : Option<CryptoContext>,
+    self_context    : Option<CryptoContext>,
 
-    api_client      : APIClient,
+    api_client      : Option<APIClient>,
     disconnect      : bool,
 
+    worker_task     : Option<JoinHandle<()>>,
+    worker_client   : Option<Arc<Mutex<AsyncClient>>>,
 
-    mqttc_task      : Option<JoinHandle<()>>,
-    mqttc_client    : Option<AsyncClient>,
-    mqttc_handler   : Option<Arc<Mutex<MqttcHandler>>>,
+    pending_calls   : HashMap<Id, Arc<Mutex<RPCRequest>>>,
 
-    pending_msgs    : Arc<Mutex<HashMap<u16, Message>>>,
-    user_agent      : Arc<Mutex<dyn UserAgent>>,
+    user_agent      : Arc<Mutex<DefaultUserAgent>>,
 }
 
 #[allow(dead_code)]
 impl Client {
     pub(crate) fn new(b: ClientBuilder) -> Result<Self> {
-        let user_agent = b.user_agent();
-        let agent = user_agent.lock().unwrap();
-        if !agent.is_configured() {
-            Err(Error::State("User agent is not configured".into()))?;
+        let user_agent = b.ua();
+        let ua = user_agent.lock().unwrap();
+        if !ua.is_configured() {
+            drop(ua);
+            return Err(Error::State("User agent is not configured".into()));
         }
 
-        let peer = agent.peer().clone();
-        let user = agent.user().unwrap().identity().clone();
-        let device = agent.device().unwrap().identity().unwrap().clone();
+        let peer = ua.peer().clone();
+        let user = ua.user().unwrap().identity().clone();
+        let device = ua.device().unwrap().identity().unwrap().clone();
 
-        drop(agent);
+        drop(ua);
         user_agent.lock().unwrap().harden();
 
-        let api_client = api_client::Builder::new()
-            .with_base_url(b.api_url())
-            .with_home_peerid(peer.id())
-            .with_user_identity(&user)
-            .with_device_identity(&device)
-            .with_access_token("TODO")
-            .with_access_token_refresh_handler(|_| {})
-            .build()?;
-
-        let client_id = bs58::encode({
+        let clientid = bs58::encode({
             md5::compute(device.id().as_bytes()).0
         }).into_string();
 
-        let bs58_userid = user.id().to_base58();
-        let self_context = user.create_crypto_context(user.id())?;
-        let server_context = device.create_crypto_context(device.id())?;
-
+        let bs58_id = user.id().to_base58();
         Ok(Self {
             peer,
             user,
             device,
             service_info    : None,
 
-            client_id,
-            inbox           : format!("inbox/{}", bs58_userid),
-            outbox          : format!("outbox/{}", bs58_userid),
+            client_id       : clientid,
+            inbox           : format!("inbox/{bs58_id}",),
+            outbox          : format!("outbox/{bs58_id}",),
+            broadcast       : "broadcast".into(),
 
-            api_client,
+            api_client      : None,
             disconnect      : false,
 
-            mqttc_task      : None,
-            mqttc_client    : None,
-            mqttc_handler   : None,
+            worker_client   : None,
+            worker_task     : None,
 
-            self_context,
-            server_context,
+            self_context    : None,
+            server_context  : None,
 
-            pending_msgs    : Arc::new(Mutex::new(HashMap::new())),
+            pending_calls   : HashMap::new(),
+
             user_agent      : user_agent.clone(),
         })
     }
 
-    fn mqttc(&self) -> &AsyncClient {
-        self.mqttc_client
-            .as_ref()
-            .expect("MQTT client should be created")
+    fn ua(&self) -> &Arc<Mutex<DefaultUserAgent>> {
+        &self.user_agent
     }
 
-    fn mqttc_msg_handler(&self) -> Arc<Mutex<MqttcHandler>> {
-        self.mqttc_handler
+    fn worker(&self) -> Arc<Mutex<AsyncClient>> {
+        self.worker_client
             .as_ref()
-            .expect("MQTT client message handler should be created")
+            .expect("MQTT client should be created")
             .clone()
     }
 
-    fn ua(&self) -> Arc<Mutex<dyn UserAgent>> {
-        self.user_agent.clone()
+    fn api_client(&mut self) -> &mut APIClient {
+        self.api_client
+            .as_mut()
+            .expect("API client should be created")
+    }
+
+    fn self_ctxt(&self) -> &CryptoContext {
+        self.self_context
+            .as_ref()
+            .expect("Self crypto context should be created")
+    }
+
+    fn server_ctxt(&self) -> &CryptoContext {
+        self.server_context
+            .as_ref()
+            .expect("Server crypto context should be created")
     }
 
 
     pub(crate) fn next_index(&mut self) -> i32 {
-        // TODO
-        0
+        0 // TODO
     }
 
-    pub fn load_access_token(&mut self) -> Option<String> {
-        Some("TODO".into())
+    pub fn load_access_token(&mut self) -> Result<Option<String>> {
+        // TODO:
+        Ok(Some("TODO".into()))
     }
 
     pub async fn start(&mut self) -> Result<()> {
         info!("Messaging client Started!");
 
-        let mut agent = self.user_agent.lock().unwrap();
-        let version_id = agent.contact_version()?;
+        _ = self.load_access_token()?;
 
-        // TODO: self_context.
+        let ua = self.user_agent.lock().unwrap();
+        let peer = ua.peer().clone();
+        let user = ua.user().unwrap().identity().clone();
+        let device = ua.device().unwrap().identity().unwrap().clone();
+        let api_url = match peer.alternative_url().as_ref() {
+            None => Err(Error::State("Alternative URL should be set".into())),
+            Some(url) => Url::parse(url).map_err(|e|
+                Error::State(format!("Failed to parse API URL: {e}"))
+            )
+        }?;
+        drop(ua);
 
-        if version_id.is_none() {
-            let mut update = self.api_client.fetch_contacts_update(
-                version_id.as_ref().map(|v| v.as_str())
+        let api_client = api_client::Builder::new()
+            .with_base_url(&api_url)
+            .with_home_peerid(peer.id())
+            .with_user_identity(&user)
+            .with_device_identity(&device)
+            //.with_access_token(self.load_access_token().ok())
+            .with_access_token_refresh_handler(|_| {})
+            .build()?;
+
+        self.api_client = Some(api_client);
+
+        let ver_id = match self.ua().lock().unwrap().contact_version() {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Fetching all contacts due to failure to retrieve contacts version from local agent: {}", e);
+                None
+            }
+        };
+
+        if ver_id.is_none() {
+            let mut update = self.api_client().fetch_contacts_update(
+                ver_id.as_deref()
             ).await?;
 
-            let Some(version_id) = update.version_id() else {
-                Err(Error::State("Contacts update does not contain version id".into()))?
-            };
-
-            let contacts = update.contacts();
-            agent.put_contacts_update(&version_id, &contacts).map_err(|e|
-                Error::State(format!("Failed to put contacts update: {}", e))
-            )?;
+            if let Some(version_id) = update.version_id() {
+                _ = self.ua().lock().unwrap().put_contacts_update(
+                    &version_id,
+                    update.contacts().as_slice()
+                ).map_err(|e|{
+                    warn!("Failed to put contacts update: {}, ignore and continue", e);
+                });
+            }
         }
 
-        let service_info = self.api_client.service_info().await?;
-        self.server_context = self.user.create_crypto_context(
-            service_info.peerid()
-        )?;
-
-        self.service_info = Some(service_info);
+        self.service_info = Some(self.api_client().service_info().await?);
+        self.self_context = Some(self.user.create_crypto_context(user.id())?);
+        self.server_context = Some(self.user.create_crypto_context(peer.id())?);
 
         Ok(())
     }
 
     pub async fn stop(&mut self, forced: bool) {
-        // TODO: server context cleanup if needed.
+        _ = self.disconnect().await;
+        self.disconnect = true;
+        // TODO: self.server_context.close();
 
-        if let Some(task) = self.mqttc_task.take() {
+        self.server_context = None;
+        self.self_context = None;
+
+        if let Some(task) = self.worker_task.take() {
             if forced {
-                info!("Stopping messaging client ...");
                 task.abort()
             };
-            println!(">>>1111");
             _ = task.await;
-            println!(">>>2222");
         };
 
         info!("Messaging client stopped ...");
-        self.mqttc_task = None;
-        self.mqttc_client = None;
-        self.mqttc_handler = None;
+        self.worker_task = None;
+        self.worker_client = None;
     }
 
     pub async fn connect(&mut self) -> Result<()> {
@@ -218,18 +260,18 @@ impl Client {
 
     fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
         let nonce = Nonce::random();
-        let usr_sig = user.as_ref().sign_into(nonce.as_bytes()).unwrap();
-        let dev_sig = device.as_ref().sign_into(nonce.as_bytes()).unwrap();
+        let usr_sig = user.sign_into(nonce.as_bytes()).unwrap();
+        let dev_sig = device.sign_into(nonce.as_bytes()).unwrap();
 
-        let mut pswd = Vec::<u8>::with_capacity(
+        let mut password = Vec::<u8>::with_capacity(
             nonce.size() + usr_sig.len() + dev_sig.len()
         );
 
-        pswd.extend_from_slice(nonce.as_bytes());
-        pswd.extend_from_slice(usr_sig.as_slice());
-        pswd.extend_from_slice(dev_sig.as_slice());
+        password.extend_from_slice(nonce.as_bytes());
+        password.extend_from_slice(usr_sig.as_slice());
+        password.extend_from_slice(dev_sig.as_slice());
 
-        bs58::encode(pswd).into_string()
+        bs58::encode(password).into_string()
     }
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
@@ -260,7 +302,7 @@ impl Client {
         // TODO: expire.
 
         let sig = self.user.sign_into(sha256.finalize().as_slice())?;
-        let sk = channel.session_keypair().private_key().as_bytes();
+        let sk = channel.session_keypair().unwrap().private_key().as_bytes();
         let sk = match invitee {
             Some(invitee) => self.user.encrypt_into(invitee, sk)?,
             None => sk.to_vec(),
@@ -276,48 +318,90 @@ impl Client {
         ))
     }
 
-    async fn send_rpc_request<T, R>(&mut self,
-        _recipient: &Id,
-        _request: RPCRequest<T, R>
-    ) -> Result<()>
-        where T: Serialize, R: serde::de::DeserializeOwned {
-
+    async fn send_rpc_request(
+        &mut self,
+        recipient: &Id,
+        request: RPCRequest
+    ) -> Result<()> {
         let msg = MessageBuilder::new(self, MessageType::Call)
-            .with_to(_recipient.clone())
-            .with_body(serde_cbor::to_vec(&_request).unwrap())
+            .with_to(recipient.clone())
+            .with_body(serde_cbor::to_vec(&request).unwrap())
             .build()?;
 
-        self.send_message_intenral(msg).await?;
-        Ok(())
+        //self.pending_calls.insert(0, request);
+        self.send_message_intenral(msg).await
     }
 
-    async fn send_message_intenral(&self, msg: Message) -> Result<()> {
-        let _type = msg.message_type();
-        //let body = msg.body();
-
+    async fn pub_message_internal(&self, msg: Message) -> Result<()> {
         let outbox = self.outbox.as_str();
-        let payload = b"TODO".to_vec();
-        self.mqttc().publish(
+        let payload = serde_cbor::to_vec(&msg).unwrap();
+
+        self.worker().lock().unwrap().publish(
             outbox,
             rumqttc::QoS::AtLeastOnce,
             false,
             payload
         ).await.map_err(|e| {
-            Error::State(format!("Failed to send message: {}", e))
+            Error::State(format!("Failed to publish message: {}", e))
         })?;
-        unimplemented!()
+
+        debug!("Published message to outbox {}", outbox);
+
+        // TODO: pending messages.
+        // TODO: sending messages;
+        Ok(())
     }
 
-    async fn attempt_connect(&mut self, urls: Vec<Url>, index: usize) -> Result<()> {
+    async fn send_message_intenral(&self, msg: Message) -> Result<()> {
+        let Some(body) = msg.body() else {
+            return self.pub_message_internal(msg).await
+        };
+
+        if body.is_empty() || msg.to() == self.peer.id() {
+            return self.pub_message_internal(msg).await
+        }
+
+        let encrypted = match msg.message_type() {
+            MessageType::Message => {
+                let recipient = self.ua().lock().unwrap().contact(msg.to())?;
+                let Some(rec) = recipient else {
+                    let estr = format!("Failed to send message to unknown recipient {}", msg.to());
+                    error!("{}", estr);
+                    // TODO error.
+                    return Err(Error::State(estr));
+                };
+
+                let Some(sid) = rec.session_id() else {
+                    let estr = format!("INTERNAL error: recipient {} has no session key.", msg.to());
+                    error!("{}", estr);
+                    return Err(Error::State(estr));
+                };
+
+                self.user
+                    .create_crypto_context(&sid)?
+                    .encrypt_into(body)?
+            },
+            MessageType::Call => {
+                self.user
+                    .create_crypto_context(msg.to())?
+                    .encrypt_into(body)?
+            },
+            _ => {
+                let estr = format!("INTERNAL error: unsupported message type {:?}", msg.message_type());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            }
+        };
+
+        self.pub_message_internal(msg.dup_from(encrypted)).await
+    }
+
+    async fn attempt_connect(&mut self, url: &Url) -> Result<()> {
         if self.disconnect {
             return Err(Error::State("Client is stopped".into()));
         }
 
-        let url = urls.get(index).ok_or_else(|| {
-            Error::State("No more candidate URLs to connect".into())
-        })?;
-
-        let mqtt_options = {
+        let options = {
             let mut options = MqttOptions::new(
                 &self.client_id,
                 url.host().unwrap().to_string(),
@@ -338,17 +422,12 @@ impl Client {
             // TODO:
         }
 
-        let (mqttc, mut eventloop) = AsyncClient::new(
-            mqtt_options,
-            10
-        );
+        let (client, mut eventloop) = AsyncClient::new(options, 10);
+        let client = Arc::new(Mutex::new(client));
+        let mut worker = MessagingWorker::new(self, client.clone());
 
-        let mqttc_handler = {
-            let handler = MqttcHandler::new(self);
-            Arc::new(Mutex::new(handler))
-        };
-        self.mqttc_client = Some(mqttc);
-        self.mqttc_task = Some(tokio::spawn(async move {
+        self.worker_client = Some(client);
+        self.worker_task   = Some(tokio::spawn(async move {
             loop {
                 let event = match eventloop.poll().await {
                     Ok(event) => event,
@@ -358,16 +437,18 @@ impl Client {
                     }
                 };
 
-                if let Event::Incoming(packet) = event {
-                    mqttc_handler.lock().unwrap().on_mqtt_msg(packet);
+                match event {
+                    Event::Incoming(packet) => worker.on_incoming_msg(packet),
+                    Event::Outgoing(packet) => worker.on_outgoing_msg(packet),
                 }
             }
         }));
+
         Ok(())
     }
 
     async fn do_connect(&mut self) -> Result<()> {
-        if let Some(_) = self.mqttc_client.as_ref() {
+        if let Some(_) = self.worker_client.as_ref() {
             if self.is_connected() {
                 info!("Already connected to the messaging server");
                 return Ok(());
@@ -379,17 +460,17 @@ impl Client {
         self.user_agent.lock().unwrap().on_connecting();
 
         let urls = vec![
-            Url::parse("tcp://155.138.245.211:1883").unwrap(),
+            Url::parse("tcp://155.138.245.211:1883").unwrap(),  // TODO:
         ];
-        self.attempt_connect(urls, 0).await?;
+        self.attempt_connect(&urls[0]).await?;
 
         debug!("Subscribing to the messages ....");
         let topics = vec![
             SubscribeFilter::new(self.inbox.clone(), rumqttc::QoS::AtLeastOnce),
             SubscribeFilter::new(self.outbox.clone(), rumqttc::QoS::AtLeastOnce),
-            SubscribeFilter::new("broadcast".to_string(), rumqttc::QoS::AtLeastOnce),
+            SubscribeFilter::new(self.broadcast.clone(), rumqttc::QoS::AtLeastOnce),
         ];
-        self.mqttc().subscribe_many(topics).await.map(|_| {
+        self.worker().lock().unwrap().subscribe_many(topics).await.map(|_| {
             info!("Subscribed to the messages successfully");
         }).map_err(|e| {
             let errstr = format!("Failed to connect to the messaging server: {}", e);
@@ -453,7 +534,7 @@ impl MessagingClient for Client {
         avatar: bool
     ) -> Result<()> {
         let name = name.map(|n| n.nfc().collect::<String>());
-        self.api_client.update_profile(
+        self.api_client().update_profile(
             name.as_deref(),
             avatar
         ).await
@@ -464,7 +545,7 @@ impl MessagingClient for Client {
         content_type: &str,
         avatar: &[u8]
     ) -> Result<String> {
-        self.api_client.upload_avatar(content_type, avatar).await
+        self.api_client().upload_avatar(content_type, avatar).await
     }
 
     async fn upload_avatar_from_file(
@@ -472,37 +553,52 @@ impl MessagingClient for Client {
         content_type: &str,
         file_name: &str
     ) -> Result<String> {
-        self.api_client.upload_avatar_from_file(
+        self.api_client().upload_avatar_from_file(
             content_type,
             file_name.into()
         ).await
     }
 
     async fn devices(&mut self) -> Result<Vec<ClientDevice>> {
-        _ = RPCRequest::<(), Vec<ClientDevice>>::new(
+        let ack = Arc::new(Mutex::new(
+            promise::DeviceListAck::new())
+        );
+        let promise = Promise::DeviceList(ack.clone());
+        let _req = RPCRequest::new::<_>(
             self.next_index(),
             RPCMethod::DeviceList,
-            None
-        );
+            None::<parameters::ChannelCreate>,
+        ).with_promise(promise.clone());
 
-        // self.send_rpc_request(&self.peer.id(), request).await?;
-        unimplemented!()
+        //self.send_rpc_request(&self.peer.id(), request).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn revoke_device(
         &mut self,
         device_id: &Id
     ) -> Result<()> {
-        let req = RPCRequest::<Id, bool>::new(
+        let ack = Arc::new(Mutex::new(promise::RevokeDeviceAck::new()));
+        let promise = Promise::RevokeDevice(ack.clone());
+        let req = RPCRequest::new::<Id>(
             self.next_index(),
             RPCMethod::DeviceRevoke,
             Some(device_id.clone())
-        );
+        ).with_promise(promise.clone());
 
         self.send_rpc_request(
             &self.peer.id().clone(),
             req
-        ).await
+        ).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn create_channel(
@@ -511,49 +607,66 @@ impl MessagingClient for Client {
         name: &str,
         notice: Option<&str>
     ) -> Result<Channel> {
-
-        let session_kp = signature::KeyPair::random();
-        let session_id = Id::from(session_kp.public_key());
+        let session_keypair = signature::KeyPair::random();
+        let session_id: Id = session_keypair.public_key().into();
         let permission = permission.unwrap_or(channel::Permission::OwnerInvite);
-
         let params = parameters::ChannelCreate::new(
             session_id,
             permission,
-            Some(name.to_string()),
-            notice.map(|n| n.to_string()),
+            Some(name.into()),
+            notice.map(|n| n.into()),
         );
 
-        let mut req = RPCRequest::<parameters::ChannelCreate, bool>::new(
+        println!("<create_channel> line >>> {}", line!());
+        let ack = Arc::new(Mutex::new(promise::CreateChannelAck::new()));
+        let promise = Promise::CreateChannel(ack.clone());
+        let cookie = self.self_context.as_mut().unwrap().encrypt_into(
+            session_keypair.private_key().as_bytes()
+        )?;
+        let req = RPCRequest::new::<parameters::ChannelCreate>(
             self.next_index(),
             RPCMethod::ChannelCreate,
             Some(params)
-        );
+        )
+        .with_promise(promise.clone())
+        .with_cookie(cookie);
 
-        req.apply_with_cookie(&session_kp, |_| {
-            b"cookie".to_vec()
-        });
+        println!("<create_channel> line >>> {}", line!());
+
+        //self.pending_calls.insert(session_id.clone(), req);
 
         let peerid = self.service_info.as_ref().unwrap().peerid().clone();
-        let rc = self.send_rpc_request(&peerid, req).await;
-        if let Err(e) = rc {
-            println!("Failed to create channel: {}", e);
-            return Err(e);
-        }
+        self.send_rpc_request(&peerid, req).await.map_err(|e| {
+            println!("Failed to send rpc request to create channel: {}", e);
+            e
+        })?;
 
-        // TODO
-        unimplemented!()
+        println!("<create_channel> line >>> {}", line!());
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn remove_channel(
         &mut self,
         channel_id: &Id
     ) -> Result<()> {
-        let req = RPCRequest::<(), bool>::new(
+        let ack = Arc::new(Mutex::new(promise::RemoveChannelAck::new()));
+        let promise = Promise::RemoveChannel(ack.clone());
+        let req = RPCRequest::new::<()>(
             self.next_index(),
             RPCMethod::ChannelRemove,
             None
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn join_channel(
@@ -586,24 +699,40 @@ impl MessagingClient for Client {
             Error::Argument(format!("Invalid member private key"))
         })?;
 
-        let mut req = RPCRequest::<InviteTicket, Channel>::new(
+        let ack = Arc::new(Mutex::new(promise::JoinChannelAck::new()));
+        let promise = Promise::JoinChannel(ack.clone());
+        let req = RPCRequest::new::<InviteTicket>(
             self.next_index(),
             RPCMethod::ChannelJoin,
             Some(ticket.proof().clone())
-        );
-        req.apply_with_cookie(session_key, |_| {
+        )
+        .with_promise(promise.clone())
+        .with_cookie({
+            // TODO: session_key.
             Vec::<u8>::new() // TODO
         });
-        self.send_rpc_request(ticket.channel_id(), req).await
+        self.send_rpc_request(ticket.channel_id(), req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn leave_channel(&mut self, channel_id: &Id) -> Result<()> {
-        let request = RPCRequest::<(), bool>::new(
+        let ack = Arc::new(Mutex::new(promise::LeaveChannelAck::new()));
+        let promise = Promise::LeaveChannel(ack.clone());
+        let req = RPCRequest::new::<()>(
             self.next_index(),
             RPCMethod::ChannelLeave,
             None
-        );
-        self.send_rpc_request(channel_id, request).await
+        ).with_promise(promise.clone());
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn create_invite_ticket(
@@ -619,11 +748,10 @@ impl MessagingClient for Client {
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
-
         if !channel.is_owner(self.user.id()) {
             Err(Error::State("Not channel owner".into()))?
         }
@@ -632,12 +760,20 @@ impl MessagingClient for Client {
         }
         drop(ua);
 
-        let req = RPCRequest::<Id, bool>::new(
+        let ack = Arc::new(Mutex::new(promise::SetChannelOwnerAck::new()));
+        let promise = Promise::SetChannelOwner(ack.clone());
+        let req = RPCRequest::new::<Id>(
             self.next_index(),
             RPCMethod::ChannelOwner,
             Some(new_owner.clone())
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn set_channel_permission(
@@ -645,22 +781,29 @@ impl MessagingClient for Client {
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
-
         if !channel.is_owner(self.user.id()) {
             Err(Error::State("Not channel owner".into()))?
         }
         drop(ua);
 
-        let req = RPCRequest::<Permission, bool>::new(
+        let ack = Arc::new(Mutex::new(promise::SetChannelPermAck::new()));
+        let promise = Promise::SetChannelPerm(ack.clone());
+        let req = RPCRequest::new::<Permission>(
             self.next_index(),
             RPCMethod::ChannelPermission,
             Some(permission)
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn set_channel_name(
@@ -668,11 +811,10 @@ impl MessagingClient for Client {
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
-
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
@@ -680,17 +822,26 @@ impl MessagingClient for Client {
         drop(ua);
 
         let name = name.map(|n|
-            match n.is_empty() {
-                true => None,
-                false => Some(n.nfc().collect::<String>())
+            match !n.is_empty() {
+                true => Some(n.nfc().collect::<String>()),
+                false => None,
             }
         ).flatten();
-        let req = RPCRequest::<String, bool>::new(
+
+        let ack = Arc::new(Mutex::new(promise::SetChannelNameAck::new()));
+        let promise = Promise::SetChannelName(ack.clone());
+        let req = RPCRequest::new::<String>(
             self.next_index(),
             RPCMethod::ChannelName,
             name
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn set_channel_notice(
@@ -698,11 +849,10 @@ impl MessagingClient for Client {
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
-
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
@@ -715,12 +865,20 @@ impl MessagingClient for Client {
                 false => Some(n.nfc().collect::<String>())
         }).flatten();
 
-        let req = RPCRequest::<String, bool>::new(
+        let ack = Arc::new(Mutex::new(promise::SetChannelNoticeAck::new()));
+        let promise = Promise::SetChannelNotice(ack.clone());
+        let req = RPCRequest::new::<String>(
             self.next_index(),
             RPCMethod::ChannelNotice,
             notice
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn set_channel_member_role(
@@ -733,11 +891,10 @@ impl MessagingClient for Client {
             return Ok(());
         }
 
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
-
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
@@ -749,12 +906,21 @@ impl MessagingClient for Client {
                 .collect::<Vec<Id>>(),
             role,
         );
-        let req = RPCRequest::<parameters::ChannelMemberRole, bool>::new(
+
+        let ack = Arc::new(Mutex::new(promise::SetChannelMemberRoleAck::new()));
+        let promise = Promise::SetChannelMemberRole(ack.clone());
+        let req = RPCRequest::new::<parameters::ChannelMemberRole>(
             self.next_index(),
             RPCMethod::ChannelRole,
             Some(role)
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn ban_channel_members(
@@ -766,13 +932,13 @@ impl MessagingClient for Client {
             return Ok(())
         }
 
-        let ua = self.user_agent.lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let ua = self.ua().lock().unwrap();
+        let Some(ch) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
 
         let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+        if !ch.is_owner(userid) && !ch.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
         drop(ua);
@@ -780,12 +946,21 @@ impl MessagingClient for Client {
         let members = members.into_iter()
             .map(|id| id.clone())
             .collect::<Vec<Id>>();
-        let req = RPCRequest::<Vec<Id>, bool>::new(
+
+        let ack = Arc::new(Mutex::new(promise::BanChannelMembersAck::new()));
+        let promise = Promise::BanChannelMembers(ack.clone());
+        let req = RPCRequest::new::<Vec<Id>>(
             self.next_index(),
             RPCMethod::ChannelBan,
             Some(members)
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn unban_channel_members(
@@ -797,7 +972,7 @@ impl MessagingClient for Client {
             return Ok(());
         }
 
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let Some(channel) = ua.channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
@@ -811,12 +986,21 @@ impl MessagingClient for Client {
         let members = members.into_iter()
             .map(|id| id.clone())
             .collect::<Vec<Id>>();
-        let req = RPCRequest::<Vec<Id>, bool>::new(
+
+        let ack = Arc::new(Mutex::new(promise::UnbanChannelMembersAck::new()));
+        let promise = Promise::UnbanChannelMembers(ack.clone());
+        let req = RPCRequest::new::<Vec<Id>>(
             self.next_index(),
             RPCMethod::ChannelUnban,
             Some(members)
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn remove_channel_members(
@@ -842,12 +1026,20 @@ impl MessagingClient for Client {
         let members = members.into_iter()
             .map(|id| id.clone())
             .collect::<Vec<Id>>();
-        let req = RPCRequest::<Vec<Id>, bool>::new(
+        let ack = Arc::new(Mutex::new(promise::RemoveChannelMembersAck::new()));
+        let promise = Promise::RemoveChannelMembers(ack.clone());
+        let req = RPCRequest::new::<Vec<Id>>(
             self.next_index(),
             RPCMethod::ChannelRemove,
             Some(members)
-        );
-        self.send_rpc_request(channel_id, req).await
+        ).with_promise(promise.clone());
+
+        self.send_rpc_request(channel_id, req).await?;
+
+        match Waiter::new(promise).await {
+            Ok(_) => ack.lock().unwrap().result(),
+            Err(e) => Err(e)
+        }
     }
 
     async fn add_contact(
@@ -919,7 +1111,7 @@ impl MessagingClient for Client {
     }
 
     async fn remove_contact(&mut self, _id: &Id) -> Result<()> {
-        let mut ua = self.user_agent.lock().unwrap();
+        let mut ua = self.ua().lock().unwrap();
         let Some(mut contact) = ua.contact(_id)? else {
             return Err(Error::State("Contact does not exist".into()));
         };
@@ -942,9 +1134,12 @@ impl MessagingClient for Client {
     }
 }
 
-struct MqttcHandler {
-    user_agent      : Arc<Mutex<dyn UserAgent>>,
-    pending_msgs    : Arc<Mutex<HashMap<u16, Message>>>,
+#[allow(unused)]
+struct MessagingWorker {
+    user_agent      : Arc<Mutex<DefaultUserAgent>>,
+    worker_client   : Arc<Mutex<AsyncClient>>,
+
+
     connect_promise : Option<Box<dyn FnMut() + Send + Sync>>,
 
     server_context  : Option<CryptoContext>,    // TODO,
@@ -957,14 +1152,20 @@ struct MqttcHandler {
     inbox           : String,
     outbox          : String,
     broadcast       : String,
+
+    pending_calls   : HashMap<u32, RPCRequest>,
+
+    user            : Option<CryptoIdentity>,
 }
 
-impl MqttcHandler {
+#[allow(unused)]
+impl MessagingWorker {
     #[allow(unused)]
-    fn new(client: &Client) -> Self {
+    fn new(client: &Client,  mqttc: Arc<Mutex<AsyncClient>>) -> Self {
         Self {
-            user_agent      : client.ua(),
-            pending_msgs    : client.pending_msgs.clone(),
+            user_agent      : client.ua().clone(),
+            worker_client   : mqttc,
+
             connect_promise : None,
             server_context  : None,
             disconnect      : false,
@@ -973,58 +1174,50 @@ impl MqttcHandler {
 
             inbox           : client.inbox.clone(),
             outbox          : client.outbox.clone(),
-            broadcast       : "broadcast".into(),
+            broadcast       : client.broadcast.clone(),
+
+            pending_calls   : HashMap::new(),
+            user            : None,
         }
+    }
+
+    fn ua(&self) -> &Arc<Mutex<DefaultUserAgent>> {
+        &self.user_agent
     }
 
     fn is_me(&self, _id: &Id) -> bool {
         true // TODO
     }
 
-    fn on_mqtt_msg(&mut self, packet: Packet) {
+    fn user_mut(&mut self) -> &mut CryptoIdentity {
+        self.user.as_mut()
+            .expect("User identity should be set")
+    }
+
+    fn on_incoming_msg(&mut self, packet: Packet) {
         match packet {
-            Packet::Publish(publish) => self.on_message(publish),
-            Packet::PubAck(ack) => self.on_publish_comletion(ack),
-            Packet::SubAck(ack) => self.on_subscribe_completion(ack),
-            Packet::UnsubAck(ack) => self.on_unsubscribe_completion(ack),
-            Packet::Disconnect => self.on_close(),
-            Packet::PingResp => self.on_ping_response(),
+            Packet::Publish(publish) => self.on_pub_msg(publish),
+            Packet::PubAck(_)   => {},
+            Packet::SubAck(_)   => {},
+            Packet::UnsubAck(_) => {},
+            Packet::Disconnect  => self.on_close(),
+            Packet::PingResp    => self.on_ping_response(),
+            Packet::ConnAck(_)  => {},
 
             _ => info!("Unknown MQTT event: {:?}", packet)
         }
     }
 
-    fn on_publish_comletion(&mut self, ack: rumqttc::PubAck) {
-        match self.pending_msgs.lock().unwrap().remove(&ack.pkid) {
-            Some(msg) => msg.on_sent(),
-            None => {
-                error!("INTERNAL ERROR: no message associated with packet {}, skipped pub acked event", ack.pkid);
-            }
+    fn on_outgoing_msg(&mut self, _packet: Outgoing) {
+        match _packet {
+            Outgoing::Publish(_pktid) => {},
+            _ => {},
         }
     }
-
-    fn on_subscribe_completion(&mut self, ack: rumqttc::SubAck) {
-        for rc in ack.return_codes {
-            match rc {
-                rumqttc::SubscribeReasonCode::Success(qos) =>
-                    info!("Subscription acknowledged with QoS: {:?}", qos),
-                rumqttc::SubscribeReasonCode::Failure =>
-                    error!("Subscription failed with error.")
-            }
-        }
-
-        if let Some(connect_promise) = self.connect_promise.as_mut() {
-            info!("Subscribe topics success");
-            self.user_agent.lock().unwrap().on_connected();
-            connect_promise();
-        }
-    }
-
-    fn on_unsubscribe_completion(&mut self, _: rumqttc::UnsubAck) {}
 
     fn on_close(&mut self) {
         if self.disconnect {
-            self.user_agent.lock().unwrap().on_disconnected();
+            self.ua().lock().unwrap().on_disconnected();
             info!("disconnected!");
             return;
         }
@@ -1038,28 +1231,31 @@ impl MqttcHandler {
         info!("Ping response received");
     }
 
-    fn on_message(&mut self, publish: rumqttc::Publish) {
+    fn on_pub_msg(&mut self, publish: rumqttc::Publish) {
         let topic = publish.topic.as_str();
         debug!("Got message on topic: {}", topic);
 
-        let payload = self.server_context.as_mut().unwrap().decrypt_into(
-            publish.payload.as_ref()
-        ).unwrap_or_else(|_| {
-            error!("Failed to decrypt message payload");
-            Vec::new()
-        });
-
-        let Ok(mut msg) = serde_cbor::from_slice::<Message>(&payload) else {
-            error!("Failed to deserialize message from {topic}, ignored");
+        println!("<<on_pub_msg>> line: {}", line!());
+        let payload = self.server_context.as_ref().unwrap().decrypt_into(
+            &publish.payload
+        );
+        println!("<<on_pub_msg>> line: {}", line!());
+        let Ok(payload) = payload  else {
+            error!("Failed to decrypt message payload from {topic}, ignored");
             return;
         };
 
+        let msg = serde_cbor::from_slice::<Message>(&payload);
+        let Ok(mut msg) = msg else {
+            error!("Failed to deserialize message from {topic}, ignored");
+            return;
+        };
         if msg.is_valid() {
-            error!("Invalid message received: {topic}, ignored");
+            error!("Received invalid message from {topic}, ignored");
             return;
         }
-
         msg.mark_encrypted(true);
+
         if topic == self.inbox {
             self.on_inbox_message(msg);
         } else if topic == self.outbox {
@@ -1067,52 +1263,288 @@ impl MqttcHandler {
         } else if topic == self.broadcast {
             self.on_broadcast_message(msg);
         } else {
-            error!("Unknown topic: {topic}, ignored");
+            error!("Received message with unknown topic: {topic}, ignored");
             return;
         }
     }
 
-    fn on_inbox_message(&mut self, msg: Message) {
-        let Ok(mtype) = msg.message_type() else {
-            return;
+    fn on_inbox_message(&mut self, mut msg: Message) {
+        let Some(body) = msg.body() else {
+            msg.mark_encrypted(false);
+            return self.pub_msg_internal(msg);
         };
 
-        if let Some(v) = msg.body().as_ref() {
-            if v.len() > 0 && msg.from() == self.peer.id() {
-                if self.is_me(&msg.to()) {
-                    info!("Received message from myself, ignored: {:?}", msg);
+        if body.is_empty() || msg.from() == self.peer.id() {
+            msg.mark_encrypted(false);
+            return self.pub_msg_internal(msg);
+        }
 
-                    match mtype {
-                        MessageType::Message => {
-                            let sender = self.user_agent.lock().unwrap().contact(msg.from());
-                            if let Ok(Some(sender)) = sender {
-                                if sender.has_session_key() {
-                                    //msg.decrypt_body(sender.rx_crypto_context());
-                                    info!("Decrypted message from self: {:?}", msg);
-                                } else {
-                                    error!("Sender contact does not have session key: {:?}", msg);
-                                }
-                            } else {
-                                error!("Failed to get sender contact for message: {:?}", msg);
-                            }
-                        },
-                        MessageType::Call => {}, // TODO: handle call
-                        MessageType::Notification => {}, // TODO: handle notification
+        if self.is_me(msg.to()){
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: sender -> me
+                    // The body is encrypted using the sender's private key
+                    // and the session public key associated with that sender.
+
+                    let sender = self.user_agent.lock().unwrap().contact(msg.from());
+                    let Ok(Some(sender)) = sender else {
+                        warn!("Failed to get contact info for sender {}", msg.from());
+                        return;
+                    };
+
+                    if sender.has_session_key() {
+                        msg.decrypt_body(
+                            sender.rx_crypto_context().unwrap(),
+                        ).unwrap_or_else(|e| {
+                            error!("Failed to decrypt message body: {}, ignored", e);
+                        });
                     }
-                    return;
-                } else { // received message for channel.
-                    // Message: sender -> channel
-                }
+                },
+                MessageType::Call => {
+                    // Call: sender(user | channel) -> me
+                    // The body is encrypted using the sender's private key
+                    // and my public key.
+
+                    msg.decrypt_body(
+                        &self.user_mut().create_crypto_context(msg.from()).unwrap(),
+                    ).unwrap_or_else(|e| {
+                        error!("Failed to decrypt call body: {}, ignored", e);
+                    });
+                },
+                _ => {}
             }
-        };
-        unimplemented!()
+        } else {
+            let channel = self.ua().lock().unwrap().channel(msg.to());
+            let Ok(Some(channel)) = channel else {
+                return self.pub_msg_internal(msg);
+            };
+
+            let Some(kp) = channel.session_keypair() else {
+                return self.pub_msg_internal(msg);
+            };
+
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: sender -> channel
+                    // The body is encrypted using the sender's private key
+                    // and the session public key of channel.
+                    //TODO:
+
+                    let ctxt = channel.rx_crypto_context(msg.from());
+                    msg.decrypt_body(ctxt);
+                },
+                MessageType::Notification => {
+                    // Message: channel -> channel
+                    // The body is encrypted using the channel's private key
+                    // and the channel session's public key
+
+                    let ctxt = channel.rx_crypto_context1();
+                    // TODO
+                },
+                _ => {}
+            }
+        }
+
+        self.pub_msg_internal(msg)
     }
 
     fn on_outbox_message(&mut self, _message: Message) {
+        println!(">>>> TODO:");
+    }
+
+    fn on_broadcast_message(&mut self, mut msg: Message) {
+        // Broadcast notifications from the service peer.
+		// Message body is encrypted with the message envelope,
+		// it was already decrypted here
+
+        msg.mark_encrypted(false);
+        self.ua().lock().unwrap().on_broadcast(msg);
+    }
+
+    fn on_msg_internal(&mut self, msg: Message) {
+        let conv_id = match !self.is_me(msg.to()) {
+            true => msg.to().clone(),
+            false => msg.from().clone()
+        };
+
+        self.ua().lock().unwrap().on_message(msg);
+
+        let mut need_refresh = false;
+        let contact = self.ua().lock().unwrap().contact(&conv_id);
+        if let Ok(Some(contact)) = contact {
+            if contact.is_staled() {
+                need_refresh = true;
+            }
+        }else {
+            need_refresh = true;
+        }
+
+        if need_refresh {
+            //self.arefresh_profile(&conv_id).await.on_success(|profile| {
+            //    self.ua().lock().unwrap().on_contact_profile(&conv_id, profile);
+            //});
+        }
+    }
+
+    fn on_rpc_response(&mut self, msg: Message) {
+        let Some(body) = msg.body() else {
+            error!("Message body is missing in RPC response from {}, ignored", msg.from());
+            return;
+        };
+
+        if body.is_empty() {
+            error!("Empty message body in RPC response from {}, ignored", msg.from());
+            return;
+        }
+
+        let Ok(mut preparsed) = RPCResponse::from(body) else {
+            error!("Failed to parse RPC response from {}, ignored", msg.from());
+            return;
+        };
+
+        let Some(mut request) = self.pending_calls.remove(preparsed.id()) else {
+            error!("Unmatched RPC response id {} from {}, ignored", preparsed.id(), msg.from());
+            return;
+        };
+
+        match request.method() {
+            RPCMethod::DeviceList => {
+                request.complete::<Vec<ClientDevice>>(preparsed);
+            },
+
+            RPCMethod::DeviceRevoke => {
+                request.complete::<()>(preparsed);
+            },
+
+            RPCMethod::ContactPush => {
+                request.complete::<()>(preparsed);
+            },
+
+            RPCMethod::ContactClear => { // TODO:
+            },
+
+            RPCMethod::ChannelCreate => { // TODO:
+            },
+            RPCMethod::ChannelRemove => { // TODO:
+            },
+            RPCMethod::ChannelJoin => { // TODO:
+            },
+            RPCMethod::ChannelLeave => { // TODO:
+            },
+            RPCMethod::ChannelOwner => { // TODO:
+            },
+            RPCMethod::ChannelPermission => { // TODO:
+            },
+            RPCMethod::ChannelName => { // TODO:
+            },
+            RPCMethod::ChannelNotice => { // TODO:
+            },
+            RPCMethod::ChannelRole => { // TODO:
+            },
+            RPCMethod::ChannelBan => { // TODO:
+            },
+            RPCMethod::ChannelUnban => { // TODO:
+            },
+            _ => {
+                error!("Unknown RPC method in response from {}, ignored", msg.from());
+                return;
+            }
+        }
         unimplemented!()
     }
 
-    fn on_broadcast_message(&mut self, _message: Message) {
+    #[allow(unused)]
+    fn on_rpc_request<P,R>(&mut self, msg: Message) where P: Serialize, R: DeserializeOwned{
+        if msg.body_is_empty() {
+            error!("Empty RPC response message from {}, ignored", msg.from());
+            return;
+        }
+
+        if msg.has_original_body() {
+            // TODO
+        }
+
+        let request: Option<RPCRequest> = None; // TODO:
+        match request.unwrap().method() {
+            RPCMethod::DeviceList => {
+                /*
+                let call: RPCRequest<(), Vec<ClientDevice>> = request.unwrap();
+                let response: RPCResponse<Vec<ClientDevice>> = match serde_cbor::from_slice(msg.body().unwrap()) {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        error!("Failed to parse RPC response from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+
+                if response.is_error() {
+                    error!("RPC response from {} error: {}, ignored", msg.from(), response.error().unwrap());
+                    return;
+                }
+
+                let devices = response.result().unwrap_or_else(|| {
+                    vec![]
+                });
+                self.user_agent.lock().unwrap().on_device_list(devices);
+                */
+            },
+            RPCMethod::DeviceRevoke => {// TODO:
+            },
+            RPCMethod::ContactPush => { // TODO:
+            },
+            RPCMethod::ContactClear => { // TODO:
+            },
+
+            RPCMethod::ChannelCreate => { // TODO:
+            },
+            RPCMethod::ChannelRemove => { // TODO:
+            },
+            RPCMethod::ChannelJoin => { // TODO:
+            },
+            RPCMethod::ChannelLeave => { // TODO:
+            },
+            RPCMethod::ChannelOwner => { // TODO:
+            },
+            RPCMethod::ChannelPermission => { // TODO:
+            },
+            RPCMethod::ChannelName => { // TODO:
+            },
+            RPCMethod::ChannelNotice => { // TODO:
+            },
+            RPCMethod::ChannelRole => { // TODO:
+            },
+            RPCMethod::ChannelBan => { // TODO:
+            },
+            RPCMethod::ChannelUnban => { // TODO:
+            },
+            _ => {
+                error!("Unknown RPC method in response from {}, ignored", msg.from());
+                return;
+            }
+        }
+        unimplemented!()
+    }
+
+    fn on_notification(&mut self, _message: Message) {
+        unimplemented!()
+    }
+
+    fn pub_msg_internal(&mut self, msg: Message) {
+        match msg.message_type() {
+            MessageType::Message => {
+                self.on_msg_internal(msg);
+            },
+            MessageType::Call => {
+                self.on_rpc_response(msg);
+            },
+            MessageType::Notification => {
+                self.on_notification(msg);
+            }
+        }
+    }
+
+    #[allow(unused)]
+    async fn try_refresh_profile(&self, _id: &Id) -> Result<Profile> {
         unimplemented!()
     }
 }

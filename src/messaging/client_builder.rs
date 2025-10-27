@@ -49,7 +49,7 @@ pub struct Builder {
 
     messaging_peer      : Option<PeerInfo>,
     messaging_nodeid    : Option<Id>,
-    api_url             : Option<Url>,
+    // api_url             : Option<Url>,
 
     repository          : Option<Database>,
     repository_db       : Option<String>,
@@ -61,7 +61,7 @@ pub struct Builder {
     contact_listeners   : Vec<Box<dyn ContactListener>>,
 
     node                : Option<Arc<Mutex<Node>>>,
-    user_agent          : Option<Arc<Mutex<dyn UserAgent>>>
+    user_agent          : Option<Arc<Mutex<DefaultUserAgent>>>
 }
 
 #[allow(unused)]
@@ -84,7 +84,6 @@ impl Builder {
 
             messaging_peer      : None,
             messaging_nodeid    : None,
-            api_url             : None,
 
             repository          : None,
             repository_db       : None,
@@ -181,28 +180,7 @@ impl Builder {
     }
 
     pub fn with_messaging_peer(mut self, peer: PeerInfo) -> Result<Self> {
-        self.api_url = peer.alternative_url().map(|url|
-                Url::parse(url).map_err(|e|
-                    Error::State(format!("Failed to parse API URL: {e}"))
-                )
-            ).transpose()?;
         self.messaging_peer = Some(peer);
-        Ok(self)
-    }
-
-    /*pub fn with_messaging_nodeid(mut self, id: &Id) -> Self {
-        self.messaging_nodeid = Some(id.clone());
-        self
-    }
-    */
-
-    pub fn with_api_url<S>(mut self, url: S) -> Result<Self>
-    where S: AsRef<str> {
-        let url = Url::parse(url.as_ref()).map_err(|e| {
-            Error::State(format!("Failed to parse API URL: {e}"))
-        })?;
-
-        self.api_url = Some(url);
         Ok(self)
     }
 
@@ -291,13 +269,10 @@ impl Builder {
         self
     }
 
-    pub(crate) fn with_user_agent<T>(
+    pub(crate) fn with_user_agent(
         &mut self,
-        agent: Arc<Mutex<T>>
-    ) -> &mut Self
-    where
-        T: UserAgent + 'static,
-    {
+        agent: Arc<Mutex<DefaultUserAgent>>
+    ) -> &mut Self {
         self.user_agent = Some(agent);
         self
     }
@@ -345,10 +320,11 @@ impl Builder {
         }
 
         if peer_check {
-            if self.messaging_peer.is_none() {
+            let Some(peer) = self.messaging_peer.as_ref() else {
                 return Err(Error::State("Peer id is not configured".into()));
-            }
-            if self.api_url.is_none() {
+            };
+
+            if peer.alternative_url().is_none() {
                 return Err(Error::State("API URL is not configured".into()));
             }
         }
@@ -356,7 +332,7 @@ impl Builder {
         Ok(())
     }
 
-    async fn setup_useragent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
+    async fn setup_useragent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>> {
         let Some(agent) = self.user_agent.as_ref() else {
             panic!("User agent is not set");
         };
@@ -385,7 +361,7 @@ impl Builder {
         Ok(agent.clone())
     }
 
-    async fn build_useragent(&mut self) -> Result<Arc<Mutex<dyn UserAgent>>> {
+    async fn build_useragent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>> {
         let mut agent = DefaultUserAgent::new(None)?;
         let repos = match self.repository.take() {
             Some(r) => r,
@@ -451,7 +427,7 @@ impl Builder {
         Ok(Arc::new(Mutex::new(agent)))
     }
 
-    async fn register_client(&mut self, agent: Arc<Mutex<dyn UserAgent>>) -> Result<()> {
+    async fn register_client(&mut self, agent: Arc<Mutex<DefaultUserAgent>>) -> Result<()> {
         self.user_agent = Some(agent.clone());
 
         if !self.register_user_and_device && !self.register_device {
@@ -459,7 +435,7 @@ impl Builder {
         }
 
         let mut api_client = api_client::Builder::new()
-            .with_base_url(self.api_url())
+            .with_base_url(&self.api_url())
             .with_home_peerid(self.peer().id())
             .with_user_identity(self.user.as_ref().unwrap())
             .with_device_identity(self.device.as_ref().unwrap())
@@ -547,18 +523,24 @@ impl Builder {
         APIClient::service_ids(url).await
     }
 
-    pub(crate) fn user_agent(&self) -> Arc<Mutex<dyn UserAgent>> {
-        assert!(self.user_agent.is_some(), "User agent is not set");
-        unwrap!(self.user_agent).clone()
+    pub(crate) fn ua(&self) -> Arc<Mutex<DefaultUserAgent>> {
+        self.user_agent
+            .as_ref()
+            .expect("User agent is not set")
+            .clone()
     }
 
     pub(crate) fn peer(&self) -> &PeerInfo {
-        assert!(self.messaging_peer.is_some(), "Messaging peer is not set");
-        unwrap!(self.messaging_peer)
+        self.messaging_peer
+            .as_ref()
+            .expect("Messaging peer is not set")
     }
 
-    pub(crate) fn api_url(&self) -> &Url {
-        assert!(self.api_url.is_some(), "API URL is not set");
-        unwrap!(self.api_url)
+    fn api_url(&self) -> Url {
+        Url::parse(
+            self.peer().alternative_url().expect("API URL is not set")
+        ).map_err(|e| {
+            Error::State(format!("Invalid API URL: {e}"))
+        }).unwrap()
     }
 }

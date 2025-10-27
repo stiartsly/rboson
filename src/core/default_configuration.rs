@@ -221,8 +221,8 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn load_json(&mut self, json_input: &str) -> Result<&mut Self> {
-        let cfg = serde_json::from_str::<Configuration>(json_input).map_err(|e| {
+    pub fn load_json(&mut self, input_json: &str) -> Result<&mut Self> {
+        let cfg = serde_json::from_str::<Configuration>(input_json).map_err(|e| {
             Error::Argument(format!("bad json config content, error: {}", e))
         })?;
 
@@ -230,8 +230,8 @@ impl<'a> Builder<'a> {
         Ok(self)
     }
 
-    pub fn load(&mut self, input: &str) -> Result<&mut Self> {
-        let data = fs::read_to_string(input).map_err(|e| {
+    pub fn load(&mut self, input_path: &str) -> Result<&mut Self> {
+        let data = fs::read_to_string(input_path).map_err(|e| {
             Error::Io(format!("Reading config error: {}", e))
         })?;
 

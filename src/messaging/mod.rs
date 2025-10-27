@@ -20,6 +20,7 @@ pub(crate) mod rpc {
     pub(crate) mod parameters;
     pub(crate) mod request;
     pub(crate) mod response;
+    pub(crate) mod promise;
 }
 
 pub(crate) mod contact;

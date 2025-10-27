@@ -439,6 +439,32 @@ impl ConnectionListener for DefaultUserAgent {
     }
 }
 
+impl MessageListener for DefaultUserAgent {
+    fn on_message(&self, message: &Message) {
+        for cb in self.message_listeners.iter() {
+            cb.on_message(message);
+        }
+    }
+
+    fn on_sending(&self, message: &Message) {
+        for cb in self.message_listeners.iter() {
+            cb.on_sending(message);
+        };
+    }
+
+    fn on_sent(&self, message: &Message) {
+        for cb in self.message_listeners.iter() {
+            cb.on_sent(message);
+        };
+    }
+
+    fn on_broadcast(&self, message: &Message) {
+        for cb in self.message_listeners.iter() {
+            cb.on_broadcast(message);
+        };
+    }
+}
+
 unsafe impl Send for DefaultUserAgent {}
 unsafe impl Sync for DefaultUserAgent {}
 

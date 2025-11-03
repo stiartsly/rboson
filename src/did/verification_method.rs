@@ -174,6 +174,7 @@ pub struct Entity {
     method_type: Option<VerificationMethodType>,
 
     #[serde(rename = "controller", skip_serializing_if = "Option::is_none")]
+    #[serde(with="crate::serde_option_id_with_base58")]
     controller: Option<Id>,
 
     #[serde(rename = "publicKeyMultibase", skip_serializing_if = "crate::is_none_or_empty")]

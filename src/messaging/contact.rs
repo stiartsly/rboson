@@ -30,6 +30,7 @@ pub enum ContactType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Contact {
     #[serde(rename = "id")]
+    #[serde(with = "crate::serde_id_with_base58")]
     id              : Id,
 
     #[serde(skip)]

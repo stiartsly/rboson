@@ -40,7 +40,7 @@ pub struct Card {
     signed_at: Option<u64>,
 
     #[serde(rename = "sig")]
-    #[serde(with = "super::serde_bytes_with_base64")]
+    #[serde(with = "crate::serde_bytes_with_base64")]
     signature: Vec<u8>,
 
     #[serde(skip)]

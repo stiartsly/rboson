@@ -179,3 +179,76 @@ impl IsEmpty for u64 {
         *self == 0
     }
 }
+
+// bytes serded as base64 URL safe without padding
+mod serde_bytes_with_base64 {
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use base64::{engine::general_purpose, Engine as _};
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer,
+    {
+        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        serializer.serialize_str(&encoded)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        general_purpose::URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(D::Error::custom)
+    }
+}
+
+// serde Id as base58 string
+mod serde_id_with_base58 {
+    use crate::Id;
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use bs58;
+
+    pub fn serialize<S>(id: &Id, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = bs58::encode(id.as_bytes()).into_string();
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Id, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Id::try_from(s.as_str()).map_err(D::Error::custom)?)
+    }
+}
+
+mod serde_option_id_with_base58 {
+    use crate::Id;
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+    use bs58;
+
+    pub fn serialize<S>(id: &Option<Id>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Some(id) = id.as_ref() else {
+            panic!("id is null");
+        };
+        let s = bs58::encode(id.as_bytes()).into_string();
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Id>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Some(Id::try_from(s.as_str()).map_err(D::Error::custom)?))
+    }
+}

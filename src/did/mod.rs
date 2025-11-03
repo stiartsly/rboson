@@ -62,26 +62,3 @@ mod unitests {
     mod test_verification_method;
     mod test_proof;
 }
-
-// bytes serded as base64 URL safe without padding
-mod serde_bytes_with_base64 {
-    use serde::{Deserializer, Serializer};
-    use serde::de::{Error, Deserialize};
-    use base64::{engine::general_purpose, Engine as _};
-
-    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes.as_slice());
-        serializer.serialize_str(&encoded)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        general_purpose::URL_SAFE_NO_PAD
-            .decode(&s)
-            .map_err(D::Error::custom)
-    }
-}

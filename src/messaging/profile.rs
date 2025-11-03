@@ -8,13 +8,15 @@ use crate::Id;
 #[derive(Debug, Clone, Deserialize, Hash)]
 pub struct Profile {
 	#[serde(rename = "id")]
+    #[serde(with = "crate::serde_id_with_base58")]
 	id: Id,
 
 	#[serde(rename = "p")]
+    #[serde(with = "crate::serde_id_with_base58")]
     home_peerid: Id,
 
     #[serde(rename = "ps")]
-    #[serde(with = "super::serde_bytes_with_base64")]
+    #[serde(with = "crate::serde_bytes_with_base64")]
     home_peer_sig: Vec<u8>,
 
 	#[serde(rename = "n")]
@@ -28,7 +30,7 @@ pub struct Profile {
     notice: Option<String>,
 
     #[serde(rename = "s")]
-    #[serde(with = "super::serde_bytes_with_base64")]
+    #[serde(with = "crate::serde_bytes_with_base64")]
     sig: Vec<u8>
 }
 

@@ -139,8 +139,10 @@ pub struct Message {
     #[serde(rename = "v")]
     version:    i32,
     #[serde(rename = "f")]
+    #[serde(with = "crate::serde_id_as_bytes")]
     from:       Id,
     #[serde(rename = "r")]
+    #[serde(with = "crate::serde_id_as_bytes")]
     to:         Id,         // alias: recipient
 
     #[serde(rename = "s")]

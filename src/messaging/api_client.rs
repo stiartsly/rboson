@@ -151,15 +151,15 @@ impl APIClient {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             userId      : &'a Id,
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             deviceId    : &'a Id,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -218,21 +218,21 @@ impl APIClient {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             userId      : &'a Id,
             userName    : &'a str,
             passphrase  : &'a str,
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             deviceSig   : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             profileSig  : &'a [u8],
         }
 
@@ -306,18 +306,18 @@ impl APIClient {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             userId      : &'a Id,
             passphrase  : &'a str,
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             userSig     : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             deviceSig   : &'a [u8],
         }
 
@@ -381,13 +381,13 @@ impl APIClient {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             deviceId    : &'a Id,
             deviceName  : &'a str,
             appName     : &'a str,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             sig         : &'a [u8],
         }
 
@@ -438,11 +438,11 @@ impl APIClient {
         #[derive(Serialize)]
         #[allow(non_snake_case)]
         struct RequestData<'a> {
-            #[serde(with = "crate::serde_id_with_base58")]
+            #[serde(with = "crate::serde_id_as_base58")]
             deviceId    : &'a Id,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             nonce       : &'a [u8],
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             sig         : &'a [u8],
         }
 
@@ -517,7 +517,7 @@ impl APIClient {
         struct RequestData<'a> {
             userName    : &'a str,
             avatar      : bool,
-            #[serde(with = "crate::serde_bytes_with_base64")]
+            #[serde(with = "crate::serde_bytes_base64")]
             profileSig  : &'a [u8],
         }
 
@@ -661,11 +661,11 @@ impl APIClient {
 #[derive(Clone, Deserialize)]
 pub(crate) struct MessagingServiceInfo {
     #[serde(rename = "peerId")]
-    #[serde(with = "crate::serde_id_with_base58")]
+    #[serde(with = "crate::serde_id_as_base58")]
     peerid: Id,
 
     #[serde(rename = "nodeId")]
-    #[serde(with = "crate::serde_id_with_base58")]
+    #[serde(with = "crate::serde_id_as_base58")]
     nodeid: Id,
 
     #[serde(rename = "version")]

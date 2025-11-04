@@ -41,8 +41,8 @@ impl RPCRequest
         Self {
             id,
             method,
-            params: params.map(
-                |v| serde_cbor::value::to_value(v).unwrap_or(Value::Null)
+            params: params.map(|p|
+                serde_cbor::value::to_value(p).unwrap_or(Value::Null)
             ),
             cookie: None,
             promise: None,
@@ -66,17 +66,6 @@ impl RPCRequest
 
     pub(crate) fn method(&self) -> RPCMethod {
         self.method
-    }
-
-    /* pub(crate) fn params1(&self) -> &Option<P> {
-        &self.params
-    }*/
-
-    pub(crate) fn apply_with_cookie<F, T>(&mut self, cookie: T,  transform: F)
-    where
-        F: Fn(T) -> Vec<u8>,
-    {
-        self.cookie = Some(transform(cookie));
     }
 
     pub(crate) fn cookie(&self) -> Option<&[u8]> {

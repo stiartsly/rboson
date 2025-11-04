@@ -30,7 +30,7 @@ pub enum ContactType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Contact {
     #[serde(rename = "id")]
-    #[serde(with = "crate::serde_id_with_base58")]
+    #[serde(with = "crate::serde_id_as_base58")]
     id              : Id,
 
     #[serde(skip)]
@@ -51,25 +51,25 @@ pub struct Contact {
     avatar          : bool,
 
     #[serde(rename="r")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     remark          : String,
     #[serde(rename="ts")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     tags            : String,
     #[serde(rename="d")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     muted           : bool,
     #[serde(rename="b")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     blocked         : bool,
     #[serde(rename="c")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     created         : u64,
     #[serde(rename="m")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     last_modified   : u64,
     #[serde(rename="e")]
-    #[serde(skip_serializing_if = "super::is_default")]
+    #[serde(skip_serializing_if = "crate::is_empty")]
     deleted         : bool,
     #[serde(rename="v")]
     revision        : i32,

@@ -49,7 +49,7 @@ pub struct Credential {
     signed_at: Option<u64>,
 
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
-    #[serde(with="crate::serde_bytes_with_base64")]
+    #[serde(with="crate::serde_bytes_base64")]
     signature: Vec<u8>,
 
     #[serde(skip_serializing, skip_deserializing)]

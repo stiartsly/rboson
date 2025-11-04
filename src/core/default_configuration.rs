@@ -28,7 +28,7 @@ use crate::{
 #[derive(Clone, Serialize, Deserialize)]
 struct NodeItem {
     #[serde(rename = "id")]
-    #[serde(with = "crate::serde_id_with_base58")]
+    #[serde(with = "crate::serde_id_as_base58")]
     id      :Id,
     #[serde(rename = "address")]
     addr    :String,

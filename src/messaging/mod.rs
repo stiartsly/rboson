@@ -109,35 +109,3 @@ mod unitests {
     mod test_channel;
     mod test_client;
 }
-
-fn is_default<T: IsDefault>(v: &T) -> bool {
-    v.is_default()
-}
-
-trait IsDefault {
-    fn is_default(&self) -> bool;
-}
-
-impl IsDefault for u64 {
-    fn is_default(&self) -> bool {
-        *self == 0
-    }
-}
-
-impl IsDefault for bool {
-    fn is_default(&self) -> bool {
-        !*self
-    }
-}
-
-impl IsDefault for String {
-    fn is_default(&self) -> bool {
-        self.is_empty()
-    }
-}
-
-impl<T> IsDefault for Vec<T> {
-    fn is_default(&self) -> bool {
-        self.is_empty()
-    }
-}

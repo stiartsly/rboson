@@ -1,14 +1,16 @@
 use std::fmt;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
+use serde_repr::{Serialize_repr, Deserialize_repr};
 use crate::{
     Id,
     CryptoContext,
     cryptobox,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize_repr, Deserialize_repr)]
+#[repr(i32)]
 pub enum Permission {
     Public          = 0,
     MemberInvite    = 1,
@@ -47,8 +49,9 @@ impl fmt::Display for Permission {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize_repr, Deserialize_repr)]
+#[repr(i32)]
 pub enum Role {
     Owner = 0,
     Moderator = 1,

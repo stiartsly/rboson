@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
+use serde_repr::{Serialize_repr, Deserialize_repr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub(crate) enum RPCMethod {
     UserProfile     = 0x01,

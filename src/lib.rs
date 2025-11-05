@@ -238,7 +238,6 @@ mod serde_id_as_bytes {
 
         let mut arr = [0u8; crate::ID_BYTES];
         arr.copy_from_slice(bytes);
-
         Ok(Id::from_bytes(arr))
     }
 }
@@ -253,12 +252,13 @@ mod serde_option_id_as_base58 {
     where
         S: Serializer,
     {
-        let Some(id) = id.as_ref() else {
-            return serializer.serialize_none();
-        };
-
-        let s = bs58::encode(id.as_bytes()).into_string();
-        serializer.serialize_str(&s)
+        match id.as_ref() {
+            None => serializer.serialize_none(),
+            Some(id) => {
+                let s = bs58::encode(id.as_bytes()).into_string();
+                serializer.serialize_str(&s)
+            }
+        }
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Id>, D::Error>
@@ -290,5 +290,28 @@ mod serde_bytes_base64 {
         general_purpose::URL_SAFE_NO_PAD
             .decode(&s)
             .map_err(D::Error::custom)
+    }
+}
+
+mod serde_option_bytes_as_cbor {
+    use serde::{Deserializer, Serializer};
+    use serde::de::{Error, Deserialize};
+
+    pub fn serialize<S>(bytes: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match bytes.as_ref() {
+            Some(bytes) => serializer.serialize_bytes(bytes.as_slice()),
+            None => serializer.serialize_none()
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = <&[u8]>::deserialize(deserializer).map_err(D::Error::custom)?;
+        Ok(Some(Vec::<u8>::from(s)))
     }
 }

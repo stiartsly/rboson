@@ -168,6 +168,7 @@ pub struct Message {
 
     #[serde(rename = "b")]
     #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(with = "crate::serde_option_bytes_as_cbor")]
     body: Option<Vec<u8>>,
 
     // Available only for locally sent messages (originating from the message builder).

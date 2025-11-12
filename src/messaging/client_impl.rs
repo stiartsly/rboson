@@ -518,7 +518,8 @@ impl MessagingClient for Client {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        unimplemented!()
+        info!("Disconnected !!!");
+        Ok(())
     }
 
     fn is_connected(&self) -> bool {
@@ -834,7 +835,6 @@ impl MessagingClient for Client {
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
-
         match Waiter::new(promise).await {
             Ok(_) => ack.lock().unwrap().result(),
             Err(e) => Err(e)
@@ -1411,17 +1411,29 @@ impl MessagingWorker {
             return;
         };
 
+        let promise = call.promise_take();
         match call.method() {
             RPCMethod::DeviceList => {
-                call.complete::<Vec<ClientDevice>>(preparsed);
+                let Some(Promise::DeviceList(ack)) = promise else {
+                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
+                    return;
+                };
+                //ack.lock().unwrap().complete(Ok(()))
             },
 
             RPCMethod::DeviceRevoke => {
-                call.complete::<()>(preparsed);
+                let Some(Promise::RevokeDevice(ack)) = promise else {
+                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
+                    return;
+                };
+                {
+                    let mut ack_guard = ack.lock().unwrap();
+                    ack_guard.complete(Ok(()));
+                }
             },
 
             RPCMethod::ContactPush => {
-                call.complete::<()>(preparsed);
+                // TODO:
             },
 
             RPCMethod::ContactClear => { // TODO:
@@ -1449,9 +1461,15 @@ impl MessagingWorker {
                 channel.set_session_key(&session_key);
 
                 self.user_agent.lock().unwrap().on_joined_channel(&channel);
-
-                // TODO:
-            },
+                let Some(Promise::CreateChannel(ack)) = promise else {
+                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
+                    return;
+                };
+                {
+                    let mut ack = ack.lock().unwrap();
+                    ack.complete(Ok(channel))
+                }
+            }
             RPCMethod::ChannelRemove => { // TODO:
             },
             RPCMethod::ChannelJoin => { // TODO:
@@ -1477,7 +1495,7 @@ impl MessagingWorker {
                 return;
             }
         }
-        unimplemented!()
+        //unimplemented!()
     }
 
     #[allow(unused)]
@@ -1549,7 +1567,7 @@ impl MessagingWorker {
                 return;
             }
         }
-        unimplemented!()
+        //unimplemented!()
     }
 
     fn on_notification(&mut self, _message: Message) {

@@ -180,7 +180,7 @@ async fn main() {
     if let Err(e) = rc {
         eprintln!("Creating channel error: {{{e}}}");
     } else {
-        println!("Channel created: {:?}", rc.unwrap());
+        println!("Channel created: {}", rc.unwrap());
     }
 
     thread::sleep(Duration::from_secs(2));

@@ -1,11 +1,12 @@
 use std::result;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use std::sync::{Arc, Mutex};
 use serde::{Serialize, Deserialize};
 use serde::ser::{Serializer};
 use serde::de::{Deserializer};
 
 use crate::{
+    as_secs,
     Id,
     Error,
     Identity,
@@ -32,64 +33,33 @@ pub type Contact = GenericContact<()>;
 
 #[derive(Debug, Clone)]
 pub struct GenericContact<T> where T: Clone {
-    //#[serde(rename = "id")]
-    //#[serde(with = "crate::serde_id_as_base58")]
     id              : Id,
-
-    //#[serde(skip)]
     auto            : bool,
 
-    //#[serde(skip)]  // internal use only.
     session_keypair : Option<signature::KeyPair>,
-    //#[serde(skip)]  // internal use only.
-    encryption_keypair  : Option<cryptobox::KeyPair>,
-    //#[serde(skip)]  //
+    encrypt_keypair : Option<cryptobox::KeyPair>,
     session_id      : Option<Id>,
 
-    //#[serde(skip)]
-    home_peerid     : Id,
-    //#[serde(skip)]  // padding expicitly.
-    name            : Option<String>,
-    //#[serde(skip)]  // padding expicitly.
-    avatar          : bool,
-
-    //#[serde(rename="r")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    remark          : String,
-    //#[serde(rename="ts")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    tags            : String,
-    //#[serde(rename="d")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    muted           : bool,
-    //#[serde(rename="b")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    blocked         : bool,
-    //#[serde(rename="c")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    created         : u64,
-    //#[serde(rename="m")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    last_modified   : u64,
-    //#[serde(rename="e")]
-    //#[serde(skip_serializing_if = "crate::is_empty")]
-    deleted         : bool,
-    //#[serde(rename="v")]
-    revision        : i32,
-
-    //#[serde(skip)]
-    modified        : bool,
-    //#[serde(skip)]
-    last_updated    : Option<SystemTime>,
-    //#[serde(skip)]
-    display_name    : Option<String>,
-
-    //#[serde(skip)]
     _rx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
-    //#[serde(skip)]
     _tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
 
-    //#[serde(skip)]
+    home_peerid     : Option<Id>,
+    name            : Option<String>,
+    avatar          : bool,
+
+    remark          : Option<String>,
+    tags            : Option<String>,
+    muted           : bool,
+    blocked         : bool,
+    created         : u64,
+    last_modified   : u64,
+    deleted         : bool,
+    revision        : i32,
+
+    modified        : bool,
+    last_updated    : Option<SystemTime>,
+    display_name    : Option<String>,
+
     annex_data      : Option<T>,
 }
 
@@ -102,14 +72,6 @@ impl<T> GenericContact<T> where T: Clone{
         remark: Option<String>
     ) -> Result<Self> {
         unimplemented!()
-    }
-
-    pub(crate) fn annex_mut(&mut self) -> &mut T {
-        self.annex_data.as_mut().expect("Annex data is missing")
-    }
-
-    pub(crate) fn annex(&self) -> &T {
-        self.annex_data.as_ref().expect("Annex data is missing")
     }
 
     /*
@@ -147,41 +109,45 @@ impl<T> GenericContact<T> where T: Clone{
     pub(crate) fn new(id: Id, home_peerid: Id, annex: T) -> Self {
         Self {
             id,
-            auto: true,
-            session_keypair: None,
-            encryption_keypair: None,
-            session_id: None,
-            home_peerid,
-            name: None,
-            avatar: false,
-            remark: String::new(),
-            tags: String::new(),
-            muted: false,
-            blocked: false,
-            created: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            last_modified: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            deleted: false,
-            revision: 1,
-            modified: false,
-            last_updated: None,
-            display_name: None,
+            auto            : true,
+            session_keypair : None,
+            encrypt_keypair : None,
+            session_id      : None,
+            home_peerid     : Some(home_peerid),
+            name            : None,
+            avatar          : false,
+            remark          : Some(String::new()),
+            tags            : Some(String::new()),
+            muted           : false,
+            blocked         : false,
+            created         : as_secs!(SystemTime::now()),
+            last_modified   : as_secs!(SystemTime::now()),
+            deleted         : false,
+            revision        : 1,
+            modified        : false,
+            last_updated    : None,
+            display_name    : None,
 
             _rx_crypto_context: None,
             _tx_crypto_context: None,
-            annex_data: Some(annex),
+            annex_data      : Some(annex),
         }
+    }
+
+    pub(crate) fn annex_mut(&mut self) -> &mut T {
+        self.annex_data.as_mut().expect("Annex data is missing")
+    }
+
+    pub(crate) fn annex(&self) -> &T {
+        self.annex_data.as_ref().expect("Annex data is missing")
     }
 
     pub fn id(&self) -> &Id {
         &self.id
     }
 
-    pub fn home_peerid(&self) -> &Id {
-        &self.home_peerid
+    pub fn home_peerid(&self) -> Option<&Id> {
+        self.home_peerid.as_ref()
     }
 
     pub fn is_auto(&self) -> bool {
@@ -225,34 +191,35 @@ impl<T> GenericContact<T> where T: Clone{
     }
 
     pub fn avatar_url(&self) -> Option<String> {
-        match self.avatar {
-            true => Some(format!("bmr://{}/{}", self.home_peerid, self.id)),
-            false => None,
+        if !self.avatar {
+            return None;
         }
+        self.home_peerid()
+            .map(|peerid| format!("bmr://{}/{}", peerid, self.id))
     }
 
-    pub fn remark(&self) -> &str {
-        self.remark.as_str()
+    pub fn remark(&self) -> Option<&str> {
+        self.remark.as_deref()
     }
 
     pub fn set_remark(&mut self, remark: &str) {
-        self.remark = match remark.is_empty() {
+        self.remark = Some(match remark.is_empty() {
             true => String::new(),
             false => remark.to_string()
-        };
+        });
         self.display_name = None;
         self.touch();
     }
 
-    pub fn tags(&self) -> &str {
-        self.tags.as_str()
+    pub fn tags(&self) -> Option<&str> {
+        self.tags.as_deref()
     }
 
     pub fn set_tags(&mut self, tags: &str) {
-        self.tags = match tags.is_empty() {
+        self.tags = Some(match tags.is_empty() {
             true => String::new(),
             false => tags.to_string()
-        };
+        });
         self.display_name = None;
         self.touch();
     }
@@ -293,11 +260,11 @@ impl<T> GenericContact<T> where T: Clone{
     }
 
     pub fn created(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.created)
+        SystemTime::UNIX_EPOCH + Duration::from_secs(self.created)
     }
 
     pub fn last_modified(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.last_modified)
+        SystemTime::UNIX_EPOCH + Duration::from_secs(self.last_modified)
     }
 
     pub fn is_modified(&self) -> bool {
@@ -324,7 +291,7 @@ impl<T> GenericContact<T> where T: Clone{
         unimplemented!()
     }
 
-    fn get_self_encryption_context(&self) -> Arc<Mutex<Option<Box<CryptoContext>>>> {
+    fn self_encryption_context(&self) -> Arc<Mutex<Option<Box<CryptoContext>>>> {
         unimplemented!()
     }
 
@@ -333,7 +300,7 @@ impl<T> GenericContact<T> where T: Clone{
             return Err(Error::Argument(format!("Invalid session key size")));
         }
 
-        let ctx = self.get_self_encryption_context();
+        let ctx = self.self_encryption_context();
         let ctx = ctx.lock().unwrap();
 
         let Some(ctx) = ctx.as_ref() else {
@@ -350,7 +317,7 @@ impl<T> GenericContact<T> where T: Clone{
 
         let session_keypair = KeyPair::try_from(private_key.as_slice())?;
         self.session_id = Some(Id::from(session_keypair.public_key()));
-        self.encryption_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
+        self.encrypt_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
         self.session_keypair = Some(session_keypair);
 
         Ok(())
@@ -419,7 +386,7 @@ impl Identity for Contact {
     }
 
     fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let Some(keypair) = self.encryption_keypair.as_ref() else {
+        let Some(keypair) = self.encrypt_keypair.as_ref() else {
             return Err(Error::State("Missing cryptobox keypair".into()));
         };
 
@@ -433,7 +400,7 @@ impl Identity for Contact {
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let Some(keypair) = self.encryption_keypair.as_ref() else {
+        let Some(keypair) = self.encrypt_keypair.as_ref() else {
             return Err(Error::State("Missing cryptobox keypair".into()));
         };
 
@@ -446,7 +413,7 @@ impl Identity for Contact {
     }
 
     fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let Some(keypair) = self.encryption_keypair.as_ref() else {
+        let Some(keypair) = self.encrypt_keypair.as_ref() else {
             return Err(Error::State("Missing cryptobox keypair".into()));
         };
 
@@ -459,7 +426,7 @@ impl Identity for Contact {
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let Some(keypair) = self.encryption_keypair.as_ref() else {
+        let Some(keypair) = self.encrypt_keypair.as_ref() else {
             return Err(Error::State("Missing cryptobox keypair".into()));
         };
 
@@ -471,7 +438,7 @@ impl Identity for Contact {
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        let Some(keypair) = self.encryption_keypair.as_ref() else {
+        let Some(keypair) = self.encrypt_keypair.as_ref() else {
             return Err(Error::State("Missing cryptobox keypair".into()));
         };
 

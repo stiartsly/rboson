@@ -278,6 +278,7 @@ impl<'de> Deserialize<'de> for Channel {
             Signature,      // "s"  - Vec<u8>
         }
 
+        /*
         impl fmt::Display for Field {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 let s = match *self {
@@ -301,6 +302,7 @@ impl<'de> Deserialize<'de> for Channel {
                 write!(f, "{}", s)
             }
         }
+        */
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
@@ -413,5 +415,12 @@ impl<'de> Deserialize<'de> for Channel {
             }
         }
         deserializer.deserialize_map(ChannelVisitor)
+    }
+}
+
+impl fmt::Display for Channel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Channel: {} [...]", self.id())
+        // TODO:
     }
 }

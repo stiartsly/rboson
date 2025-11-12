@@ -70,12 +70,7 @@ impl RPCRequest
         self.cookie.as_deref()
     }
 
-    pub(crate) fn complete<R>(&mut self, response: RPCResponse)
-    where
-        R: serde::de::DeserializeOwned,
-    {
-        self.response = Some(response);
-
-        // TODO:
+    pub(crate) fn promise_take(&mut self) -> Option<Promise> {
+        self.promise.take()
     }
 }

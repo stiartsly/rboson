@@ -42,6 +42,7 @@ use crate::messaging::{
     ClientBuilder,
     MessagingClient,
     ConnectionListener,
+    ChannelListener,
     profile::Profile,
     api_client::{self, APIClient},
     channel::{self, Role, Permission, Channel},
@@ -52,7 +53,7 @@ use crate::messaging::{
         method::RPCMethod,
         request::RPCRequest,
         response::RPCResponse,
-        parameters,
+        parameters::{self, Parameters},
         promise::{self, Ack, Promise, Waiter},
     },
     message::{
@@ -75,8 +76,8 @@ pub struct Client {
 
     service_info    : Option<api_client::MessagingServiceInfo>,
 
-    server_context  : Option<CryptoContext>,
-    self_context    : Option<CryptoContext>,
+    server_context  : Option<Arc<Mutex<CryptoContext>>>,
+    self_context    : Option<Arc<Mutex<CryptoContext>>>,
 
     api_client      : Option<APIClient>,
     disconnect      : bool,
@@ -84,8 +85,7 @@ pub struct Client {
     worker_task     : Option<JoinHandle<()>>,
     worker_client   : Option<Arc<Mutex<AsyncClient>>>,
 
-    pending_calls   : HashMap<Id, Arc<Mutex<RPCRequest>>>,
-
+    pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
     user_agent      : Arc<Mutex<DefaultUserAgent>>,
 }
 
@@ -131,7 +131,7 @@ impl Client {
             self_context    : None,
             server_context  : None,
 
-            pending_calls   : HashMap::new(),
+            pending_calls   : Arc::new(Mutex::new(HashMap::new())),
 
             user_agent      : user_agent.clone(),
         })
@@ -154,18 +154,21 @@ impl Client {
             .expect("API client should be created")
     }
 
-    fn self_ctxt(&self) -> &CryptoContext {
+    fn self_ctxt(&self) -> &Arc<Mutex<CryptoContext>> {
         self.self_context
             .as_ref()
             .expect("Self crypto context should be created")
     }
 
-    fn server_ctxt(&self) -> &CryptoContext {
+    fn server_ctxt(&self) -> &Arc<Mutex<CryptoContext>> {
         self.server_context
             .as_ref()
             .expect("Server crypto context should be created")
     }
 
+    fn pending_calls(&self) -> Arc<Mutex<HashMap<u32, RPCRequest>>> {
+        self.pending_calls.clone()
+    }
 
     pub(crate) fn next_index(&mut self) -> i32 {
         0 // TODO
@@ -181,7 +184,7 @@ impl Client {
 
         _ = self.load_access_token()?;
 
-        let ua = self.user_agent.lock().unwrap();
+        let ua = self.ua().lock().unwrap();
         let peer = ua.peer().clone();
         let user = ua.user().unwrap().identity().clone();
         let device = ua.device().unwrap().identity().unwrap().clone();
@@ -228,9 +231,8 @@ impl Client {
         }
 
         self.service_info = Some(self.api_client().service_info().await?);
-        self.self_context = Some(self.user.create_crypto_context(user.id())?);
-        self.server_context = Some(self.user.create_crypto_context(peer.id())?);
-
+        self.self_context = Some(Arc::new(Mutex::new(self.user.create_crypto_context(user.id())?)));
+        self.server_context = Some(Arc::new(Mutex::new(self.user.create_crypto_context(peer.id())?)));
         Ok(())
     }
 
@@ -328,13 +330,14 @@ impl Client {
             .with_body(serde_cbor::to_vec(&request).unwrap())
             .build()?;
 
-        //self.pending_calls.insert(0, request);
+        self.pending_calls.lock().unwrap().insert(0, request);
         self.send_message_intenral(msg).await
     }
 
     async fn pub_message_internal(&self, msg: Message) -> Result<()> {
         let outbox = self.outbox.as_str();
         let payload = serde_cbor::to_vec(&msg).unwrap();
+        let payload = self.server_ctxt().lock().unwrap().encrypt_into(&payload)?;
 
         self.worker().lock().unwrap().publish(
             outbox,
@@ -564,10 +567,10 @@ impl MessagingClient for Client {
             promise::DeviceListAck::new())
         );
         let promise = Promise::DeviceList(ack.clone());
-        let _req = RPCRequest::new::<_>(
+        let _req = RPCRequest::new(
             self.next_index(),
             RPCMethod::DeviceList,
-            None::<parameters::ChannelCreate>,
+            None,
         ).with_promise(promise.clone());
 
         //self.send_rpc_request(&self.peer.id(), request).await?;
@@ -584,10 +587,10 @@ impl MessagingClient for Client {
     ) -> Result<()> {
         let ack = Arc::new(Mutex::new(promise::RevokeDeviceAck::new()));
         let promise = Promise::RevokeDevice(ack.clone());
-        let req = RPCRequest::new::<Id>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::DeviceRevoke,
-            Some(device_id.clone())
+            Some(Parameters::RevokeDevice(device_id.clone()))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(
@@ -611,27 +614,24 @@ impl MessagingClient for Client {
         let session_id: Id = session_keypair.public_key().into();
         let permission = permission.unwrap_or(channel::Permission::OwnerInvite);
         let params = parameters::ChannelCreate::new(
-            session_id,
+            session_id.clone(),
             permission,
             Some(name.into()),
             notice.map(|n| n.into()),
         );
 
-        println!("<create_channel> line >>> {}", line!());
         let ack = Arc::new(Mutex::new(promise::CreateChannelAck::new()));
         let promise = Promise::CreateChannel(ack.clone());
-        let cookie = self.self_context.as_mut().unwrap().encrypt_into(
+        let cookie = self.self_ctxt().lock().unwrap().encrypt_into(
             session_keypair.private_key().as_bytes()
         )?;
-        let req = RPCRequest::new::<parameters::ChannelCreate>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelCreate,
-            Some(params)
+            Some(Parameters::CreateChannel(params)),
         )
         .with_promise(promise.clone())
         .with_cookie(cookie);
-
-        println!("<create_channel> line >>> {}", line!());
 
         //self.pending_calls.insert(session_id.clone(), req);
 
@@ -640,8 +640,6 @@ impl MessagingClient for Client {
             println!("Failed to send rpc request to create channel: {}", e);
             e
         })?;
-
-        println!("<create_channel> line >>> {}", line!());
 
         match Waiter::new(promise).await {
             Ok(_) => ack.lock().unwrap().result(),
@@ -655,7 +653,7 @@ impl MessagingClient for Client {
     ) -> Result<()> {
         let ack = Arc::new(Mutex::new(promise::RemoveChannelAck::new()));
         let promise = Promise::RemoveChannel(ack.clone());
-        let req = RPCRequest::new::<()>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelRemove,
             None
@@ -679,7 +677,7 @@ impl MessagingClient for Client {
         if ticket.is_expired() {
             Err(Error::Argument("Invite ticket is expired".into()))?
         }
-        if ticket.is_valid(self.user.id()) {
+        if !ticket.is_valid(self.user.id()) {
             Err(Error::Argument("Invite ticket is not valid for this user".into()))?
         }
 
@@ -701,12 +699,11 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::JoinChannelAck::new()));
         let promise = Promise::JoinChannel(ack.clone());
-        let req = RPCRequest::new::<InviteTicket>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelJoin,
-            Some(ticket.proof().clone())
-        )
-        .with_promise(promise.clone())
+            Some(Parameters::JoinChannel(ticket.proof().clone()))
+        ).with_promise(promise.clone())
         .with_cookie({
             // TODO: session_key.
             Vec::<u8>::new() // TODO
@@ -722,7 +719,7 @@ impl MessagingClient for Client {
     async fn leave_channel(&mut self, channel_id: &Id) -> Result<()> {
         let ack = Arc::new(Mutex::new(promise::LeaveChannelAck::new()));
         let promise = Promise::LeaveChannel(ack.clone());
-        let req = RPCRequest::new::<()>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelLeave,
             None
@@ -762,10 +759,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::SetChannelOwnerAck::new()));
         let promise = Promise::SetChannelOwner(ack.clone());
-        let req = RPCRequest::new::<Id>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelOwner,
-            Some(new_owner.clone())
+            Some(Parameters::SetChanneLOwner(new_owner.clone()))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -792,10 +789,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::SetChannelPermAck::new()));
         let promise = Promise::SetChannelPerm(ack.clone());
-        let req = RPCRequest::new::<Permission>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelPermission,
-            Some(permission)
+            Some(Parameters::SetChannelPermission(permission))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -830,10 +827,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::SetChannelNameAck::new()));
         let promise = Promise::SetChannelName(ack.clone());
-        let req = RPCRequest::new::<String>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelName,
-            name
+            name.map(|v| Parameters::SetChannelName(v.to_string()))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -867,10 +864,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::SetChannelNoticeAck::new()));
         let promise = Promise::SetChannelNotice(ack.clone());
-        let req = RPCRequest::new::<String>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelNotice,
-            notice
+            notice.map(|v| Parameters::SetChannelNotice(v.to_string()))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -909,10 +906,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::SetChannelMemberRoleAck::new()));
         let promise = Promise::SetChannelMemberRole(ack.clone());
-        let req = RPCRequest::new::<parameters::ChannelMemberRole>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelRole,
-            Some(role)
+            Some(Parameters::SetChannelMemberRole(role))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -949,10 +946,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::BanChannelMembersAck::new()));
         let promise = Promise::BanChannelMembers(ack.clone());
-        let req = RPCRequest::new::<Vec<Id>>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelBan,
-            Some(members)
+            Some(Parameters::BanChannelMembers(members))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -989,10 +986,10 @@ impl MessagingClient for Client {
 
         let ack = Arc::new(Mutex::new(promise::UnbanChannelMembersAck::new()));
         let promise = Promise::UnbanChannelMembers(ack.clone());
-        let req = RPCRequest::new::<Vec<Id>>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelUnban,
-            Some(members)
+            Some(Parameters::UnbanChannelMembers(members))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -1023,15 +1020,14 @@ impl MessagingClient for Client {
         }
         drop(ua);
 
-        let members = members.into_iter()
-            .map(|id| id.clone())
+        let members = members.into_iter().map(|id| id.clone())
             .collect::<Vec<Id>>();
         let ack = Arc::new(Mutex::new(promise::RemoveChannelMembersAck::new()));
         let promise = Promise::RemoveChannelMembers(ack.clone());
-        let req = RPCRequest::new::<Vec<Id>>(
+        let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelRemove,
-            Some(members)
+            Some(Parameters::RemoveChannelMembers(members))
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -1142,7 +1138,8 @@ struct MessagingWorker {
 
     connect_promise : Option<Box<dyn FnMut() + Send + Sync>>,
 
-    server_context  : Option<CryptoContext>,    // TODO,
+    self_context    : Arc<Mutex<CryptoContext>>,
+    server_context  : Arc<Mutex<CryptoContext>>,
     disconnect      : bool,
     failures        : u32,
 
@@ -1153,21 +1150,21 @@ struct MessagingWorker {
     outbox          : String,
     broadcast       : String,
 
-    pending_calls   : HashMap<u32, RPCRequest>,
+    pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
 
     user            : Option<CryptoIdentity>,
 }
 
 #[allow(unused)]
 impl MessagingWorker {
-    #[allow(unused)]
     fn new(client: &Client,  mqttc: Arc<Mutex<AsyncClient>>) -> Self {
         Self {
             user_agent      : client.ua().clone(),
             worker_client   : mqttc,
 
             connect_promise : None,
-            server_context  : None,
+            self_context    : client.self_ctxt().clone(),
+            server_context  : client.server_ctxt().clone(),
             disconnect      : false,
             failures        : 0,
             peer            : client.peer.clone(),
@@ -1176,7 +1173,7 @@ impl MessagingWorker {
             outbox          : client.outbox.clone(),
             broadcast       : client.broadcast.clone(),
 
-            pending_calls   : HashMap::new(),
+            pending_calls   : client.pending_calls(),
             user            : None,
         }
     }
@@ -1235,22 +1232,24 @@ impl MessagingWorker {
         let topic = publish.topic.as_str();
         debug!("Got message on topic: {}", topic);
 
-        println!("<<on_pub_msg>> line: {}", line!());
-        let payload = self.server_context.as_ref().unwrap().decrypt_into(
+        let payload = match self.server_context.lock().unwrap().decrypt_into(
             &publish.payload
-        );
-        println!("<<on_pub_msg>> line: {}", line!());
-        let Ok(payload) = payload  else {
-            error!("Failed to decrypt message payload from {topic}, ignored");
-            return;
+        ) {
+            Ok(payload) => payload,
+            Err(e) => {
+                error!("Failed to decrypt message payload from {topic}: {}", e);
+                return;
+            }
         };
 
-        let msg = serde_cbor::from_slice::<Message>(&payload);
-        let Ok(mut msg) = msg else {
-            error!("Failed to deserialize message from {topic}, ignored");
-            return;
+        let mut msg = match serde_cbor::from_slice::<Message>(&payload) {
+            Ok(msg) => msg,
+            Err(e) => {
+                error!("Failed to deserialize message from {topic}: {}", e);
+                return;
+            }
         };
-        if msg.is_valid() {
+        if !msg.is_valid() {
             error!("Received invalid message from {topic}, ignored");
             return;
         }
@@ -1330,7 +1329,7 @@ impl MessagingWorker {
                     // and the session public key of channel.
                     //TODO:
 
-                    let ctxt = channel.rx_crypto_context(msg.from());
+                    let ctxt = channel.rx_crypto_context_by(msg.from());
                     msg.decrypt_body(ctxt);
                 },
                 MessageType::Notification => {
@@ -1338,7 +1337,7 @@ impl MessagingWorker {
                     // The body is encrypted using the channel's private key
                     // and the channel session's public key
 
-                    let ctxt = channel.rx_crypto_context1();
+                    let ctxt = channel.rx_crypto_context();
                     // TODO
                 },
                 _ => {}
@@ -1388,42 +1387,70 @@ impl MessagingWorker {
 
     fn on_rpc_response(&mut self, msg: Message) {
         let Some(body) = msg.body() else {
-            error!("Message body is missing in RPC response from {}, ignored", msg.from());
+            error!("Message body is missing in response message from {}, ignored", msg.from());
             return;
         };
-
         if body.is_empty() {
-            error!("Empty message body in RPC response from {}, ignored", msg.from());
+            error!("Message body is empty in response message from {}, ignored", msg.from());
             return;
         }
+
+        /*{
+            use hex::ToHex;
+            let body_hex = body.encode_hex::<String>();
+            println!("RPC response body (hex): {}", body_hex);
+        }*/
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
             error!("Failed to parse RPC response from {}, ignored", msg.from());
             return;
         };
 
-        let Some(mut request) = self.pending_calls.remove(preparsed.id()) else {
+        let Some(mut call) = self.pending_calls.lock().unwrap().remove(&0) else {
             error!("Unmatched RPC response id {} from {}, ignored", preparsed.id(), msg.from());
             return;
         };
 
-        match request.method() {
+        match call.method() {
             RPCMethod::DeviceList => {
-                request.complete::<Vec<ClientDevice>>(preparsed);
+                call.complete::<Vec<ClientDevice>>(preparsed);
             },
 
             RPCMethod::DeviceRevoke => {
-                request.complete::<()>(preparsed);
+                call.complete::<()>(preparsed);
             },
 
             RPCMethod::ContactPush => {
-                request.complete::<()>(preparsed);
+                call.complete::<()>(preparsed);
             },
 
             RPCMethod::ContactClear => { // TODO:
             },
 
-            RPCMethod::ChannelCreate => { // TODO:
+            RPCMethod::ChannelCreate => {
+                // No notification to the channel creator
+			    // so save the channel here
+
+                let mut channel = match preparsed.result::<Channel>() {
+                    Some(v) => v,
+                    None => {
+                        error!("No channel information in the response from {}, ignored", msg.from());
+                        return;
+                    }
+                };
+
+                let cookie = call.cookie();
+                let session_key = self.self_context.lock().unwrap().decrypt_into(
+                    cookie.as_ref().unwrap()
+                ).unwrap_or_else(|e| {
+                    error!("Failed to decrypt channel session key from {}, ignored: {}", msg.from(), e);
+                    Vec::<u8>::new()
+                });
+                channel.set_session_key(&session_key);
+
+                self.user_agent.lock().unwrap().on_joined_channel(&channel);
+
+                // TODO:
             },
             RPCMethod::ChannelRemove => { // TODO:
             },

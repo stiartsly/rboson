@@ -303,7 +303,8 @@ impl ContactListener for DefaultUserAgent {
 
 impl ChannelListener for DefaultUserAgent {
     fn on_joined_channel(&self, _channel: &Channel) {
-        unimplemented!()
+        println!("on_joined_channel called");
+        //unimplemented!()
     }
 
     fn on_left_channel(&self, _channel: &Channel) {

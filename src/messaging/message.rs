@@ -189,22 +189,22 @@ static VERSION: i32 = 1;
 
 #[allow(dead_code)]
 impl Message {
-    pub(crate) fn new(mut builder: MessageBuilder) -> Self {
+    pub(crate) fn new(mut mb: MessageBuilder) -> Self {
         Message {
             version         : VERSION,
-            from            : builder.client.userid().clone(),
-            to              : builder.to.take().unwrap(),
+            from            : mb.client.userid().clone(),
+            to              : mb.to.take().unwrap(),
 
-            serial_number   : builder.client.next_index(),
+            serial_number   : mb.client.next_index(),
             created         : as_ms!(SystemTime::now()) as u64,
-            message_type    : builder.msg_type as i32,
+            message_type    : mb.msg_type as i32,
 
             properties      : None,
 
-            content_type    : builder.content_type.map(|v| v.to_string()),
+            content_type    : mb.content_type.map(|v| v.to_string()),
             content_disposition: None,
 
-            body            : None,
+            body            : mb.body.take(),
             orginal_body    : None,
 
             rid             : 0,
@@ -261,8 +261,8 @@ impl Message {
     pub fn is_valid(&self) -> bool {
         self.version == VERSION &&
             self.message_type >= MessageType::Message as i32 &&
-                self.message_type <= MessageType::Notification as i32 &&
-                    self.created > 0
+            self.message_type <= MessageType::Notification as i32 &&
+            self.created > 0
     }
 
     pub(crate) fn properties(&self) -> &HashMap<String, serde_json::Value> {
@@ -413,9 +413,8 @@ impl<'a> MessageBuilder<'a> {
 
     pub(crate) fn build(self) -> Result<Message> {
         if self.to.is_none() {
-            Err(Error::Argument("Message 'to' field is required".into()))
-        } else {
-            Ok(Message::new(self))
+            return Err(Error::Argument("Message 'to' field is required".into()))
         }
+        Ok(Message::new(self))
     }
 }

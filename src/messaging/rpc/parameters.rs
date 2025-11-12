@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use crate::Id;
-use crate::messaging::channel;
+use crate::messaging::{
+    channel,
+    invite_ticket::InviteTicket,
+};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct UserProfile {
@@ -46,9 +49,9 @@ impl ContactRemove {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct ChannelCreate {
-    #[serde(rename = "sid")]
+    #[serde(rename = "sid", with="crate::serde_id_as_bytes")]
     session_id: Id,
 
     #[serde(rename = "p")]
@@ -57,7 +60,7 @@ pub(crate) struct ChannelCreate {
     #[serde(rename = "n", skip_serializing_if = "crate::is_none_or_empty")]
     name: Option<String>,
 
-    #[serde(rename = "d", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "nt", skip_serializing_if = "crate::is_none_or_empty")]
     notice: Option<String>,
 }
 
@@ -116,4 +119,24 @@ impl ChannelMemberRole {
     pub(crate) fn role(&self) -> channel::Role {
         self.role
     }
+}
+
+#[allow(unused)]
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum Parameters {
+    UserProfile(UserProfile),
+    RemoveContact(ContactRemove),
+    RevokeDevice(Id),
+    CreateChannel(ChannelCreate),
+    JoinChannel(InviteTicket),
+    ChannelMemberRole(ChannelMemberRole),
+    SetChanneLOwner(Id),
+    SetChannelPermission(channel::Permission),
+    SetChannelName(String),
+    SetChannelNotice(String),
+    SetChannelMemberRole(ChannelMemberRole),
+    BanChannelMembers(Vec<Id>),
+    UnbanChannelMembers(Vec<Id>),
+    RemoveChannelMembers(Vec<Id>),
 }

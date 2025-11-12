@@ -27,7 +27,7 @@ impl RPCResponse
     pub(crate) fn new<T>(id: u32, result: T) -> Self where T: Serialize {
         Self {
             id,
-            result: Some(serde_cbor::value::to_value(result).unwrap_or(Value::Null)),
+            result: serde_cbor::value::to_value(result).ok(),
             error: None,
         }
     }

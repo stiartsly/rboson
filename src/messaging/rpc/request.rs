@@ -1,9 +1,9 @@
 use serde::Serialize;
-use serde_cbor::{self, Value};
 use super::{
     method::RPCMethod,
     response::RPCResponse,
     promise::Promise,
+    parameters::Parameters
 };
 
 #[allow(unused)]
@@ -17,12 +17,13 @@ pub(crate) struct RPCRequest
     method: RPCMethod,
 
     #[serde(rename = "p", skip_serializing_if = "Option::is_none")]
-    params: Option<Value>,
+    params: Option<Parameters>,
 
     // This is the client side cookie for data sync between multiple device.
 	// Because all messages go through the super node, so the sensitive data should
 	// be encrypted(by user's key pair) can only can be decrypted by the user self-only.
 	// The server should ignore this field.
+    //#[serde(rename = "c", with = "crate::serde_option_bytes_as_cbor")]
     #[serde(rename = "c", skip_serializing_if = "crate::is_none_or_empty")]
     cookie: Option<Vec<u8>>,
 
@@ -36,14 +37,11 @@ pub(crate) struct RPCRequest
 #[allow(unused)]
 impl RPCRequest
 {
-    pub(crate) fn new<P>(id: i32, method: RPCMethod, params: Option<P>) -> Self
-    where P: Serialize, {
+    pub(crate) fn new(id: i32, method: RPCMethod, params: Option<Parameters>) -> Self {
         Self {
             id,
             method,
-            params: params.map(|p|
-                serde_cbor::value::to_value(p).unwrap_or(Value::Null)
-            ),
+            params,
             cookie: None,
             promise: None,
             response: None,

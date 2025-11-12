@@ -1,11 +1,19 @@
 use std::fmt;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use serde::{
+    Serialize,
+    Deserialize,
+    ser::{Serializer, SerializeStruct},
+    de::{self, Deserializer, Visitor, MapAccess}
+};
 use serde_repr::{Serialize_repr, Deserialize_repr};
+
 use crate::{
     Id,
     CryptoContext,
     cryptobox,
+    messaging::contact::GenericContact,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,71 +172,246 @@ impl fmt::Display for Member {
     }
 }
 
-#[derive(Debug, Deserialize)]
+pub type Channel = GenericContact<ChannelData>;
+
+#[derive(Debug, Clone)]
 #[allow(unused)]
-pub struct Channel {
-    #[serde(rename = "o")]
+pub struct ChannelData {
     owner: Id,
-
-    #[serde(rename = "pm")]
     permission: Permission,
-
-    #[serde(skip)]
     notice: String,
 
-    #[serde(skip)]
-    mamber_crypto_context: HashMap<Id, CryptoContext>,
+    _member_crypto_ctxts: HashMap<Id, Arc<Mutex<CryptoContext>>>,
+}
 
+impl ChannelData {
+    pub(crate) fn new(owner: Id, permission: Permission, notice: String) -> Self {
+        Self {
+            owner,
+            permission,
+            notice,
+            _member_crypto_ctxts: HashMap::new(),
+        }
+    }
 }
 
 #[allow(unused)]
 impl Channel {
+    pub(crate) fn data(&self) -> &ChannelData {
+        self.annex()
+    }
+
+    pub(crate) fn data_mut(&mut self) -> &mut ChannelData {
+        self.annex_mut()
+    }
 
     pub fn owner(&self) -> &Id {
-        &self.owner
+        unimplemented!()
     }
 
-    pub(crate) fn set_owner(&mut self, owner: Id) {
-        self.owner = owner;
-        self.touch();
+    pub(crate) fn set_owner(&mut self, _owner: Id) {
+        unimplemented!()
     }
 
-    pub fn permission(&self) -> Permission {
-        self.permission
+    pub fn is_owner(&self, _id: &Id) -> bool {
+        unimplemented!()
     }
 
-    pub(crate) fn set_permission(&mut self, permission: Permission) {
-        self.permission = permission;
-        self.touch();
+    pub fn is_member(&self, _id: &Id) -> bool {
+        unimplemented!()
+    }
+
+    pub fn is_moderator(&self, _id: &Id) -> bool {
+        unimplemented!()
     }
 
     pub(crate) fn session_keypair(&self) -> Option<&cryptobox::KeyPair> {
         unimplemented!()
     }
 
-    pub(crate) fn is_owner(&self, id: &Id) -> bool {
-        self.owner == *id
-    }
-
-    pub(crate) fn is_member(&self, id: &Id) -> bool {
+    pub(crate) fn rx_crypto_context_by(&self, _id: &Id) -> &CryptoContext {
         unimplemented!()
     }
 
-    pub(crate) fn is_moderator(&self, id: &Id) -> bool {
-        unimplemented!()
-    }
-
-    fn touch(&mut self) {
-        unimplemented!()
-    }
-
-    pub(crate) fn rx_crypto_context(&self, id: &Id) -> &CryptoContext {
-        unimplemented!()
-    }
-
-    pub(crate) fn rx_crypto_context1(&self) -> &CryptoContext {
-        unimplemented!()
+    //pub(crate) fn rx_crypto_context1(&self) -> &CryptoContext {
+    //    unimplemented!()
+    //}
+}
+impl Serialize for Channel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut s = serializer.serialize_struct("Channel", 1)?;
+        let perm = i32::from(self.data().permission);
+        s.serialize_field("pm", &perm)?;
+        if let Some(name) = self.name() {
+            s.serialize_field("n", name)?;
+        }
+        s.end()
     }
 }
 
-/* Removed duplicate empty Member struct */
+impl<'de> Deserialize<'de> for Channel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug)]
+        enum Field {
+            Id,             // "id" - Id,
+            Peerid,         // "p"  - Id,
+            Name,           // "n"  - String
+            Remark,         // "r"  - String
+            Tags,           // "ts" - String
+            Muted,          // "d"  - bool
+            Blocked,        // "b"  - bool
+            Created,        // "c"  - u64
+            LastModified,   // "m" - u64
+            Deleted,        // "e"  - bool
+            Revision,       // "v"  - i32
+            Owner,          // "o"  - Id
+            Perm,           // "pm" - i32
+            Notice,         // "nt" - String,
+
+            HomePeerSig,    // "ps" - Vec<u8>
+            Signature,      // "s"  - Vec<u8>
+        }
+
+        impl fmt::Display for Field {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                let s = match *self {
+                    Field::Id           => "id",
+                    Field::Peerid       => "p",
+                    Field::Name         => "n",
+                    Field::Remark       => "r",
+                    Field::Tags         => "ts",
+                    Field::Muted        => "d",
+                    Field::Blocked      => "b",
+                    Field::Created      => "c",
+                    Field::LastModified => "m",
+                    Field::Deleted      => "e",
+                    Field::Revision     => "v",
+                    Field::Owner        => "o",
+                    Field::Perm         => "pm",
+                    Field::Notice       => "nt",
+                    Field::HomePeerSig  => "ps",
+                    Field::Signature    => "s",
+                };
+                write!(f, "{}", s)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(deserializer)?;
+                match key.as_str() {
+                    "id"    => Ok(Field::Id),
+                    "p"     => Ok(Field::Peerid),
+                    "n"     => Ok(Field::Name),
+                    "r"     => Ok(Field::Remark),
+                    "ts"    => Ok(Field::Tags),
+                    "d"     => Ok(Field::Muted),
+                    "b"     => Ok(Field::Blocked),
+                    "c"     => Ok(Field::Created),
+                    "m"     => Ok(Field::LastModified),
+                    "e"     => Ok(Field::Deleted),
+                    "v"     => Ok(Field::Revision),
+                    "o"     => Ok(Field::Owner),
+                    "pm"    => Ok(Field::Perm),
+                    "nt"    => Ok(Field::Notice),
+                    "ps"    => Ok(Field::HomePeerSig),
+                    "s"     => Ok(Field::Signature),
+                    _ => {
+                        println!(">>>> unknown field: {}", key);
+                        Err(de::Error::unknown_field(&key, &["id", "name", "c"]))
+                    }
+                }
+            }
+        }
+
+        struct ChannelVisitor;
+
+        impl<'de> Visitor<'de> for ChannelVisitor {
+            type Value = Channel;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct Channel")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut owner: Option<Id> = None;
+                let mut perm:  Permission = Permission::Public;
+                let mut notice: Option<String> = None;
+
+                let mut peerid: Option<Id> = None;
+                let mut id: Option<Id> = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Owner    => {
+                            owner = map.next_value::<serde_cbor::Value>().map(|v| {
+                                Some(
+                                    if let serde_cbor::Value::Bytes(b) = v {
+                                        Id::from_bytes(b.try_into().unwrap())
+                                    } else {
+                                        panic!("Invalid type for Channel owner");
+                                    }
+                                )
+                            })?;
+                        },
+                        Field::Perm     => {
+                            let p: i32 = map.next_value()?;
+                            perm = Permission::try_from(p).map_err(|_| de::Error::custom("Invalid permission value"))?;
+                        },
+                        Field::Notice   => notice = map.next_value()?,
+                        Field::Id       => {
+                            id = map.next_value::<serde_cbor::Value>().map(|v| {
+                                Some(
+                                    if let serde_cbor::Value::Bytes(b) = v {
+                                        Id::from_bytes(b.try_into().unwrap())
+                                    } else {
+                                        panic!("Invalid type for Channel Id");
+                                    }
+                                )
+                            })?;
+                        },
+                        Field::Peerid   => {
+                            peerid = map.next_value::<serde_cbor::Value>().map(|v| {
+                                Some(
+                                    if let serde_cbor::Value::Bytes(b) = v {
+                                        Id::from_bytes(b.try_into().unwrap())
+                                    } else {
+                                        panic!("Invalid type for Channel Home PeerId");
+                                    }
+                                )
+                            })?;
+                        },
+                        _ => {
+                            _ = map.next_value::<serde_cbor::Value>();
+                         }
+                    }
+                }
+
+                let channel_data = ChannelData::new(
+                    owner.ok_or_else(|| de::Error::missing_field("o"))?,
+                    perm,
+                    notice.unwrap_or_default()
+                );
+                let channel = GenericContact::new(
+                    id.unwrap(),
+                    peerid.unwrap(),
+                    channel_data
+                );
+                Ok(channel)
+            }
+        }
+        deserializer.deserialize_map(ChannelVisitor)
+    }
+}

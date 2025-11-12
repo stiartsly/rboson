@@ -1,7 +1,9 @@
-use std::fmt;
+use std::result;
 use std::time::SystemTime;
 use std::sync::{Arc, Mutex};
 use serde::{Serialize, Deserialize};
+use serde::ser::{Serializer};
+use serde::de::{Deserializer};
 
 use crate::{
     Id,
@@ -14,8 +16,7 @@ use crate::{
 };
 
 use super::{
-    // channel::Permission,
-    profile::Profile,
+    profile::Profile
 };
 
 #[repr(u8)]
@@ -27,68 +28,73 @@ pub enum ContactType {
     Group   = 2,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Contact {
-    #[serde(rename = "id")]
-    #[serde(with = "crate::serde_id_as_base58")]
+pub type Contact = GenericContact<()>;
+
+#[derive(Debug, Clone)]
+pub struct GenericContact<T> where T: Clone {
+    //#[serde(rename = "id")]
+    //#[serde(with = "crate::serde_id_as_base58")]
     id              : Id,
 
-    #[serde(skip)]
+    //#[serde(skip)]
     auto            : bool,
 
-    #[serde(skip)]  // internal use only.
+    //#[serde(skip)]  // internal use only.
     session_keypair : Option<signature::KeyPair>,
-    #[serde(skip)]  // internal use only.
+    //#[serde(skip)]  // internal use only.
     encryption_keypair  : Option<cryptobox::KeyPair>,
-    #[serde(skip)]  //
+    //#[serde(skip)]  //
     session_id      : Option<Id>,
 
-    #[serde(skip)]
+    //#[serde(skip)]
     home_peerid     : Id,
-    #[serde(skip)]  // padding expicitly.
+    //#[serde(skip)]  // padding expicitly.
     name            : Option<String>,
-    #[serde(skip)]  // padding expicitly.
+    //#[serde(skip)]  // padding expicitly.
     avatar          : bool,
 
-    #[serde(rename="r")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="r")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     remark          : String,
-    #[serde(rename="ts")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="ts")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     tags            : String,
-    #[serde(rename="d")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="d")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     muted           : bool,
-    #[serde(rename="b")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="b")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     blocked         : bool,
-    #[serde(rename="c")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="c")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     created         : u64,
-    #[serde(rename="m")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="m")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     last_modified   : u64,
-    #[serde(rename="e")]
-    #[serde(skip_serializing_if = "crate::is_empty")]
+    //#[serde(rename="e")]
+    //#[serde(skip_serializing_if = "crate::is_empty")]
     deleted         : bool,
-    #[serde(rename="v")]
+    //#[serde(rename="v")]
     revision        : i32,
 
-    #[serde(skip)]
+    //#[serde(skip)]
     modified        : bool,
-    #[serde(skip)]
+    //#[serde(skip)]
     last_updated    : Option<SystemTime>,
-    #[serde(skip)]
+    //#[serde(skip)]
     display_name    : Option<String>,
 
-    #[serde(skip)]
+    //#[serde(skip)]
     _rx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
-    #[serde(skip)]
-    _tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>
+    //#[serde(skip)]
+    _tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
+
+    //#[serde(skip)]
+    annex_data      : Option<T>,
 }
 
 #[allow(unused)]
-impl Contact {
+impl<T> GenericContact<T> where T: Clone{
     pub(crate) fn new1(
         id: Id,
         home_peerid: Option<Id>,
@@ -96,6 +102,14 @@ impl Contact {
         remark: Option<String>
     ) -> Result<Self> {
         unimplemented!()
+    }
+
+    pub(crate) fn annex_mut(&mut self) -> &mut T {
+        self.annex_data.as_mut().expect("Annex data is missing")
+    }
+
+    pub(crate) fn annex(&self) -> &T {
+        self.annex_data.as_ref().expect("Annex data is missing")
     }
 
     /*
@@ -128,7 +142,9 @@ impl Contact {
         }
     }
 
-    pub(crate) fn new(id: Id, home_peerid: Id) -> Self {
+    */
+
+    pub(crate) fn new(id: Id, home_peerid: Id, annex: T) -> Self {
         Self {
             id,
             auto: true,
@@ -153,9 +169,12 @@ impl Contact {
             modified: false,
             last_updated: None,
             display_name: None,
+
+            _rx_crypto_context: None,
+            _tx_crypto_context: None,
+            annex_data: Some(annex),
         }
     }
-    */
 
     pub fn id(&self) -> &Id {
         &self.id
@@ -462,9 +481,20 @@ impl Identity for Contact {
     }
 }
 
-impl fmt::Display for Contact {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Contact: {}[", self.id.to_base58())?;
+impl Serialize for Contact {
+    fn serialize<S>(&self, _serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        unimplemented!()
+    }
+}
+
+impl<'de> Deserialize<'de> for Contact {
+    fn deserialize<D>(_deserializer: D) -> result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
         unimplemented!()
     }
 }

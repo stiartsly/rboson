@@ -1,7 +1,7 @@
 
 use crate::{
     Id,
-    messaging::Contact,
+    messaging::contact::Contact,
 };
 
 pub trait ContactListener {

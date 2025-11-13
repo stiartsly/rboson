@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use serde::{Serialize, de::DeserializeOwned};
@@ -19,6 +20,7 @@ use rumqttc::{
 };
 
 use crate::{
+    unwrap,
     Id,
     Identity,
     PeerInfo,
@@ -74,6 +76,8 @@ pub struct Client {
     outbox          : String,
     broadcast       : String,
 
+    base_index      : RefCell<u32>,
+
     service_info    : Option<api_client::MessagingServiceInfo>,
 
     server_context  : Option<Arc<Mutex<CryptoContext>>>,
@@ -103,6 +107,10 @@ impl Client {
         let user = ua.user().unwrap().identity().clone();
         let device = ua.device().unwrap().identity().unwrap().clone();
 
+        println!("peerid    : {}", peer.id());
+        println!("userid    : {}", user.id());
+        println!("deviceid  : {}", device.id());
+
         drop(ua);
         user_agent.lock().unwrap().harden();
 
@@ -121,6 +129,8 @@ impl Client {
             inbox           : format!("inbox/{bs58_id}",),
             outbox          : format!("outbox/{bs58_id}",),
             broadcast       : "broadcast".into(),
+
+            base_index      : RefCell::new(0),
 
             api_client      : None,
             disconnect      : false,
@@ -170,8 +180,9 @@ impl Client {
         self.pending_calls.clone()
     }
 
-    pub(crate) fn next_index(&mut self) -> i32 {
-        0 // TODO
+    pub(crate) fn next_index(&self) -> u32 {
+        self.base_index.replace_with(|&mut v| v + 1);
+        *self.base_index.borrow()
     }
 
     pub fn load_access_token(&mut self) -> Result<Option<String>> {
@@ -320,17 +331,16 @@ impl Client {
         ))
     }
 
-    async fn send_rpc_request(
-        &mut self,
+    async fn send_rpc_request(&self,
         recipient: &Id,
-        request: RPCRequest
+        req: RPCRequest
     ) -> Result<()> {
         let msg = MessageBuilder::new(self, MessageType::Call)
-            .with_to(recipient.clone())
-            .with_body(serde_cbor::to_vec(&request).unwrap())
+            .with_to(recipient)
+            .with_body(serde_cbor::to_vec(&req).unwrap())
             .build()?;
 
-        self.pending_calls.lock().unwrap().insert(0, request);
+        self.pending_calls.lock().unwrap().insert(req.id(), req);
         self.send_message_intenral(msg).await
     }
 
@@ -380,13 +390,11 @@ impl Client {
                     return Err(Error::State(estr));
                 };
 
-                self.user
-                    .create_crypto_context(&sid)?
+                self.user.create_crypto_context(&sid)?
                     .encrypt_into(body)?
             },
             MessageType::Call => {
-                self.user
-                    .create_crypto_context(msg.to())?
+                self.user.create_crypto_context(msg.to())?
                     .encrypt_into(body)?
             },
             _ => {
@@ -488,7 +496,7 @@ impl Client {
     }
 
     pub async fn create_channel(
-        &mut self,
+        &self,
         permission: Option<channel::Permission>,
         name: &str,
         notice: Option<&str>
@@ -605,17 +613,16 @@ impl MessagingClient for Client {
         }
     }
 
-    async fn create_channel(
-        &mut self,
+    async fn create_channel(&self,
         permission: Option<channel::Permission>,
         name: &str,
         notice: Option<&str>
     ) -> Result<Channel> {
-        let session_keypair = signature::KeyPair::random();
-        let session_id: Id = session_keypair.public_key().into();
+        let session_kp = signature::KeyPair::random();
+        let session_id = Id::from(session_kp.public_key());
         let permission = permission.unwrap_or(channel::Permission::OwnerInvite);
-        let params = parameters::ChannelCreate::new(
-            session_id.clone(),
+        let parameters = parameters::ChannelCreate::new(
+            session_id,
             permission,
             Some(name.into()),
             notice.map(|n| n.into()),
@@ -624,23 +631,18 @@ impl MessagingClient for Client {
         let ack = Arc::new(Mutex::new(promise::CreateChannelAck::new()));
         let promise = Promise::CreateChannel(ack.clone());
         let cookie = self.self_ctxt().lock().unwrap().encrypt_into(
-            session_keypair.private_key().as_bytes()
+            session_kp.private_key().as_bytes()
         )?;
         let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelCreate,
-            Some(Parameters::CreateChannel(params)),
+            Some(Parameters::CreateChannel(parameters)),
         )
         .with_promise(promise.clone())
         .with_cookie(cookie);
 
-        //self.pending_calls.insert(session_id.clone(), req);
-
-        let peerid = self.service_info.as_ref().unwrap().peerid().clone();
-        self.send_rpc_request(&peerid, req).await.map_err(|e| {
-            println!("Failed to send rpc request to create channel: {}", e);
-            e
-        })?;
+        let peerid = unwrap!(self.service_info).peerid().clone();  // why not peerid.
+        self.send_rpc_request(&peerid, req).await?;
 
         match Waiter::new(promise).await {
             Ok(_) => ack.lock().unwrap().result(),
@@ -648,15 +650,14 @@ impl MessagingClient for Client {
         }
     }
 
-    async fn remove_channel(
-        &mut self,
+    async fn remove_channel(&self,
         channel_id: &Id
     ) -> Result<()> {
         let ack = Arc::new(Mutex::new(promise::RemoveChannelAck::new()));
         let promise = Promise::RemoveChannel(ack.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelRemove,
+            RPCMethod::ChannelDelete,
             None
         ).with_promise(promise.clone());
 
@@ -1152,7 +1153,7 @@ struct MessagingWorker {
 
     pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
 
-    user            : Option<CryptoIdentity>,
+    user            : CryptoIdentity
 }
 
 #[allow(unused)]
@@ -1174,7 +1175,7 @@ impl MessagingWorker {
             broadcast       : client.broadcast.clone(),
 
             pending_calls   : client.pending_calls(),
-            user            : None,
+            user            : client.user.clone(),
         }
     }
 
@@ -1182,13 +1183,8 @@ impl MessagingWorker {
         &self.user_agent
     }
 
-    fn is_me(&self, _id: &Id) -> bool {
-        true // TODO
-    }
-
-    fn user_mut(&mut self) -> &mut CryptoIdentity {
-        self.user.as_mut()
-            .expect("User identity should be set")
+    fn is_me(&self, id: &Id) -> bool {
+        self.user.id() == id
     }
 
     fn on_incoming_msg(&mut self, packet: Packet) {
@@ -1305,7 +1301,7 @@ impl MessagingWorker {
                     // and my public key.
 
                     msg.decrypt_body(
-                        &self.user_mut().create_crypto_context(msg.from()).unwrap(),
+                        &self.user.create_crypto_context(msg.from()).unwrap(),
                     ).unwrap_or_else(|e| {
                         error!("Failed to decrypt call body: {}, ignored", e);
                     });
@@ -1387,11 +1383,11 @@ impl MessagingWorker {
 
     fn on_rpc_response(&mut self, msg: Message) {
         let Some(body) = msg.body() else {
-            error!("Message body is missing in response message from {}, ignored", msg.from());
+            error!("Message body missing in response from {}, message ignored", msg.from());
             return;
         };
         if body.is_empty() {
-            error!("Message body is empty in response message from {}, ignored", msg.from());
+            error!("Response message from {} has empty body, ignored", msg.from());
             return;
         }
 
@@ -1402,12 +1398,12 @@ impl MessagingWorker {
         }*/
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
-            error!("Failed to parse RPC response from {}, ignored", msg.from());
+            error!("Failed to parse RPC response from {}, message ignored", msg.from());
             return;
         };
 
-        let Some(mut call) = self.pending_calls.lock().unwrap().remove(&0) else {
-            error!("Unmatched RPC response id {} from {}, ignored", preparsed.id(), msg.from());
+        let Some(mut call) = self.pending_calls.lock().unwrap().remove(preparsed.id()) else {
+            error!("Unmatched RPC response ID {} from {}, message ignored", preparsed.id(), msg.from());
             return;
         };
 
@@ -1440,29 +1436,26 @@ impl MessagingWorker {
             },
 
             RPCMethod::ChannelCreate => {
-                // No notification to the channel creator
-			    // so save the channel here
-
                 let mut channel = match preparsed.result::<Channel>() {
-                    Some(v) => v,
-                    None => {
-                        error!("No channel information in the response from {}, ignored", msg.from());
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Internal eror: {e}");
+                        // TODO: ack.complete(Err(e));
                         return;
                     }
                 };
 
-                let cookie = call.cookie();
-                let session_key = self.self_context.lock().unwrap().decrypt_into(
-                    cookie.as_ref().unwrap()
-                ).unwrap_or_else(|e| {
-                    error!("Failed to decrypt channel session key from {}, ignored: {}", msg.from(), e);
-                    Vec::<u8>::new()
-                });
+                let Ok(session_key) = self.self_context.lock().unwrap().decrypt_into(
+                    unwrap!(call.cookie())
+                ) else {
+                    error!("Internal error, decrypting channel session key failed.");
+                    return;
+                };
                 channel.set_session_key(&session_key);
 
                 self.user_agent.lock().unwrap().on_joined_channel(&channel);
                 let Some(Promise::CreateChannel(ack)) = promise else {
-                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
+                    error!("Internal error, mismatched promise type for the RPC response, ignored");
                     return;
                 };
                 {
@@ -1470,7 +1463,32 @@ impl MessagingWorker {
                     ack.complete(Ok(channel))
                 }
             }
-            RPCMethod::ChannelRemove => { // TODO:
+            RPCMethod::ChannelDelete => {
+                match preparsed.result::<()>() {
+                    Err(e) => {
+                        error!("Internal eror: {e}");
+                        return;
+                    }
+                    Ok(_) => {}
+                }
+                let channel = match self.ua().lock().unwrap().channel(msg.from()) {
+                    Ok(Some(ch)) => ch,
+                    _ => {
+                        error!("Internal error, channel not found from the user agent.");
+                        // TODO: ack.complete(Err(e));
+                        return;
+                    }
+                };
+                self.user_agent.lock().unwrap().on_channel_deleted(&channel);
+
+                let Some(Promise::RemoveChannel(ack)) = promise else {
+                    error!("Internal error, mismatched promise type for the RPC response, ignored");
+                    return;
+                };
+                {
+                    let mut ack = ack.lock().unwrap();
+                    ack.complete(Ok(()))
+                }
             },
             RPCMethod::ChannelJoin => { // TODO:
             },

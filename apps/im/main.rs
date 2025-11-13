@@ -13,7 +13,7 @@ use boson::{
 
 use boson::messaging::{
     UserProfile,
-    //MessagingClient,
+    MessagingClient,
     Message,
     // Client,
     ClientBuilder,
@@ -179,8 +179,20 @@ async fn main() {
     let rc = client.create_channel(None, "tang", Some("notice")).await;
     if let Err(e) = rc {
         eprintln!("Creating channel error: {{{e}}}");
-    } else {
-        println!("Channel created: {}", rc.unwrap());
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let channel = rc.unwrap();
+    println!("Channel created id: {}", channel.id());
+
+    let rc = client.remove_channel(channel.id()).await;
+    if let Err(e) = rc {
+        eprintln!("Removing channel error: {{{e}}}");
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
     }
 
     thread::sleep(Duration::from_secs(2));

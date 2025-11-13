@@ -47,13 +47,13 @@ pub trait MessagingClient {
         device_id: &Id
     ) -> impl Future<Output = Result<()>>;
 
-    fn create_channel(&mut self,
+    fn create_channel(&self,
         permission: Option<Permission>,
         name: &str,
         notice: Option<&str>
     ) -> impl Future<Output = Result<Channel>>;
 
-    fn remove_channel(&mut self,
+    fn remove_channel(&self,
         channel_id: &Id
     ) -> impl Future<Output = Result<()>>;
 

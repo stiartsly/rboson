@@ -6,12 +6,11 @@ use super::{
     parameters::Parameters
 };
 
-#[allow(unused)]
 #[derive(Serialize)]
 pub(crate) struct RPCRequest
 {
     #[serde(rename = "i")]
-    id: i32,
+    id: u32,
 
     #[serde(rename = "m")]
     method: RPCMethod,
@@ -23,7 +22,6 @@ pub(crate) struct RPCRequest
 	// Because all messages go through the super node, so the sensitive data should
 	// be encrypted(by user's key pair) can only can be decrypted by the user self-only.
 	// The server should ignore this field.
-    //#[serde(rename = "c", with = "crate::serde_option_bytes_as_cbor")]
     #[serde(rename = "c", skip_serializing_if = "crate::is_none_or_empty")]
     cookie: Option<Vec<u8>>,
 
@@ -31,20 +29,20 @@ pub(crate) struct RPCRequest
     promise: Option<Promise>,
 
     #[serde(skip)]
-    response: Option<RPCResponse>
+    _response: Option<RPCResponse>
 }
 
 #[allow(unused)]
 impl RPCRequest
 {
-    pub(crate) fn new(id: i32, method: RPCMethod, params: Option<Parameters>) -> Self {
+    pub(crate) fn new(id: u32, method: RPCMethod, params: Option<Parameters>) -> Self {
         Self {
             id,
             method,
             params,
             cookie: None,
             promise: None,
-            response: None,
+            _response: None,
         }
     }
 
@@ -58,7 +56,7 @@ impl RPCRequest
         self
     }
 
-    pub(crate) fn id(&self) -> i32 {
+    pub(crate) fn id(&self) -> u32 {
         self.id
     }
 

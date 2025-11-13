@@ -146,7 +146,7 @@ pub struct Message {
     to:         Id,         // alias: recipient
 
     #[serde(rename = "s")]
-    serial_number: i32,
+    serial_number: u32,
     #[serde(rename = "c")]
     created: u64,         // timestamp in seconds
     #[serde(rename = "t")]
@@ -190,7 +190,7 @@ static VERSION: i32 = 1;
 #[allow(dead_code)]
 impl Message {
     pub(crate) fn new(mut mb: MessageBuilder) -> Self {
-        Message {
+        Self {
             version         : VERSION,
             from            : mb.client.userid().clone(),
             to              : mb.to.take().unwrap(),
@@ -214,8 +214,29 @@ impl Message {
         }
     }
 
-    pub(crate) fn dup_from(&self, _body: Vec<u8>) -> Self {
-        unimplemented!()
+    pub(crate) fn dup_from(&self, body: Vec<u8>) -> Self {
+        Self {
+            version         : self.version,
+            from            : self.from.clone(),
+            to              : self.to.clone(),
+
+            serial_number   : self.serial_number,
+            created         : self.created,
+            message_type    : self.message_type,
+
+            properties      : self.properties.clone(),
+
+            content_type    : self.content_type.clone(),
+            content_disposition: self.content_disposition.clone(),
+
+            body            : Some(body),
+            orginal_body    : None,
+
+            rid             : self.rid,
+            conversation_id : self.conversation_id.clone(),
+            encrypted       : self.encrypted,
+            completed       : self.completed,
+        }
     }
 
     pub fn version(&self) -> i32 {
@@ -246,7 +267,7 @@ impl Message {
         &self.to
     }
 
-    pub fn serial_number(&self) -> i32 {
+    pub fn serial_number(&self) -> u32 {
         self.serial_number
     }
 
@@ -345,7 +366,7 @@ impl fmt::Display for Message {
 
 #[allow(dead_code)]
 pub(crate) struct MessageBuilder<'a> {
-    client      : &'a mut Client,
+    client      : &'a Client,
     msg_type    : MessageType,
 
     to          : Option<Id>,
@@ -358,7 +379,7 @@ pub(crate) struct MessageBuilder<'a> {
 
 #[allow(dead_code)]
 impl<'a> MessageBuilder<'a> {
-    pub(crate) fn new(client: &'a mut Client, msg_type: MessageType) -> Self {
+    pub(crate) fn new(client: &'a Client, msg_type: MessageType) -> Self {
         Self {
             client,
             msg_type,
@@ -370,8 +391,8 @@ impl<'a> MessageBuilder<'a> {
         }
     }
 
-    pub(crate) fn with_to(mut self, to: Id) -> Self {
-        self.to = Some(to);
+    pub(crate) fn with_to(mut self, to: &Id) -> Self {
+        self.to = Some(to.clone());
         self
     }
 

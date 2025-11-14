@@ -13,9 +13,8 @@ use boson::{
 
 use boson::messaging::{
     UserProfile,
-    MessagingClient,
+    // MessagingClient,
     Message,
-    // Client,
     ClientBuilder,
     Contact,
     ConnectionListener,

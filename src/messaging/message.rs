@@ -187,9 +187,8 @@ pub struct Message {
 
 static VERSION: i32 = 1;
 
-#[allow(dead_code)]
 impl Message {
-    pub(crate) fn new(mut mb: MessageBuilder) -> Self {
+    pub(crate) fn new(mut mb: Builder) -> Self {
         Self {
             version         : VERSION,
             from            : mb.client.userid().clone(),
@@ -247,7 +246,7 @@ impl Message {
         self.rid
     }
 
-    pub(crate) fn set_rid(&mut self, rid: u64) {
+    pub(crate) fn _set_rid(&mut self, rid: u64) {
         self.rid = rid;
     }
 
@@ -286,7 +285,7 @@ impl Message {
             self.created > 0
     }
 
-    pub(crate) fn properties(&self) -> &HashMap<String, serde_json::Value> {
+    pub(crate) fn _properties(&self) -> &HashMap<String, serde_json::Value> {
         unimplemented!()
     }
 
@@ -294,7 +293,7 @@ impl Message {
         self.content_type.clone().unwrap_or_else(|| ContentType::Text.to_string())
     }
 
-    pub(crate) fn content_disposition(&self) -> String {
+    pub(crate) fn _content_disposition(&self) -> String {
         self.content_disposition.clone().unwrap_or_else(|| ContentDisposition::Inline.to_string())
     }
 
@@ -324,15 +323,15 @@ impl Message {
         self.body.as_ref().map(|b| b.is_empty()).unwrap_or(true)
     }
 
-    pub(crate) fn completed(&self) -> u64 {
+    pub(crate) fn _completed(&self) -> u64 {
         self.completed
     }
 
-    pub(crate) fn mark_completed(&mut self, completed: SystemTime) {
+    pub(crate) fn _mark_completed(&mut self, completed: SystemTime) {
         self.completed = as_ms!(completed) as u64
     }
 
-    pub(crate) fn is_encrypted(&self) -> bool {
+    pub(crate) fn _is_encrypted(&self) -> bool {
         self.encrypted
     }
 
@@ -340,7 +339,7 @@ impl Message {
         self.encrypted = encrypted;
     }
 
-    pub(crate) fn on_sent(&self) {
+    pub(crate) fn _on_sent(&self) {
         // TODO: unimplemented!()
     }
 
@@ -364,21 +363,20 @@ impl fmt::Display for Message {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) struct MessageBuilder<'a> {
+#[allow(unused)]
+pub(crate) struct Builder<'a> {
     client      : &'a Client,
     msg_type    : MessageType,
 
     to          : Option<Id>,
-    properties  : Option<HashMap<String, serde_json::Value>>,
+    properties : Option<HashMap<String, serde_json::Value>>,
     content_type: Option<ContentType>,
     body        : Option<Vec<u8>>,
 
     //message: Option<Message>,
 }
 
-#[allow(dead_code)]
-impl<'a> MessageBuilder<'a> {
+impl<'a> Builder<'a> {
     pub(crate) fn new(client: &'a Client, msg_type: MessageType) -> Self {
         Self {
             client,
@@ -396,7 +394,7 @@ impl<'a> MessageBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_property(mut self, name: &str, value: serde_json::Value) -> Self {
+    pub(crate) fn _with_property(mut self, name: &str, value: serde_json::Value) -> Self {
         if let Some(map) = self.properties.as_mut() {
             map.insert(name.to_string(), value);
         } else {
@@ -407,7 +405,7 @@ impl<'a> MessageBuilder<'a> {
         self
     }
 
-    pub(crate) fn clear_properties(mut self) -> Self {
+    pub(crate) fn _clear_properties(mut self) -> Self {
         if let Some(map) = self.properties.as_mut() {
             map.clear();
         }
@@ -415,7 +413,7 @@ impl<'a> MessageBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_content_type(mut self, content_type: ContentType) -> Self {
+    pub(crate) fn _with_content_type(mut self, content_type: ContentType) -> Self {
         self.content_type = Some(content_type);
         self
     }
@@ -426,16 +424,8 @@ impl<'a> MessageBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_body_utf8(mut self, body: &str) -> Self {
-        self.body = Some(body.as_bytes().to_vec());
-        // original body.
-        self
-    }
-
-    pub(crate) fn build(self) -> Result<Message> {
-        if self.to.is_none() {
-            return Err(Error::Argument("Message 'to' field is required".into()))
-        }
-        Ok(Message::new(self))
+    pub(crate) fn build(self) -> Message {
+        assert!(self.to.is_some(), "Message 'to' field is required");
+        Message::new(self)
     }
 }

@@ -59,9 +59,9 @@ use crate::messaging::{
         promise::{self, Ack, Promise, Waiter},
     },
     message::{
-        Message,
         MessageType,
-        MessageBuilder
+        Message as Msg,
+        Builder as MsgBuilder
     }
 };
 
@@ -335,16 +335,66 @@ impl Client {
         recipient: &Id,
         req: RPCRequest
     ) -> Result<()> {
-        let msg = MessageBuilder::new(self, MessageType::Call)
+        let msg = MsgBuilder::new(self, MessageType::Call)
             .with_to(recipient)
             .with_body(serde_cbor::to_vec(&req).unwrap())
-            .build()?;
+            .build();
 
         self.pending_calls.lock().unwrap().insert(req.id(), req);
-        self.send_message_intenral(msg).await
+        self.send_msg(msg).await
     }
 
-    async fn pub_message_internal(&self, msg: Message) -> Result<()> {
+    async fn send_msg(&self, msg: Msg) -> Result<()> {
+        let encrypt_needed = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.to() != self.peer.id()
+        };
+
+        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
+            let recipient = self.ua().lock().unwrap().contact(msg.to())?;
+            let Some(rec) = recipient else {
+                let estr = format!("Failed to send message to unknown recipient {}", msg.to());
+                error!("{}", estr);
+                // TODO error.
+                return Err(Error::State(estr));
+            };
+
+            let Some(sid) = rec.session_id() else {
+                let estr = format!("INTERNAL error: recipient {} has no session key.", msg.to());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            };
+
+            self.user.create_crypto_context(&sid)?
+                .encrypt_into(msg.body().as_ref().unwrap())
+        };
+
+        let encrypt_call_msg = |msg: &Msg| -> Result<Vec<u8>> {
+            self.user.create_crypto_context(msg.to())?
+                .encrypt_into(msg.body().as_ref().unwrap())
+        };
+
+        let msg = if encrypt_needed(&msg) {
+            let msg_type = msg.message_type();
+            let encrypted = match msg_type {
+                MessageType::Message    => encrypt_msg(&msg)?,
+                MessageType::Call       => encrypt_call_msg(&msg)?,
+                _ => {
+                    panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
+                }
+            };
+            msg.dup_from(encrypted)
+        } else {
+            msg
+        };
+
+        self.publish_msg(msg).await
+    }
+
+    async fn publish_msg(&self, msg: Msg) -> Result<()> {
         let outbox = self.outbox.as_str();
         let payload = serde_cbor::to_vec(&msg).unwrap();
         let payload = self.server_ctxt().lock().unwrap().encrypt_into(&payload)?;
@@ -363,48 +413,6 @@ impl Client {
         // TODO: pending messages.
         // TODO: sending messages;
         Ok(())
-    }
-
-    async fn send_message_intenral(&self, msg: Message) -> Result<()> {
-        let Some(body) = msg.body() else {
-            return self.pub_message_internal(msg).await
-        };
-
-        if body.is_empty() || msg.to() == self.peer.id() {
-            return self.pub_message_internal(msg).await
-        }
-
-        let encrypted = match msg.message_type() {
-            MessageType::Message => {
-                let recipient = self.ua().lock().unwrap().contact(msg.to())?;
-                let Some(rec) = recipient else {
-                    let estr = format!("Failed to send message to unknown recipient {}", msg.to());
-                    error!("{}", estr);
-                    // TODO error.
-                    return Err(Error::State(estr));
-                };
-
-                let Some(sid) = rec.session_id() else {
-                    let estr = format!("INTERNAL error: recipient {} has no session key.", msg.to());
-                    error!("{}", estr);
-                    return Err(Error::State(estr));
-                };
-
-                self.user.create_crypto_context(&sid)?
-                    .encrypt_into(body)?
-            },
-            MessageType::Call => {
-                self.user.create_crypto_context(msg.to())?
-                    .encrypt_into(body)?
-            },
-            _ => {
-                let estr = format!("INTERNAL error: unsupported message type {:?}", msg.message_type());
-                error!("{}", estr);
-                return Err(Error::State(estr));
-            }
-        };
-
-        self.pub_message_internal(msg.dup_from(encrypted)).await
     }
 
     async fn attempt_connect(&mut self, url: &Url) -> Result<()> {
@@ -495,13 +503,18 @@ impl Client {
         unimplemented!()
     }
 
-    pub async fn create_channel(
-        &self,
+    pub async fn create_channel(&self,
         permission: Option<channel::Permission>,
         name: &str,
         notice: Option<&str>
     ) -> Result<Channel> {
         MessagingClient::create_channel(self, permission, name, notice).await
+    }
+
+    pub async fn remove_channel(&self,
+        channel_id: &Id
+    ) -> Result<()> {
+        MessagingClient::remove_channel(self, channel_id).await
     }
 }
 
@@ -1238,7 +1251,7 @@ impl MessagingWorker {
             }
         };
 
-        let mut msg = match serde_cbor::from_slice::<Message>(&payload) {
+        let mut msg = match serde_cbor::from_slice::<Msg>(&payload) {
             Ok(msg) => msg,
             Err(e) => {
                 error!("Failed to deserialize message from {topic}: {}", e);
@@ -1263,7 +1276,7 @@ impl MessagingWorker {
         }
     }
 
-    fn on_inbox_message(&mut self, mut msg: Message) {
+    fn on_inbox_message(&mut self, mut msg: Msg) {
         let Some(body) = msg.body() else {
             msg.mark_encrypted(false);
             return self.pub_msg_internal(msg);
@@ -1343,11 +1356,11 @@ impl MessagingWorker {
         self.pub_msg_internal(msg)
     }
 
-    fn on_outbox_message(&mut self, _message: Message) {
+    fn on_outbox_message(&mut self, _message: Msg) {
         println!(">>>> TODO:");
     }
 
-    fn on_broadcast_message(&mut self, mut msg: Message) {
+    fn on_broadcast_message(&mut self, mut msg: Msg) {
         // Broadcast notifications from the service peer.
 		// Message body is encrypted with the message envelope,
 		// it was already decrypted here
@@ -1356,7 +1369,7 @@ impl MessagingWorker {
         self.ua().lock().unwrap().on_broadcast(msg);
     }
 
-    fn on_msg_internal(&mut self, msg: Message) {
+    fn on_msg_internal(&mut self, msg: Msg) {
         let conv_id = match !self.is_me(msg.to()) {
             true => msg.to().clone(),
             false => msg.from().clone()
@@ -1381,7 +1394,7 @@ impl MessagingWorker {
         }
     }
 
-    fn on_rpc_response(&mut self, msg: Message) {
+    fn on_rpc_response(&mut self, msg: Msg) {
         let Some(body) = msg.body() else {
             error!("Message body missing in response from {}, message ignored", msg.from());
             return;
@@ -1517,7 +1530,7 @@ impl MessagingWorker {
     }
 
     #[allow(unused)]
-    fn on_rpc_request<P,R>(&mut self, msg: Message) where P: Serialize, R: DeserializeOwned{
+    fn on_rpc_request<P,R>(&mut self, msg: Msg) where P: Serialize, R: DeserializeOwned{
         if msg.body_is_empty() {
             error!("Empty RPC response message from {}, ignored", msg.from());
             return;
@@ -1588,11 +1601,11 @@ impl MessagingWorker {
         //unimplemented!()
     }
 
-    fn on_notification(&mut self, _message: Message) {
+    fn on_notification(&mut self, _message: Msg) {
         unimplemented!()
     }
 
-    fn pub_msg_internal(&mut self, msg: Message) {
+    fn pub_msg_internal(&mut self, msg: Msg) {
         match msg.message_type() {
             MessageType::Message => {
                 self.on_msg_internal(msg);

@@ -353,7 +353,7 @@ impl Client {
             with_body && v.to() != self.peer.id()
         };
 
-        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
+        let encrypt_cb_for_msg = |msg: &Msg| -> Result<Vec<u8>> {
             let recipient = self.ua().lock().unwrap().contact(msg.to())?;
             let Some(rec) = recipient else {
                 let estr = format!("Failed to send message to unknown recipient {}", msg.to());
@@ -369,19 +369,19 @@ impl Client {
             };
 
             self.user.create_crypto_context(&sid)?
-                .encrypt_into(msg.body().as_ref().unwrap())
+                .encrypt_into(unwrap!(msg.body()))
         };
 
-        let encrypt_call_msg = |msg: &Msg| -> Result<Vec<u8>> {
+        let encrypt_cb_for_call = |msg: &Msg| -> Result<Vec<u8>> {
             self.user.create_crypto_context(msg.to())?
-                .encrypt_into(msg.body().as_ref().unwrap())
+                .encrypt_into(unwrap!(msg.body()))
         };
 
         let msg = if encrypt_needed(&msg) {
             let msg_type = msg.message_type();
             let encrypted = match msg_type {
-                MessageType::Message    => encrypt_msg(&msg)?,
-                MessageType::Call       => encrypt_call_msg(&msg)?,
+                MessageType::Message    => encrypt_cb_for_msg(&msg)?,
+                MessageType::Call       => encrypt_cb_for_call(&msg)?,
                 _ => {
                     panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
                 }
@@ -391,12 +391,12 @@ impl Client {
             msg
         };
 
-        self.publish_msg(msg).await
+        self.publish_msg(&msg).await
     }
 
-    async fn publish_msg(&self, msg: Msg) -> Result<()> {
+    async fn publish_msg(&self, msg: &Msg) -> Result<()> {
         let outbox = self.outbox.as_str();
-        let payload = serde_cbor::to_vec(&msg).unwrap();
+        let payload = serde_cbor::to_vec(msg).unwrap();
         let payload = self.server_ctxt().lock().unwrap().encrypt_into(&payload)?;
 
         self.worker().lock().unwrap().publish(
@@ -405,10 +405,10 @@ impl Client {
             false,
             payload
         ).await.map_err(|e| {
-            Error::State(format!("Failed to publish message: {}", e))
+            Error::State(format!("Internal error {e}: failed to publish message: {}", e))
         })?;
 
-        debug!("Published message to outbox {}", outbox);
+        debug!("Message published to outbox {}", outbox);
 
         // TODO: pending messages.
         // TODO: sending messages;

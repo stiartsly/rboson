@@ -1,0 +1,408 @@
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use std::thread;
+use clap::{error, Parser, ArgMatches, Command};
+use reedline::{Reedline, Signal};
+
+mod prompt;
+use prompt::MyPrompt;
+
+mod cmds {
+    pub(crate) mod channel_cmd;
+    pub(crate) mod device_cmd;
+}
+
+use boson::{
+    configuration as cfg,
+    signature,
+    Id,
+    dht::Node,
+    appdata_store::AppDataStoreBuilder,
+};
+
+use boson::messaging::{
+    UserProfile,
+    // MessagingClient,
+    Client,
+    Message,
+    ClientBuilder,
+    Contact,
+    ConnectionListener,
+    MessageListener,
+    ContactListener,
+    ProfileListener,
+};
+
+fn build_cli() -> Command {
+    let mut cmd = Command::new("tau")
+        .about("Interactive messaging shell application")
+        .no_binary_name(true)
+        .subcommand_required(true)
+        .subcommand(cmds::channel_cmd::channel_cli())
+        .subcommand(cmds::device_cmd::device_cli())
+        .help_template("{subcommands}");
+
+    cmd.error(error::ErrorKind::InvalidSubcommand, "Invalid command provided");
+    cmd
+}
+
+async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<Client>>) {
+    match matches.subcommand() {
+        Some(("channel", ch)) => match ch.subcommand() {
+            Some(("create", m)) => {
+                let name = m.get_one::<String>("NAME").unwrap();
+                let notice: Option<String> = m.get_one::<String>("notice").cloned();
+                println!(
+                    "[OK] Channel created: name={:?} {}",
+                    name,
+                    notice.as_ref().map(|v| format!("--notice={v}")).unwrap_or("".to_string())
+                );
+
+                let rc = client.lock().unwrap().create_channel(
+                    None,
+                    name,
+                    notice.as_deref()
+                ).await;
+
+                let channel = rc.unwrap();
+                println!("Channel created id: {}", channel.id());
+            }
+            Some(("delete", m)) => {
+                let id = m.get_one::<String>("ID").unwrap();
+                println!("[OK] Channel removed: id={}", id);
+            }
+            _ => {
+                println!(">>>> Unknown channel subcommand");
+            }
+        },
+
+        Some(("device", dv)) => match dv.subcommand() {
+            Some(("list", m)) => {
+                let all = m.get_flag("all");
+                println!("[OK] Listing devices (all={})", all);
+            }
+            Some(("revoke", m)) => {
+                let id = m.get_one::<String>("id").unwrap();
+                println!("[OK] Device revoked: id={}", id);
+            }
+            _ => println!("Unknown device subcommand"),
+        },
+        _ => println!("Unknown 1111 command"),
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "tau")]
+#[command(version = "1.0")]
+#[command(about = "Tau iteractive messaging shell", long_about = None)]
+struct Options {
+    #[arg(short, long, value_name = "FILE")]
+    config: String,
+
+    #[arg(short='D', long)]
+    daemonize: bool
+}
+
+#[tokio::main]
+async fn main(){
+    let opts = Options::parse();
+    let cfg = cfg::Builder::new().load(&opts.config)
+        .map_err(|e| panic!("{e}"))
+        .unwrap()
+        .build()
+        .map_err(|e| panic!("{e}"))
+        .unwrap();
+
+    let Some(ucfg) = cfg.user() else {
+        eprintln!("User item is not found in config file");
+        return;
+    };
+
+    let Some(dcfg) = cfg.device() else {
+        eprintln!("Device item is not found in config file");
+        return;
+    };
+
+    let Some(mcfg) = cfg.messaging() else {
+        eprintln!("Messaging item not found in config file");
+        return;
+    };
+
+    let peerid = Id::try_from(mcfg.server_peerid())
+        .map_err(|e| panic!("{e}"))
+        .unwrap();
+
+    let result = Node::new(&cfg);
+    if let Err(e) = result {
+        eprintln!("Creating boson Node instance error: {e}");
+        return;
+    }
+
+    let node = Arc::new(Mutex::new(result.unwrap()));
+    node.lock().unwrap().start();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut path = String::new();
+    path.push_str(cfg.data_dir());
+    path.push_str("/messaging");
+
+    let mut appdata_store = AppDataStoreBuilder::new("im")
+        .with_path(path.as_str())
+        .with_node(&node)
+        .with_peerid(&peerid)
+        .build()
+        .unwrap();
+
+    if let Err(e) = appdata_store.load().await {
+        eprintln!("Loading app data store error: {e}");
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let Some(peer) = appdata_store.service_peer() else {
+        println!("Messaging peer is not found!!!, please run it later.");
+        node.lock().unwrap().stop();
+        return;
+    };
+
+    let Some(ni) = appdata_store.service_node() else {
+        eprintln!("Node hosting the peer not found!!!");
+        node.lock().unwrap().stop();
+        return;
+    };
+
+    println!("Messaging Peer: {}", peer);
+    println!("Messaging Node: {}", ni);
+
+    let usk: signature::PrivateKey = match ucfg.private_key().try_into() {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("Failed to convert private key from hex format");
+            node.lock().unwrap().stop();
+            return;
+        }
+    };
+
+    let dsk: signature::PrivateKey = match dcfg.private_key().try_into() {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("Failed to convert device private key from hex format");
+            node.lock().unwrap().stop();
+            return;
+        }
+    };
+
+    let user_key = signature::KeyPair::from(&usk);
+    let device_key = signature::KeyPair::from(&dsk);
+
+    let result = ClientBuilder::new()
+        .with_user_key(user_key)
+        .with_user_name(ucfg.name().unwrap_or("guest")).unwrap()
+        .with_device_key(device_key)
+        .with_device_name("test-device").unwrap()
+        .with_device_node(node.clone())
+        .with_app_name("test-im").unwrap()
+        .with_messaging_peer(peer.clone()).unwrap()
+        .with_messaging_repository("test-repo")
+       // .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
+        .with_user_registration(ucfg.password().map_or("secret", |v|v))
+        //.with_device_registration(dcfg.password().map_or("secret", |v|v))
+        .with_connection_listener(ConnectionListenerTest)
+        .with_message_listener(MessageListenerTest)
+        .with_contact_listener(ContactListenerTest)
+        .with_profile_listener(ProfileListenerTest)
+        .build_into()
+        .await;
+
+    let mut client = match result {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Creating messaging client instance error: {{{e}}}");
+            node.lock().unwrap().stop();
+            return;
+        }
+    };
+
+    let rc = client.start().await;
+    thread::sleep(Duration::from_secs(1));
+    if let Err(e) = rc {
+        eprintln!("Starting messaging client error: {{{e}}}");
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let rc = client.connect().await;
+    if let Err(e) = rc {
+        eprintln!("Connecting to messaging service error: {{{e}}}");
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let client = Arc::new(Mutex::new(client));
+
+    /*
+    let rc = client.create_channel(None, "tang", Some("notice")).await;
+    if let Err(e) = rc {
+        eprintln!("Creating channel error: {{{e}}}");
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    let channel = rc.unwrap();
+    println!("Channel created id: {}", channel.id());
+
+    let rc = client.remove_channel(channel.id()).await;
+    if let Err(e) = rc {
+        eprintln!("Removing channel error: {{{e}}}");
+        _ = client.stop(true).await;
+        node.lock().unwrap().stop();
+        return;
+    }
+
+    thread::sleep(Duration::from_secs(2));
+    _ = client.stop(false).await;
+    node.lock().unwrap().stop();
+    */
+    println!(">>>> end of story!!!");
+    //panic!("panic here");
+
+    let mut cli = build_cli();
+    let mut rl = Reedline::create();
+    let prompt = MyPrompt;
+
+    println!("Welcome to interactive messaging shell. Type 'exit' to quit.\n");
+
+    loop {
+        let Ok(sig) = rl.read_line(&prompt) else {
+            println!("\n Fatal error occurred.");
+            continue;
+        };
+        match sig {
+            Signal::Success(line) => {
+                let input = line.trim();
+
+                if input.is_empty() {
+                    continue;
+                }
+
+                match input {
+                    "exit" | "quit" => {
+                        println!("Goodbye!");
+                        break;
+                    },
+                    "help" => {
+                        _ = cli.print_long_help();
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                let args: Vec<String> = input.split_whitespace().map(|s| s.to_string())
+                    .collect();
+
+                match args[0].as_str() {
+                    "help" => {
+                        _ = match cli.find_subcommand_mut(args[1].as_str()) {
+                            Some(cmd) => cmd.print_long_help(),
+                            None => cli.print_long_help(),
+                        };
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                let cmd = args.join(" ");
+                match cli.clone().try_get_matches_from(args) {
+                    Ok(matches) => execute_command(matches, &client).await,
+                    Err(_) => {
+                        println!("Error: invalid subcommand '{}'", cmd);
+                    }
+                }
+            }
+            Signal::CtrlC | Signal::CtrlD => {
+                println!("\nGoodbye!");
+                break;
+            }
+        }
+    }
+
+    thread::sleep(Duration::from_secs(2));
+    _ = client.lock().unwrap().stop(false).await;
+    node.lock().unwrap().stop();
+}
+
+struct ConnectionListenerTest;
+impl ConnectionListener for ConnectionListenerTest {
+    fn on_connecting(&self) {
+        println!("Connecting to messaging service...");
+    }
+
+    fn on_connected(&self) {
+        println!("Connected to messaging service");
+    }
+
+    fn on_disconnected(&self) {
+        println!("Disconnected from messaging service");
+    }
+}
+
+struct MessageListenerTest;
+impl MessageListener for MessageListenerTest {
+    fn on_message(&self, message: &Message) {
+        println!("Received message: {:?}", message);
+    }
+    fn on_sending(&self, message: &Message) {
+        println!("Sending message: {:?}", message);
+    }
+
+    fn on_sent(&self, message: &Message) {
+        println!("Message sent: {:?}", message);
+    }
+
+    fn on_broadcast(&self, message: &Message) {
+        println!("Broadcast message: {:?}", message);
+    }
+}
+
+struct ContactListenerTest;
+impl ContactListener for ContactListenerTest {
+    fn on_contacts_updating(&self,
+        _version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        println!("Contacts updating!");
+    }
+
+    fn on_contacts_updated(&self,
+        _base_version_id: &str,
+        _new_version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        println!("Contacts updated");
+    }
+
+    fn on_contacts_cleared(&self) {
+        println!("Contacts cleared");
+    }
+
+    fn on_contact_profile(&self,
+        _contact_id: &Id,
+        _profile: &Contact
+    ) {
+        println!("Contact profile ");
+    }
+}
+
+struct ProfileListenerTest;
+impl ProfileListener for ProfileListenerTest {
+    fn on_user_profile_acquired(&self, _profile: &UserProfile) {
+        println!("User profile acquired");
+    }
+
+    fn on_user_profile_changed(&self, _avatar: bool) {
+        println!("User profile changed");
+    }
+}

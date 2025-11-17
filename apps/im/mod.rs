@@ -69,7 +69,12 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<Client>>) {
             }
             Some(("delete", m)) => {
                 let id = m.get_one::<String>("ID").unwrap();
-                println!("[OK] Channel removed: id={}", id);
+                let id = Id::try_from(id.as_str()).unwrap();
+                _ = client.lock().unwrap().remove_channel(&id).await.map_err(|e| {
+                    println!("Failed to remove channel: {{{}}}", e);
+                }).map(|_| {
+                    println!("Channel {} removed.", id);
+                });
             }
             _ => {
                 println!(">>>> Unknown channel subcommand");
@@ -266,8 +271,6 @@ async fn main(){
     _ = client.stop(false).await;
     node.lock().unwrap().stop();
     */
-    println!(">>>> end of story!!!");
-    //panic!("panic here");
 
     let mut cli = build_cli();
     let mut rl = Reedline::create();

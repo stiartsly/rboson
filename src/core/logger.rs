@@ -88,6 +88,24 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     }
 }
 
+#[allow(unused)]
+pub(crate) fn enable_console_output(enable: bool) {
+    unsafe {
+        if let Some(ref mut v) = MY_LOGGER {
+            v.console_output_enabled = enable;
+        }
+    }
+}
+
+#[allow(unused)]
+pub(crate) fn disable_console_output() {
+    unsafe {
+        if let Some(ref mut v) = MY_LOGGER {
+            v.console_output_enabled = false;
+        }
+    }
+}
+
 pub(crate) fn teardown() {
     _ = log::set_logger(&NULL_LOGGER);
 }

@@ -22,8 +22,7 @@ use boson::{
 
 use boson::messaging::{
     UserProfile,
-    // MessagingClient,
-    Client,
+    MessagingClient,
     Message,
     ClientBuilder,
     Contact,
@@ -41,12 +40,13 @@ fn build_cli() -> Command {
         .subcommand(cmds::channel_cmd::channel_cli())
         .subcommand(cmds::device_cmd::device_cli())
         .help_template("{subcommands}");
+        //.override_help("My custom help message\n");
 
     cmd.error(error::ErrorKind::InvalidSubcommand, "Invalid command provided");
     cmd
 }
 
-async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<Client>>) {
+async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient>>) {
     match matches.subcommand() {
         Some(("channel", ch)) => match ch.subcommand() {
             Some(("create", m)) => {
@@ -321,7 +321,7 @@ async fn main(){
                 match cli.clone().try_get_matches_from(args) {
                     Ok(matches) => execute_command(matches, &client).await,
                     Err(_) => {
-                        println!("Error: invalid subcommand '{}'", cmd);
+                        println!("Error: command not found: '{}'", cmd);
                     }
                 }
             }

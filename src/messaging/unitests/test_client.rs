@@ -9,9 +9,9 @@ use crate::{
 
 use crate::messaging::{
     UserProfile,
-    MessagingClient,
     Message,
-    Client,
+    MessagingCaps,
+    MessagingClient,
     ClientBuilder,
     Contact,
     ConnectionListener,
@@ -33,7 +33,7 @@ async fn test_service_ids() {
     let nodeid = Id::try_from(NODEID).unwrap();
     let peerid = Id::try_from(PEERID).unwrap();
 
-    let result = Client::service_ids(&url).await;
+    let result = MessagingClient::service_ids(&url).await;
     assert!(result.is_ok());
 
     let result = ClientBuilder::service_ids(&url).await;

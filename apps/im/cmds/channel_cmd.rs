@@ -8,7 +8,6 @@ pub(crate) fn channel_cli() -> Command {
         .subcommand(
             Command::new("create")
                 .about("Create a channel")
-                //.allow_missing_positional(true)
                 .arg(arg!(<NAME> "The channel name to create"))
                 .arg(arg!(--notice <NOTICE> "The channel notice").required(false))
                 .arg(arg!(-i --"allow-invitor" <WHO> "The permission for invite creator")

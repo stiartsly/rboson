@@ -18,13 +18,13 @@ use crate::{
     messaging::{
         ServiceIds,
         UserAgent,
-        DefaultUserAgent,
+        UserAgentCaps,
         ConnectionListener,
         MessageListener,
         ContactListener,
         ChannelListener,
         ProfileListener,
-        Client,
+        MessagingClient,
         api_client::{self, APIClient},
         persistence::database::Database
     }
@@ -61,7 +61,7 @@ pub struct Builder {
     contact_listeners   : Vec<Box<dyn ContactListener>>,
 
     node                : Option<Arc<Mutex<Node>>>,
-    user_agent          : Option<Arc<Mutex<DefaultUserAgent>>>
+    user_agent          : Option<Arc<Mutex<UserAgent>>>
 }
 
 #[allow(unused)]
@@ -271,7 +271,7 @@ impl Builder {
 
     pub(crate) fn with_user_agent(
         &mut self,
-        agent: Arc<Mutex<DefaultUserAgent>>
+        agent: Arc<Mutex<UserAgent>>
     ) -> &mut Self {
         self.user_agent = Some(agent);
         self
@@ -332,7 +332,7 @@ impl Builder {
         Ok(())
     }
 
-    async fn setup_useragent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>> {
+    async fn setup_useragent(&mut self) -> Result<Arc<Mutex<UserAgent>>> {
         let Some(agent) = self.user_agent.as_ref() else {
             panic!("User agent is not set");
         };
@@ -361,8 +361,8 @@ impl Builder {
         Ok(agent.clone())
     }
 
-    async fn build_useragent(&mut self) -> Result<Arc<Mutex<DefaultUserAgent>>> {
-        let mut agent = DefaultUserAgent::new(None)?;
+    async fn build_useragent(&mut self) -> Result<Arc<Mutex<UserAgent>>> {
+        let mut agent = UserAgent::new(None)?;
         let repos = match self.repository.take() {
             Some(r) => r,
             None => {
@@ -427,7 +427,7 @@ impl Builder {
         Ok(Arc::new(Mutex::new(agent)))
     }
 
-    async fn register_client(&mut self, agent: Arc<Mutex<DefaultUserAgent>>) -> Result<()> {
+    async fn register_client(&mut self, agent: Arc<Mutex<UserAgent>>) -> Result<()> {
         self.user_agent = Some(agent.clone());
 
         if !self.register_user_and_device && !self.register_device {
@@ -507,7 +507,7 @@ impl Builder {
         Ok(())
     }
 
-    pub async fn build_into(mut self) -> Result<Client> {
+    pub async fn build_into(mut self) -> Result<MessagingClient> {
         self.eligible_check().await?;
 
         let agent = match self.user_agent.is_some() {
@@ -516,14 +516,14 @@ impl Builder {
         }?;
 
         self.register_client(agent.clone()).await?;
-        Client::new(self)
+        MessagingClient::new(self)
     }
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
         APIClient::service_ids(url).await
     }
 
-    pub(crate) fn ua(&self) -> Arc<Mutex<DefaultUserAgent>> {
+    pub(crate) fn ua(&self) -> Arc<Mutex<UserAgent>> {
         self.user_agent
             .as_ref()
             .expect("User agent is not set")

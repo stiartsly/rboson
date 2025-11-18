@@ -50,32 +50,32 @@ pub mod client_device;
 pub mod messaging_repository;
 pub mod service_ids;
 
+pub(crate) mod messaging_caps;
 pub(crate) mod messaging_client;
-pub(crate) mod client_impl;
-pub(crate) mod client_builder;
+pub(crate) mod messaging_client_builder;
 
 pub mod client {
+    pub use crate::messaging::messaging_caps::MessagingCaps;
     pub use crate::messaging::messaging_client::MessagingClient;
-    pub use crate::messaging::client_impl::Client;
-    pub use crate::messaging::client_builder::Builder;
+    pub use crate::messaging::messaging_client_builder::Builder;
 }
 
-pub(crate) mod user_agent;
+pub(crate) mod user_agent_caps;
 pub(crate) mod user_agent_impl;
 pub mod user_agent_ {
-    pub use crate::messaging::user_agent_impl::DefaultUserAgent;
-    pub use crate::messaging::user_agent::UserAgent;
+    pub use crate::messaging::user_agent_impl::UserAgent;
+    pub use crate::messaging::user_agent_caps::UserAgentCaps;
 }
 
 pub use crate::{
     messaging::client_device::ClientDevice,
     messaging::service_ids::ServiceIds,
+    messaging::client::MessagingCaps,
     messaging::client::MessagingClient,
-    messaging::client::Client,
     messaging::client::Builder as ClientBuilder,
 
+    messaging::user_agent_::UserAgentCaps,
     messaging::user_agent_::UserAgent,
-    messaging::user_agent_::DefaultUserAgent,
 
     messaging::contact::Contact,
     messaging::contact_listener::ContactListener,

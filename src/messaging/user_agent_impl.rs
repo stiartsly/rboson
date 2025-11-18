@@ -23,7 +23,7 @@ use crate::messaging::{
     ContactListener,
     ConnectionListener,
     MessageListener,
-    user_agent::UserAgent,
+    user_agent_caps::UserAgentCaps,
 
     message::Message,
     channel::{Member, Channel, Role},
@@ -36,7 +36,7 @@ use crate::messaging::{
 };
 
 #[allow(dead_code)]
-pub struct DefaultUserAgent {
+pub struct UserAgent {
     user        : Option<UserProfile>,
     device      : Option<DeviceProfile>,
     peer        : Option<PeerInfo>,
@@ -54,7 +54,7 @@ pub struct DefaultUserAgent {
 }
 
 #[allow(unused)]
-impl DefaultUserAgent {
+impl UserAgent {
     pub fn new(_path: Option<&Path>) -> Result<Self> {
         Ok(Self {
             user                : None,
@@ -294,14 +294,35 @@ impl DefaultUserAgent {
     }
 }
 
-impl ContactListener for DefaultUserAgent {
-    fn on_contacts_updating(&self, _version_id: &str, _contacts: Vec<Contact>) {}
-    fn on_contacts_updated(&self, _base_version_id: &str, _new_version_id: &str, _contacts: Vec<Contact>) {}
-    fn on_contacts_cleared(&self) {}
-    fn on_contact_profile(&self, _contact_id: &Id, _profile: &Contact) {}
+impl ContactListener for UserAgent {
+    fn on_contacts_updating(&self,
+        _version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        // TODO: implement this method
+    }
+
+    fn on_contacts_updated(&self,
+        _base_version_id: &str,
+        _new_version_id: &str,
+        _contacts: Vec<Contact>
+    ) {
+        // TODO: implement this method
+    }
+
+    fn on_contacts_cleared(&self) {
+        // TODO: implement this method
+    }
+
+    fn on_contact_profile(&self,
+        _contact_id: &Id,
+        _profile: &Contact
+    ) {
+        // TODO: implement this method
+    }
 }
 
-impl ChannelListener for DefaultUserAgent {
+impl ChannelListener for UserAgent {
     fn on_joined_channel(&self, _channel: &Channel) {
         println!("on_joined_channel called");
         //unimplemented!()
@@ -352,7 +373,7 @@ impl ChannelListener for DefaultUserAgent {
     }
 }
 
-impl MessageListenerMut for DefaultUserAgent {
+impl MessageListenerMut for UserAgent {
     fn on_message(&mut self, mut message: Message) {
         let conv_id = match !self.is_myself(message.to()) {
             true => message.to(),
@@ -386,7 +407,7 @@ impl MessageListenerMut for DefaultUserAgent {
     }
 }
 
-impl ProfileListenerMut for DefaultUserAgent {
+impl ProfileListenerMut for UserAgent {
     fn on_user_profile_acquired(&mut self, profile: UserProfile) {
         if let Some(ref user) = self.user {
             if user.id() != profile.id() {
@@ -420,7 +441,7 @@ impl ProfileListenerMut for DefaultUserAgent {
     }
 }
 
-impl ConnectionListener for DefaultUserAgent {
+impl ConnectionListener for UserAgent {
     fn on_connecting(&self) {
         self.connection_listeners.iter().for_each(|l| {
             l.on_connecting();
@@ -440,7 +461,7 @@ impl ConnectionListener for DefaultUserAgent {
     }
 }
 
-impl MessageListener for DefaultUserAgent {
+impl MessageListener for UserAgent {
     fn on_message(&self, message: &Message) {
         for cb in self.message_listeners.iter() {
             cb.on_message(message);
@@ -466,10 +487,10 @@ impl MessageListener for DefaultUserAgent {
     }
 }
 
-unsafe impl Send for DefaultUserAgent {}
-unsafe impl Sync for DefaultUserAgent {}
+unsafe impl Send for UserAgent {}
+unsafe impl Sync for UserAgent {}
 
-impl UserAgent for DefaultUserAgent {
+impl UserAgentCaps for UserAgent {
     fn user(&self) -> Option<&UserProfile> {
         self.user.as_ref()
     }

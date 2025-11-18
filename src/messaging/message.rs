@@ -13,8 +13,8 @@ use crate::{
         CryptoContext
     },
     messaging::{
-        MessagingClient,
-        Client,
+        MessagingCaps,
+        MessagingClient
     },
 };
 
@@ -365,7 +365,7 @@ impl fmt::Display for Message {
 
 #[allow(unused)]
 pub(crate) struct Builder<'a> {
-    client      : &'a Client,
+    client      : &'a MessagingClient,
     msg_type    : MessageType,
 
     to          : Option<Id>,
@@ -377,7 +377,7 @@ pub(crate) struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    pub(crate) fn new(client: &'a Client, msg_type: MessageType) -> Self {
+    pub(crate) fn new(client: &'a MessagingClient, msg_type: MessageType) -> Self {
         Self {
             client,
             msg_type,

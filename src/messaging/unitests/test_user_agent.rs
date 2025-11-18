@@ -2,14 +2,14 @@ use crate::{
     signature,
     core::CryptoIdentity,
     messaging::{
-        UserAgent,
-        DefaultUserAgent
+        UserAgentCaps,
+        UserAgent
     }
 };
 
 #[tokio::test]
 async fn test_user_agent() {
-    let result = DefaultUserAgent::new(None);
+    let result = UserAgent::new(None);
     assert!(result.is_ok());
 
     let user_identity   = CryptoIdentity::from_keypair(signature::KeyPair::random());

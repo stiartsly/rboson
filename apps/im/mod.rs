@@ -69,12 +69,51 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
             }
             Some(("delete", m)) => {
                 let id = m.get_one::<String>("ID").unwrap();
-                let id = Id::try_from(id.as_str()).unwrap();
+                let Ok(id) = Id::try_from(id.as_str()) else {
+                    println!("Error: invalid channel id: {}", id);
+                    return;
+                };
+
+                println!("Deleting channel: {}", id);
                 _ = client.lock().unwrap().remove_channel(&id).await.map_err(|e| {
-                    println!("Failed to remove channel: {{{}}}", e);
+                    println!("Failed to delete channel: {{{}}}", e);
                 }).map(|_| {
-                    println!("Channel {} removed.", id);
+                    println!("Channel {} is deleted.", id);
                 });
+            }
+
+            Some(("join", m)) => {
+                let ticket = m.get_one::<String>("TICKET").unwrap();
+                println!("Joining channel with ticket: {}", ticket);
+                /*
+                _ = client.lock().unwrap().join_channel(ticket).await.map_err(|e| {
+                    println!("Failed to join channel: {{{}}}", e);
+                }).map(|_| {
+                    println!("Joined channel with ticket: {}", ticket);
+                });
+                */
+            }
+            Some(("leave", m)) => {
+                let id = m.get_one::<String>("ID").unwrap();
+                let Ok(id) = Id::try_from(id.as_str()) else {
+                    println!("Error: invalid channel id: {}", id);
+                    return;
+                };
+
+                println!("Leaving a channel: {}", id);
+                _ = client.lock().unwrap().leave_channel(&id).await.map_err(|e| {
+                    println!("Failed to leave channel: {{{}}}", e);
+                }).map(|_| {
+                    println!("Left channel {}", id);
+                });
+            }
+
+            Some(("info", m)) => {
+                let id = m.get_one::<String>("ID").unwrap();
+                println!("[OK] Retrieving channel info: {}", id);
+            }
+            Some(("list", _m)) => {
+                println!("[OK] Listing channels");
             }
             _ => {
                 println!(">>>> Unknown channel subcommand");
@@ -246,32 +285,6 @@ async fn main(){
     }
 
     let client = Arc::new(Mutex::new(client));
-
-    /*
-    let rc = client.create_channel(None, "tang", Some("notice")).await;
-    if let Err(e) = rc {
-        eprintln!("Creating channel error: {{{e}}}");
-        _ = client.stop(true).await;
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    let channel = rc.unwrap();
-    println!("Channel created id: {}", channel.id());
-
-    let rc = client.remove_channel(channel.id()).await;
-    if let Err(e) = rc {
-        eprintln!("Removing channel error: {{{e}}}");
-        _ = client.stop(true).await;
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    thread::sleep(Duration::from_secs(2));
-    _ = client.stop(false).await;
-    node.lock().unwrap().stop();
-    */
-
     let mut cli = build_cli();
     let mut rl = Reedline::create();
     let prompt = MyPrompt;
@@ -332,8 +345,7 @@ async fn main(){
         }
     }
 
-    thread::sleep(Duration::from_secs(2));
-    _ = client.lock().unwrap().stop(false).await;
+    _ = client.lock().unwrap().stop(true).await;
     node.lock().unwrap().stop();
 }
 

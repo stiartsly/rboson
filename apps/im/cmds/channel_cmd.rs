@@ -4,7 +4,7 @@ pub(crate) fn channel_cli() -> Command {
     Command::new("channel")
         .about("Manage channels")
         .subcommand_required(true)
-        .arg(arg!(-h --help "Print help information"))
+        //.arg(arg!(-h --help "Print help information"))
         .subcommand(
             Command::new("create")
                 .about("Create a channel")
@@ -19,8 +19,22 @@ pub(crate) fn channel_cli() -> Command {
         .subcommand(
             Command::new("delete")
                 .about("Delete channel")
-                .arg(arg!(<ID> "The channel id to delete"))
+                .arg(arg!(<ID> "The channel id to be removed"))
                 .arg_required_else_help(true)
+        )
+        .subcommand(
+            Command::new("list")
+                .about("List all channels")
+        )
+        .subcommand(
+            Command::new("join")
+                .about("Join a channel")
+                .arg(arg!(<TICKET> "The invitation ticket used to join the channel"))
+        )
+        .subcommand(
+            Command::new("leave")
+                .about("Leave a channel")
+                .arg(arg!(<ID> "The channel id to leave"))
         )
         .subcommand(
             Command::new("info")
@@ -29,5 +43,4 @@ pub(crate) fn channel_cli() -> Command {
         )
         .help_template("{subcommands}")
         .disable_help_flag(true)
-        //.ignore_errors(true)
 }

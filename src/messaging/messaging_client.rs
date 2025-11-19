@@ -528,6 +528,18 @@ impl MessagingClient {
     ) -> Result<()> {
         MessagingCaps::remove_channel(self, channel_id).await
     }
+
+    pub async fn join_channel(&mut self,
+        ticket: &InviteTicket
+    ) -> Result<()> {
+        MessagingCaps::join_channel(self, ticket).await
+    }
+
+    pub async fn leave_channel(&mut self,
+        channel_id: &Id
+    ) -> Result<()> {
+        MessagingCaps::leave_channel(self, channel_id).await
+    }
 }
 
 unsafe impl Send for MessagingClient {}

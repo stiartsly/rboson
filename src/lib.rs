@@ -158,7 +158,7 @@ pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
     v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
 }
 
-pub(crate) fn _is_empty<T: IsEmpty>(v: &T) -> bool {
+pub(crate) fn is_empty<T: IsEmpty>(v: &T) -> bool {
     v.is_empty()
 }
 

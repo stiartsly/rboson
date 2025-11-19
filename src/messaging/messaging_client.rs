@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{SystemTime, Duration};
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
@@ -21,6 +21,7 @@ use rumqttc::{
 
 use crate::{
     unwrap,
+    as_secs,
     Id,
     Identity,
     PeerInfo,
@@ -65,6 +66,20 @@ use crate::messaging::{
     }
 };
 
+#[macro_export]
+macro_rules! lock {
+    ($ua:expr) => {{
+        $ua.lock().unwrap()
+    }};
+}
+
+#[macro_export]
+macro_rules! ua {
+    ($me:expr) => {{
+        $me.ua.lock().unwrap()
+    }};
+}
+
 #[allow(dead_code)]
 pub struct MessagingClient {
     peer            : PeerInfo,
@@ -90,35 +105,34 @@ pub struct MessagingClient {
     worker_client   : Option<Arc<Mutex<AsyncClient>>>,
 
     pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
-    user_agent      : Arc<Mutex<UserAgent>>,
+
+    ua              : Arc<Mutex<UserAgent>>,
 }
 
 #[allow(dead_code)]
 impl MessagingClient {
     pub(crate) fn new(b: ClientBuilder) -> Result<Self> {
-        let user_agent = b.ua();
-        let ua = user_agent.lock().unwrap();
-        if !ua.is_configured() {
-            drop(ua);
+        let ua = b.ua();
+        if !lock!(ua).is_configured() {
             return Err(Error::State("User agent is not configured".into()));
         }
 
-        let peer = ua.peer().clone();
-        let user = ua.user().unwrap().identity().clone();
-        let device = ua.device().unwrap().identity().unwrap().clone();
+        let peer = lock!(ua).peer().clone();
+        let user = lock!(ua).user().unwrap().identity().clone();
+        let device = lock!(ua).device().unwrap().identity().unwrap().clone();
 
         println!("peerid    : {}", peer.id());
         println!("userid    : {}", user.id());
         println!("deviceid  : {}", device.id());
 
+        lock!(ua).harden();
         drop(ua);
-        user_agent.lock().unwrap().harden();
 
+        let userid = user.id().to_base58();
         let clientid = bs58::encode({
             md5::compute(device.id().as_bytes()).0
         }).into_string();
 
-        let bs58_id = user.id().to_base58();
         Ok(Self {
             peer,
             user,
@@ -126,9 +140,9 @@ impl MessagingClient {
             service_info    : None,
 
             client_id       : clientid,
-            inbox           : format!("inbox/{bs58_id}",),
-            outbox          : format!("outbox/{bs58_id}",),
-            broadcast       : "broadcast".into(),
+            inbox           : format!("inbox/{userid}",),
+            outbox          : format!("outbox/{userid}",),
+            broadcast       : format!("broadcast"),
 
             base_index      : RefCell::new(0),
 
@@ -143,12 +157,8 @@ impl MessagingClient {
 
             pending_calls   : Arc::new(Mutex::new(HashMap::new())),
 
-            user_agent      : user_agent.clone(),
+            ua              : b.ua().clone(),
         })
-    }
-
-    fn ua(&self) -> &Arc<Mutex<UserAgent>> {
-        &self.user_agent
     }
 
     fn worker(&self) -> Arc<Mutex<AsyncClient>> {
@@ -195,17 +205,15 @@ impl MessagingClient {
 
         _ = self.load_access_token()?;
 
-        let ua = self.ua().lock().unwrap();
-        let peer = ua.peer().clone();
-        let user = ua.user().unwrap().identity().clone();
-        let device = ua.device().unwrap().identity().unwrap().clone();
+        let peer = ua!(self).peer().clone();
+        let user = ua!(self).user().unwrap().identity().clone();
+        let device = ua!(self).device().unwrap().identity().unwrap().clone();
         let api_url = match peer.alternative_url().as_ref() {
             None => Err(Error::State("Alternative URL should be set".into())),
             Some(url) => Url::parse(url).map_err(|e|
                 Error::State(format!("Failed to parse API URL: {e}"))
             )
         }?;
-        drop(ua);
 
         let api_client = api_client::Builder::new()
             .with_base_url(&api_url)
@@ -218,25 +226,25 @@ impl MessagingClient {
 
         self.api_client = Some(api_client);
 
-        let ver_id = match self.ua().lock().unwrap().contact_version() {
+        let version = match ua!(self).contact_version() {
             Ok(v) => v,
             Err(e) => {
-                warn!("Fetching all contacts due to failure to retrieve contacts version from local agent: {}", e);
+                warn!("Failed to retrieve contact version from local agent with error {e}");
                 None
             }
         };
 
-        if ver_id.is_none() {
-            let mut update = self.api_client().fetch_contacts_update(
-                ver_id.as_deref()
+        if version.is_none() {
+            let mut version = self.api_client().fetch_contacts_update(
+                version.as_deref()
             ).await?;
 
-            if let Some(version_id) = update.version_id() {
-                _ = self.ua().lock().unwrap().put_contacts_update(
+            if let Some(version_id) = version.version_id() {
+                _ = ua!(self).put_contacts_update(
                     &version_id,
-                    update.contacts().as_slice()
+                    version.contacts().as_slice()
                 ).map_err(|e|{
-                    warn!("Failed to put contacts update: {}, ignore and continue", e);
+                    warn!("Failed to put contacts update to local agent: {e}, ignored this failure.");
                 });
             }
         }
@@ -250,10 +258,13 @@ impl MessagingClient {
     pub async fn stop(&mut self, forced: bool) {
         _ = self.disconnect().await;
         self.disconnect = true;
-        // TODO: self.server_context.close();
 
-        self.server_context = None;
-        self.self_context = None;
+        if let Some(ctxt) = self.self_context.take() {
+            drop(ctxt);
+        }
+        if let Some(ctxt) = self.server_context.take() {
+            drop(ctxt);
+        }
 
         if let Some(task) = self.worker_task.take() {
             if forced {
@@ -291,30 +302,31 @@ impl MessagingClient {
         APIClient::service_ids(url).await
     }
 
-    async fn sign_into_invite_ticket(&self, channel_id: &Id, invitee: Option<&Id>) -> Result<InviteTicket> {
-        let locked_agent = self.user_agent.lock().unwrap();
-        let Some(channel) = locked_agent.channel(channel_id)? else {
-            return Err(Error::State("Channel does not exist".into()));
+    async fn sign_into_invite_ticket(&self,
+        channel_id: &Id,
+        invitee: Option<&Id>
+    ) -> Result<InviteTicket> {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
+            return Err(Error::Argument("No channel {} was found in local agent.".into()));
         };
 
-        use std::time::{SystemTime, Duration};
         let expire = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
-        let expire_ts = expire.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        let expire = as_secs!(expire);
+        let sha256 = {
+            let mut sha256 = Sha256::new();
+            sha256.update(channel_id.as_bytes());
+            sha256.update(self.user.id().as_bytes());
 
-
-        let mut sha256 = Sha256::new();
-        sha256.update(channel_id.as_bytes());
-        sha256.update(self.user.id().as_bytes());
-        if let Some(invitee) = invitee {
+            let invitee = match invitee {
+                Some(id) => id,
+                None => &Id::max()
+            };
             sha256.update(invitee.as_bytes());
-        } else {
-            sha256.update(Id::max().as_bytes());
-        }
+            sha256.update(&expire.to_le_bytes());
+            sha256.finalize().to_vec()
+        };
 
-        // sha256.update(expire.duration_since(SystemTime::UNIX_EPOCH)?.as_secs().to_be_bytes());
-        // TODO: expire.
-
-        let sig = self.user.sign_into(sha256.finalize().as_slice())?;
+        let sig = self.user.sign_into(&sha256)?;
         let sk = channel.session_keypair().unwrap().private_key().as_bytes();
         let sk = match invitee {
             Some(invitee) => self.user.encrypt_into(invitee, sk)?,
@@ -325,7 +337,7 @@ impl MessagingClient {
             channel_id.clone(),
             self.user.id().clone(),
             invitee.is_none(),
-            expire_ts,
+            expire,
             sig,
             Some(sk)
         ))
@@ -354,7 +366,7 @@ impl MessagingClient {
         };
 
         let encrypt_cb_for_msg = |msg: &Msg| -> Result<Vec<u8>> {
-            let recipient = self.ua().lock().unwrap().contact(msg.to())?;
+            let recipient = ua!(self).contact(msg.to())?;
             let Some(rec) = recipient else {
                 let estr = format!("Failed to send message to unknown recipient {}", msg.to());
                 error!("{}", estr);
@@ -476,7 +488,7 @@ impl MessagingClient {
 
         info!("Connecting to the messaging server ...");
         self.disconnect = false;
-        self.user_agent.lock().unwrap().on_connecting();
+        ua!(self).on_connecting();
 
         let urls = vec![
             Url::parse("tcp://155.138.245.211:1883").unwrap(),  // TODO:
@@ -494,7 +506,7 @@ impl MessagingClient {
         }).map_err(|e| {
             let errstr = format!("Failed to connect to the messaging server: {}", e);
             error!("{}", errstr);
-            self.user_agent.lock().unwrap().on_disconnected();
+            ua!(self).on_disconnected();
             Error::State(errstr)
         })
     }
@@ -528,10 +540,11 @@ impl MessagingCaps for MessagingClient {
     }
 
     fn user_agent(&self) -> Arc<Mutex<UserAgent>> {
-        self.user_agent.clone()
+        self.ua.clone()
     }
 
     async fn close(&mut self) -> Result<()> {
+        // TODO:
         Ok(())
     }
 
@@ -691,6 +704,7 @@ impl MessagingCaps for MessagingClient {
             Err(Error::Argument("Invite ticket is not valid for this user".into()))?
         }
 
+        // check session key
         let session_key = match ticket.is_public() {
             true => ticket.session_key().unwrap().to_vec(),
             false => {
@@ -700,7 +714,6 @@ impl MessagingCaps for MessagingClient {
                 )?
             }
         };
-
         _ = signature::KeyPair::try_from(
             session_key.as_slice()
         ).map_err(|_| {
@@ -709,15 +722,17 @@ impl MessagingCaps for MessagingClient {
 
         let ack = Arc::new(Mutex::new(promise::JoinChannelAck::new()));
         let promise = Promise::JoinChannel(ack.clone());
+        let cookie = self.self_ctxt().lock().unwrap().encrypt_into(
+            session_key.as_slice()
+        )?;
         let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelJoin,
             Some(Parameters::JoinChannel(ticket.proof().clone()))
-        ).with_promise(promise.clone())
-        .with_cookie({
-            // TODO: session_key.
-            Vec::<u8>::new() // TODO
-        });
+        )
+        .with_promise(promise.clone())
+        .with_cookie(cookie);
+
         self.send_rpc_request(ticket.channel_id(), req).await?;
 
         match Waiter::new(promise).await {
@@ -734,6 +749,7 @@ impl MessagingCaps for MessagingClient {
             RPCMethod::ChannelLeave,
             None
         ).with_promise(promise.clone());
+
         self.send_rpc_request(channel_id, req).await?;
 
         match Waiter::new(promise).await {
@@ -742,8 +758,7 @@ impl MessagingCaps for MessagingClient {
         }
     }
 
-    async fn create_invite_ticket(
-        &mut self,
+    async fn create_invite_ticket(&mut self,
         channel_id: &Id,
         invitee: Option<&Id>
     ) -> Result<InviteTicket> {
@@ -755,17 +770,15 @@ impl MessagingCaps for MessagingClient {
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+        let Some(channel) = ua!(self).channel(channel_id)? else {
+            Err(Error::Argument("No channel with ID {channel_id} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
-            Err(Error::State("Not channel owner".into()))?
+            Err(Error::Argument("Not channel owner".into()))?
         }
         if channel.is_member(new_owner) {
-            Err(Error::State("New owner is not in the channel".into()))?
+            Err(Error::Argument("New owner is not in the channel".into()))?
         }
-        drop(ua);
 
         let ack = Arc::new(Mutex::new(promise::SetChannelOwnerAck::new()));
         let promise = Promise::SetChannelOwner(ack.clone());
@@ -788,14 +801,12 @@ impl MessagingCaps for MessagingClient {
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
         if !channel.is_owner(self.user.id()) {
             Err(Error::State("Not channel owner".into()))?
         }
-        drop(ua);
 
         let ack = Arc::new(Mutex::new(promise::SetChannelPermAck::new()));
         let promise = Promise::SetChannelPerm(ack.clone());
@@ -818,15 +829,14 @@ impl MessagingCaps for MessagingClient {
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
+
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let name = name.map(|n|
             match !n.is_empty() {
@@ -855,15 +865,14 @@ impl MessagingCaps for MessagingClient {
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
+
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let notice = notice.map(|n|
             match n.is_empty() {
@@ -896,16 +905,14 @@ impl MessagingCaps for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
+
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let role = parameters::ChannelMemberRole::new(
             members.into_iter().map(|id| id.clone())
@@ -938,8 +945,7 @@ impl MessagingCaps for MessagingClient {
             return Ok(())
         }
 
-        let ua = self.ua().lock().unwrap();
-        let Some(ch) = ua.channel(channel_id)? else {
+        let Some(ch) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
 
@@ -947,7 +953,6 @@ impl MessagingCaps for MessagingClient {
         if !ch.is_owner(userid) && !ch.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let members = members.into_iter()
             .map(|id| id.clone())
@@ -978,8 +983,7 @@ impl MessagingCaps for MessagingClient {
             return Ok(());
         }
 
-        let ua = self.ua().lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
 
@@ -987,7 +991,6 @@ impl MessagingCaps for MessagingClient {
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let members = members.into_iter()
             .map(|id| id.clone())
@@ -1018,8 +1021,7 @@ impl MessagingCaps for MessagingClient {
             return Ok(());
         }
 
-        let ua = self.user_agent.lock().unwrap();
-        let Some(channel) = ua.channel(channel_id)? else {
+        let Some(channel) = ua!(self).channel(channel_id)? else {
             Err(Error::State("Channel does not exist".into()))?
         };
 
@@ -1027,7 +1029,6 @@ impl MessagingCaps for MessagingClient {
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
-        drop(ua);
 
         let members = members.into_iter().map(|id| id.clone())
             .collect::<Vec<Id>>();
@@ -1073,7 +1074,7 @@ impl MessagingCaps for MessagingClient {
     }
 
     async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
-        let ua = self.user_agent.clone();
+        let ua = self.ua.clone();
         let id = id.clone();
 
         match tokio::spawn(async move {
@@ -1085,12 +1086,11 @@ impl MessagingCaps for MessagingClient {
     }
 
     async fn channel(&self, id: &Id) -> Result<Option<Channel>> {
-        let ua = self.user_agent.clone();
+        let ua = self.ua.clone();
         let id = id.clone();
 
         match tokio::spawn(async move {
-            ua.lock().unwrap()
-                .channel(&id)
+            ua.lock().unwrap().channel(&id)
         }).await {
             Ok(channel) => channel,
             Err(e) => Err(Error::State(format!("Failed to get channel: {}", e)))
@@ -1098,7 +1098,7 @@ impl MessagingCaps for MessagingClient {
     }
 
     async fn contacts(&self) -> Result<Vec<Contact>> {
-        let ua = self.user_agent.clone();
+        let ua = self.ua.clone();
 
         match tokio::spawn(async move {
             ua.lock().unwrap().contacts()
@@ -1115,17 +1115,15 @@ impl MessagingCaps for MessagingClient {
         self.push_contacts_update(vec![contact.clone()]).await
     }
 
-    async fn remove_contact(&mut self, _id: &Id) -> Result<()> {
-        let mut ua = self.ua().lock().unwrap();
-        let Some(mut contact) = ua.contact(_id)? else {
+    async fn remove_contact(&mut self, id: &Id) -> Result<()> {
+        let Some(mut contact) = ua!(self).contact(id)? else {
             return Err(Error::State("Contact does not exist".into()));
         };
 
         if contact.is_auto() {
-            ua.remove_contacts(vec![_id])?;
+            ua!(self).remove_contacts(vec![id])?;
             return Ok(())
         }
-        drop(ua);
 
         if contact.is_deleted() {
             return Ok(())
@@ -1168,7 +1166,7 @@ struct MessagingWorker {
 impl MessagingWorker {
     fn new(client: &MessagingClient,  mqttc: Arc<Mutex<AsyncClient>>) -> Self {
         Self {
-            user_agent      : client.ua().clone(),
+            user_agent      : client.ua.clone(),
             worker_client   : mqttc,
 
             connect_promise : None,

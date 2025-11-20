@@ -40,7 +40,7 @@ pub struct UserAgent {
     user        : Option<UserProfile>,
     device      : Option<DeviceProfile>,
     peer        : Option<PeerInfo>,
-    repository  : Option<Database>,
+    repo        : Option<Database>,
 
     connection_listeners: Vec<Box<dyn ConnectionListener>>,
     profile_listeners   : Vec<Box<dyn ProfileListener>>,
@@ -60,7 +60,7 @@ impl UserAgent {
             user                : None,
             device              : None,
             peer                : None,
-            repository          : None,
+            repo                : None,
             connection_listeners: Vec::new(),
             profile_listeners   : Vec::new(),
             message_listeners   : Vec::new(),
@@ -118,7 +118,7 @@ impl UserAgent {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.repository = Some(repository);
+        self.repo = Some(repository);
         self.load_config()?;
         self.conversations.clear();
         //self.repository.all_conversations().for_each(|c| {
@@ -128,7 +128,7 @@ impl UserAgent {
     }
 
     fn update_userinfo_config(&mut self) {
-        let Some(repo) = self.repository.as_ref() else {
+        let Some(repo) = self.repo.as_ref() else {
             error!("Repository is not configured!");
             return;
         };
@@ -149,7 +149,7 @@ impl UserAgent {
             avatar: unwrap!(self.user).has_avatar()
         };
 
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             if let Err(e) = v.put_config_mult(".user", &user) {
                 error!("Save user profile failed, error: {e}");
             }
@@ -157,7 +157,7 @@ impl UserAgent {
     }
 
     fn update_device_info_config(&self) {
-        let Some(repo) = self.repository.as_ref() else {
+        let Some(repo) = self.repo.as_ref() else {
             error!("Repository is not configured!");
             return;
         };
@@ -177,7 +177,7 @@ impl UserAgent {
             app: unwrap!(self.device).app_name()
         };
 
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             if let Err(e) = v.put_config_mult(".device", &user) {
                 error!("Save device profile failed, error: {e}");
             }
@@ -185,7 +185,7 @@ impl UserAgent {
     }
 
     fn udpate_messaging_peerinfo(&self) {
-        let Some(repo) = self.repository.as_ref() else {
+        let Some(repo) = self.repo.as_ref() else {
             error!("Repository is not configured!");
             return;
         };
@@ -204,7 +204,7 @@ impl UserAgent {
             apiUrl: unwrap!(self.peer).alternative_url()
         };
 
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             if let Err(e) = v.put_config_mult(".peer", &user) {
                 error!("Save messaging peer info failed, error: {e}");
             }
@@ -212,7 +212,7 @@ impl UserAgent {
     }
 
     fn load_config(&mut self) -> Result<()> {
-        let Some(repo) = self.repository.as_ref() else {
+        let Some(repo) = self.repo.as_ref() else {
             return Err(Error::State("Messaging repository is not configured!".into()));
         };
 
@@ -286,7 +286,7 @@ impl UserAgent {
     }
 
     fn put_message(&mut self, message: Message) {
-        self.repository.as_mut().map(|v| {
+        self.repo.as_mut().map(|v| {
             v.put_message(message).map_err(|e| {
                 error!("Save message failed, error: {e}");
             });
@@ -547,7 +547,7 @@ impl UserAgentCaps for UserAgent {
 
     fn remove_conversation(&mut self, conversation_id: &Id) {
         self.conversations.remove(conversation_id);
-        if let Some(repo) = self.repository.as_mut() {
+        if let Some(repo) = self.repo.as_mut() {
             let _ = repo.remove_messages_by_conversation(conversation_id);
         }
     }
@@ -559,7 +559,7 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn messages(&self, converstation_id: &Id) -> Vec<Message> {
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             v.messages_since(converstation_id, 0, 100, 0)
         })
         .unwrap_or_else(|| Ok(vec![]))
@@ -567,7 +567,7 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn messages_between(&self, converstation_id: &Id, from: u64, end: u64) -> Vec<Message> {
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             v.messages_between(converstation_id, from, end)
         })
         .unwrap_or_else(|| Ok(vec![]))
@@ -575,7 +575,7 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn messages_since(&self, converstation_id: &Id, since: u64, limit: usize, offset: usize) -> Vec<Message> {
-        self.repository.as_ref().map(|v| {
+        self.repo.as_ref().map(|v| {
             v.messages_since(converstation_id, since, limit, offset)
         })
         .unwrap_or_else(|| Ok(vec![]))
@@ -583,19 +583,19 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn remove_message(&mut self, messsage_id: u32) {
-        self.repository.as_mut().map(|v| {
+        self.repo.as_mut().map(|v| {
             _ = v.remove_amessage(messsage_id);
         });
     }
 
     fn remove_messages(&mut self, message_ids: &[u32]) {
-        self.repository.as_mut().map(|v| {
+        self.repo.as_mut().map(|v| {
             _ = v.remove_messages(message_ids);
         });
     }
 
     fn remove_messages_by_conversation(&mut self, converstation_id: &Id) {
-        self.repository.as_mut().map(|v| {
+        self.repo.as_mut().map(|v| {
             _ = v.remove_messages_by_conversation(converstation_id);
         });
     }
@@ -605,7 +605,8 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
-        unimplemented!()
+        // unimplemented!()
+        Ok(None)
     }
 
     fn contact_version(&self) -> Result<Option<String>> {

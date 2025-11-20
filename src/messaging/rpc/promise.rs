@@ -29,7 +29,6 @@ impl<T> Data<T> {
     }
 }
 
-#[allow(unused)]
 pub(crate) trait Ack {
     type Value;
 

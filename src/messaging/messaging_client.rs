@@ -1369,7 +1369,9 @@ impl MessagingWorker {
                         return;
                     }
                 },
-                _ => {}
+                MessageType::Call => {
+                    panic!("Should no Call message type sent to channel")
+                }
             }
         }
 
@@ -1380,7 +1382,7 @@ impl MessagingWorker {
     }
 
     fn on_outbox_msg(&mut self, _message: Msg) {
-        println!(">>>> TODO:");
+        println!(">>>> TODO: received outbox message");
     }
 
     fn on_broadcast_msg(&mut self, mut msg: Msg) {
@@ -1460,21 +1462,14 @@ impl MessagingWorker {
         let promise = call.promise_take();
         match call.method() {
             RPCMethod::DeviceList => {
-                let Some(Promise::DeviceList(_ack)) = promise else {
-                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
-                    return;
+                if let Some(Promise::DeviceList(ack)) = promise {
+                    lock!(ack).complete(Ok(Vec::new()));
                 };
-                //ack.lock().unwrap().complete(Ok(()))
             },
 
             RPCMethod::DeviceRevoke => {
-                let Some(Promise::RevokeDevice(ack)) = promise else {
-                    error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
-                    return;
-                };
-                {
-                    let mut ack_guard = ack.lock().unwrap();
-                    ack_guard.complete(Ok(()));
+                if let Some(Promise::RevokeDevice(ack)) = promise {
+                    lock!(ack).complete(Ok(()));
                 }
             },
 
@@ -1486,58 +1481,55 @@ impl MessagingWorker {
             },
 
             RPCMethod::ChannelCreate => {
+                let complete = |rc: Result<Channel>| {
+                    if let Some(Promise::CreateChannel(ack)) = promise {
+                        lock!(ack).complete(rc)
+                    }
+                };
                 let mut channel = match preparsed.result::<Channel>() {
                     Ok(v) => v,
                     Err(e) => {
-                        error!("Internal eror: {e}");
-                        // TODO: ack.complete(Err(e));
-                        return;
+                        warn!("Internal error: {}", e);
+                        complete(Err(Error::State(format!("Internal error: {e}"))));
+                        return
                     }
                 };
 
-                let Ok(session_key) = self.self_context.lock().unwrap().decrypt_into(
+                let session_key = match lock!(self.self_context).decrypt_into(
                     unwrap!(call.cookie())
-                ) else {
-                    error!("Internal error, decrypting channel session key failed.");
-                    return;
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("Internal error: {}", e);
+                        complete(Err(Error::State(format!("Internal error: {e}"))));
+                        return
+                    }
                 };
                 _ = channel.set_session_key(&session_key);
 
                 ua!(self).on_joined_channel(&channel);
-                let Some(Promise::CreateChannel(ack)) = promise else {
-                    error!("Internal error, mismatched promise type for the RPC response, ignored");
-                    return;
-                };
-                {
-                    let mut ack = ack.lock().unwrap();
-                    ack.complete(Ok(channel))
-                }
+                complete(Ok(channel))
             }
             RPCMethod::ChannelDelete => {
-                match preparsed.result::<()>() {
-                    Err(e) => {
-                        error!("Internal eror: {e}");
-                        return;
-                    }
-                    Ok(_) => {}
-                }
-                let channel = match ua!(self).channel(msg.from()) {
-                    Ok(Some(ch)) => ch,
-                    _ => {
-                        error!("Internal error, channel not found from the user agent.");
-                        // TODO: ack.complete(Err(e));
-                        return;
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RemoveChannel(ack)) = promise {
+                        lock!(ack).complete(rc)
                     }
                 };
-                ua!(self).on_channel_deleted(&channel);
-
-                let Some(Promise::RemoveChannel(ack)) = promise else {
-                    error!("Internal error, mismatched promise type for the RPC response, ignored");
+                if let Err(e) = preparsed.result::<()>() {
+                    complete(Err(e));
                     return;
-                };
-                {
-                    let mut ack = ack.lock().unwrap();
-                    ack.complete(Ok(()))
+                }
+                match ua!(self).channel(msg.from()) {
+                    Ok(Some(channel)) => {
+                        ua!(self).on_channel_deleted(&channel);
+                        complete(Ok(()))
+                    },
+                    _ => {
+                        let err = format!("Internal error: No channel {{{}}} found after deletion", msg.from());
+                        warn!("{}", err);
+                        complete(Err(Error::State(err)));
+                    }
                 }
             },
             RPCMethod::ChannelJoin => { // TODO:

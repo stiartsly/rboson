@@ -7,7 +7,8 @@ use crate::{
 };
 
 use crate::messaging::{
-    message::Message
+    message::Message,
+    channel::Channel,
 };
 
 #[allow(unused)]
@@ -33,10 +34,10 @@ pub(crate) trait MessagingRepository {
         Ok(val)
     }
 
-    fn put_messages(&self, _messages: &[Message]) -> Result<()>;
-    fn put_message(&self, _message: Message) -> Result<()> {
-        self.put_messages(&[_message])
+    fn put_message(&self, _msg: Message) -> Result<()> {
+        self.put_messages(&[_msg])
     }
+    fn put_messages(&self, _msg: &[Message]) -> Result<()>;
 
     fn messages_between(&self, _conversation_id: &Id, _begin: u64, _end: u64) -> Result<Vec<Message>>;
     fn messages_since(&self, _conversation_id: &Id, _since: u64, _limit: usize, _offset: usize) -> Result<Vec<Message>>;
@@ -46,4 +47,9 @@ pub(crate) trait MessagingRepository {
     fn remove_amessage(&self, _rid: u32) -> Result<()> {
         self.remove_messages(&[_rid])
     }
+
+
+    fn channel(&self, channel_id: &Id) -> Result<Option<Channel>>;
+    fn channels(&self) -> Result<Vec<Channel>>;
+
 }

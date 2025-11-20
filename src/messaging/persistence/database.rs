@@ -12,12 +12,12 @@ use crate::{
 use crate::messaging::{
     messaging_repository::MessagingRepository,
     message::Message,
+    channel::Channel,
 };
 
 #[allow(unused)]
 #[derive(Debug)]
-pub(crate) struct Database {
-}
+pub(crate) struct Database;
 
 #[allow(unused)]
 impl Database {
@@ -73,6 +73,15 @@ impl MessagingRepository for Database {
     }
 
     fn remove_messages_by_conversation(&self, _conversation_id: &Id) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
+        // unimplemented!()
+        Ok(None)
+    }
+
+    fn channels(&self) -> Result<Vec<Channel>> {
         unimplemented!()
     }
 }

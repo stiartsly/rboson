@@ -229,7 +229,7 @@ impl Channel {
         unimplemented!()
     }
 
-    pub(crate) fn rx_crypto_context_by(&self, _id: &Id) -> &CryptoContext {
+    pub(crate) fn rx_crypto_context_by(&self, _id: &Id) -> Option<&CryptoContext> {
         unimplemented!()
     }
 

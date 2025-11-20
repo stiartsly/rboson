@@ -331,7 +331,7 @@ impl Message {
         self.completed = as_ms!(completed) as u64
     }
 
-    pub(crate) fn _is_encrypted(&self) -> bool {
+    pub(crate) fn is_encrypted(&self) -> bool {
         self.encrypted
     }
 

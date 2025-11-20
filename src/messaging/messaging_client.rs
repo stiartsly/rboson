@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use serde::{Serialize, de::DeserializeOwned};
+use log::{error, warn, info, debug, trace};
+use tokio::task::JoinHandle;
 use serde_cbor;
 use sha2::{Digest, Sha256};
-use url::Url;
-use log::{error, warn, info, debug};
-use tokio::task::JoinHandle;
 use md5;
+use url::Url;
 use rumqttc::{
     MqttOptions,
     AsyncClient,
@@ -357,7 +357,7 @@ impl MessagingClient {
     }
 
     async fn send_msg(&self, msg: Msg) -> Result<()> {
-        let encrypt_needed = |v: &Msg| {
+        let encryption_needed = |v: &Msg| {
             let with_body = match v.body() {
                 Some(b) => !b.is_empty(),
                 None => false
@@ -389,7 +389,7 @@ impl MessagingClient {
                 .encrypt_into(unwrap!(msg.body()))
         };
 
-        let msg = if encrypt_needed(&msg) {
+        let msg = if encryption_needed(&msg) {
             let msg_type = msg.message_type();
             let encrypted = match msg_type {
                 MessageType::Message    => encrypt_cb_for_msg(&msg)?,
@@ -777,13 +777,12 @@ impl MessagingCaps for MessagingClient {
         self.sign_into_invite_ticket(channel_id, invitee).await
     }
 
-    async fn set_channel_owner(
-        &mut self,
+    async fn set_channel_owner(&mut self,
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::Argument("No channel with ID {channel_id} was found".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
             Err(Error::Argument("Not channel owner".into()))?
@@ -808,16 +807,15 @@ impl MessagingCaps for MessagingClient {
         }
     }
 
-    async fn set_channel_permission(
-        &mut self,
+    async fn set_channel_permission(&mut self,
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
-            Err(Error::State("Not channel owner".into()))?
+            Err(Error::Argument("Not channel owner".into()))?
         }
 
         let ack = Arc::new(Mutex::new(promise::SetChannelPermAck::new()));
@@ -836,18 +834,17 @@ impl MessagingCaps for MessagingClient {
         }
     }
 
-    async fn set_channel_name(
-        &mut self,
+    async fn set_channel_name(&mut self,
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::State("Not channel owner or moderator".into()))?
+            Err(Error::Argument("Not channel owner or moderator".into()))?
         }
 
         let name = name.map(|n|
@@ -872,32 +869,34 @@ impl MessagingCaps for MessagingClient {
         }
     }
 
-    async fn set_channel_notice(
-        &mut self,
+    async fn set_channel_notice(&mut self,
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::State("Not channel owner or moderator".into()))?
+            Err(Error::Argument("Not channel owner or moderator".into()))?
         }
 
-        let notice = notice.map(|n|
-            match n.is_empty() {
-                true => None,
-                false => Some(n.nfc().collect::<String>())
-        }).flatten();
+        let notice = notice.map(|v|
+            if v.len() > 0 {
+                let nfc = v.nfc().collect::<String>();
+                Some(Parameters::SetChannelNotice(nfc))
+            } else {
+                None
+            }
+        ).flatten();
 
         let ack = Arc::new(Mutex::new(promise::SetChannelNoticeAck::new()));
         let promise = Promise::SetChannelNotice(ack.clone());
         let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelNotice,
-            notice.map(|v| Parameters::SetChannelNotice(v.to_string()))
+            notice,
         ).with_promise(promise.clone());
 
         self.send_rpc_request(channel_id, req).await?;
@@ -908,8 +907,7 @@ impl MessagingCaps for MessagingClient {
         }
     }
 
-    async fn set_channel_member_role(
-        &mut self,
+    async fn set_channel_member_role(&mut self,
         channel_id: &Id,
         members: Vec<&Id>,
         role: Role
@@ -918,12 +916,12 @@ impl MessagingCaps for MessagingClient {
             return Ok(());
         }
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
         if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::State("Not channel owner or moderator".into()))?
+            Err(Error::Argument("Not channel owner or moderator".into()))?
         }
 
         let role = parameters::ChannelMemberRole::new(
@@ -958,12 +956,12 @@ impl MessagingCaps for MessagingClient {
         }
 
         let Some(ch) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
         if !ch.is_owner(userid) && !ch.is_moderator(userid) {
-            Err(Error::State("Not channel owner or moderator".into()))?
+            Err(Error::Argument("Not channel owner or moderator".into()))?
         }
 
         let members = members.into_iter()
@@ -996,7 +994,7 @@ impl MessagingCaps for MessagingClient {
         }
 
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
@@ -1034,7 +1032,7 @@ impl MessagingCaps for MessagingClient {
         }
 
         let Some(channel) = ua!(self).channel(channel_id)? else {
-            Err(Error::State("Channel does not exist".into()))?
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
         let userid = self.user.id();
@@ -1149,13 +1147,9 @@ impl MessagingCaps for MessagingClient {
     }
 }
 
-#[allow(unused)]
 struct MessagingWorker {
-    user_agent      : Arc<Mutex<UserAgent>>,
-    worker_client   : Arc<Mutex<AsyncClient>>,
-
-
-    connect_promise : Option<Box<dyn FnMut() + Send + Sync>>,
+    ua              : Arc<Mutex<UserAgent>>,
+    _worker_client   : Arc<Mutex<AsyncClient>>,
 
     self_context    : Arc<Mutex<CryptoContext>>,
     server_context  : Arc<Mutex<CryptoContext>>,
@@ -1174,14 +1168,12 @@ struct MessagingWorker {
     user            : CryptoIdentity
 }
 
-#[allow(unused)]
 impl MessagingWorker {
     fn new(client: &MessagingClient,  mqttc: Arc<Mutex<AsyncClient>>) -> Self {
         Self {
-            user_agent      : client.ua.clone(),
-            worker_client   : mqttc,
+            ua              : client.ua.clone(),
+            _worker_client   : mqttc,
 
-            connect_promise : None,
             self_context    : client.self_ctxt().clone(),
             server_context  : client.server_ctxt().clone(),
             disconnect      : false,
@@ -1197,25 +1189,23 @@ impl MessagingWorker {
         }
     }
 
-    fn ua(&self) -> &Arc<Mutex<UserAgent>> {
-        &self.user_agent
-    }
-
     fn is_me(&self, id: &Id) -> bool {
         self.user.id() == id
     }
 
     fn on_incoming_msg(&mut self, packet: Packet) {
         match packet {
-            Packet::Publish(publish) => self.on_pub_msg(publish),
+            Packet::Publish(v)  => self.on_publish(v),
             Packet::PubAck(_)   => {},
             Packet::SubAck(_)   => {},
             Packet::UnsubAck(_) => {},
-            Packet::Disconnect  => self.on_close(),
-            Packet::PingResp    => self.on_ping_response(),
+            Packet::Disconnect  => self.on_disconnect(),
+            Packet::PingResp    => self.on_ping_rsp(),
             Packet::ConnAck(_)  => {},
-
-            _ => info!("Unknown MQTT event: {:?}", packet)
+            _ => {
+                error!("Fatail error: unknown MQTT event: {:?}", packet);
+                panic!();
+            }
         }
     }
 
@@ -1226,9 +1216,9 @@ impl MessagingWorker {
         }
     }
 
-    fn on_close(&mut self) {
+    fn on_disconnect(&mut self) {
         if self.disconnect {
-            self.ua().lock().unwrap().on_disconnected();
+            ua!(self).on_disconnected();
             info!("disconnected!");
             return;
         }
@@ -1238,31 +1228,30 @@ impl MessagingWorker {
 
     }
 
-    fn on_ping_response(&mut self) {
-        info!("Ping response received");
+    fn on_ping_rsp(&mut self) {
+        trace!("Ping response received");
     }
 
-    fn on_pub_msg(&mut self, publish: rumqttc::Publish) {
-        let topic = publish.topic.as_str();
+    fn on_publish(&mut self, data: rumqttc::Publish) {
+        let topic = data.topic.as_str();
         debug!("Got message on topic: {}", topic);
 
-        let payload = match self.server_context.lock().unwrap().decrypt_into(
-            &publish.payload
-        ) {
-            Ok(payload) => payload,
+        let decrypted = match lock!(self.server_context).decrypt_into(&data.payload) {
+            Ok(v) => v,
             Err(e) => {
-                error!("Failed to decrypt message payload from {topic}: {}", e);
+                error!("Error decrypting message payload from {topic}: {e}");
                 return;
             }
         };
 
-        let mut msg = match serde_cbor::from_slice::<Msg>(&payload) {
-            Ok(msg) => msg,
+        let mut msg = match serde_cbor::from_slice::<Msg>(&decrypted) {
+            Ok(v) => v,
             Err(e) => {
-                error!("Failed to deserialize message from {topic}: {}", e);
+                error!("Error deserializing message from {topic}: {e}");
                 return;
             }
         };
+
         if !msg.is_valid() {
             error!("Received invalid message from {topic}, ignored");
             return;
@@ -1270,26 +1259,29 @@ impl MessagingWorker {
         msg.mark_encrypted(true);
 
         if topic == self.inbox {
-            self.on_inbox_message(msg);
+            self.on_inbox_msg(msg);
         } else if topic == self.outbox {
-            self.on_outbox_message(msg);
+            self.on_outbox_msg(msg);
         } else if topic == self.broadcast {
-            self.on_broadcast_message(msg);
+            self.on_broadcast_msg(msg);
         } else {
             error!("Received message with unknown topic: {topic}, ignored");
             return;
         }
     }
 
-    fn on_inbox_message(&mut self, mut msg: Msg) {
-        let Some(body) = msg.body() else {
-            msg.mark_encrypted(false);
-            return self.pub_msg_internal(msg);
+    fn on_inbox_msg(&mut self, mut msg: Msg) {
+        let need_decryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.from() != self.peer.id()
         };
 
-        if body.is_empty() || msg.from() == self.peer.id() {
+        if !need_decryption(&msg) {
             msg.mark_encrypted(false);
-            return self.pub_msg_internal(msg);
+            return self.process_msg(msg);
         }
 
         if self.is_me(msg.to()){
@@ -1298,42 +1290,54 @@ impl MessagingWorker {
                     // Message: sender -> me
                     // The body is encrypted using the sender's private key
                     // and the session public key associated with that sender.
-
-                    let sender = self.user_agent.lock().unwrap().contact(msg.from());
+                    let sender = ua!(self).contact(msg.from());
                     let Ok(Some(sender)) = sender else {
-                        warn!("Failed to get contact info for sender {}", msg.from());
+                        warn!("Sender {} not in contact list, ignored", msg.from());
                         return;
                     };
-
-                    if sender.has_session_key() {
-                        msg.decrypt_body(
-                            sender.rx_crypto_context().unwrap(),
-                        ).unwrap_or_else(|e| {
-                            error!("Failed to decrypt message body: {}, ignored", e);
-                        });
+                    if !sender.has_session_key() {
+                        warn!("No session key attached to sender {}, ignored", msg.from());
+                        return;
                     }
+
+                    if let Err(e) = msg.decrypt_body(unwrap!(sender.rx_crypto_context())) {
+                        warn!("Error decrypting message body: {}, ignored", e);
+                        return;
+                    };
                 },
                 MessageType::Call => {
                     // Call: sender(user | channel) -> me
                     // The body is encrypted using the sender's private key
                     // and my public key.
 
-                    msg.decrypt_body(
-                        &self.user.create_crypto_context(msg.from()).unwrap(),
-                    ).unwrap_or_else(|e| {
-                        error!("Failed to decrypt call body: {}, ignored", e);
-                    });
+					// TODO: CHECKME - cache the CryptoContext?
+                    let ctxt = self.user.create_crypto_context(msg.from());
+                    if let Err(e) = msg.decrypt_body(unwrap!(ctxt)) {
+                        warn!("Error decrypting call body: {}, ignored", e);
+                        return;
+                    };
                 },
-                _ => {}
+                _ => {
+                    // Notification: !homePeer -> me
+					// The body is encrypted using the sender's private key
+					// and my public key.
+
+					// TODO: CHECKME - cache the CryptoContext?
+                    let ctxt = self.user.create_crypto_context(msg.from());
+                    if let Err(e) = msg.decrypt_body(unwrap!(ctxt)) {
+                        warn!("Error decrypting notitification body: {}, ignored", e);
+                        return;
+                    };
+                }
             }
         } else {
-            let channel = self.ua().lock().unwrap().channel(msg.to());
-            let Ok(Some(channel)) = channel else {
-                return self.pub_msg_internal(msg);
+            let Ok(Some(channel)) = ua!(self).channel(msg.to()) else {
+                warn!("No channel {{{}}} found, ignored", msg.to());
+                return;
             };
-
-            let Some(kp) = channel.session_keypair() else {
-                return self.pub_msg_internal(msg);
+            if !channel.has_session_key() {
+                warn!("No session key for channel {{{}}}, ignored", msg.to());
+                return;
             };
 
             match msg.message_type() {
@@ -1341,49 +1345,77 @@ impl MessagingWorker {
                     // Message: sender -> channel
                     // The body is encrypted using the sender's private key
                     // and the session public key of channel.
-                    //TODO:
-
-                    let ctxt = channel.rx_crypto_context_by(msg.from());
-                    msg.decrypt_body(ctxt);
+                    let Some(ctxt) = channel.rx_crypto_context_by(msg.from()) else {
+                        warn!("No crypto context found for sender {{{}}} in channel {{{}}}, ignored",
+                            msg.from(), msg.to());
+                        return;
+                    };
+                    if let Err(e) = msg.decrypt_body(ctxt) {
+                        warn!("Error decrypting message body: {}, ignored", e);
+                        return;
+                    }
                 },
                 MessageType::Notification => {
                     // Message: channel -> channel
                     // The body is encrypted using the channel's private key
                     // and the channel session's public key
 
-                    let ctxt = channel.rx_crypto_context();
-                    // TODO
+                    let Ok(ctxt) = channel.rx_crypto_context() else {
+                        warn!("No crypto context found for channel {{{}}}, ignored", msg.to());
+                        return;
+                    };
+                    if let Err(e) = msg.decrypt_body(ctxt) {
+                        warn!("Error decrypting notification body: {}, ignored", e);
+                        return;
+                    }
                 },
                 _ => {}
             }
         }
 
-        self.pub_msg_internal(msg)
+        if msg.is_encrypted() {
+            warn!("Message from unknow sender {}, keep in encrypted", msg.from());
+        }
+        self.process_msg(msg)
     }
 
-    fn on_outbox_message(&mut self, _message: Msg) {
+    fn on_outbox_msg(&mut self, _message: Msg) {
         println!(">>>> TODO:");
     }
 
-    fn on_broadcast_message(&mut self, mut msg: Msg) {
+    fn on_broadcast_msg(&mut self, mut msg: Msg) {
         // Broadcast notifications from the service peer.
 		// Message body is encrypted with the message envelope,
 		// it was already decrypted here
 
         msg.mark_encrypted(false);
-        self.ua().lock().unwrap().on_broadcast(msg);
+        ua!(self).on_broadcast(msg);
     }
 
-    fn on_msg_internal(&mut self, msg: Msg) {
+    fn process_msg(&mut self, msg: Msg) {
+        match msg.message_type() {
+            MessageType::Message => {
+                self.on_msg(msg);
+            },
+            MessageType::Call => {
+                self.on_rpc_response(msg);
+            },
+            MessageType::Notification => {
+                self.on_notification(msg);
+            }
+        }
+    }
+
+    fn on_msg(&mut self, msg: Msg) {
         let conv_id = match !self.is_me(msg.to()) {
             true => msg.to().clone(),
             false => msg.from().clone()
         };
 
-        self.ua().lock().unwrap().on_message(msg);
+        ua!(self).on_message(msg);
 
         let mut need_refresh = false;
-        let contact = self.ua().lock().unwrap().contact(&conv_id);
+        let contact = ua!(self).contact(&conv_id);
         if let Ok(Some(contact)) = contact {
             if contact.is_staled() {
                 need_refresh = true;
@@ -1428,7 +1460,7 @@ impl MessagingWorker {
         let promise = call.promise_take();
         match call.method() {
             RPCMethod::DeviceList => {
-                let Some(Promise::DeviceList(ack)) = promise else {
+                let Some(Promise::DeviceList(_ack)) = promise else {
                     error!("Mismatched promise type for DeviceList from {}, ignored", msg.from());
                     return;
                 };
@@ -1469,9 +1501,9 @@ impl MessagingWorker {
                     error!("Internal error, decrypting channel session key failed.");
                     return;
                 };
-                channel.set_session_key(&session_key);
+                _ = channel.set_session_key(&session_key);
 
-                self.user_agent.lock().unwrap().on_joined_channel(&channel);
+                ua!(self).on_joined_channel(&channel);
                 let Some(Promise::CreateChannel(ack)) = promise else {
                     error!("Internal error, mismatched promise type for the RPC response, ignored");
                     return;
@@ -1489,7 +1521,7 @@ impl MessagingWorker {
                     }
                     Ok(_) => {}
                 }
-                let channel = match self.ua().lock().unwrap().channel(msg.from()) {
+                let channel = match ua!(self).channel(msg.from()) {
                     Ok(Some(ch)) => ch,
                     _ => {
                         error!("Internal error, channel not found from the user agent.");
@@ -1497,7 +1529,7 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                self.user_agent.lock().unwrap().on_channel_deleted(&channel);
+                ua!(self).on_channel_deleted(&channel);
 
                 let Some(Promise::RemoveChannel(ack)) = promise else {
                     error!("Internal error, mismatched promise type for the RPC response, ignored");
@@ -1608,20 +1640,6 @@ impl MessagingWorker {
 
     fn on_notification(&mut self, _message: Msg) {
         unimplemented!()
-    }
-
-    fn pub_msg_internal(&mut self, msg: Msg) {
-        match msg.message_type() {
-            MessageType::Message => {
-                self.on_msg_internal(msg);
-            },
-            MessageType::Call => {
-                self.on_rpc_response(msg);
-            },
-            MessageType::Notification => {
-                self.on_notification(msg);
-            }
-        }
     }
 
     #[allow(unused)]

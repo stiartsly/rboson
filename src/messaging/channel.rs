@@ -7,12 +7,14 @@ use serde::{
     ser::{Serializer, SerializeStruct},
     de::{self, Deserializer, Visitor, MapAccess}
 };
-use serde_repr::{Serialize_repr, Deserialize_repr};
+use serde_repr::{
+    Serialize_repr,
+    Deserialize_repr
+};
 
 use crate::{
     Id,
     CryptoContext,
-    cryptobox,
     messaging::contact::GenericContact,
 };
 
@@ -49,10 +51,10 @@ impl From<Permission> for i32 {
 impl fmt::Display for Permission {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match *self {
-            Permission::Public => "Public",
-            Permission::MemberInvite => "MemberInvite",
+            Permission::Public          => "Public",
+            Permission::MemberInvite    => "MemberInvite",
             Permission::ModeratorInvite => "ModeratorInvite",
-            Permission::OwnerInvite => "OwnerInvite",
+            Permission::OwnerInvite     => "OwnerInvite",
         })
     }
 }
@@ -96,10 +98,10 @@ impl From<Role> for i32 {
 impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match *self {
-            Role::Owner => "Owner",
+            Role::Owner     => "Owner",
             Role::Moderator => "Moderator",
-            Role::Member => "Member",
-            Role::Banned => "Banned",
+            Role::Member    => "Member",
+            Role::Banned    => "Banned",
         })
     }
 }
@@ -179,13 +181,13 @@ pub type Channel = GenericContact<ChannelData>;
 pub struct ChannelData {
     owner: Id,
     permission: Permission,
-    notice: String,
+    notice: Option<String>,
 
     _member_crypto_ctxts: HashMap<Id, Arc<Mutex<CryptoContext>>>,
 }
 
 impl ChannelData {
-    pub(crate) fn new(owner: Id, permission: Permission, notice: String) -> Self {
+    pub(crate) fn new(owner: Id, permission: Permission, notice: Option<String>) -> Self {
         Self {
             owner,
             permission,
@@ -198,11 +200,11 @@ impl ChannelData {
 #[allow(unused)]
 impl Channel {
     pub(crate) fn data(&self) -> &ChannelData {
-        self.annex()
+        self.derived()
     }
 
     pub(crate) fn data_mut(&mut self) -> &mut ChannelData {
-        self.annex_mut()
+        self.derived_mut()
     }
 
     pub fn owner(&self) -> &Id {
@@ -214,7 +216,8 @@ impl Channel {
     }
 
     pub fn is_owner(&self, _id: &Id) -> bool {
-        unimplemented!()
+        // unimplemented!()
+        true
     }
 
     pub fn is_member(&self, _id: &Id) -> bool {
@@ -225,9 +228,10 @@ impl Channel {
         unimplemented!()
     }
 
-    pub(crate) fn session_keypair(&self) -> Option<&cryptobox::KeyPair> {
+   /* pub(crate) fn session_keypair(&self) -> Option<&cryptobox::KeyPair> {
+
         unimplemented!()
-    }
+    }*/
 
     pub(crate) fn rx_crypto_context_by(&self, _id: &Id) -> Option<&CryptoContext> {
         unimplemented!()
@@ -278,32 +282,6 @@ impl<'de> Deserialize<'de> for Channel {
             Signature,      // "s"  - Vec<u8>
         }
 
-        /*
-        impl fmt::Display for Field {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                let s = match *self {
-                    Field::Id           => "id",
-                    Field::Peerid       => "p",
-                    Field::Name         => "n",
-                    Field::Remark       => "r",
-                    Field::Tags         => "ts",
-                    Field::Muted        => "d",
-                    Field::Blocked      => "b",
-                    Field::Created      => "c",
-                    Field::LastModified => "m",
-                    Field::Deleted      => "e",
-                    Field::Revision     => "v",
-                    Field::Owner        => "o",
-                    Field::Perm         => "pm",
-                    Field::Notice       => "nt",
-                    Field::HomePeerSig  => "ps",
-                    Field::Signature    => "s",
-                };
-                write!(f, "{}", s)
-            }
-        }
-        */
-
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
             where
@@ -328,7 +306,6 @@ impl<'de> Deserialize<'de> for Channel {
                     "ps"    => Ok(Field::HomePeerSig),
                     "s"     => Ok(Field::Signature),
                     _ => {
-                        println!(">>>> unknown field: {}", key);
                         Err(de::Error::unknown_field(&key, &["id", "name", "c"]))
                     }
                 }
@@ -404,7 +381,7 @@ impl<'de> Deserialize<'de> for Channel {
                 let channel_data = ChannelData::new(
                     owner.ok_or_else(|| de::Error::missing_field("o"))?,
                     perm,
-                    notice.unwrap_or_default()
+                    notice
                 );
                 let channel = GenericContact::new(
                     id.unwrap(),

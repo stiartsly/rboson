@@ -41,6 +41,12 @@ pub(crate) fn channel_cli() -> Command {
                 .about("Retrieve channel information")
                 .arg(arg!(<ID> "The channel id to retrieve information for"))
         )
+        .subcommand(
+            Command::new("ticket")
+                .about("Create a ticket")
+                .arg(arg!(<ID> "The channel id to join for which the ticket is created"))
+                .arg(arg!(--invitee <ID> "The invitee id").required(false))
+        )
         .help_template("{subcommands}")
         .disable_help_flag(true)
 }

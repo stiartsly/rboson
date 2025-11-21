@@ -93,6 +93,13 @@ macro_rules! unwrap_mut {
     }};
 }
 
+#[macro_export]
+macro_rules! lock {
+    ($ua:expr) => {{
+        $ua.lock().unwrap()
+    }};
+}
+
 use std::net::IpAddr;
 fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
     let if_addrs = match get_if_addrs::get_if_addrs() {

@@ -108,6 +108,41 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
                 });
             }
 
+            Some(("ticket", m)) => {
+                let id = m.get_one::<String>("ID").unwrap();
+                let Ok(channel_id) = Id::try_from(id.as_str()) else {
+                    println!("Error: invalid channel id: {}", id);
+                    return;
+                };
+
+                let invitee = m.get_one::<String>("invitee");
+                let invitee_id = match invitee {
+                    Some(v) => {
+                        let Ok(ii) = Id::try_from(v.as_str()) else {
+                            println!("Error: invalid invitee id: {}", v);
+                            return;
+                        };
+                        Some(ii)
+                    }
+                    None => None,
+                };
+
+                println!("Creating ticket for channel: {}", channel_id);
+                let rc = client.lock().unwrap().create_invite_ticket(
+                    &channel_id,
+                    invitee_id.as_ref()
+                ).await;
+
+                match rc {
+                    Ok(ticket) => {
+                        println!("Channel ticket created: {}", ticket);
+                    }
+                    Err(e) => {
+                        println!("Failed to create channel ticket: {{{}}}", e);
+                    }
+                }
+            }
+
             Some(("info", m)) => {
                 let id = m.get_one::<String>("ID").unwrap();
                 println!("[OK] Retrieving channel info: {}", id);

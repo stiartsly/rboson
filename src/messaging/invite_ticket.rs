@@ -6,7 +6,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     as_secs,
-    Id
+    Id,
+    Error, core::Result,
 };
 
 const DEFAULT_EXPIRATION: u64 = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -128,6 +129,25 @@ impl InviteTicket {
 }
 
 impl fmt::Display for InviteTicket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| fmt::Error)?
+            .fmt(f)
+    }
+}
+
+impl TryFrom<&str> for InviteTicket {
+    type Error = Error;
+
+    fn try_from(data: &str) -> Result<Self> {
+        serde_json::from_str(data).map_err(|e|
+            Error::Argument(format!("Failed to parse InviteTicket from string: {}", e))
+        )
+    }
+}
+
+/*
+impl fmt::Display for InviteTicket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "InviteTicket[channel={}, invitor={}",
             self.channel_id,
@@ -145,3 +165,4 @@ impl fmt::Display for InviteTicket {
         Ok(())
     }
 }
+*/

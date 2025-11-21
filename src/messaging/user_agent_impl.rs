@@ -26,13 +26,15 @@ use crate::messaging::{
     user_agent_caps::UserAgentCaps,
 
     message::Message,
-    channel::{Member, Channel, Role},
+    contact::GenericContact,
+    channel::{self, Member, Channel, ChannelData, Role},
     messaging_repository::MessagingRepository,
     persistence::database::Database,
 
     profile_listener::ProfileListenerMut,
     message_listener::MessageListenerMut,
     channel_listener::ChannelListener,
+
 };
 
 #[allow(dead_code)]
@@ -325,7 +327,6 @@ impl ContactListener for UserAgent {
 impl ChannelListener for UserAgent {
     fn on_joined_channel(&self, _channel: &Channel) {
         println!("on_joined_channel called");
-        //unimplemented!()
     }
 
     fn on_left_channel(&self, _channel: &Channel) {
@@ -333,7 +334,7 @@ impl ChannelListener for UserAgent {
     }
 
     fn on_channel_deleted(&self, _channel: &Channel) {
-        unimplemented!()
+        println!("on_channel_deleted called");
     }
 
     fn on_channel_updated(&self, _channel: &Channel) {
@@ -605,8 +606,19 @@ impl UserAgentCaps for UserAgent {
     }
 
     fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
-        // unimplemented!()
-        Ok(None)
+        // TODO: implement channel retrieval logic.
+        let channel_data = ChannelData::new(
+            Id::random(),
+            channel::Permission::OwnerInvite,
+            Some("test channel".into())
+        );
+
+        let channel = GenericContact::new(
+            Id::random(),
+            Id::random(),
+            channel_data
+        );
+        Ok(Some(channel))
     }
 
     fn contact_version(&self) -> Result<Option<String>> {

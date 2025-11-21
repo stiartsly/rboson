@@ -7,6 +7,7 @@ use serde::de::{Deserializer};
 
 use crate::{
     as_secs,
+    lock,
     Id,
     Error,
     Identity,
@@ -14,15 +15,14 @@ use crate::{
     cryptobox::{self, CryptoBox, Nonce},
     core::Result,
     core::CryptoContext,
+    messaging::{
+        profile::Profile
+    }
 };
 
-use super::{
-    profile::Profile
-};
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(unused)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ContactType {
     Unknown = 0,
     Contact = 1,
@@ -60,7 +60,9 @@ pub struct GenericContact<T> where T: Clone {
     last_updated    : Option<SystemTime>,
     display_name    : Option<String>,
 
-    annex_data      : Option<T>,
+    // derived data field used to store additional data for derived Contact types,
+    // For example, type 'Channel' is the derived struct with extra data
+    derived_data    : Option<T>,
 }
 
 #[allow(unused)]
@@ -106,7 +108,7 @@ impl<T> GenericContact<T> where T: Clone{
 
     */
 
-    pub(crate) fn new(id: Id, home_peerid: Id, annex: T) -> Self {
+    pub(crate) fn new(id: Id, home_peerid: Id, addtional: T) -> Self {
         Self {
             id,
             auto            : true,
@@ -130,16 +132,16 @@ impl<T> GenericContact<T> where T: Clone{
 
             _rx_crypto_context: None,
             _tx_crypto_context: None,
-            annex_data      : Some(annex),
+            derived_data    : Some(addtional),
         }
     }
 
-    pub(crate) fn annex_mut(&mut self) -> &mut T {
-        self.annex_data.as_mut().expect("Annex data is missing")
+    pub(crate) fn derived_mut(&mut self) -> &mut T {
+        self.derived_data.as_mut().expect("Derived data is missing")
     }
 
-    pub(crate) fn annex(&self) -> &T {
-        self.annex_data.as_ref().expect("Annex data is missing")
+    pub(crate) fn derived(&self) -> &T {
+        self.derived_data.as_ref().expect("Derived data is missing")
     }
 
     pub fn id(&self) -> &Id {
@@ -148,6 +150,10 @@ impl<T> GenericContact<T> where T: Clone{
 
     pub fn home_peerid(&self) -> Option<&Id> {
         self.home_peerid.as_ref()
+    }
+
+    pub(crate) fn set_home_peerid(&mut self, peerid: Id) {
+        self.home_peerid = Some(peerid);
     }
 
     pub fn is_auto(&self) -> bool {
@@ -163,8 +169,8 @@ impl<T> GenericContact<T> where T: Clone{
         true
     }
 
-    pub fn has_session_key(&self) -> bool {
-        self.session_keypair.is_some()
+    pub fn session_keypair(&self) -> Option<&signature::KeyPair> {
+        self.session_keypair.as_ref()
     }
 
     pub fn session_id(&self) -> Option<Id> {
@@ -291,35 +297,32 @@ impl<T> GenericContact<T> where T: Clone{
         unimplemented!()
     }
 
-    fn self_encryption_context(&self) -> Arc<Mutex<Option<Box<CryptoContext>>>> {
+    fn self_encryption_context(&self) -> Option<Arc<Mutex<CryptoContext>>> {
         unimplemented!()
     }
 
     fn init_session_key(&mut self, private_key: &[u8]) -> Result<()> {
         if private_key.len() != signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
-            return Err(Error::Argument(format!("Invalid session key size")));
+            return Err(Error::Argument(format!("Invalid session key")));
         }
 
-        let ctx = self.self_encryption_context();
-        let ctx = ctx.lock().unwrap();
-
-        let Some(ctx) = ctx.as_ref() else {
+        let Some(ctxt) = self.self_encryption_context() else {
             return Err(Error::State("No self encryption context".into()));
         };
 
-        let private_key = ctx.decrypt_into(private_key).map_err(|e| {
-            Error::Crypto(format!("Failed to decrypt session key: {}", e))
-        })?;
-
-        if private_key.len() != signature::PrivateKey::BYTES {
+        let Ok(sk) = lock!(ctxt).decrypt_into(private_key) else {
+            return Err(Error::Crypto(format!("Error decrypting session key.")))?
+        };
+        if sk.len() != signature::PrivateKey::BYTES {
             return Err(Error::Crypto(format!("Invalid session key size")));
         }
 
-        let session_keypair = KeyPair::try_from(private_key.as_slice())?;
-        self.session_id = Some(Id::from(session_keypair.public_key()));
+        let session_keypair = KeyPair::try_from(sk.as_slice())?;
+        let session_id = Id::from(session_keypair.public_key());
+
         self.encrypt_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
         self.session_keypair = Some(session_keypair);
-
+        self.session_id = Some(session_id);
         Ok(())
     }
 
@@ -337,9 +340,7 @@ impl<T> GenericContact<T> where T: Clone{
             self.modified = true;
             self.increment_revision();
         }
-        self.last_modified = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        self.last_modified = as_secs!(SystemTime::now());
     }
 
     pub(crate) fn rx_crypto_context(&self) -> Result<&CryptoContext> {
@@ -366,28 +367,41 @@ impl Identity for Contact {
 
     fn sign(&self, data: &[u8], sig: &mut [u8]) -> Result<usize> {
         let Some(keypair) = self.session_keypair.as_ref() else {
-            return Err(Error::State("Missing session keypair".into()));
+            Err(Error::State("Missing session keypair".into()))?
         };
-        signature::sign(data, sig, keypair.private_key())
+
+        signature::sign(
+            data,
+            sig,
+            keypair.private_key()
+        )
     }
 
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
         let Some(keypair) = self.session_keypair.as_ref() else {
-            return Err(Error::State("Missing session keypair".into()));
+            Err(Error::State("Missing session keypair".into()))?
         };
-        signature::sign_into(data, keypair.private_key())
+
+        signature::sign_into(
+            data,
+            keypair.private_key()
+        )
     }
 
     fn verify(&self, data: &[u8], sig: &[u8]) -> Result<()> {
         let Some(keypair) = self.session_keypair.as_ref() else {
-            return Err(Error::State("Missing session keypair".into()));
+            Err(Error::State("Missing session keypair".into()))?
         };
-        signature::verify(data,sig, keypair.public_key())
+
+        signature::verify(
+            data,sig,
+            keypair.public_key()
+        )
     }
 
     fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let Some(keypair) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing cryptobox keypair".into()));
+        let Some(kp) = self.encrypt_keypair.as_ref() else {
+            Err(Error::State("Missing encryption keypair".into()))?
         };
 
         cryptobox::encrypt(
@@ -395,54 +409,56 @@ impl Identity for Contact {
             cipher,
             &Nonce::random(),
             &recipient.to_encryption_key(),
-            keypair.private_key()
+            kp.private_key()
         )
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let Some(keypair) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing cryptobox keypair".into()));
+        let Some(kp) = self.encrypt_keypair.as_ref() else {
+            return Err(Error::State("Missing encryption keypair".into()));
         };
 
         cryptobox::decrypt(
             cipher,
             plain,
             &sender.to_encryption_key(),
-            keypair.private_key()
+            kp.private_key()
         )
     }
 
     fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let Some(keypair) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing cryptobox keypair".into()));
+        let Some(kp) = self.encrypt_keypair.as_ref() else {
+            return Err(Error::State("Missing encryption keypair".into()));
         };
 
         cryptobox::encrypt_into(
             plain,
             &Nonce::random(),
             &recipient.to_encryption_key(),
-            keypair.private_key()
+            kp.private_key()
         )
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let Some(keypair) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing cryptobox keypair".into()));
+        let Some(kp) = self.encrypt_keypair.as_ref() else {
+            return Err(Error::State("Missing encryption keypair".into()));
         };
 
         cryptobox::decrypt_into(
             cipher,
             &sender.to_encryption_key(),
-            keypair.private_key()
+            kp.private_key()
         )
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        let Some(keypair) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing cryptobox keypair".into()));
+        let Some(kp) = self.encrypt_keypair.as_ref() else {
+            return Err(Error::State("Missing encryption keypair".into()));
         };
 
-        CryptoBox::try_from((&id.to_encryption_key(), keypair.private_key())).map(|v|
+        CryptoBox::try_from(
+            (&id.to_encryption_key(), kp.private_key())
+        ).map(|v|
             CryptoContext::new(id.clone(), v)
         )
     }

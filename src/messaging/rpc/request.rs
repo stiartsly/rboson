@@ -32,7 +32,6 @@ pub(crate) struct RPCRequest
     _response: Option<RPCResponse>
 }
 
-#[allow(unused)]
 impl RPCRequest
 {
     pub(crate) fn new(id: u32, method: RPCMethod, params: Option<Parameters>) -> Self {
@@ -68,7 +67,11 @@ impl RPCRequest
         self.cookie.as_deref()
     }
 
-    pub(crate) fn promise_take(&mut self) -> Option<Promise> {
-        self.promise.take()
+    pub(crate) fn is_initiator(&self) -> bool {
+        self.promise.is_some()
+    }
+
+    pub(crate) fn promise(&self) -> Option<&Promise> {
+        self.promise.as_ref()
     }
 }

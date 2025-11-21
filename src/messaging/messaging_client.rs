@@ -21,6 +21,7 @@ use rumqttc::{
 
 use crate::{
     unwrap,
+    lock,
     as_secs,
     Id,
     Identity,
@@ -65,13 +66,6 @@ use crate::messaging::{
         Builder as MsgBuilder
     }
 };
-
-#[macro_export]
-macro_rules! lock {
-    ($ua:expr) => {{
-        $ua.lock().unwrap()
-    }};
-}
 
 #[macro_export]
 macro_rules! ua {
@@ -327,10 +321,10 @@ impl MessagingClient {
         };
 
         let sig = self.user.sign_into(&sha256)?;
-        let sk = channel.session_keypair().unwrap().private_key().as_bytes();
+        let sk = channel.session_keypair().unwrap().private_key();
         let sk = match invitee {
-            Some(invitee) => self.user.encrypt_into(invitee, sk)?,
-            None => sk.to_vec(),
+            Some(invitee) => self.user.encrypt_into(invitee, sk.as_bytes())?,
+            None => sk.as_bytes().to_vec()
         };
 
         Ok(InviteTicket::new(
@@ -469,7 +463,7 @@ impl MessagingClient {
                 };
 
                 match event {
-                    Event::Incoming(packet) => worker.on_incoming_msg(packet),
+                    Event::Incoming(packet) => worker.on_incoming_msg(packet).await,
                     Event::Outgoing(packet) => worker.on_outgoing_msg(packet),
                 }
             }
@@ -539,6 +533,13 @@ impl MessagingClient {
         channel_id: &Id
     ) -> Result<()> {
         MessagingCaps::leave_channel(self, channel_id).await
+    }
+
+    pub async fn create_invite_ticket(&mut self,
+        channel_id: &Id,
+        invitee: Option<&Id>
+    ) -> Result<InviteTicket> {
+        self.sign_into_invite_ticket(channel_id, invitee).await
     }
 }
 
@@ -1193,9 +1194,13 @@ impl MessagingWorker {
         self.user.id() == id
     }
 
-    fn on_incoming_msg(&mut self, packet: Packet) {
+    async fn channel_members(&self, _channel_id: &Id) {
+        // TODO:
+    }
+
+    async fn on_incoming_msg(&mut self, packet: Packet) {
         match packet {
-            Packet::Publish(v)  => self.on_publish(v),
+            Packet::Publish(v)  => self.on_publish(v).await,
             Packet::PubAck(_)   => {},
             Packet::SubAck(_)   => {},
             Packet::UnsubAck(_) => {},
@@ -1232,7 +1237,7 @@ impl MessagingWorker {
         trace!("Ping response received");
     }
 
-    fn on_publish(&mut self, data: rumqttc::Publish) {
+    async fn on_publish(&mut self, data: rumqttc::Publish) {
         let topic = data.topic.as_str();
         debug!("Got message on topic: {}", topic);
 
@@ -1259,7 +1264,7 @@ impl MessagingWorker {
         msg.mark_encrypted(true);
 
         if topic == self.inbox {
-            self.on_inbox_msg(msg);
+            self.on_inbox_msg(msg).await;
         } else if topic == self.outbox {
             self.on_outbox_msg(msg);
         } else if topic == self.broadcast {
@@ -1270,7 +1275,7 @@ impl MessagingWorker {
         }
     }
 
-    fn on_inbox_msg(&mut self, mut msg: Msg) {
+    async fn on_inbox_msg(&mut self, mut msg: Msg) {
         let need_decryption = |v: &Msg| {
             let with_body = match v.body() {
                 Some(b) => !b.is_empty(),
@@ -1281,7 +1286,7 @@ impl MessagingWorker {
 
         if !need_decryption(&msg) {
             msg.mark_encrypted(false);
-            return self.process_msg(msg);
+            return self.process_msg(msg).await;
         }
 
         if self.is_me(msg.to()){
@@ -1295,7 +1300,7 @@ impl MessagingWorker {
                         warn!("Sender {} not in contact list, ignored", msg.from());
                         return;
                     };
-                    if !sender.has_session_key() {
+                    if sender.session_keypair().is_none() {
                         warn!("No session key attached to sender {}, ignored", msg.from());
                         return;
                     }
@@ -1335,7 +1340,7 @@ impl MessagingWorker {
                 warn!("No channel {{{}}} found, ignored", msg.to());
                 return;
             };
-            if !channel.has_session_key() {
+            if channel.session_keypair().is_none() {
                 warn!("No session key for channel {{{}}}, ignored", msg.to());
                 return;
             };
@@ -1378,7 +1383,7 @@ impl MessagingWorker {
         if msg.is_encrypted() {
             warn!("Message from unknow sender {}, keep in encrypted", msg.from());
         }
-        self.process_msg(msg)
+        self.process_msg(msg).await
     }
 
     fn on_outbox_msg(&mut self, _message: Msg) {
@@ -1394,13 +1399,13 @@ impl MessagingWorker {
         ua!(self).on_broadcast(msg);
     }
 
-    fn process_msg(&mut self, msg: Msg) {
+    async fn process_msg(&mut self, msg: Msg) {
         match msg.message_type() {
             MessageType::Message => {
                 self.on_msg(msg);
             },
             MessageType::Call => {
-                self.on_rpc_response(msg);
+                self.on_rpc_response(msg).await;
             },
             MessageType::Notification => {
                 self.on_notification(msg);
@@ -1433,7 +1438,7 @@ impl MessagingWorker {
         }
     }
 
-    fn on_rpc_response(&mut self, msg: Msg) {
+    async fn on_rpc_response(&mut self, msg: Msg) {
         let Some(body) = msg.body() else {
             error!("Message body missing in response from {}, message ignored", msg.from());
             return;
@@ -1443,32 +1448,31 @@ impl MessagingWorker {
             return;
         }
 
-        /*{
+        {
             use hex::ToHex;
             let body_hex = body.encode_hex::<String>();
             println!("RPC response body (hex): {}", body_hex);
-        }*/
+        }
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
             error!("Failed to parse RPC response from {}, message ignored", msg.from());
             return;
         };
 
-        let Some(mut call) = self.pending_calls.lock().unwrap().remove(preparsed.id()) else {
+        let Some(call) = self.pending_calls.lock().unwrap().remove(preparsed.id()) else {
             error!("Unmatched RPC response ID {} from {}, message ignored", preparsed.id(), msg.from());
             return;
         };
 
-        let promise = call.promise_take();
         match call.method() {
             RPCMethod::DeviceList => {
-                if let Some(Promise::DeviceList(ack)) = promise {
+                if let Some(Promise::DeviceList(ack)) = call.promise() {
                     lock!(ack).complete(Ok(Vec::new()));
                 };
             },
 
             RPCMethod::DeviceRevoke => {
-                if let Some(Promise::RevokeDevice(ack)) = promise {
+                if let Some(Promise::RevokeDevice(ack)) = call.promise() {
                     lock!(ack).complete(Ok(()));
                 }
             },
@@ -1482,7 +1486,7 @@ impl MessagingWorker {
 
             RPCMethod::ChannelCreate => {
                 let complete = |rc: Result<Channel>| {
-                    if let Some(Promise::CreateChannel(ack)) = promise {
+                    if let Some(Promise::CreateChannel(ack)) = call.promise() {
                         lock!(ack).complete(rc)
                     }
                 };
@@ -1506,35 +1510,55 @@ impl MessagingWorker {
                     }
                 };
                 _ = channel.set_session_key(&session_key);
+                let channel_id = channel.id().clone();
 
                 ua!(self).on_joined_channel(&channel);
-                complete(Ok(channel))
+
+                complete(Ok(channel));
+
+                if call.is_initiator() {
+                    _ = self.channel_members(&channel_id).await;
+                }
             }
             RPCMethod::ChannelDelete => {
                 let complete = |rc: Result<()>| {
-                    if let Some(Promise::RemoveChannel(ack)) = promise {
+                    if let Some(Promise::RemoveChannel(ack)) = call.promise() {
                         lock!(ack).complete(rc)
                     }
                 };
-                if let Err(e) = preparsed.result::<()>() {
+                if let Err(e) = preparsed.result::<bool>() {
                     complete(Err(e));
                     return;
                 }
-                match ua!(self).channel(msg.from()) {
-                    Ok(Some(channel)) => {
-                        ua!(self).on_channel_deleted(&channel);
-                        complete(Ok(()))
-                    },
-                    _ => {
-                        let err = format!("Internal error: No channel {{{}}} found after deletion", msg.from());
-                        warn!("{}", err);
-                        complete(Err(Error::State(err)));
-                    }
-                }
+                let Ok(Some(channel)) = ua!(self).channel(msg.from()) else {
+                    let err = format!("Internal error: No channel {{{}}} found from local agent", msg.from());
+                    warn!("{}", err);
+                    complete(Err(Error::State(err)));
+                    return;
+                };
+                ua!(self).on_channel_deleted(&channel);
+                complete(Ok(()))
             },
             RPCMethod::ChannelJoin => { // TODO:
             },
             RPCMethod::ChannelLeave => { // TODO:
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::LeaveChannel(ack)) = call.promise() {
+                        lock!(ack).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(Err(e));
+                    return;
+                }
+                let Ok(Some(channel)) = ua!(self).channel(msg.from()) else {
+                    let err = format!("Internal error: No channel {{{}}} found after from local agent", msg.from());
+                    warn!("{}", err);
+                    complete(Err(Error::State(err)));
+                    return;
+                };
+                ua!(self).on_left_channel(&channel);
+                complete(Ok(()))
             },
             RPCMethod::ChannelOwner => { // TODO:
             },
@@ -1555,7 +1579,10 @@ impl MessagingWorker {
                 return;
             }
         }
-        //unimplemented!()
+    }
+
+    fn on_notification(&mut self, _message: Msg) {
+        unimplemented!()
     }
 
     #[allow(unused)]
@@ -1628,10 +1655,6 @@ impl MessagingWorker {
             }
         }
         //unimplemented!()
-    }
-
-    fn on_notification(&mut self, _message: Msg) {
-        unimplemented!()
     }
 
     #[allow(unused)]

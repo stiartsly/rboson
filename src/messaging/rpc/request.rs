@@ -3,7 +3,7 @@ use super::{
     method::RPCMethod,
     response::RPCResponse,
     promise::Promise,
-    parameters::Parameters
+    params::Parameters
 };
 
 #[derive(Serialize)]

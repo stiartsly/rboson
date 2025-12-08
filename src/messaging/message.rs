@@ -13,7 +13,7 @@ use crate::{
         CryptoContext
     },
     messaging::{
-        MessagingCaps,
+        MessagingAgent,
         MessagingClient
     },
 };

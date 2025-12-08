@@ -621,9 +621,9 @@ impl UserAgentCaps for UserAgent {
         Ok(Some(channel))
     }
 
-    fn contact_version(&self) -> Result<Option<String>> {
+    fn contacts_version(&self) -> Result<String> {
         // TODO: Implement contact version retrieval logic.
-        Ok(None)
+        Ok("v1.0.0".into())
     }
 
     fn put_contacts_update(&mut self, _version_id: &str, _contacts: &[Contact]) -> Result<()> {

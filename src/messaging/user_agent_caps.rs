@@ -48,7 +48,7 @@ pub trait UserAgentCaps: Send + ConnectionListener + ChannelListener {
     fn channels(&self) -> Result<Vec<&Channel>>;
     fn channel(&self, channel_id: &Id) -> Result<Option<Channel>>;
 
-    fn contact_version(&self) -> Result<Option<String>>;
+    fn contacts_version(&self) -> Result<String>;
     fn put_contacts_update(&mut self, version_id: &str, contacts: &[Contact]) -> Result<()>;
 
     fn contact(&self, id: &Id) -> Result<Option<Contact>>;

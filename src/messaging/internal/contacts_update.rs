@@ -1,9 +1,9 @@
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use crate::messaging::{
     Contact
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactsUpdate {
     #[serde(rename = "v")]
     #[serde(skip_serializing_if = "crate::is_none_or_empty")]
@@ -16,6 +16,13 @@ pub(crate) struct ContactsUpdate {
 }
 
 impl ContactsUpdate {
+    pub(crate) fn new(version_id: Option<String>, contacts: Vec<Contact>) -> Self {
+        Self {
+            version_id,
+            contacts: Some(contacts)
+        }
+    }
+
     pub(crate) fn version_id(&mut self) -> Option<String> {
         //self.version_id.take()
         Some("1.1".to_string())

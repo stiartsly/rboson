@@ -16,7 +16,7 @@ use crate::messaging::{
 };
 
 // messaging capabilities trait
-pub trait MessagingCaps{
+pub trait MessagingAgent{
     fn userid(&self) -> &Id;
     fn user_agent(&self) -> Arc<Mutex<UserAgent>> ;
 
@@ -123,11 +123,11 @@ pub trait MessagingCaps{
         home_peer_id: Option<&Id>,
         session_key: &[u8],
         remark: Option<&str>
-    ) -> impl Future<Output = Result<()>>;
+    ) -> impl Future<Output = Result<Contact>>;
 
     fn update_contact(&mut self,
         contact: Contact
-    ) -> impl Future<Output = Result<()>>;
+    ) -> impl Future<Output = Result<Contact>>;
 
     fn remove_contact(&mut self,
         id: &Id

@@ -23,6 +23,7 @@ use boson::{
 use boson::messaging::{
     UserProfile,
     MessagingClient,
+    MessagingAgent,
     Message,
     ClientBuilder,
     Contact,
@@ -391,7 +392,7 @@ impl ConnectionListener for ConnectionListenerTest {
     }
 
     fn on_connected(&self) {
-        println!("Connected to messaging service");
+       println!("Connected to messaging service");
     }
 
     fn on_disconnected(&self) {

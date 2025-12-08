@@ -10,7 +10,7 @@ use crate::{
 use crate::messaging::{
     UserProfile,
     Message,
-    MessagingCaps,
+    MessagingAgent,
     MessagingClient,
     ClientBuilder,
     Contact,

@@ -17,7 +17,7 @@ pub(crate) mod internal {
 pub(crate) mod rpc {
     pub(crate) mod method;
     pub(crate) mod error;
-    pub(crate) mod parameters;
+    pub(crate) mod params;
     pub(crate) mod request;
     pub(crate) mod response;
     pub(crate) mod promise;
@@ -50,12 +50,12 @@ pub mod client_device;
 pub mod messaging_repository;
 pub mod service_ids;
 
-pub(crate) mod messaging_caps;
+pub(crate) mod messaging_agent;
 pub(crate) mod messaging_client;
 pub(crate) mod messaging_client_builder;
 
 pub mod client {
-    pub use crate::messaging::messaging_caps::MessagingCaps;
+    pub use crate::messaging::messaging_agent::MessagingAgent;
     pub use crate::messaging::messaging_client::MessagingClient;
     pub use crate::messaging::messaging_client_builder::Builder;
 }
@@ -70,7 +70,7 @@ pub mod user_agent_ {
 pub use crate::{
     messaging::client_device::ClientDevice,
     messaging::service_ids::ServiceIds,
-    messaging::client::MessagingCaps,
+    messaging::client::MessagingAgent,
     messaging::client::MessagingClient,
     messaging::client::Builder as ClientBuilder,
 

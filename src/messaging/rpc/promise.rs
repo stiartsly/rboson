@@ -57,11 +57,11 @@ pub(crate) trait Ack {
     }
 }
 
-pub(crate) struct CommonAck<T> {
+pub(crate) struct Value<T> {
     data: Data<T>
 }
 
-impl<T> CommonAck<T> {
+impl<T> Value<T> {
     pub(crate) fn new() -> Self {
         Self {
             data: Data::new()
@@ -69,7 +69,7 @@ impl<T> CommonAck<T> {
     }
 }
 
-impl<T> Ack for CommonAck<T> {
+impl<T> Ack for Value<T> {
     type Value = T;
 
     fn data(&self) -> &Data<Self::Value> {
@@ -80,37 +80,28 @@ impl<T> Ack for CommonAck<T> {
     }
 }
 
-pub(crate) type DeviceListAck = CommonAck<Vec<ClientDevice>>;
-pub(crate) type RevokeDeviceAck = CommonAck<()>;
-pub(crate) type CreateChannelAck = CommonAck<Channel>;
-pub(crate) type RemoveChannelAck = CommonAck<()>;
-pub(crate) type JoinChannelAck = CommonAck<()>;
-pub(crate) type LeaveChannelAck = CommonAck<()>;
-pub(crate) type SetChannelOwnerAck = CommonAck<()>;
-pub(crate) type SetChannelPermAck = CommonAck<()>;
-pub(crate) type SetChannelNameAck = CommonAck<()>;
-pub(crate) type SetChannelNoticeAck = CommonAck<()>;
-pub(crate) type SetChannelMemberRoleAck = CommonAck<()>;
-pub(crate) type BanChannelMembersAck = CommonAck<()>;
-pub(crate) type UnbanChannelMembersAck = CommonAck<()>;
-pub(crate) type RemoveChannelMembersAck = CommonAck<()>;
+pub(crate) type DevicesVal  = Value<Vec<ClientDevice>>;
+pub(crate) type ChannelVal  = Value<Channel>;
+pub(crate) type BoolVal     = Value<()>;
+pub(crate) type StringVal   = Value<String>;
 
 #[derive(Clone)]
 pub(crate) enum Promise {
-    DeviceList(Arc<Mutex<DeviceListAck>>),
-    RevokeDevice(Arc<Mutex<RevokeDeviceAck>>),
-    CreateChannel(Arc<Mutex<CreateChannelAck>>),
-    RemoveChannel(Arc<Mutex<RemoveChannelAck>>),
-    JoinChannel(Arc<Mutex<JoinChannelAck>>),
-    LeaveChannel(Arc<Mutex<LeaveChannelAck>>),
-    SetChannelOwner(Arc<Mutex<SetChannelOwnerAck>>),
-    SetChannelPerm(Arc<Mutex<SetChannelPermAck>>),
-    SetChannelName(Arc<Mutex<SetChannelNameAck>>),
-    SetChannelNotice(Arc<Mutex<SetChannelNoticeAck>>),
-    SetChannelMemberRole(Arc<Mutex<SetChannelMemberRoleAck>>),
-    BanChannelMembers(Arc<Mutex<BanChannelMembersAck>>),
-    UnbanChannelMembers(Arc<Mutex<UnbanChannelMembersAck>>),
-    RemoveChannelMembers(Arc<Mutex<RemoveChannelMembersAck>>),
+    GetDeviceList(Arc<Mutex<DevicesVal>>),
+    RevokeDevice(Arc<Mutex<BoolVal>>),
+    CreateChannel(Arc<Mutex<ChannelVal>>),
+    RemoveChannel(Arc<Mutex<BoolVal>>),
+    JoinChannel(Arc<Mutex<BoolVal>>),
+    LeaveChannel(Arc<Mutex<BoolVal>>),
+    SetChannelOwner(Arc<Mutex<BoolVal>>),
+    SetChannelPerm(Arc<Mutex<BoolVal>>),
+    SetChannelName(Arc<Mutex<BoolVal>>),
+    SetChannelNotice(Arc<Mutex<BoolVal>>),
+    SetChannelMemberRole(Arc<Mutex<BoolVal>>),
+    BanChannelMembers(Arc<Mutex<BoolVal>>),
+    UnbanChannelMembers(Arc<Mutex<BoolVal>>),
+    RemoveChannelMembers(Arc<Mutex<BoolVal>>),
+    PushContactsUpdate(Arc<Mutex<StringVal>>)
 }
 
 impl Promise {
@@ -129,8 +120,9 @@ impl Promise {
             BanChannelMembers(s) |
             UnbanChannelMembers(s) |
             RemoveChannelMembers(s) => s.lock().unwrap().is_completed(),
-            DeviceList(s)           => s.lock().unwrap().is_completed(),
+            GetDeviceList(s)        => s.lock().unwrap().is_completed(),
             CreateChannel(s)        => s.lock().unwrap().is_completed(),
+            PushContactsUpdate(s)   => s.lock().unwrap().is_completed(),
         }
     }
 
@@ -149,8 +141,9 @@ impl Promise {
             BanChannelMembers(s) |
             UnbanChannelMembers(s) |
             RemoveChannelMembers(s) => s.lock().unwrap().set_waker(w),
-            DeviceList(s)           => s.lock().unwrap().set_waker(w),
+            GetDeviceList(s)        => s.lock().unwrap().set_waker(w),
             CreateChannel(s)        => s.lock().unwrap().set_waker(w),
+            PushContactsUpdate(s)   => s.lock().unwrap().set_waker(w),
         }
     }
 }

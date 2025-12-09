@@ -134,6 +134,15 @@ impl Member {
         }
     }
 
+    pub(crate) fn unknown(id: &Id) -> Self {
+        Self {
+            id			: id.clone(),
+            home_peerid	: Id::default(),
+            role		: Role::Member,
+            joined		: 0,
+        }
+    }
+
     pub fn id(&self) -> &Id {
         &self.id
     }
@@ -199,6 +208,18 @@ impl ChannelData {
 
 #[allow(unused)]
 impl Channel {
+    pub(crate) fn auto(_from: &Id) -> Self {
+        unimplemented!()
+    }
+
+    pub(crate) fn set_permission(&mut self, permission: Permission) {
+        self.data_mut().permission = permission;
+    }
+
+    pub(crate) fn set_notice(&mut self, notice: &str) {
+        self.data_mut().notice = Some(notice.to_string());
+    }
+
     pub(crate) fn data(&self) -> &ChannelData {
         self.derived()
     }
@@ -225,6 +246,10 @@ impl Channel {
     }
 
     pub fn is_moderator(&self, _id: &Id) -> bool {
+        unimplemented!()
+    }
+
+    pub(crate) fn member(&self, _id: &Id) -> Option<Member> {
         unimplemented!()
     }
 

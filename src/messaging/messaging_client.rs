@@ -47,6 +47,7 @@ use crate::messaging::{
     MessagingAgent,
     ConnectionListener,
     ChannelListener,
+    ContactListener,
     profile::Profile,
     api_client::{self, APIClient},
     channel::{self, Role, Permission, Channel},
@@ -727,7 +728,7 @@ impl MessagingAgent for MessagingClient {
 
     async fn join_channel(&mut self,
         ticket: &InviteTicket
-    ) -> Result<()> {
+    ) -> Result<Channel> {
         if ticket.session_key().is_none() {
             Err(Error::Argument("Invite ticket does not contain session key".into()))?
         }
@@ -758,7 +759,7 @@ impl MessagingAgent for MessagingClient {
             Error::Argument(format!("Invalid member private key"))
         })?;
 
-        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
         let fut = Promise::JoinChannel(arc.clone());
         let cookie = lock!(self.self_ctxt()).encrypt_into(
             session_key.as_slice()
@@ -1456,14 +1457,10 @@ impl MessagingWorker {
     }
 
     async fn on_rpc_response(&mut self, msg: Msg) {
-        let Some(body) = msg.body() else {
-            error!("Message body missing in response from {}, message ignored", msg.from());
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Message body is missing or empty in response from {}, ignored", msg.from());
             return;
         };
-        if body.is_empty() {
-            error!("Response message from {} has empty body, ignored", msg.from());
-            return;
-        }
 
         {
             use hex::ToHex;
@@ -1483,116 +1480,457 @@ impl MessagingWorker {
 
         match call.method() {
             RPCMethod::DeviceList => {
-                if let Some(Promise::GetDeviceList(ack)) = call.promise() {
-                    lock!(ack).complete(Ok(Vec::new()));
+                let complete = |rc: Result<Vec<ClientDevice>>| {
+                    if let Some(Promise::GetDeviceList(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
                 };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                let devices = match preparsed.result::<Vec<ClientDevice>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                complete(Ok(devices))
             },
 
             RPCMethod::DeviceRevoke => {
-                if let Some(Promise::RevokeDevice(ack)) = call.promise() {
-                    lock!(ack).complete(Ok(()));
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RevokeDevice(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
                 }
+                complete(Ok(()))
             },
 
             RPCMethod::ContactPush => {
                 // TODO:
             },
 
-            RPCMethod::ContactClear => { // TODO:
+            RPCMethod::ContactClear => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::ContactClear(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                lock!(self.ua).on_contacts_cleared();
+                complete(Ok(()))
             },
 
             RPCMethod::ChannelCreate => {
                 let complete = |rc: Result<Channel>| {
-                    if let Some(Promise::CreateChannel(ack)) = call.promise() {
-                        lock!(ack).complete(rc)
+                    if let Some(Promise::CreateChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
                     }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
                 };
                 let mut channel = match preparsed.result::<Channel>() {
                     Ok(v) => v,
                     Err(e) => {
-                        warn!("Internal error: {}", e);
-                        complete(Err(Error::State(format!("Internal error: {e}"))));
-                        return
+                        complete(err_from(e));
+                        return;
                     }
                 };
-
                 let session_key = match lock!(self.self_context).decrypt_into(
-                    unwrap!(call.cookie())
-                ) {
+                    unwrap!(call.cookie())) {
                     Ok(v) => v,
                     Err(e) => {
-                        warn!("Internal error: {}", e);
-                        complete(Err(Error::State(format!("Internal error: {e}"))));
+                        complete(err_from(e));
                         return
                     }
                 };
-                _ = channel.set_session_key(&session_key);
+                if let Err(e) = channel.set_session_key(&session_key) {
+                    complete(err_from(e));
+                    return
+                }
+
                 //let channel_id = channel.id().clone();
-
-                ua!(self).on_joined_channel(&channel);
-
+                lock!(self.ua).on_joined_channel(&channel);
                 complete(Ok(channel));
 
-                //if call.is_initiator() {
-                //    _ = self.channel_members(&channel_id).await;
-                //}
+               // if call.is_initiator() {
+               //     _ = self.channel_members(&channel_id).await;
+               // }
             }
             RPCMethod::ChannelDelete => {
                 let complete = |rc: Result<()>| {
-                    if let Some(Promise::RemoveChannel(ack)) = call.promise() {
-                        lock!(ack).complete(rc)
+                    if let Some(Promise::RemoveChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
                     }
                 };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
                 if let Err(e) = preparsed.result::<bool>() {
-                    complete(Err(e));
+                    complete(err_from(e));
                     return;
                 }
-                let Ok(Some(channel)) = ua!(self).channel(msg.from()) else {
-                    let err = format!("Internal error: No channel {{{}}} found from local agent", msg.from());
-                    warn!("{}", err);
-                    complete(Err(Error::State(err)));
-                    return;
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => {
+                        let estr = format!("Internal error: no channel {} found", msg.from());
+                        complete(Err(Error::State(estr)));
+                        return;
+                    },
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
                 };
                 ua!(self).on_channel_deleted(&channel);
                 complete(Ok(()))
             },
-            RPCMethod::ChannelJoin => { // TODO:
+            RPCMethod::ChannelJoin => {
+                let complete = |rc: Result<Channel>| {
+                    if let Some(Promise::JoinChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                let mut channel = match preparsed.result::<Channel>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                let session_key = match lock!(self.self_context).decrypt_into(
+                    unwrap!(call.cookie())) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return
+                    }
+                };
+                if let Err(e) = channel.set_session_key(&session_key) {
+                    complete(err_from(e));
+                    return
+                }
+
+                //let channel_id = channel.id().clone();
+                lock!(self.ua).on_joined_channel(&channel);
+                complete(Ok(channel));
+
+               // if call.is_initiator() {
+               //     _ = self.channel_members(&channel_id).await;
+               // }
             },
             RPCMethod::ChannelLeave => { // TODO:
                 let complete = |rc: Result<()>| {
-                    if let Some(Promise::LeaveChannel(ack)) = call.promise() {
-                        lock!(ack).complete(rc)
+                    if let Some(Promise::LeaveChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
                     }
                 };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
                 if let Err(e) = preparsed.result::<bool>() {
-                    complete(Err(e));
+                    complete(err_from(e));
                     return;
                 }
-                let Ok(Some(channel)) = ua!(self).channel(msg.from()) else {
-                    let err = format!("Internal error: No channel {{{}}} found after from local agent", msg.from());
-                    warn!("{}", err);
-                    complete(Err(Error::State(err)));
-                    return;
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => {
+                        let estr = format!("Internal error: no channel {} found", msg.from());
+                        complete(Err(Error::State(estr)));
+                        return;
+                    },
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
                 };
                 ua!(self).on_left_channel(&channel);
                 complete(Ok(()))
             },
-            RPCMethod::ChannelOwner => { // TODO:
+            RPCMethod::ChannelOwner => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelOwner(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelOwner(new_owner) = unwrap!(call.params()) {
+                    channel.set_owner(new_owner.clone());
+                    ua!(self).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelPermission => { // TODO:
+            RPCMethod::ChannelPermission => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelOwner(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelPermission(new_permission) = unwrap!(call.params()) {
+                    channel.set_permission(new_permission.clone());
+                    ua!(self).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelName => { // TODO:
+            RPCMethod::ChannelName => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelName(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelName(name) = unwrap!(call.params()) {
+                    channel.set_name(name.as_str());
+                    ua!(self).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelNotice => { // TODO:
+            RPCMethod::ChannelNotice => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelNotice(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelNotice(notice) = unwrap!(call.params()) {
+                    channel.set_notice(notice.as_str());
+                    ua!(self).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelRole => { // TODO:
+            RPCMethod::ChannelRole => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelMemberRole(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelMemberRole(member_role) = unwrap!(call.params()) {
+                    let role = member_role.role();
+                    let changed_members = member_role.members().iter()
+                        .map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    ua!(self).on_channel_members_role_changed(&channel, changed_members.as_ref(), role);
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelBan => { // TODO:
+            RPCMethod::ChannelBan => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::BanChannelMembers(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::BanChannelMembers(ids) = unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    ua!(self).on_channel_members_banned(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
             },
-            RPCMethod::ChannelUnban => { // TODO:
+            RPCMethod::ChannelUnban => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::UnbanChannelMembers(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::UnbanChannelMembers(ids) = unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    ua!(self).on_channel_members_unbanned(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelRemove =>{
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RemoveChannelMembers(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let err_from = |e: Error| {
+                    let estr = format!("Internal error: {e}");
+                    warn!("{}", estr);
+                    Err(Error::State(estr))
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::RemoveChannelMembers(ids) = unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    ua!(self).on_channel_members_removed(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
             },
             _ => {
-                error!("Unknown RPC method in response from {}, ignored", msg.from());
+                error!("Internal Error: invalid RPC call {:?}", call.method());
                 return;
             }
         }

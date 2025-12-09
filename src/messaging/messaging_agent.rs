@@ -60,7 +60,7 @@ pub trait MessagingAgent{
 
     fn join_channel(&mut self,
         ticket: &InviteTicket
-    ) -> impl Future<Output = Result<()>>;
+    ) -> impl Future<Output = Result<Channel>>;
 
     fn leave_channel(&mut self,
         channel_id: &Id

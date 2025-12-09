@@ -59,6 +59,10 @@ impl RPCRequest
         self.id
     }
 
+    pub(crate) fn params(&self) -> Option<&Parameters> {
+        self.params.as_ref()
+    }
+
     pub(crate) fn method(&self) -> RPCMethod {
         self.method
     }

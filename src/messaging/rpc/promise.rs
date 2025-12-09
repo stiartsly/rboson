@@ -91,7 +91,7 @@ pub(crate) enum Promise {
     RevokeDevice(Arc<Mutex<BoolVal>>),
     CreateChannel(Arc<Mutex<ChannelVal>>),
     RemoveChannel(Arc<Mutex<BoolVal>>),
-    JoinChannel(Arc<Mutex<BoolVal>>),
+    JoinChannel(Arc<Mutex<ChannelVal>>),
     LeaveChannel(Arc<Mutex<BoolVal>>),
     SetChannelOwner(Arc<Mutex<BoolVal>>),
     SetChannelPerm(Arc<Mutex<BoolVal>>),
@@ -101,7 +101,8 @@ pub(crate) enum Promise {
     BanChannelMembers(Arc<Mutex<BoolVal>>),
     UnbanChannelMembers(Arc<Mutex<BoolVal>>),
     RemoveChannelMembers(Arc<Mutex<BoolVal>>),
-    PushContactsUpdate(Arc<Mutex<StringVal>>)
+    PushContactsUpdate(Arc<Mutex<StringVal>>),
+    ContactClear(Arc<Mutex<BoolVal>>),
 }
 
 impl Promise {
@@ -110,7 +111,6 @@ impl Promise {
         match self {
             RevokeDevice(s) |
             RemoveChannel(s) |
-            JoinChannel(s) |
             LeaveChannel(s) |
             SetChannelOwner(s) |
             SetChannelPerm(s) |
@@ -119,9 +119,11 @@ impl Promise {
             SetChannelMemberRole(s) |
             BanChannelMembers(s) |
             UnbanChannelMembers(s) |
-            RemoveChannelMembers(s) => s.lock().unwrap().is_completed(),
+            RemoveChannelMembers(s) |
+            ContactClear(s)         => s.lock().unwrap().is_completed(),
             GetDeviceList(s)        => s.lock().unwrap().is_completed(),
-            CreateChannel(s)        => s.lock().unwrap().is_completed(),
+            CreateChannel(s) |
+            JoinChannel(s)          => s.lock().unwrap().is_completed(),
             PushContactsUpdate(s)   => s.lock().unwrap().is_completed(),
         }
     }
@@ -131,7 +133,6 @@ impl Promise {
         match self {
             RevokeDevice(s) |
             RemoveChannel(s) |
-            JoinChannel(s) |
             LeaveChannel(s) |
             SetChannelOwner(s) |
             SetChannelPerm(s) |
@@ -140,9 +141,11 @@ impl Promise {
             SetChannelMemberRole(s) |
             BanChannelMembers(s) |
             UnbanChannelMembers(s) |
-            RemoveChannelMembers(s) => s.lock().unwrap().set_waker(w),
+            RemoveChannelMembers(s) |
+            ContactClear(s)         => s.lock().unwrap().set_waker(w),
             GetDeviceList(s)        => s.lock().unwrap().set_waker(w),
-            CreateChannel(s)        => s.lock().unwrap().set_waker(w),
+            CreateChannel(s) |
+            JoinChannel(s)          => s.lock().unwrap().set_waker(w),
             PushContactsUpdate(s)   => s.lock().unwrap().set_waker(w),
         }
     }

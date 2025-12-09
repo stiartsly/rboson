@@ -21,6 +21,7 @@ pub(crate) mod rpc {
     pub(crate) mod request;
     pub(crate) mod response;
     pub(crate) mod promise;
+    pub(crate) mod notif;
 }
 
 pub(crate) mod contact;

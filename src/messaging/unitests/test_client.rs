@@ -112,7 +112,7 @@ impl ProfileListener for ProfileListenerTest {
         println!("User profile acquired");
     }
 
-    fn on_user_profile_changed(&self, _avatar: bool) {
+    fn on_user_profile_changed(&self, _name: &str, _avatar: bool) {
         println!("User profile changed");
     }
 }

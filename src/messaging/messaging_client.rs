@@ -48,6 +48,7 @@ use crate::messaging::{
     ConnectionListener,
     ChannelListener,
     ContactListener,
+    ProfileListener,
     profile::Profile,
     api_client::{self, APIClient},
     channel::{self, Role, Permission, Channel},
@@ -58,6 +59,7 @@ use crate::messaging::{
         method::RPCMethod,
         request::RPCRequest,
         response::RPCResponse,
+        notif::{events, Notification, ChannelMembersRoleUpdated},
         params::{self, Parameters},
         promise::{self, Ack, Promise, Waiter},
     },
@@ -1420,40 +1422,44 @@ impl MessagingWorker {
     async fn process_msg(&mut self, msg: Msg) {
         match msg.message_type() {
             MessageType::Message => {
-                self.on_msg(msg);
+                self.on_msg(msg).await;
             },
             MessageType::Call => {
                 self.on_rpc_response(msg).await;
             },
             MessageType::Notification => {
-                self.on_notification(msg);
+                self.on_notification(msg).await;
             }
         }
     }
 
-    fn on_msg(&mut self, msg: Msg) {
-        let conv_id = match !self.is_me(msg.to()) {
+    async fn on_msg(&mut self, msg: Msg) {
+        let need_refresh = |contact: Option<&Contact>| {
+            match contact {
+                Some(c) => c.is_staled(),
+                None => true
+            }
+        };
+        let conversation_id = match !self.is_me(msg.to()) {
             true => msg.to().clone(),
             false => msg.from().clone()
         };
 
-        ua!(self).on_message(msg);
+        lock!(self.ua).on_message(msg);
 
-        let mut need_refresh = false;
-        let contact = ua!(self).contact(&conv_id);
-        if let Ok(Some(contact)) = contact {
-            if contact.is_staled() {
-                need_refresh = true;
+        let ua = self.ua.clone();
+        _ = tokio::spawn(async move {
+            let Ok(contact) = lock!(ua).contact(&conversation_id) else {
+                error!("Error retrieving contact {} from user agent", conversation_id);
+                return;
+            };
+            // check if the contact need to be update
+            if need_refresh(contact.as_ref()) {
+                //self.arefresh_profile(&conv_id).await.on_success(|profile| {
+                //    self.ua().lock().unwrap().on_contact_profile(&conv_id, profile);
+                //});
             }
-        }else {
-            need_refresh = true;
-        }
-
-        if need_refresh {
-            //self.arefresh_profile(&conv_id).await.on_success(|profile| {
-            //    self.ua().lock().unwrap().on_contact_profile(&conv_id, profile);
-            //});
-        }
+        }).await;
     }
 
     async fn on_rpc_response(&mut self, msg: Msg) {
@@ -1936,8 +1942,188 @@ impl MessagingWorker {
         }
     }
 
-    fn on_notification(&mut self, _message: Msg) {
-        unimplemented!()
+    async fn on_notification(&mut self, msg: Msg) {
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Message body is missing or empty in notification from {}, ignored", msg.from());
+            return;
+        };
+
+        {
+            use hex::ToHex;
+            let body_hex = body.encode_hex::<String>();
+            println!("Notification body (hex): {}", body_hex);
+        }
+
+        let Ok(mut preparsed) = Notification::from(body) else {
+            error!("Error parsing notification from {}, message ignored", msg.from());
+            return;
+        };
+
+        match preparsed.event() {
+            events::USER_PROFILE => {
+                let profile = match preparsed.data::<Profile>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing profile data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if !self.is_me(&profile.id()) && !profile.is_genuine() {
+                    warn!("User updated its profile, but the Profile invalid, ignored");
+                    return;
+                } else {
+                    info!("User updated its profile: {}", profile.id());
+                }
+                let name = profile.name();
+                lock!(self.ua).on_user_profile_changed(name, profile.has_avatar());
+            },
+            events::CHANNEL_PROFILE => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let updated = match preparsed.data::<Channel>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if let Ok(Some(mut channel)) = lock!(self.ua).channel(msg.to()) {
+                    channel.update_channel(&updated);
+                    lock!(self.ua).on_channel_deleted(&channel)
+                }
+            },
+            events::CHANNEL_DELETED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                if let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) {
+                    lock!(self.ua).on_channel_deleted(&channel)
+                }
+            },
+            events::CHANNEL_MEMBER_JOINED => {
+                let member = match preparsed.data::<channel::Member>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel member data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) {
+                    lock!(self.ua).on_channel_member_joined(&channel, &member);
+                }
+            },
+            events::CHANNEL_MEMBER_LEFT => {
+                let memberid = preparsed.operator();
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let member = match channel.member(&memberid) {
+                    Some(m) => m,
+                    None => channel::Member::unknown(&memberid)
+                };
+                lock!(self.ua).on_channel_member_left(&channel, &member);
+            },
+            events::CHANNEL_MEMBERS_ROLE => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let updated = match preparsed.data::<ChannelMembersRoleUpdated>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members role data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let role = updated.role();
+                let ids = updated.members();
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_role_changed(&channel, members.as_ref(), role);
+            },
+            events::CHANNEL_MEMBERS_BANNED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_banned(&channel, members.as_ref());
+            },
+            events::CHANNEL_MEMBERS_UNBANNED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_unbanned(&channel, members.as_ref());
+            },
+            events::CHANNEL_MEMBERS_REMOVED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_removed(&channel, members.as_ref());
+            },
+            _ => {
+                error!("Internal Error: invalid notification {:?}, ignored", preparsed.event());
+                return;
+            }
+        }
     }
 
     #[allow(unused)]

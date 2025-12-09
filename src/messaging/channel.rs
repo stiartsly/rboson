@@ -220,6 +220,10 @@ impl Channel {
         self.data_mut().notice = Some(notice.to_string());
     }
 
+    pub(crate) fn update_channel(&mut self, _channel: &Channel) {
+        unimplemented!()
+    }
+
     pub(crate) fn data(&self) -> &ChannelData {
         self.derived()
     }

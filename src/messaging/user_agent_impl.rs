@@ -423,7 +423,7 @@ impl ProfileListenerMut for UserAgent {
         }
     }
 
-    fn on_user_profile_changed(&mut self, name: String, avatar: bool) {
+    fn on_user_profile_changed(&mut self, name: &str, avatar: bool) {
         let Some(ref user) = self.user else {
             warn!("User profile is not set!");
             return;
@@ -431,13 +431,13 @@ impl ProfileListenerMut for UserAgent {
 
         self.user = Some(UserProfile::new(
             user.identity().clone(),
-            name,
+            name.to_string(),
             avatar
         ));
 
         self.update_userinfo_config();
         for cb in self.profile_listeners.iter_mut() {
-            cb.on_user_profile_changed(avatar);
+            cb.on_user_profile_changed(name, avatar);
         }
     }
 }
@@ -485,6 +485,20 @@ impl MessageListener for UserAgent {
         for cb in self.message_listeners.iter() {
             cb.on_broadcast(message);
         };
+    }
+}
+
+impl ProfileListener for UserAgent {
+    fn on_user_profile_acquired(&self, profile: &UserProfile) {
+        for cb in self.profile_listeners.iter() {
+            cb.on_user_profile_acquired(profile);
+        }
+    }
+
+    fn on_user_profile_changed(&self, name: &str, avatar: bool) {
+        for cb in self.profile_listeners.iter() {
+            cb.on_user_profile_changed(name, avatar);
+        }
     }
 }
 

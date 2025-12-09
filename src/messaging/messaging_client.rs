@@ -1286,7 +1286,7 @@ impl MessagingWorker {
         if topic == self.inbox {
             self.on_inbox_msg(msg).await;
         } else if topic == self.outbox {
-            self.on_outbox_msg(msg);
+            self.on_outbox_msg(msg).await;
         } else if topic == self.broadcast {
             self.on_broadcast_msg(msg);
         } else {
@@ -1406,8 +1406,57 @@ impl MessagingWorker {
         self.process_msg(msg).await
     }
 
-    fn on_outbox_msg(&mut self, _message: Msg) {
-        println!(">>>> TODO: received outbox message");
+    async fn on_outbox_msg(&mut self, mut msg: Msg) {
+        let need_decryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.from() != self.peer.id()
+        };
+
+        if true { // TODO:
+            warn!("Outgoing message received on outbox, ignored");
+            return;
+        } else if need_decryption(&msg) {
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: me -> recipient
+                    // The body is encrypted using my private key
+                    // and the session public key associated with the recipient.
+                    let recipient = ua!(self).contact(msg.to());
+                    let Ok(Some(recipient)) = recipient else {
+                        warn!("Recipient {} not in contact list, ignored", msg.to());
+                        return;
+                    };
+                    if recipient.session_keypair().is_none() {
+                        warn!("No session key attached to recipient {}, ignored", msg.to());
+                        return;
+                    }
+                },
+                MessageType::Call => {
+                    // Call: me -> recipient (user | channel)
+                    // The body is encrypted using my private key
+                    // and the recipient's public key.
+                },
+                _ => {}
+            }
+        } else {
+            // service RPC requests: me -> servicePeer
+            // body is encrypted together with the message envelope.
+            // Or: empty body
+            msg.mark_encrypted(false);
+        }
+
+        match msg.message_type() {
+            MessageType::Message => self.on_sent(msg).await,
+            MessageType::Call => self.on_rpc_request(msg).await,
+            _ => warn!("Unexpected message type on outbox, ignored")
+        }
+    }
+
+    async fn on_sent(&mut self, _msg: Msg) {
+        unimplemented!()
     }
 
     fn on_broadcast_msg(&mut self, mut msg: Msg) {
@@ -1464,7 +1513,7 @@ impl MessagingWorker {
 
     async fn on_rpc_response(&mut self, msg: Msg) {
         let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
-            warn!("Message body is missing or empty in response from {}, ignored", msg.from());
+            warn!("Empty RPC response received from {}, ignored", msg.from());
             return;
         };
 
@@ -1944,7 +1993,7 @@ impl MessagingWorker {
 
     async fn on_notification(&mut self, msg: Msg) {
         let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
-            warn!("Message body is missing or empty in notification from {}, ignored", msg.from());
+            warn!("Empty notification received from {}, ignored", msg.from());
             return;
         };
 
@@ -2126,76 +2175,47 @@ impl MessagingWorker {
         }
     }
 
-    #[allow(unused)]
-    fn on_rpc_request<P,R>(&mut self, msg: Msg) where P: Serialize, R: DeserializeOwned{
-        if msg.body_is_empty() {
-            error!("Empty RPC response message from {}, ignored", msg.from());
+    async fn on_rpc_request(&mut self, msg: Msg) {
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Empty RPC request received from {}, ignored", msg.from());
             return;
-        }
+        };
 
         if msg.has_original_body() {
             // TODO
+            return;
+        }
+        {
+            use hex::ToHex;
+            let body_hex = body.encode_hex::<String>();
+            println!("RPC response body (hex): {}", body_hex);
         }
 
-        let request: Option<RPCRequest> = None; // TODO:
-        match request.unwrap().method() {
-            RPCMethod::DeviceList => {
-                /*
-                let call: RPCRequest<(), Vec<ClientDevice>> = request.unwrap();
-                let response: RPCResponse<Vec<ClientDevice>> = match serde_cbor::from_slice(msg.body().unwrap()) {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        error!("Failed to parse RPC response from {}: {}, ignored", msg.from(), e);
-                        return;
-                    }
-                };
-
-                if response.is_error() {
-                    error!("RPC response from {} error: {}, ignored", msg.from(), response.error().unwrap());
-                    return;
-                }
-
-                let devices = response.result().unwrap_or_else(|| {
-                    vec![]
-                });
-                self.user_agent.lock().unwrap().on_device_list(devices);
-                */
-            },
-            RPCMethod::DeviceRevoke => {// TODO:
-            },
-            RPCMethod::ContactPush => { // TODO:
-            },
-            RPCMethod::ContactClear => { // TODO:
-            },
-
-            RPCMethod::ChannelCreate => { // TODO:
-            },
-            RPCMethod::ChannelRemove => { // TODO:
-            },
-            RPCMethod::ChannelJoin => { // TODO:
-            },
-            RPCMethod::ChannelLeave => { // TODO:
-            },
-            RPCMethod::ChannelOwner => { // TODO:
-            },
-            RPCMethod::ChannelPermission => { // TODO:
-            },
-            RPCMethod::ChannelName => { // TODO:
-            },
-            RPCMethod::ChannelNotice => { // TODO:
-            },
-            RPCMethod::ChannelRole => { // TODO:
-            },
-            RPCMethod::ChannelBan => { // TODO:
-            },
-            RPCMethod::ChannelUnban => { // TODO:
-            },
+        let Ok(preparsed) = RPCRequest::from(body) else {
+            error!("Failed to parse RPC response from {}, message ignored", msg.from());
+            return;
+        };
+        match preparsed.method() {
+            RPCMethod::DeviceList   => {},  // ignored
+            RPCMethod::DeviceRevoke => {}   // ignored
+            RPCMethod::ContactPush  => {},
+            RPCMethod::ContactClear => {},
+            RPCMethod::ChannelCreate => {},
+            RPCMethod::ChannelRemove => {},
+            RPCMethod::ChannelJoin  => {},
+            RPCMethod::ChannelLeave => {},
+            RPCMethod::ChannelOwner => {},
+            RPCMethod::ChannelPermission => {},
+            RPCMethod::ChannelName  => {},
+            RPCMethod::ChannelNotice => {},
+            RPCMethod::ChannelRole  => {},
+            RPCMethod::ChannelBan   => {},
+            RPCMethod::ChannelUnban => {},
             _ => {
                 error!("Unknown RPC method in response from {}, ignored", msg.from());
                 return;
             }
         }
-        //unimplemented!()
     }
 
     #[allow(unused)]

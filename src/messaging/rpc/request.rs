@@ -1,4 +1,10 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use serde_cbor::{self};
+
+use crate::{
+    Error,
+    error::Result
+};
 use super::{
     method::RPCMethod,
     response::RPCResponse,
@@ -6,7 +12,7 @@ use super::{
     params::Parameters
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct RPCRequest
 {
     #[serde(rename = "i")]
@@ -45,6 +51,12 @@ impl RPCRequest
         }
     }
 
+    pub(crate) fn from(body: &[u8]) -> Result<Self> {
+        serde_cbor::from_slice::<RPCRequest>(body).map_err(|e|
+            Error::Protocol(format!("Failed to parse RPC response: {}", e))
+        )
+    }
+
     pub(crate) fn with_promise(mut self, promise: Promise) -> Self{
         self.promise = Some(promise);
         self
@@ -71,6 +83,7 @@ impl RPCRequest
         self.cookie.as_deref()
     }
 
+    #[allow(unused)]
     pub(crate) fn is_initiator(&self) -> bool {
         self.promise.is_some()
     }

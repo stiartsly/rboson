@@ -319,10 +319,6 @@ impl Message {
         })
     }
 
-    pub(crate) fn body_is_empty(&self) -> bool {
-        self.body.as_ref().map(|b| b.is_empty()).unwrap_or(true)
-    }
-
     pub(crate) fn _completed(&self) -> u64 {
         self.completed
     }

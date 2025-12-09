@@ -3,7 +3,6 @@ use std::time::{SystemTime, Duration};
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
-use serde::{Serialize, de::DeserializeOwned};
 use log::{error, warn, info, debug, trace};
 use tokio::task::JoinHandle;
 use serde_cbor;
@@ -70,13 +69,6 @@ use crate::messaging::{
     },
     internal::contacts_update::ContactsUpdate,
 };
-
-#[macro_export]
-macro_rules! ua {
-    ($me:expr) => {{
-        $me.ua.lock().unwrap()
-    }};
-}
 
 #[allow(dead_code)]
 pub struct MessagingClient {
@@ -205,9 +197,9 @@ impl MessagingClient {
 
         _ = self.load_access_token()?;
 
-        let peer = ua!(self).peer().clone();
-        let user = ua!(self).user().unwrap().identity().clone();
-        let device = ua!(self).device().unwrap().identity().unwrap().clone();
+        let peer = lock!(self.ua).peer().clone();
+        let user = lock!(self.ua).user().unwrap().identity().clone();
+        let device = lock!(self.ua).device().unwrap().identity().unwrap().clone();
         let api_url = match peer.alternative_url().as_ref() {
             None => Err(Error::State("Alternative URL should be set".into())),
             Some(url) => Url::parse(url).map_err(|e|
@@ -239,7 +231,7 @@ impl MessagingClient {
             ).await?;
 
             if let Some(version_id) = version.version_id() {
-                _ = ua!(self).put_contacts_update(
+                _ = lock!(self.ua).put_contacts_update(
                     &version_id,
                     version.contacts().as_slice()
                 ).map_err(|e|{
@@ -301,7 +293,7 @@ impl MessagingClient {
         channel_id: &Id,
         invitee: Option<&Id>
     ) -> Result<InviteTicket> {
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             return Err(Error::Argument("No channel {} was found in local agent.".into()));
         };
 
@@ -361,7 +353,7 @@ impl MessagingClient {
         };
 
         let encrypt_cb_for_msg = |msg: &Msg| -> Result<Vec<u8>> {
-            let recipient = ua!(self).contact(msg.to())?;
+            let recipient = lock!(self.ua).contact(msg.to())?;
             let Some(rec) = recipient else {
                 let estr = format!("Failed to send message to unknown recipient {}", msg.to());
                 error!("{}", estr);
@@ -483,7 +475,7 @@ impl MessagingClient {
 
         info!("Connecting to the messaging server ...");
         self.disconnect = false;
-        ua!(self).on_connecting();
+        lock!(self.ua).on_connecting();
 
         let urls = vec![
             Url::parse("tcp://155.138.245.211:1883").unwrap(),  // TODO:
@@ -501,7 +493,7 @@ impl MessagingClient {
         }).map_err(|e| {
             let errstr = format!("Failed to connect to the messaging server: {}", e);
             error!("{}", errstr);
-            ua!(self).on_disconnected();
+            lock!(self.ua).on_disconnected();
             Error::State(errstr)
         })
     }
@@ -812,7 +804,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {channel_id} found from user agent".into()))?
         };
         if !channel.is_owner(self.user.id()) {
@@ -845,7 +837,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
@@ -875,7 +867,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         let userid = self.user.id();
@@ -915,7 +907,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         let userid = self.user.id();
@@ -952,7 +944,7 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         let userid = self.user.id();
@@ -990,7 +982,7 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(())
         }
-        let Some(ch) = ua!(self).channel(channel_id)? else {
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         let userid = self.user.id();
@@ -1029,7 +1021,7 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
 
@@ -1065,7 +1057,7 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(channel) = ua!(self).channel(channel_id)? else {
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         let userid = self.user.id();
@@ -1235,7 +1227,7 @@ impl MessagingWorker {
 
     fn on_disconnect(&mut self) {
         if self.disconnect {
-            ua!(self).on_disconnected();
+            lock!(self.ua).on_disconnected();
             info!("disconnected!");
             return;
         }
@@ -1254,7 +1246,7 @@ impl MessagingWorker {
         self.failures = 0;
         *lock!(self.connected) = true;
         info!("Connected to the messaging server");
-        ua!(self).on_connected();
+        lock!(self.ua).on_connected();
     }
 
     async fn on_publish(&mut self, data: rumqttc::Publish) {
@@ -1315,7 +1307,7 @@ impl MessagingWorker {
                     // Message: sender -> me
                     // The body is encrypted using the sender's private key
                     // and the session public key associated with that sender.
-                    let sender = ua!(self).contact(msg.from());
+                    let sender = lock!(self.ua).contact(msg.from());
                     let Ok(Some(sender)) = sender else {
                         warn!("Sender {} not in contact list, ignored", msg.from());
                         return;
@@ -1356,7 +1348,7 @@ impl MessagingWorker {
                 }
             }
         } else {
-            let Ok(Some(channel)) = ua!(self).channel(msg.to()) else {
+            let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
                 warn!("No channel {{{}}} found, ignored", msg.to());
                 return;
             };
@@ -1424,7 +1416,7 @@ impl MessagingWorker {
                     // Message: me -> recipient
                     // The body is encrypted using my private key
                     // and the session public key associated with the recipient.
-                    let recipient = ua!(self).contact(msg.to());
+                    let recipient = lock!(self.ua).contact(msg.to());
                     let Ok(Some(recipient)) = recipient else {
                         warn!("Recipient {} not in contact list, ignored", msg.to());
                         return;
@@ -1465,7 +1457,7 @@ impl MessagingWorker {
 		// it was already decrypted here
 
         msg.mark_encrypted(false);
-        ua!(self).on_broadcast(msg);
+        lock!(self.ua).on_broadcast(msg);
     }
 
     async fn process_msg(&mut self, msg: Msg) {
@@ -1516,7 +1508,6 @@ impl MessagingWorker {
             warn!("Empty RPC response received from {}, ignored", msg.from());
             return;
         };
-
         {
             use hex::ToHex;
             let body_hex = body.encode_hex::<String>();
@@ -1524,12 +1515,12 @@ impl MessagingWorker {
         }
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
-            error!("Failed to parse RPC response from {}, message ignored", msg.from());
+            error!("Error parsing RPC response from {}, ignored", msg.from());
             return;
         };
 
         let Some(call) = self.pending_calls.lock().unwrap().remove(preparsed.id()) else {
-            error!("Unmatched RPC response ID {} from {}, message ignored", preparsed.id(), msg.from());
+            error!("Unmatched RPC response ID {} from {}, ignored", preparsed.id(), msg.from());
             return;
         };
 
@@ -1554,7 +1545,6 @@ impl MessagingWorker {
                 };
                 complete(Ok(devices))
             },
-
             RPCMethod::DeviceRevoke => {
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::RevokeDevice(arc)) = call.promise() {
@@ -1572,11 +1562,9 @@ impl MessagingWorker {
                 }
                 complete(Ok(()))
             },
-
             RPCMethod::ContactPush => {
                 // TODO:
             },
-
             RPCMethod::ContactClear => {
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::ContactClear(arc)) = call.promise() {
@@ -1595,7 +1583,6 @@ impl MessagingWorker {
                 lock!(self.ua).on_contacts_cleared();
                 complete(Ok(()))
             },
-
             RPCMethod::ChannelCreate => {
                 let complete = |rc: Result<Channel>| {
                     if let Some(Promise::CreateChannel(arc)) = call.promise() {
@@ -1634,7 +1621,7 @@ impl MessagingWorker {
                // if call.is_initiator() {
                //     _ = self.channel_members(&channel_id).await;
                // }
-            }
+            },
             RPCMethod::ChannelDelete => {
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::RemoveChannel(arc)) = call.promise() {
@@ -1662,7 +1649,7 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                ua!(self).on_channel_deleted(&channel);
+                lock!(self.ua).on_channel_deleted(&channel);
                 complete(Ok(()))
             },
             RPCMethod::ChannelJoin => {
@@ -1704,7 +1691,7 @@ impl MessagingWorker {
                //     _ = self.channel_members(&channel_id).await;
                // }
             },
-            RPCMethod::ChannelLeave => { // TODO:
+            RPCMethod::ChannelLeave => {
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::LeaveChannel(arc)) = call.promise() {
                         lock!(arc).complete(rc)
@@ -1731,7 +1718,7 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                ua!(self).on_left_channel(&channel);
+                lock!(self.ua).on_left_channel(&channel);
                 complete(Ok(()))
             },
             RPCMethod::ChannelOwner => {
@@ -1759,7 +1746,7 @@ impl MessagingWorker {
                 };
                 if let Parameters::SetChannelOwner(new_owner) = unwrap!(call.params()) {
                     channel.set_owner(new_owner.clone());
-                    ua!(self).on_channel_updated(&channel);
+                    lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1788,7 +1775,7 @@ impl MessagingWorker {
                 };
                 if let Parameters::SetChannelPermission(new_permission) = unwrap!(call.params()) {
                     channel.set_permission(new_permission.clone());
-                    ua!(self).on_channel_updated(&channel);
+                    lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1817,7 +1804,7 @@ impl MessagingWorker {
                 };
                 if let Parameters::SetChannelName(name) = unwrap!(call.params()) {
                     channel.set_name(name.as_str());
-                    ua!(self).on_channel_updated(&channel);
+                    lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1846,7 +1833,7 @@ impl MessagingWorker {
                 };
                 if let Parameters::SetChannelNotice(notice) = unwrap!(call.params()) {
                     channel.set_notice(notice.as_str());
-                    ua!(self).on_channel_updated(&channel);
+                    lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1881,7 +1868,7 @@ impl MessagingWorker {
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    ua!(self).on_channel_members_role_changed(&channel, changed_members.as_ref(), role);
+                    lock!(self.ua).on_channel_members_role_changed(&channel, changed_members.as_ref(), role);
                 }
                 complete(Ok(()))
             },
@@ -1914,7 +1901,7 @@ impl MessagingWorker {
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    ua!(self).on_channel_members_banned(&channel, changed.as_ref());
+                    lock!(self.ua).on_channel_members_banned(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },
@@ -1947,7 +1934,7 @@ impl MessagingWorker {
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    ua!(self).on_channel_members_unbanned(&channel, changed.as_ref());
+                    lock!(self.ua).on_channel_members_unbanned(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },
@@ -1980,7 +1967,7 @@ impl MessagingWorker {
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    ua!(self).on_channel_members_removed(&channel, changed.as_ref());
+                    lock!(self.ua).on_channel_members_removed(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },

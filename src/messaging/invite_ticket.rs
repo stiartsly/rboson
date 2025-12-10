@@ -5,7 +5,6 @@ use serde::{ Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    as_secs,
     Id,
     Error, core::Result,
 };
@@ -33,7 +32,6 @@ pub struct InviteTicket {
     session_key: Option<Vec<u8>>
 }
 
-#[allow(unused)]
 impl InviteTicket {
     pub const EXPIRATION: u64 = DEFAULT_EXPIRATION;
 
@@ -67,7 +65,7 @@ impl InviteTicket {
     }
 
     pub fn is_expired(&self) -> bool {
-        self.expire < as_secs!(SystemTime::now())
+        self.expire < crate::as_secs!(SystemTime::now())
     }
 
     pub fn session_key(&self) -> Option<&[u8]> {
@@ -126,13 +124,12 @@ impl InviteTicket {
         v.update(&expire.to_le_bytes());
         v.finalize().to_vec()
     }
-}
 
-impl fmt::Display for InviteTicket {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        serde_json::to_string(self)
-            .map_err(|_| fmt::Error)?
-            .fmt(f)
+    #[allow(unused)]
+    fn to_json(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|e|
+            Error::Argument(format!("Failed to serialize InviteTicket to string: {}", e))
+        )
     }
 }
 
@@ -146,7 +143,6 @@ impl TryFrom<&str> for InviteTicket {
     }
 }
 
-/*
 impl fmt::Display for InviteTicket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "InviteTicket[channel={}, invitor={}",
@@ -165,4 +161,3 @@ impl fmt::Display for InviteTicket {
         Ok(())
     }
 }
-*/

@@ -102,6 +102,7 @@ pub(crate) enum Promise {
     UnbanChannelMembers(Arc<Mutex<BoolVal>>),
     RemoveChannelMembers(Arc<Mutex<BoolVal>>),
     PushContactsUpdate(Arc<Mutex<StringVal>>),
+    #[allow(unused)]
     ContactClear(Arc<Mutex<BoolVal>>),
 }
 

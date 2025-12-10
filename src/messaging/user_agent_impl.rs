@@ -82,22 +82,30 @@ impl UserAgent {
         self.hardened = true;
     }
 
-    pub fn set_user(&mut self, user: CryptoIdentity, name: String) -> Result<()>{
+    pub fn set_user(&mut self, user: CryptoIdentity, name: Option<&str>) -> Result<()>{
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.user = Some(UserProfile::new(user, name, false));
+        self.user = Some(UserProfile::new(user, name.map(|v| v.into()).unwrap(), false));
         self.update_userinfo_config();
         Ok(())
     }
 
-    pub fn set_device(&mut self, device: CryptoIdentity, name: String, app: Option<String>) -> Result<()> {
+    pub fn set_device(&mut self,
+        device: CryptoIdentity,
+        name: Option<&str>,
+        app_name: Option<&str>
+    ) -> Result<()> {
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.device = Some(DeviceProfile::new(device, name, app));
+        self.device = Some(DeviceProfile::new(
+            Some(device),
+            name.map(|v|v.into()),
+            app_name.map(|v|v.into())
+        ));
         self.update_device_info_config();
         Ok(())
     }
@@ -175,7 +183,7 @@ impl UserAgent {
 
         let user = DeviceInfo {
             privateKey: unwrap!(unwrap!(self.device).identity()).keypair().private_key().as_bytes(),
-            name: unwrap!(self.device).name(),
+            name: unwrap!(self.device).name().unwrap(),
             app: unwrap!(self.device).app_name()
         };
 
@@ -258,8 +266,8 @@ impl UserAgent {
         })?;
 
         let device = DeviceProfile::new(
-            identity,
-            device.name,
+            Some(identity),
+            Some(device.name),
             device.app
         );
 

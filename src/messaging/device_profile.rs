@@ -7,14 +7,14 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct DeviceProfile {
     identity: Option<CryptoIdentity>,
-    name    : String,
+    name    : Option<String>,
     app     : Option<String>
 }
 
 impl DeviceProfile {
-    pub(crate) fn new(identity: CryptoIdentity, name: String, app: Option<String>) -> Self {
+    pub(crate) fn new(identity: Option<CryptoIdentity>, name: Option<String>, app: Option<String>) -> Self {
         Self {
-            identity: Some(identity),
+            identity,
             name,
             app
         }
@@ -41,8 +41,8 @@ impl DeviceProfile {
         Ok(())
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     pub fn app_name(&self) -> Option<&str> {

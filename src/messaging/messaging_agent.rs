@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::future::Future;
+
 use crate::{
     Id,
     core::Result,
@@ -15,7 +16,6 @@ use crate::messaging::{
     client_device::ClientDevice
 };
 
-// messaging capabilities trait
 pub trait MessagingAgent{
     fn userid(&self) -> &Id;
     fn user_agent(&self) -> Arc<Mutex<UserAgent>> ;
@@ -42,7 +42,7 @@ pub trait MessagingAgent{
         file_name: &str
     ) -> impl Future<Output = Result<String>>;
 
-    fn devices(&mut self) -> impl Future<Output = Result<Vec<ClientDevice>>>;
+    fn devices(&mut self)-> impl Future<Output = Result<Vec<ClientDevice>>>;
 
     fn revoke_device(&mut self,
         device_id: &Id

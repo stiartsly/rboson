@@ -138,16 +138,16 @@ async fn test_messaging_client() {
         .pop()
         .expect("No peer found");
 
-    let user_key = signature::KeyPair::random();
-    let dev_key  = signature::KeyPair::random();
+    let user_key    = signature::KeyPair::random();
+    let device_key  = signature::KeyPair::random();
     let result = ClientBuilder::new()
         .with_user_key(user_key.clone())
-        .with_user_name("test-User").unwrap()
+        .with_device_key(device_key.clone())
         .with_messaging_peer(peer.clone()).unwrap()
-        .with_device_key(dev_key.clone())
-        .with_device_name("test-Device").unwrap()
-        .with_app_name("test-App").unwrap()
-        .with_user_registration("secret")
+        .with_user_name("test-User")
+        .with_device_name("test-Device")
+        .with_app_name("test-App")
+        .register_user_and_device("secret")
         .with_messaging_repository("test-repo")
         .with_device_node(node.clone())
         .with_connection_listener(ConnectionListenerTest)

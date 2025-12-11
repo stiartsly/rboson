@@ -93,19 +93,15 @@ impl UserAgent {
     }
 
     pub fn set_device(&mut self,
-        device: CryptoIdentity,
-        name: Option<&str>,
-        app_name: Option<&str>
+        device  : CryptoIdentity,
+        name    : &str,
+        app_name: &str,
     ) -> Result<()> {
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.device = Some(DeviceProfile::new(
-            Some(device),
-            name.map(|v|v.into()),
-            app_name.map(|v|v.into())
-        ));
+        self.device = Some(DeviceProfile::new(Some(device), name, app_name));
         self.update_device_info_config();
         Ok(())
     }
@@ -178,12 +174,12 @@ impl UserAgent {
             #[serde(with = "crate::serde_bytes_base64")]
             privateKey  : &'a [u8],
             name        : &'a str,
-            app         : Option<&'a str>
+            app         : &'a str,
         }
 
         let user = DeviceInfo {
             privateKey: unwrap!(unwrap!(self.device).identity()).keypair().private_key().as_bytes(),
-            name: unwrap!(self.device).name().unwrap(),
+            name: unwrap!(self.device).name(),
             app: unwrap!(self.device).app_name()
         };
 
@@ -267,8 +263,8 @@ impl UserAgent {
 
         let device = DeviceProfile::new(
             Some(identity),
-            Some(device.name),
-            device.app
+            device.name.as_str(),
+            device.app.unwrap().as_str()
         );
 
         #[derive(Deserialize, Debug)]

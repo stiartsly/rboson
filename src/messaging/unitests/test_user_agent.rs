@@ -20,7 +20,7 @@ async fn test_user_agent() {
     assert!(agent.device().is_none());
 
     _ = agent.set_user(user_identity.clone(), "Alice".into());
-    _ = agent.set_device(device_identity.clone(), "Example".into(), Some("Example".into()));
+    _ = agent.set_device(device_identity.clone(), "Example".into(), "Example");
 
     assert!(agent.user().is_some());
     assert!(agent.device().is_some());

@@ -279,7 +279,7 @@ impl Builder {
         Ok(())
     }
 
-    async fn setup_user_agent(&mut self) -> Result<Arc<Mutex<UserAgent>>> {
+    async fn setup_user_agent(&mut self) -> Result<(Arc<Mutex<UserAgent>>)> {
         let Some(ua) = self.ua.clone() else {
             return Err(Error::State("User agent is not set".into()));
         };
@@ -402,17 +402,18 @@ impl Builder {
         if user.is_some() {
             let cred = api_client.register_device(
                 crate::unwrap!(self.passphrase),
-                crate::unwrap!(device).name().unwrap(),
-                crate::unwrap!(device).app_name().unwrap_or("")
+                crate::unwrap!(device).name(),
+                crate::unwrap!(device).app_name()
             ).await?;
 
-            //crate::lock(ua).on_user_profile_acquired(cred.user());
+            crate::lock!(ua).on_user_profile_acquired(&cred);
         } else {
             let rid = api_client.register_device_request(
                 crate::unwrap!(self.device_name),
                 crate::unwrap!(self.app_name)
             ).await?;  // return registeration ID if success
 
+            // TODO:
             self.register_request_handler.as_ref().map(
                 |cb| cb(rid.as_str())
             ).unwrap_or(Ok(true)).map(|finished| {
@@ -426,15 +427,12 @@ impl Builder {
                         Err(Error::State("User cancelled the registration request".into()))
                     }
                 }
-            })?.map_err(|e| {
+            }).map_err(|e| {
                 error!("Failed to handle registration request: {e}");
                 e
             })?;
 
-            api_client.finish_register_device_request(&rid, None).await.map_err(|e| {
-                error!("Failed to finish device registration request: {e}");
-                e
-            })?;
+            api_client.finish_register_device_request(&rid, None).await?;
             //crate::lock!(ua).on_user_profile_acquired(cred.user());
         }
         Ok(())
@@ -444,9 +442,9 @@ impl Builder {
         self.eligible_check().await?;
 
         let ua = match self.ua.is_some() {
-            true  => self.setup_user_agent().await,
-            false => self.build_user_agent().await,
-        }?;
+            true  => self.setup_user_agent().await?,
+            false => self.build_user_agent().await?,
+        };
 
         self.register_client(ua).await?;
         MessagingClient::new(self)

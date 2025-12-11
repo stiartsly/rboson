@@ -1,22 +1,23 @@
 use crate::{
     Id,
-    core::{Error, Result},
+    Error,
+    error::Result,
     core::CryptoIdentity,
 };
 
 #[derive(Debug, Clone)]
 pub struct DeviceProfile {
     identity: Option<CryptoIdentity>,
-    name    : Option<String>,
-    app     : Option<String>
+    name    : String,
+    app     : String,
 }
 
 impl DeviceProfile {
-    pub(crate) fn new(identity: Option<CryptoIdentity>, name: Option<String>, app: Option<String>) -> Self {
+    pub(crate) fn new(identity: Option<CryptoIdentity>, name: &str, app: &str) -> Self {
         Self {
             identity,
-            name,
-            app
+            name    : name.into(),
+            app     : app.into(),
         }
     }
 
@@ -32,20 +33,20 @@ impl DeviceProfile {
         self.identity.is_some()
     }
 
-    pub fn set_identity(&mut self, identity: &CryptoIdentity) -> Result<()> {
+    pub fn set_identity(&mut self, identity: CryptoIdentity) -> Result<()> {
         if self.has_identity() {
             return Err(Error::State("Identity already set.".into()));
         }
 
-        self.identity = Some(identity.clone());
+        self.identity = Some(identity);
         Ok(())
     }
 
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+    pub fn name(&self) -> &str {
+        self.name.as_str()
     }
 
-    pub fn app_name(&self) -> Option<&str> {
-        self.app.as_deref()
+    pub fn app_name(&self) -> &str {
+        self.app.as_str()
     }
 }

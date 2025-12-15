@@ -23,7 +23,7 @@ use crate::messaging::{
     ContactListener,
     ConnectionListener,
     MessageListener,
-    user_agent_caps::UserAgentCaps,
+    user_agent::UserAgentCaps,
 
     message::Message,
     contact::GenericContact,
@@ -57,8 +57,8 @@ pub struct UserAgent {
 
 #[allow(unused)]
 impl UserAgent {
-    pub fn new(_path: Option<&Path>) -> Result<Self> {
-        Ok(Self {
+    pub fn new(_path: Option<&Path>) -> Self {
+        Self {
             user                : None,
             device              : None,
             peer                : None,
@@ -71,7 +71,7 @@ impl UserAgent {
             conversations       : HashMap::new(),
 
             hardened: false,
-        })
+        }
     }
 
     fn is_myself(&self, id: &Id) -> bool {
@@ -82,12 +82,15 @@ impl UserAgent {
         self.hardened = true;
     }
 
-    pub fn set_user(&mut self, user: CryptoIdentity, name: Option<&str>) -> Result<()>{
+    pub fn set_user(&mut self,
+        user: CryptoIdentity,
+        name: Option<&str>
+    ) -> Result<()>{
         if self.hardened {
             return Err(Error::State("UserAgent is hardened".into()));
         }
 
-        self.user = Some(UserProfile::new(user, name.map(|v| v.into()).unwrap(), false));
+        self.user = Some(UserProfile::new(user, name.map(|v| v.into()).unwrap_or_default(), false));
         self.update_userinfo_config();
         Ok(())
     }
@@ -125,7 +128,10 @@ impl UserAgent {
         }
 
         self.repo = Some(repository);
-        self.load_config()?;
+        self.load_config().map_err(|e| {
+            use crate::core::Error;
+            Error::State(format!("Load user agent config failed: {e}"))
+        })?;
         self.conversations.clear();
         //self.repository.all_conversations().for_each(|c| {
         //    self.conversations.insert(c.id().clone(), c);
@@ -232,9 +238,9 @@ impl UserAgent {
             avatar      : bool
         }
 
-        let user = repo.get_config_mult::<UserInfo>(".user").map_err(|e|
+        let user = repo.get_config_mult::<UserInfo>(".user").map_err(|e| {
             Error::State("Load user profile failed, error {e}".into())
-        )?;
+        })?;
         let identity = CryptoIdentity::from_private_key(user.privateKey.as_slice()).map_err(|e| {
             Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
         })?;
@@ -518,9 +524,8 @@ impl UserAgentCaps for UserAgent {
         self.device.as_ref()
     }
 
-    fn peer(&self) -> &PeerInfo {
-        assert!(self.peer.is_some(), "Peer info is not set!");
-        self.peer.as_ref().unwrap()
+    fn peer(&self) -> Option<&PeerInfo> {
+        self.peer.as_ref()
     }
 
     fn is_configured(&self) -> bool {
@@ -528,8 +533,8 @@ impl UserAgentCaps for UserAgent {
             self.device.is_some() &&
             self.peer.is_some() &&
             //self.repository.is_some() &&
-            self.peer().is_valid() &&
-            self.peer().alternative_url().is_some()
+            crate::unwrap!(self.peer).is_valid() &&
+            crate::unwrap!(self.peer).alternative_url().is_some()
     }
 
     fn harden(&mut self) {
@@ -567,7 +572,7 @@ impl UserAgentCaps for UserAgent {
     fn remove_conversation(&mut self, conversation_id: &Id) {
         self.conversations.remove(conversation_id);
         if let Some(repo) = self.repo.as_mut() {
-            let _ = repo.remove_messages_by_conversation(conversation_id);
+            _ = repo.remove_messages_by_conversation(conversation_id);
         }
     }
 

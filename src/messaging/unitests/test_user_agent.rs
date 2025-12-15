@@ -9,15 +9,12 @@ use crate::{
 
 #[tokio::test]
 async fn test_user_agent() {
-    let result = UserAgent::new(None);
-    assert!(result.is_ok());
-
-    let user_identity   = CryptoIdentity::from_keypair(signature::KeyPair::random());
-    let device_identity = CryptoIdentity::from_keypair(signature::KeyPair::random());
-
-    let mut agent = result.unwrap();
+    let mut agent = UserAgent::new(None);
     assert!(agent.user().is_none());
     assert!(agent.device().is_none());
+
+    let user_identity = CryptoIdentity::from_keypair(signature::KeyPair::random());
+    let device_identity = CryptoIdentity::from_keypair(signature::KeyPair::random());
 
     _ = agent.set_user(user_identity.clone(), "Alice".into());
     _ = agent.set_device(device_identity.clone(), "Example".into(), "Example");

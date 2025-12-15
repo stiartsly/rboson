@@ -21,7 +21,7 @@ use crate::messaging::{
 pub trait UserAgentCaps: Send + ConnectionListener + ChannelListener + ProfileListener{
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
-    fn peer(&self) -> &PeerInfo;
+    fn peer(&self) -> Option<&PeerInfo>;
 
     fn is_configured(&self) -> bool;
     fn harden(&mut self);

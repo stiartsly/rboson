@@ -61,11 +61,11 @@ pub mod client {
     pub use crate::messaging::messaging_client_builder::Builder;
 }
 
-pub(crate) mod user_agent_caps;
+pub(crate) mod user_agent;
 pub(crate) mod user_agent_impl;
 pub mod user_agent_ {
     pub use crate::messaging::user_agent_impl::UserAgent;
-    pub use crate::messaging::user_agent_caps::UserAgentCaps;
+    pub use crate::messaging::user_agent::UserAgentCaps;
 }
 
 pub use crate::{

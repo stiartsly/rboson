@@ -85,8 +85,8 @@ pub struct MessagingClient {
 
     service_info    : Option<api_client::MessagingServiceInfo>,
 
-    server_context  : Option<Arc<Mutex<CryptoContext>>>,
-    self_context    : Option<Arc<Mutex<CryptoContext>>>,
+    server_context  : Arc<Mutex<CryptoContext>>,
+    self_context    : Arc<Mutex<CryptoContext>>,
 
     api_client      : Option<APIClient>,
     disconnect      : bool,
@@ -108,7 +108,7 @@ impl MessagingClient {
             return Err(Error::State("User agent is not configured".into()));
         }
 
-        let peer = lock!(ua).peer().clone();
+        let peer = lock!(ua).peer().unwrap().clone();
         let user = lock!(ua).user().unwrap().identity().clone();
         let device = lock!(ua).device().unwrap().identity().unwrap().clone();
 
@@ -125,9 +125,6 @@ impl MessagingClient {
         }).into_string();
 
         Ok(Self {
-            peer,
-            user,
-            device,
             service_info    : None,
 
             client_id       : clientid,
@@ -144,8 +141,12 @@ impl MessagingClient {
             worker_client   : None,
             worker_task     : None,
 
-            self_context    : None,
-            server_context  : None,
+            self_context    : Arc::new(Mutex::new(user.create_crypto_context(user.id())?)),
+            server_context  : Arc::new(Mutex::new(user.create_crypto_context(peer.id())?)),
+
+            peer,
+            user,
+            device,
 
             pending_calls   : Arc::new(Mutex::new(HashMap::new())),
 
@@ -164,18 +165,6 @@ impl MessagingClient {
         self.api_client
             .as_mut()
             .expect("API client should be created")
-    }
-
-    fn self_ctxt(&self) -> &Arc<Mutex<CryptoContext>> {
-        self.self_context
-            .as_ref()
-            .expect("Self crypto context should be created")
-    }
-
-    fn server_ctxt(&self) -> &Arc<Mutex<CryptoContext>> {
-        self.server_context
-            .as_ref()
-            .expect("Server crypto context should be created")
     }
 
     fn pending_calls(&self) -> Arc<Mutex<HashMap<u32, RPCRequest>>> {
@@ -197,22 +186,19 @@ impl MessagingClient {
 
         _ = self.load_access_token()?;
 
-        let peer = lock!(self.ua).peer().clone();
-        let user = lock!(self.ua).user().unwrap().identity().clone();
-        let device = lock!(self.ua).device().unwrap().identity().unwrap().clone();
-        let api_url = match peer.alternative_url().as_ref() {
-            None => Err(Error::State("Alternative URL should be set".into())),
+        let api_url = match self.peer.alternative_url().as_ref() {
+            None => Err(Error::State("Alternative URL is not set".into())),
             Some(url) => Url::parse(url).map_err(|e|
-                Error::State(format!("Failed to parse API URL: {e}"))
+                Error::State(format!("Error parsing API URL: {e}"))
             )
         }?;
 
         let api_client = api_client::Builder::new()
             .with_base_url(&api_url)
-            .with_home_peerid(peer.id())
-            .with_user_identity(&user)
-            .with_device_identity(&device)
-            //.with_access_token(self.load_access_token().ok())
+            .with_home_peerid(self.peer.id())
+            .with_user_identity(&self.user)
+            .with_device_identity(&self.device)
+            //.with_access_token(self.load_access_token().ok()) // TODO:
             .with_access_token_refresh_handler(|_| {})
             .build()?;
 
@@ -220,7 +206,7 @@ impl MessagingClient {
         let version = match lock!(self.ua).contacts_version() {
             Ok(v) => Some(v),
             Err(e) => {
-                warn!("Failed to retrieve contact version from local agent with error {e}");
+                warn!("Error retrieving contact version from local agent: {e}, ignored.");
                 None
             }
         };
@@ -235,27 +221,18 @@ impl MessagingClient {
                     &version_id,
                     version.contacts().as_slice()
                 ).map_err(|e|{
-                    warn!("Failed to put contacts update to local agent: {e}, ignored this failure.");
+                    warn!("Error putting contacts update to local agent: {e}, ignored.");
                 });
             }
         }
 
         self.service_info = Some(self.api_client().service_info().await?);
-        self.self_context = Some(Arc::new(Mutex::new(self.user.create_crypto_context(user.id())?)));
-        self.server_context = Some(Arc::new(Mutex::new(self.user.create_crypto_context(peer.id())?)));
         Ok(())
     }
 
     pub async fn stop(&mut self, forced: bool) {
         _ = self.disconnect().await;
         self.disconnect = true;
-
-        if let Some(ctxt) = self.self_context.take() {
-            drop(ctxt);
-        }
-        if let Some(ctxt) = self.server_context.take() {
-            drop(ctxt);
-        }
 
         if let Some(task) = self.worker_task.take() {
             if forced {
@@ -267,22 +244,6 @@ impl MessagingClient {
         info!("Messaging client stopped ...");
         self.worker_task = None;
         self.worker_client = None;
-    }
-
-    fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
-        let nonce = Nonce::random();
-        let usr_sig = user.sign_into(nonce.as_bytes()).unwrap();
-        let dev_sig = device.sign_into(nonce.as_bytes()).unwrap();
-
-        let mut password = Vec::<u8>::with_capacity(
-            nonce.size() + usr_sig.len() + dev_sig.len()
-        );
-
-        password.extend_from_slice(nonce.as_bytes());
-        password.extend_from_slice(usr_sig.as_slice());
-        password.extend_from_slice(dev_sig.as_slice());
-
-        bs58::encode(password).into_string()
     }
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
@@ -396,7 +357,7 @@ impl MessagingClient {
     async fn publish_msg(&self, msg: &Msg) -> Result<()> {
         let outbox = self.outbox.as_str();
         let payload = serde_cbor::to_vec(msg).unwrap();
-        let payload = self.server_ctxt().lock().unwrap().encrypt_into(&payload)?;
+        let payload = lock!(self.server_context).encrypt_into(&payload)?;
 
         self.worker().lock().unwrap().publish(
             outbox,
@@ -427,7 +388,7 @@ impl MessagingClient {
             );
             options.set_credentials(
                 self.user.id().to_base58(),
-                Self::password(&self.user, &self.device)
+                password(&self.user, &self.device)
             );
             options.set_max_packet_size(16*1024, 18*1024);
             options.set_keep_alive(Duration::from_secs(60));
@@ -529,8 +490,8 @@ impl MessagingClient {
     }
 }
 
-unsafe impl Send for MessagingClient {}
-unsafe impl Sync for MessagingClient {}
+//unsafe impl Send for MessagingClient {}
+//unsafe impl Sync for MessagingClient {}
 
 impl MessagingAgent for MessagingClient {
     fn userid(&self) -> &Id {
@@ -570,7 +531,7 @@ impl MessagingAgent for MessagingClient {
         avatar: bool
     ) -> Result<()> {
         let Some(client) = self.api_client.as_mut() else {
-            return Err(Error::State("The client is not started yet".into()));
+            return Err(Error::State("Client is not started yet".into()));
         };
         client.update_profile(
             name.map(|n| n.nfc().collect::<String>()).as_deref(),
@@ -583,7 +544,7 @@ impl MessagingAgent for MessagingClient {
         avatar: &[u8]
     ) -> Result<String> {
         let Some(client) = self.api_client.as_mut() else {
-            return Err(Error::State("The client is not started yet".into()));
+            return Err(Error::State("Client is not started yet".into()));
         };
         client.upload_avatar(
             content_type,
@@ -676,7 +637,7 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
         let fut = Promise::CreateChannel(arc.clone());
-        let cookie = lock!(self.self_ctxt()).encrypt_into(
+        let cookie = lock!(self.self_context).encrypt_into(
             keypair.private_key().as_bytes()
         )?;
         let req = RPCRequest::new(
@@ -755,7 +716,7 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
         let fut = Promise::JoinChannel(arc.clone());
-        let cookie = lock!(self.self_ctxt()).encrypt_into(
+        let cookie = lock!(self.self_context).encrypt_into(
             session_key.as_slice()
         )?;
         let req = RPCRequest::new(
@@ -1182,8 +1143,8 @@ impl MessagingWorker {
             ua              : client.ua.clone(),
             _worker_client   : mqttc,
 
-            self_context    : client.self_ctxt().clone(),
-            server_context  : client.server_ctxt().clone(),
+            self_context    : client.self_context.clone(),
+            server_context  : client.server_context.clone(),
             disconnect      : false,
             failures        : 0,
             peer            : client.peer.clone(),
@@ -1245,6 +1206,7 @@ impl MessagingWorker {
     fn on_connected(&mut self) {
         self.failures = 0;
         *lock!(self.connected) = true;
+
         info!("Connected to the messaging server");
         lock!(self.ua).on_connected();
     }
@@ -2209,4 +2171,20 @@ impl MessagingWorker {
     async fn try_refresh_profile(&self, _id: &Id) -> Result<Profile> {
         unimplemented!()
     }
+}
+
+fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
+    let nonce = Nonce::random();
+    let usign = user.sign_into(nonce.as_bytes()).unwrap();
+    let dsign = device.sign_into(nonce.as_bytes()).unwrap();
+
+    let mut password = Vec::<u8>::with_capacity(
+        nonce.size() + usign.len() + dsign.len()
+    );
+
+    password.extend_from_slice(nonce.as_bytes());
+    password.extend_from_slice(&usign);
+    password.extend_from_slice(&dsign);
+
+    bs58::encode(password).into_string()
 }

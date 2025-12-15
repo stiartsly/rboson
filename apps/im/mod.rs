@@ -391,7 +391,7 @@ impl ConnectionListener for ConnectionListenerTest {
     }
 
     fn on_connected(&self) {
-       println!("Connected to messaging service");
+       // println!("Connected to messaging service");
     }
 
     fn on_disconnected(&self) {

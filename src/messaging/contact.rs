@@ -302,22 +302,27 @@ impl<T> GenericContact<T> where T: Clone{
     }
 
     fn init_session_key(&mut self, private_key: &[u8]) -> Result<()> {
-        if private_key.len() != signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
-            return Err(Error::Argument(format!("Invalid session key")));
-        }
-
-        let Some(ctxt) = self.self_encryption_context() else {
-            return Err(Error::State("No self encryption context".into()));
+        let sk = if private_key.len() == signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
+            let Some(ctxt) = self.self_encryption_context() else {
+                return Err(Error::State("No self encryption context".into()));
+            };
+            let Ok(sk) = lock!(ctxt).decrypt_into(private_key) else {
+                return Err(Error::Crypto(format!("Error decrypting session key.")))?
+            };
+            Some(sk)
+        } else if private_key.len() == signature::PrivateKey::BYTES {
+            // DO nothing, already in correct size
+            None
+        } else {
+           return Err(Error::Crypto(format!("Invalid session key size")));
         };
 
-        let Ok(sk) = lock!(ctxt).decrypt_into(private_key) else {
-            return Err(Error::Crypto(format!("Error decrypting session key.")))?
+        let ref_sk = match sk {
+            Some(ref v) => v.as_slice(),
+            None => private_key,
         };
-        if sk.len() != signature::PrivateKey::BYTES {
-            return Err(Error::Crypto(format!("Invalid session key size")));
-        }
 
-        let session_keypair = KeyPair::try_from(sk.as_slice())?;
+        let session_keypair = KeyPair::try_from(ref_sk)?;
         let session_id = Id::from(session_keypair.public_key());
 
         self.encrypt_keypair = Some(cryptobox::KeyPair::from(&session_keypair));

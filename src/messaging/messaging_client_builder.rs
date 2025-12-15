@@ -306,18 +306,20 @@ impl Builder {
     }
 
     async fn build_user_agent(&mut self) -> Result<Arc<Mutex<UserAgent>>> {
-        let mut ua = UserAgent::new(None)?;
+        let mut ua = UserAgent::new(None);
+        /*
         ua.set_repository(
             match self.repository.take() {
                 Some(r) => r,
                 None => {
                     let path = PathBuf::from(crate::unwrap!(self.repository_db));
                     Database::open(&path).map_err(|e| {
-                        Error::State(format!("Access the messaging repository failed: {e}"))
+                        Error::State(format!("Error accessing the messaging repository: {e}"))
                     })?
                 }
             }
         )?;
+        */
 
         if let Some(user) = self.user.as_ref() {
             if ua.user().is_none() {
@@ -335,7 +337,9 @@ impl Builder {
 
         if let Some(device) = self.device.as_ref() {
             if ua.device().is_none() {
-                // ua.set_device(device, &self.device_node, &self.app_name)?
+                ua.set_device(device.clone(),
+                    self.device_name.as_ref().unwrap(),
+                    self.app_name.as_ref().unwrap())?
             } else {
                 warn!("Device is already set in the user agent, ignoring device profile");
             }

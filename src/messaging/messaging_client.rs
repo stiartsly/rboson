@@ -21,7 +21,6 @@ use rumqttc::{
 use crate::{
     unwrap,
     lock,
-    as_secs,
     Id,
     Identity,
     PeerInfo,
@@ -90,7 +89,9 @@ pub struct MessagingClient {
 
     api_client      : Option<APIClient>,
     disconnect      : bool,
+
     connected       : Arc<Mutex<bool>>,
+    stopping        : Arc<Mutex<bool>>,
 
     worker_task     : Option<JoinHandle<()>>,
     worker_client   : Option<Arc<Mutex<AsyncClient>>>,
@@ -137,6 +138,7 @@ impl MessagingClient {
             api_client      : None,
             disconnect      : false,
             connected       : Arc::new(Mutex::new(false)),
+            stopping        : Arc::new(Mutex::new(false)),
 
             worker_client   : None,
             worker_task     : None,
@@ -231,8 +233,8 @@ impl MessagingClient {
     }
 
     pub async fn stop(&mut self, forced: bool) {
+        *lock!(self.stopping) = true;
         _ = self.disconnect().await;
-        self.disconnect = true;
 
         if let Some(task) = self.worker_task.take() {
             if forced {
@@ -254,22 +256,22 @@ impl MessagingClient {
         channel_id: &Id,
         invitee: Option<&Id>
     ) -> Result<InviteTicket> {
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
             return Err(Error::Argument("No channel {} was found in local agent.".into()));
         };
 
         let expire = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
-        let expire = as_secs!(expire);
+        let expire = crate::as_secs!(expire);
         let sha256 = {
             let mut sha256 = Sha256::new();
-            sha256.update(channel_id.as_bytes());
-            sha256.update(self.user.id().as_bytes());
+            sha256.update(&channel_id);
+            sha256.update(&self.user.id());
 
             let invitee = match invitee {
                 Some(id) => id,
                 None => &Id::max()
             };
-            sha256.update(invitee.as_bytes());
+            sha256.update(&invitee);
             sha256.update(&expire.to_le_bytes());
             sha256.finalize().to_vec()
         };
@@ -277,8 +279,8 @@ impl MessagingClient {
         let sig = self.user.sign_into(&sha256)?;
         let sk = channel.session_keypair().unwrap().private_key();
         let sk = match invitee {
-            Some(invitee) => self.user.encrypt_into(invitee, sk.as_bytes())?,
-            None => sk.as_bytes().to_vec()
+            Some(invitee) => self.user.encrypt_into(invitee, sk.as_ref())?,
+            None => sk.as_ref().to_vec()
         };
 
         Ok(InviteTicket::new(
@@ -305,7 +307,7 @@ impl MessagingClient {
     }
 
     async fn send_msg(&self, msg: Msg) -> Result<()> {
-        let encryption_needed = |v: &Msg| {
+        let need_encryption = |v: &Msg| {
             let with_body = match v.body() {
                 Some(b) => !b.is_empty(),
                 None => false
@@ -313,17 +315,16 @@ impl MessagingClient {
             with_body && v.to() != self.peer.id()
         };
 
-        let encrypt_cb_for_msg = |msg: &Msg| -> Result<Vec<u8>> {
-            let recipient = lock!(self.ua).contact(msg.to())?;
+        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
+            let recipient = crate::lock!(self.ua).contact(msg.to())?;
             let Some(rec) = recipient else {
-                let estr = format!("Failed to send message to unknown recipient {}", msg.to());
+                let estr = format!("Interal Error: unknown recipient {}", msg.to());
                 error!("{}", estr);
-                // TODO error.
                 return Err(Error::State(estr));
             };
 
             let Some(sid) = rec.session_id() else {
-                let estr = format!("INTERNAL error: recipient {} has no session key.", msg.to());
+                let estr = format!("Internal error: recipient {} has no session key.", msg.to());
                 error!("{}", estr);
                 return Err(Error::State(estr));
             };
@@ -332,16 +333,16 @@ impl MessagingClient {
                 .encrypt_into(unwrap!(msg.body()))
         };
 
-        let encrypt_cb_for_call = |msg: &Msg| -> Result<Vec<u8>> {
+        let encrypt_call = |msg: &Msg| -> Result<Vec<u8>> {
             self.user.create_crypto_context(msg.to())?
-                .encrypt_into(unwrap!(msg.body()))
+                .encrypt_into(crate::unwrap!(msg.body()))
         };
 
-        let msg = if encryption_needed(&msg) {
+        let msg = if need_encryption(&msg) {
             let msg_type = msg.message_type();
             let encrypted = match msg_type {
-                MessageType::Message    => encrypt_cb_for_msg(&msg)?,
-                MessageType::Call       => encrypt_cb_for_call(&msg)?,
+                MessageType::Message    => encrypt_msg(&msg)?,
+                MessageType::Call       => encrypt_call(&msg)?,
                 _ => {
                     panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
                 }
@@ -365,7 +366,7 @@ impl MessagingClient {
             false,
             payload
         ).await.map_err(|e| {
-            Error::State(format!("Internal error {e}: failed to publish message: {}", e))
+            Error::State(format!("Internal error: error publishing message: {}", e))
         })?;
 
         debug!("Message published to outbox {}", outbox);
@@ -415,6 +416,7 @@ impl MessagingClient {
                         break;
                     }
                 };
+                // println!(">>> MQTT Event: {:?}", event);
 
                 match event {
                     Event::Incoming(packet) => worker.on_incoming_msg(packet).await,
@@ -558,7 +560,7 @@ impl MessagingAgent for MessagingClient {
         file_name: &str
     ) -> Result<String> {
         let Some(client) = self.api_client.as_mut() else {
-            return Err(Error::State("The client is not started yet".into()));
+            return Err(Error::State("Client is not started yet".into()));
         };
         client.upload_avatar_from_file(
             content_type,
@@ -568,7 +570,7 @@ impl MessagingAgent for MessagingClient {
 
     async fn devices(&mut self) -> Result<Vec<ClientDevice>> {
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::DevicesVal::new()));
@@ -585,7 +587,7 @@ impl MessagingAgent for MessagingClient {
         ).await?;
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -595,7 +597,7 @@ impl MessagingAgent for MessagingClient {
         device_id: &Id
     ) -> Result<()> {
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -623,7 +625,7 @@ impl MessagingAgent for MessagingClient {
         notice: Option<&str>
     ) -> Result<Channel> {
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let keypair = signature::KeyPair::random();
@@ -663,7 +665,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id
     ) -> Result<()> {
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -695,7 +697,7 @@ impl MessagingAgent for MessagingClient {
         }
 
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         // check session key
@@ -1121,10 +1123,10 @@ struct MessagingWorker {
 
     self_context    : Arc<Mutex<CryptoContext>>,
     server_context  : Arc<Mutex<CryptoContext>>,
-    disconnect      : bool,
+
     failures        : u32,
     connected       : Arc<Mutex<bool>>,
-
+    stopping        : Arc<Mutex<bool>>,
 
     peer            : PeerInfo,
 
@@ -1143,19 +1145,21 @@ impl MessagingWorker {
             ua              : client.ua.clone(),
             _worker_client   : mqttc,
 
+            user            : client.user.clone(),
             self_context    : client.self_context.clone(),
             server_context  : client.server_context.clone(),
-            disconnect      : false,
-            failures        : 0,
+
             peer            : client.peer.clone(),
+
+            failures        : 0,
             connected       : client.connected.clone(),
+            stopping        : client.stopping.clone(),
 
             inbox           : client.inbox.clone(),
             outbox          : client.outbox.clone(),
             broadcast       : client.broadcast.clone(),
 
             pending_calls   : client.pending_calls(),
-            user            : client.user.clone(),
         }
     }
 
@@ -1165,7 +1169,7 @@ impl MessagingWorker {
 
     async fn on_incoming_msg(&mut self, packet: Packet) {
         match packet {
-            Packet::Publish(v)  => self.on_publish(v).await,
+            Packet::Publish(p)  => self.on_publish(p).await,
             Packet::PubAck(_)   => {},
             Packet::SubAck(_)   => {},
             Packet::UnsubAck(_) => {},
@@ -1173,7 +1177,7 @@ impl MessagingWorker {
             Packet::PingResp    => self.on_ping_rsp(),
             Packet::ConnAck(_)  => self.on_connected(),
             _ => {
-                error!("Fatail error: unknown MQTT event: {:?}", packet);
+                error!("Fatail error: unexpected MQTT event: {:?}", packet);
                 panic!();
             }
         }
@@ -1187,16 +1191,18 @@ impl MessagingWorker {
     }
 
     fn on_disconnect(&mut self) {
-        if self.disconnect {
-            lock!(self.ua).on_disconnected();
-            info!("disconnected!");
-            return;
-        }
-
         self.failures += 1;
         *lock!(self.connected) = false;
-        error!("Connection lost, attempt to reconnect in {} seconds...", 5); // TODO:
 
+        crate::lock!(self.ua).on_disconnected();
+        info!("Disconnected from messaging server!");
+
+        if *crate::lock!(self.stopping) {
+            return;
+        } else {
+            error!("Connection lost, attempt to reconnect in {} seconds...", 5);
+            // TODO: timer to reconnect.
+        }
     }
 
     fn on_ping_rsp(&mut self) {
@@ -1205,32 +1211,30 @@ impl MessagingWorker {
 
     fn on_connected(&mut self) {
         self.failures = 0;
-        *lock!(self.connected) = true;
+        *crate::lock!(self.connected) = true;
 
-        info!("Connected to the messaging server");
-        lock!(self.ua).on_connected();
+        info!("Connected to messaging server");
+        crate::lock!(self.ua).on_connected();
     }
 
     async fn on_publish(&mut self, data: rumqttc::Publish) {
         let topic = data.topic.as_str();
         debug!("Got message on topic: {}", topic);
 
-        let decrypted = match lock!(self.server_context).decrypt_into(&data.payload) {
+        let decrypted = match crate::lock!(self.server_context).decrypt_into(&data.payload) {
             Ok(v) => v,
             Err(e) => {
-                error!("Error decrypting message payload from {topic}: {e}");
+                error!("Error decrypting message payload from {topic}: {e}, ignored");
                 return;
             }
         };
-
         let mut msg = match serde_cbor::from_slice::<Msg>(&decrypted) {
             Ok(v) => v,
             Err(e) => {
-                error!("Error deserializing message from {topic}: {e}");
+                error!("Error deserializing message from {topic}: {e}, ignored");
                 return;
             }
         };
-
         if !msg.is_valid() {
             error!("Received invalid message from {topic}, ignored");
             return;
@@ -1242,7 +1246,7 @@ impl MessagingWorker {
         } else if topic == self.outbox {
             self.on_outbox_msg(msg).await;
         } else if topic == self.broadcast {
-            self.on_broadcast_msg(msg);
+            self.on_broadcast_msg(msg).await;
         } else {
             error!("Received message with unknown topic: {topic}, ignored");
             return;
@@ -1269,7 +1273,7 @@ impl MessagingWorker {
                     // Message: sender -> me
                     // The body is encrypted using the sender's private key
                     // and the session public key associated with that sender.
-                    let sender = lock!(self.ua).contact(msg.from());
+                    let sender = crate::lock!(self.ua).contact(msg.from());
                     let Ok(Some(sender)) = sender else {
                         warn!("Sender {} not in contact list, ignored", msg.from());
                         return;
@@ -1349,7 +1353,7 @@ impl MessagingWorker {
                     }
                 },
                 MessageType::Call => {
-                    panic!("Should no Call message type sent to channel")
+                    panic!("Should be no call message sent to channel")
                 }
             }
         }
@@ -1413,13 +1417,13 @@ impl MessagingWorker {
         unimplemented!()
     }
 
-    fn on_broadcast_msg(&mut self, mut msg: Msg) {
+    async fn on_broadcast_msg(&mut self, mut msg: Msg) {
         // Broadcast notifications from the service peer.
 		// Message body is encrypted with the message envelope,
 		// it was already decrypted here
 
         msg.mark_encrypted(false);
-        lock!(self.ua).on_broadcast(msg);
+        crate::lock!(self.ua).on_broadcast(msg);
     }
 
     async fn process_msg(&mut self, msg: Msg) {

@@ -229,10 +229,17 @@ impl From<&signature::PublicKey> for Id {
         Id(pk.0)
     }
 }
+
 impl Deref for Id {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl AsRef<[u8]> for Id {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
 

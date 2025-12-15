@@ -156,6 +156,12 @@ impl Drop for PrivateKey {
     }
 }
 
+impl AsRef<[u8]> for PrivateKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "0x{}", hex::encode(self.0))?;
@@ -224,6 +230,12 @@ impl PublicKey {
 impl Drop for PublicKey {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
 
@@ -375,6 +387,18 @@ impl FromStr for KeyPair {
 impl Drop for KeyPair {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl AsRef<PrivateKey> for KeyPair {
+    fn as_ref(&self) -> &PrivateKey {
+        &self.0
+    }
+}
+
+impl AsRef<PublicKey> for KeyPair {
+    fn as_ref(&self) -> &PublicKey {
+        &self.1
     }
 }
 

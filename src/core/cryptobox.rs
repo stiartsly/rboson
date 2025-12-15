@@ -97,6 +97,12 @@ impl Drop for PrivateKey {
     }
 }
 
+impl AsRef<[u8]> for PrivateKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0))
@@ -164,6 +170,12 @@ impl Drop for PublicKey {
     }
 }
 
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0))?;
@@ -223,6 +235,12 @@ impl TryFrom<&[u8]> for Nonce {
 impl Drop for Nonce {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl AsRef<[u8]> for Nonce {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
 
@@ -377,6 +395,18 @@ impl From<&signature::KeyPair> for KeyPair {
 impl Drop for KeyPair {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl AsRef<PrivateKey> for KeyPair {
+    fn as_ref(&self) -> &PrivateKey {
+        &self.0
+    }
+}
+
+impl AsRef<PublicKey> for KeyPair {
+    fn as_ref(&self) -> &PublicKey {
+        &self.1
     }
 }
 

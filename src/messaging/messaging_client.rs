@@ -1,17 +1,21 @@
-use std::collections::HashMap;
+use std::collections::{LinkedList, HashMap};
 use std::time::{SystemTime, Duration};
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use log::{error, warn, info, debug, trace};
-use tokio::task::JoinHandle;
 use serde_cbor;
 use sha2::{Digest, Sha256};
 use md5;
 use url::Url;
+use tokio::{
+    task::JoinHandle,
+    sync::Notify
+};
 use rumqttc::{
     MqttOptions,
     AsyncClient,
+    QoS::AtLeastOnce,
     SubscribeFilter,
     Event,
     Packet,
@@ -96,7 +100,11 @@ pub struct MessagingClient {
     worker_task     : Option<JoinHandle<()>>,
     worker_client   : Option<Arc<Mutex<AsyncClient>>>,
 
-    pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
+    notifier        : Arc<Notify>,
+    requests        : Arc<Mutex<LinkedList<RPCRequest>>>,
+
+    mqttc           : Option<rumqttc::AsyncClient>,
+    eventloop       : Option<rumqttc::EventLoop>,
 
     ua              : Arc<Mutex<UserAgent>>,
 }
@@ -150,27 +158,14 @@ impl MessagingClient {
             user,
             device,
 
-            pending_calls   : Arc::new(Mutex::new(HashMap::new())),
+            notifier        : Arc::new(Notify::new()),
+            requests        : Arc::new(Mutex::new(LinkedList::new())),
+
+            mqttc           : None,
+            eventloop       : None,
 
             ua              : b.ua().clone(),
         })
-    }
-
-    fn worker(&self) -> Arc<Mutex<AsyncClient>> {
-        self.worker_client
-            .as_ref()
-            .expect("MQTT client should be created")
-            .clone()
-    }
-
-    fn api_client(&mut self) -> &mut APIClient {
-        self.api_client
-            .as_mut()
-            .expect("API client should be created")
-    }
-
-    fn pending_calls(&self) -> Arc<Mutex<HashMap<u32, RPCRequest>>> {
-        self.pending_calls.clone()
     }
 
     pub(crate) fn next_index(&self) -> u32 {
@@ -195,7 +190,7 @@ impl MessagingClient {
             )
         }?;
 
-        let api_client = api_client::Builder::new()
+        let mut api_client = api_client::Builder::new()
             .with_base_url(&api_url)
             .with_home_peerid(self.peer.id())
             .with_user_identity(&self.user)
@@ -204,7 +199,6 @@ impl MessagingClient {
             .with_access_token_refresh_handler(|_| {})
             .build()?;
 
-        self.api_client = Some(api_client);
         let version = match lock!(self.ua).contacts_version() {
             Ok(v) => Some(v),
             Err(e) => {
@@ -214,7 +208,7 @@ impl MessagingClient {
         };
 
         if version.is_none() {
-            let mut version = self.api_client().fetch_contacts_update(
+            let mut version = api_client.fetch_contacts_update(
                 version.as_deref()
             ).await?;
 
@@ -228,7 +222,9 @@ impl MessagingClient {
             }
         }
 
-        self.service_info = Some(self.api_client().service_info().await?);
+        self.service_info = Some(api_client.service_info().await?);
+        self.api_client = Some(api_client);
+
         Ok(())
     }
 
@@ -293,95 +289,8 @@ impl MessagingClient {
         ))
     }
 
-    async fn send_rpc_request(&self,
-        recipient: &Id,
-        req: RPCRequest
-    ) -> Result<()> {
-        let msg = MsgBuilder::new(self, MessageType::Call)
-            .with_to(recipient)
-            .with_body(serde_cbor::to_vec(&req).unwrap())
-            .build();
-
-        self.pending_calls.lock().unwrap().insert(req.id(), req);
-        self.send_msg(msg).await
-    }
-
-    async fn send_msg(&self, msg: Msg) -> Result<()> {
-        let need_encryption = |v: &Msg| {
-            let with_body = match v.body() {
-                Some(b) => !b.is_empty(),
-                None => false
-            };
-            with_body && v.to() != self.peer.id()
-        };
-
-        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
-            let recipient = crate::lock!(self.ua).contact(msg.to())?;
-            let Some(rec) = recipient else {
-                let estr = format!("Interal Error: unknown recipient {}", msg.to());
-                error!("{}", estr);
-                return Err(Error::State(estr));
-            };
-
-            let Some(sid) = rec.session_id() else {
-                let estr = format!("Internal error: recipient {} has no session key.", msg.to());
-                error!("{}", estr);
-                return Err(Error::State(estr));
-            };
-
-            self.user.create_crypto_context(&sid)?
-                .encrypt_into(unwrap!(msg.body()))
-        };
-
-        let encrypt_call = |msg: &Msg| -> Result<Vec<u8>> {
-            self.user.create_crypto_context(msg.to())?
-                .encrypt_into(crate::unwrap!(msg.body()))
-        };
-
-        let msg = if need_encryption(&msg) {
-            let msg_type = msg.message_type();
-            let encrypted = match msg_type {
-                MessageType::Message    => encrypt_msg(&msg)?,
-                MessageType::Call       => encrypt_call(&msg)?,
-                _ => {
-                    panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
-                }
-            };
-            msg.dup_from(encrypted)
-        } else {
-            msg
-        };
-
-        self.publish_msg(&msg).await
-    }
-
-    async fn publish_msg(&self, msg: &Msg) -> Result<()> {
-        let outbox = self.outbox.as_str();
-        let payload = serde_cbor::to_vec(msg).unwrap();
-        let payload = lock!(self.server_context).encrypt_into(&payload)?;
-
-        self.worker().lock().unwrap().publish(
-            outbox,
-            rumqttc::QoS::AtLeastOnce,
-            false,
-            payload
-        ).await.map_err(|e| {
-            Error::State(format!("Internal error: error publishing message: {}", e))
-        })?;
-
-        debug!("Message published to outbox {}", outbox);
-
-        // TODO: pending messages.
-        // TODO: sending messages;
-        Ok(())
-    }
-
     async fn attempt_connect(&mut self, url: &Url) -> Result<()> {
-        if self.disconnect {
-            return Err(Error::State("Client is stopped".into()));
-        }
-
-        let options = {
+       let options = {
             let mut options = MqttOptions::new(
                 &self.client_id,
                 url.host().unwrap().to_string(),
@@ -402,30 +311,25 @@ impl MessagingClient {
             // TODO:
         }
 
-        let (client, mut eventloop) = AsyncClient::new(options, 10);
-        let client = Arc::new(Mutex::new(client));
-        let mut worker = MessagingWorker::new(self, client.clone());
+        let result = AsyncClient::new(options, 10);
+        self.mqttc = Some(result.0);
+        self.eventloop = Some(result.1);
 
-        self.worker_client = Some(client);
-        self.worker_task   = Some(tokio::spawn(async move {
-            loop {
-                let event = match eventloop.poll().await {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!("MQTT event loop error: {}, break the loop.", e);
-                        break;
-                    }
-                };
-                // println!(">>> MQTT Event: {:?}", event);
+        let topics = vec![
+            SubscribeFilter::new(self.inbox.clone(), AtLeastOnce),
+            SubscribeFilter::new(self.outbox.clone(), AtLeastOnce),
+            SubscribeFilter::new(self.broadcast.clone(), AtLeastOnce)
+        ];
 
-                match event {
-                    Event::Incoming(packet) => worker.on_incoming_msg(packet).await,
-                    Event::Outgoing(packet) => worker.on_outgoing_msg(packet),
-                }
-            }
-        }));
+        debug!("Subscribing topics to messaging server ....");
 
-        Ok(())
+        crate::unwrap!(self.mqttc).subscribe_many(topics).await.map(|_| {
+            info!("Subscribed topics successfully");
+        }).map_err(|e| {
+            let errstr = format!("Error subscribing topics to messaging server: {}", e);
+            error!("{}", errstr);
+            Error::State(errstr)
+        })
     }
 
     async fn do_connect(&mut self) -> Result<()> {
@@ -445,20 +349,57 @@ impl MessagingClient {
         ];
         self.attempt_connect(&urls[0]).await?;
 
-        debug!("Subscribing to the messages ....");
-        let topics = vec![
-            SubscribeFilter::new(self.inbox.clone(), rumqttc::QoS::AtLeastOnce),
-            SubscribeFilter::new(self.outbox.clone(), rumqttc::QoS::AtLeastOnce),
-            SubscribeFilter::new(self.broadcast.clone(), rumqttc::QoS::AtLeastOnce),
-        ];
-        self.worker().lock().unwrap().subscribe_many(topics).await.map(|_| {
-            info!("Subscribed to the messages successfully");
-        }).map_err(|e| {
-            let errstr = format!("Failed to connect to the messaging server: {}", e);
-            error!("{}", errstr);
-            lock!(self.ua).on_disconnected();
-            Error::State(errstr)
-        })
+        // TODO:
+
+        let mqttc = self.mqttc.take().unwrap();
+        let mut eventloop = self.eventloop.take().unwrap();
+
+        let mut worker = MessagingWorker::new(self, mqttc);
+
+        let quit = self.stopping.clone();
+        let notifier = self.notifier.clone();
+
+        _ = Some(std::thread::spawn(move ||{
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+
+
+            let requests = worker.requests.clone();
+            let mut running = true;
+            while running {
+                tokio::select! {
+                    res = eventloop.poll() => {
+                        let event = match res {
+                            Ok(event) => event,
+                            Err(e) => {
+                                error!("MQTT eventloop polling error: {e}, break the loop.");
+                                break;
+                            },
+                        };
+
+                        match event {
+                            Event::Incoming(packet) => worker.on_incoming_msg(packet).await,
+                            Event::Outgoing(packet) => worker.on_outgoing_msg(packet).await,
+                        }
+                    }
+
+                    _ = notifier.notified() => {
+                        if let Some(_req) = lock!(requests).pop_front() {
+                            _ = worker.send_rpc_request(_req).await;
+                        }
+                    }
+                }
+
+                if *lock!(quit) {
+                    running = false
+                }
+            }
+        })}));
+
+        Ok(())
     }
 
     async fn push_contacts_update(&mut self,
@@ -475,11 +416,12 @@ impl MessagingClient {
             Some(Parameters::ContactsUpdate(
                 ContactsUpdate::new(Some(current_version), updated_contacts)
             ))
-        );
-        self.send_rpc_request(
-            &self.peer.id(),
-            req
-        ).await?;
+        )
+        .with_recipient(self.peer.id().clone())
+        .with_promise(fut.clone());
+
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
 
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
@@ -491,9 +433,6 @@ impl MessagingClient {
         self.api_client.is_some()
     }
 }
-
-//unsafe impl Send for MessagingClient {}
-//unsafe impl Sync for MessagingClient {}
 
 impl MessagingAgent for MessagingClient {
     fn userid(&self) -> &Id {
@@ -581,10 +520,8 @@ impl MessagingAgent for MessagingClient {
             None,
         ).with_promise(fut.clone());
 
-        self.send_rpc_request(
-            &self.peer.id(),
-            req
-        ).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
 
         match Waiter::new(fut).await {
             Ok(_) => crate::lock!(arc).result(),
@@ -606,12 +543,12 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::DeviceRevoke,
             Some(Parameters::RevokeDevice(device_id.clone()))
-        ).with_promise(fut.clone());
+        )
+        .with_promise(fut.clone())
+        .with_recipient(self.peer.id().clone());
 
-        self.send_rpc_request(
-            &self.peer.id().clone(),
-            req
-        ).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
 
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
@@ -648,12 +585,11 @@ impl MessagingAgent for MessagingClient {
             Some(Parameters::CreateChannel(params))
         )
         .with_promise(fut.clone())
-        .with_cookie(cookie);
+        .with_cookie(cookie)
+        .with_recipient(unwrap!(self.service_info).peerid().clone()); // why not peerid.
 
-        self.send_rpc_request(
-            unwrap!(self.service_info).peerid(),  // why not peerid.
-            req
-        ).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
 
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
@@ -674,9 +610,13 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::ChannelDelete,
             None
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -726,10 +666,13 @@ impl MessagingAgent for MessagingClient {
             RPCMethod::ChannelJoin,
             Some(Parameters::JoinChannel(ticket.proof().clone()))
         )
+        .with_recipient(ticket.channel_id().clone())
         .with_promise(fut.clone())
         .with_cookie(cookie);
 
-        self.send_rpc_request(ticket.channel_id(), req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -747,9 +690,13 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::ChannelLeave,
             None
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -773,12 +720,12 @@ impl MessagingAgent for MessagingClient {
         if !channel.is_owner(self.user.id()) {
             Err(Error::Argument("Not channel owner".into()))?
         }
-        if channel.is_member(new_owner) {
-            Err(Error::Argument("New owner is not in the channel".into()))?
+        if !channel.is_member(new_owner) {
+            Err(Error::Argument("Not channel member".into()))?
         }
 
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -787,9 +734,13 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::ChannelOwner,
             Some(Parameters::SetChannelOwner(new_owner.clone()))
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -801,14 +752,14 @@ impl MessagingAgent for MessagingClient {
         permission: Permission
     ) -> Result<()> {
         let Some(channel) = lock!(self.ua).channel(channel_id)? else {
-            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
             Err(Error::Argument("Not channel owner".into()))?
         }
 
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -817,9 +768,13 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::ChannelPermission,
             Some(Parameters::SetChannelPermission(permission))
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -830,23 +785,16 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
-        let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::Argument("Not channel owner or moderator".into()))?
-        }
-        if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
 
-        let name = name.map(|n|
-            match !n.is_empty() {
-                true => Some(n.nfc().collect::<String>()),
-                false => None,
-            }
-        ).flatten();
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
         let fut = Promise::SetChannelName(arc.clone());
@@ -855,11 +803,15 @@ impl MessagingAgent for MessagingClient {
             RPCMethod::ChannelName,
             name.filter(|v| !v.is_empty()).map(|v| {
                 let nfc = v.nfc().collect::<String>();
-                Parameters::SetChannelNotice(nfc)
+                Parameters::SetChannelName(nfc)
             })
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -870,15 +822,15 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
-            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
         };
-        let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::Argument("Not channel owner or moderator".into()))?
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
+
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -890,9 +842,13 @@ impl MessagingAgent for MessagingClient {
                 let nfc = v.nfc().collect::<String>();
                 Parameters::SetChannelNotice(nfc)
             })
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -907,15 +863,15 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
-        let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
-            Err(Error::Argument("Not channel owner or moderator".into()))?
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
+
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let role = params::ChannelMemberRole::new(
@@ -929,9 +885,13 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::ChannelRole,
             Some(Parameters::SetChannelMemberRole(role))
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -946,14 +906,14 @@ impl MessagingAgent for MessagingClient {
             return Ok(())
         }
         let Some(ch) = lock!(self.ua).channel(channel_id)? else {
-            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
         };
-        let userid = self.user.id();
-        if !ch.is_owner(userid) && !ch.is_moderator(userid) {
-            Err(Error::Argument("Not channel owner or moderator".into()))?
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
         }
+
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let members = members.into_iter()
@@ -968,9 +928,13 @@ impl MessagingAgent for MessagingClient {
             Some(Parameters::BanChannelMembers(
                 members.into_iter().map(|v| v.clone()).collect::<Vec<Id>>()
             ))
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -984,16 +948,15 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
-            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument(format!("No channel {channel_id} was found")))?
         };
-
-        let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+        if !ch.is_owner_or_moderator(self.user.id()) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
+
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -1004,9 +967,13 @@ impl MessagingAgent for MessagingClient {
             Some(Parameters::UnbanChannelMembers(
                 members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>()
             ))
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(fut).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -1018,17 +985,17 @@ impl MessagingAgent for MessagingClient {
         members: Vec<&Id>
     ) -> Result<()> {
         if members.is_empty() {
-            return Ok(());
+            Err(Error::Argument(format!("No members to remove")))?;
         }
         let Some(channel) = lock!(self.ua).channel(channel_id)? else {
-            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+            Err(Error::Argument(format!("No channel {channel_id} was found")))?
         };
-        let userid = self.user.id();
-        if !channel.is_owner(userid) && !channel.is_moderator(userid) {
+        if !channel.is_owner_or_moderator(self.user.id()) {
             Err(Error::State("Not channel owner or moderator".into()))?
         }
+
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -1039,9 +1006,13 @@ impl MessagingAgent for MessagingClient {
             Some(Parameters::RemoveChannelMembers(
                 members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>())
             )
-        ).with_promise(promise.clone());
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(promise.clone());
 
-        self.send_rpc_request(channel_id, req).await?;
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
         match Waiter::new(promise).await {
             Ok(_) => lock!(arc).result(),
             Err(e) => Err(e)
@@ -1119,7 +1090,8 @@ impl MessagingAgent for MessagingClient {
 
 struct MessagingWorker {
     ua              : Arc<Mutex<UserAgent>>,
-    _worker_client   : Arc<Mutex<AsyncClient>>,
+    //_worker_client   : Arc<Mutex<AsyncClient>>,
+    mqttc           : AsyncClient,
 
     self_context    : Arc<Mutex<CryptoContext>>,
     server_context  : Arc<Mutex<CryptoContext>>,
@@ -1134,16 +1106,18 @@ struct MessagingWorker {
     outbox          : String,
     broadcast       : String,
 
-    pending_calls   : Arc<Mutex<HashMap<u32, RPCRequest>>>,
+    // notifier        : Arc<Notify>,
+    requests        : Arc<Mutex<LinkedList<RPCRequest>>>,
+    pending_calls   : HashMap<u32, RPCRequest>,
 
     user            : CryptoIdentity
 }
 
 impl MessagingWorker {
-    fn new(client: &MessagingClient,  mqttc: Arc<Mutex<AsyncClient>>) -> Self {
+    fn new(client: &MessagingClient,  mqttc: AsyncClient) -> Self {
         Self {
             ua              : client.ua.clone(),
-            _worker_client   : mqttc,
+            mqttc,
 
             user            : client.user.clone(),
             self_context    : client.self_context.clone(),
@@ -1159,12 +1133,95 @@ impl MessagingWorker {
             outbox          : client.outbox.clone(),
             broadcast       : client.broadcast.clone(),
 
-            pending_calls   : client.pending_calls(),
+            requests        : client.requests.clone(),
+            pending_calls   : HashMap::new(),
         }
     }
 
     fn is_me(&self, id: &Id) -> bool {
         self.user.id() == id
+    }
+
+    async fn send_rpc_request(&mut self, req: RPCRequest) -> Result<()> {
+        let msg = MsgBuilder::new(MessageType::Call)
+            .with_from(self.user.id().clone())
+            .with_to(req.recipient())
+            .with_body(serde_cbor::to_vec(&req).unwrap())
+            .with_serial_number(req.id())
+            .build();
+
+        self.pending_calls.insert(req.id(), req);
+        self.send_msg(msg).await
+    }
+
+    async fn send_msg(&self, msg: Msg) -> Result<()> {
+        let need_encryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.to() != self.peer.id()
+        };
+
+        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
+            let recipient = crate::lock!(self.ua).contact(msg.to())?;
+            let Some(rec) = recipient else {
+                let estr = format!("Interal Error: unknown recipient {}", msg.to());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            };
+
+            let Some(sid) = rec.session_id() else {
+                let estr = format!("Internal error: recipient {} has no session key.", msg.to());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            };
+
+            self.user.create_crypto_context(&sid)?
+                .encrypt_into(unwrap!(msg.body()))
+        };
+
+        let encrypt_call = |msg: &Msg| -> Result<Vec<u8>> {
+            self.user.create_crypto_context(msg.to())?
+                .encrypt_into(crate::unwrap!(msg.body()))
+        };
+
+        let msg = if need_encryption(&msg) {
+            let msg_type = msg.message_type();
+            let encrypted = match msg_type {
+                MessageType::Message    => encrypt_msg(&msg)?,
+                MessageType::Call       => encrypt_call(&msg)?,
+                _ => {
+                    panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
+                }
+            };
+            msg.dup_from(encrypted)
+        } else {
+            msg
+        };
+
+        self.publish_msg(&msg).await
+    }
+
+    async fn publish_msg(&self, msg: &Msg) -> Result<()> {
+        let outbox = self.outbox.as_str();
+        let payload = serde_cbor::to_vec(msg).unwrap();
+        let payload = lock!(self.server_context).encrypt_into(&payload)?;
+
+        self.mqttc.publish(
+            outbox,
+            rumqttc::QoS::AtLeastOnce,
+            false,
+            payload
+        ).await.map_err(|e| {
+            Error::State(format!("Internal error: error publishing message: {}", e))
+        })?;
+
+        debug!("Message published to outbox {}", outbox);
+
+        // TODO: pending messages.
+        // TODO: sending messages;
+        Ok(())
     }
 
     async fn on_incoming_msg(&mut self, packet: Packet) {
@@ -1183,7 +1240,7 @@ impl MessagingWorker {
         }
     }
 
-    fn on_outgoing_msg(&mut self, _packet: Outgoing) {
+    async fn on_outgoing_msg(&mut self, _packet: Outgoing) {
         match _packet {
             Outgoing::Publish(_pktid) => {},
             _ => {},
@@ -1485,7 +1542,7 @@ impl MessagingWorker {
             return;
         };
 
-        let Some(call) = self.pending_calls.lock().unwrap().remove(preparsed.id()) else {
+        let Some(call) = self.pending_calls.remove(preparsed.id()) else {
             error!("Unmatched RPC response ID {} from {}, ignored", preparsed.id(), msg.from());
             return;
         };
@@ -2141,11 +2198,11 @@ impl MessagingWorker {
         {
             use hex::ToHex;
             let body_hex = body.encode_hex::<String>();
-            println!("RPC response body (hex): {}", body_hex);
+            println!("RPC request body (hex): {}", body_hex);
         }
 
         let Ok(preparsed) = RPCRequest::from(body) else {
-            error!("Failed to parse RPC response from {}, message ignored", msg.from());
+            error!("Failed to parse RPC request from {}, message ignored", msg.from());
             return;
         };
         match preparsed.method() {

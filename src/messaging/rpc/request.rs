@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 use serde_cbor::{self};
 
 use crate::{
+    Id,
     Error,
     error::Result
 };
@@ -35,7 +36,10 @@ pub(crate) struct RPCRequest
     promise: Option<Promise>,
 
     #[serde(skip)]
-    _response: Option<RPCResponse>
+    _response: Option<RPCResponse>,
+
+    #[serde(skip)]
+    to: Option<Id>
 }
 
 impl RPCRequest
@@ -48,13 +52,23 @@ impl RPCRequest
             cookie: None,
             promise: None,
             _response: None,
+            to: None,
         }
+    }
+
+    pub(crate) fn recipient(&self) -> &Id {
+        self.to.as_ref().unwrap()
     }
 
     pub(crate) fn from(body: &[u8]) -> Result<Self> {
         serde_cbor::from_slice::<RPCRequest>(body).map_err(|e|
             Error::Protocol(format!("Failed to parse RPC response: {}", e))
         )
+    }
+
+    pub(crate) fn with_recipient(mut self, recipient: Id) -> Self {
+        self.to = Some(recipient);
+        self
     }
 
     pub(crate) fn with_promise(mut self, promise: Promise) -> Self{

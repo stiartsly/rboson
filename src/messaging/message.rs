@@ -11,11 +11,7 @@ use crate::{
         Error,
         Result,
         CryptoContext
-    },
-    messaging::{
-        MessagingAgent,
-        MessagingClient
-    },
+    }
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,10 +187,10 @@ impl Message {
     pub(crate) fn new(mut mb: Builder) -> Self {
         Self {
             version         : VERSION,
-            from            : mb.client.userid().clone(),
+            from            : mb.from.take().unwrap(),
             to              : mb.to.take().unwrap(),
 
-            serial_number   : mb.client.next_index(),
+            serial_number   : mb.serial_number.unwrap(),
             created         : as_ms!(SystemTime::now()) as u64,
             message_type    : mb.msg_type as i32,
 
@@ -360,11 +356,13 @@ impl fmt::Display for Message {
 }
 
 #[allow(unused)]
-pub(crate) struct Builder<'a> {
-    client      : &'a MessagingClient,
+pub(crate) struct Builder {
+    //client      : &'a MessagingClient,
     msg_type    : MessageType,
 
+    from        : Option<Id>,
     to          : Option<Id>,
+    serial_number: Option<u32>,
     properties : Option<HashMap<String, serde_json::Value>>,
     content_type: Option<ContentType>,
     body        : Option<Vec<u8>>,
@@ -372,12 +370,13 @@ pub(crate) struct Builder<'a> {
     //message: Option<Message>,
 }
 
-impl<'a> Builder<'a> {
-    pub(crate) fn new(client: &'a MessagingClient, msg_type: MessageType) -> Self {
+impl Builder {
+    pub(crate) fn new(msg_type: MessageType) -> Self {
         Self {
-            client,
             msg_type,
+            from: None,
             to: None,
+            serial_number: None,
             properties: None,
             content_type: None,
             body: None,
@@ -385,8 +384,18 @@ impl<'a> Builder<'a> {
         }
     }
 
+    pub(crate) fn with_from(mut self, from: Id) -> Self {
+        self.from = Some(from);
+        self
+    }
+
     pub(crate) fn with_to(mut self, to: &Id) -> Self {
         self.to = Some(to.clone());
+        self
+    }
+
+    pub(crate) fn with_serial_number(mut self, serial_number: u32) -> Self {
+        self.serial_number = Some(serial_number);
         self
     }
 

@@ -253,6 +253,10 @@ impl Channel {
         unimplemented!()
     }
 
+    pub(crate) fn is_owner_or_moderator(&self, id: &Id) -> bool {
+        self.is_owner(id) || self.is_moderator(id)
+    }
+
     pub(crate) fn member(&self, _id: &Id) -> Option<Member> {
         unimplemented!()
     }

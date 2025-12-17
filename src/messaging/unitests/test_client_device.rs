@@ -1,7 +1,5 @@
 use crate::Id;
-use crate::messaging::{
-    client_device::ClientDevice
-};
+use crate::messaging::ClientDevice;
 
 #[test]
 fn test_json_serde() {
@@ -9,14 +7,14 @@ fn test_json_serde() {
     let dev = ClientDevice::new(
         &deviceid,
         "Alice",
-        Some("Example"),
+        "Example",
         1234567890,
         1234567890,
         "localhost",
     );
 
-    let serde = serde_json::to_string(&dev).unwrap();
-    let rc = serde_json::from_str(&serde);
+    let serde = serde_cbor::to_vec(&dev).unwrap();
+    let rc = serde_cbor::from_slice::<ClientDevice>(&serde);
     assert!(rc.is_ok());
 
     let dev_new: ClientDevice = rc.unwrap();
@@ -26,7 +24,7 @@ fn test_json_serde() {
     assert_eq!(dev.client_id().is_empty(), false);
     assert_eq!(dev.id(), dev_new.id());
     assert_eq!(dev.name(), dev_new.name());
-    assert_eq!(dev.app_name(), dev_new.app_name());
+    assert_eq!(dev.app(), dev_new.app());
     assert_eq!(dev.created(), dev_new.created());
     assert_eq!(dev.last_seen(), dev_new.last_seen());
     assert_eq!(dev.last_address(), dev_new.last_address());

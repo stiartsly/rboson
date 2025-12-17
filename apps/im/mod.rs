@@ -159,7 +159,21 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
         Some(("device", dv)) => match dv.subcommand() {
             Some(("list", m)) => {
                 let all = m.get_flag("all");
-                println!("[OK] Listing devices (all={})", all);
+                _ = client.lock().unwrap().devices().await.map_err(|e| {
+                    println!("Error listing devices: {e}");
+                }).map(|devices| {
+                    println!("Devices (all:{},total:{}):", all, devices.len());
+                    for device in devices {
+                        println!("Device id({}) \n\tname({})\n\tapp({})\n\tcreated({:?})\n\tlast_seen({:?})\n\tlast_address({})",
+                            device.id(),
+                            device.name(),
+                            device.app(),
+                            device.created(),
+                            device.last_seen(),
+                            device.last_address()
+                        );
+                    }
+                });
             }
             Some(("revoke", m)) => {
                 let id = m.get_one::<String>("id").unwrap();

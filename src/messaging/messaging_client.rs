@@ -23,7 +23,6 @@ use rumqttc::{
 };
 
 use crate::{
-    unwrap,
     lock,
     Id,
     Identity,
@@ -518,7 +517,9 @@ impl MessagingAgent for MessagingClient {
             self.next_index(),
             RPCMethod::DeviceList,
             None,
-        ).with_promise(fut.clone());
+        )
+        .with_recipient(self.peer.id().clone())
+        .with_promise(fut.clone());
 
         lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -576,8 +577,8 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
         let fut = Promise::CreateChannel(arc.clone());
-        let cookie = lock!(self.self_context).encrypt_into(
-            keypair.private_key().as_bytes()
+        let cookie = crate::lock!(self.self_context).encrypt_into(
+            keypair.private_key().as_ref()
         )?;
         let req = RPCRequest::new(
             self.next_index(),
@@ -586,13 +587,13 @@ impl MessagingAgent for MessagingClient {
         )
         .with_promise(fut.clone())
         .with_cookie(cookie)
-        .with_recipient(unwrap!(self.service_info).peerid().clone()); // why not peerid.
+        .with_recipient(crate::unwrap!(self.service_info).peerid().clone()); // why not peerid.
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -614,11 +615,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -658,30 +659,30 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
         let fut = Promise::JoinChannel(arc.clone());
-        let cookie = lock!(self.self_context).encrypt_into(
-            session_key.as_slice()
+        let cookie = crate::lock!(self.self_context).encrypt_into(
+            session_key.as_ref()
         )?;
         let req = RPCRequest::new(
             self.next_index(),
             RPCMethod::ChannelJoin,
-            Some(Parameters::JoinChannel(ticket.proof().clone()))
+            Some(Parameters::JoinChannel(ticket.proof()))
         )
         .with_recipient(ticket.channel_id().clone())
         .with_promise(fut.clone())
         .with_cookie(cookie);
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
 
     async fn leave_channel(&mut self, channel_id: &Id) -> Result<()> {
         if !self.is_connected() {
-            return Err(Error::State("The client is not connected yet".into()));
+            return Err(Error::State("Client is not connected yet".into()));
         }
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -694,11 +695,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -714,7 +715,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         new_owner: &Id
     ) -> Result<()> {
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {channel_id} found from user agent".into()))?
         };
         if !channel.is_owner(self.user.id()) {
@@ -738,11 +739,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -751,7 +752,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         permission: Permission
     ) -> Result<()> {
-        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {channel_id} was found".into()))?
         };
         if !channel.is_owner(self.user.id()) {
@@ -772,11 +773,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -785,7 +786,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         name: Option<&str>
     ) -> Result<()> {
-        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         if !ch.is_owner_or_moderator(self.user.id()) {
@@ -809,11 +810,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -822,7 +823,7 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         notice: Option<&str>
     ) -> Result<()> {
-        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {channel_id} was found".into()))?
         };
         if !ch.is_owner_or_moderator(self.user.id()) {
@@ -846,11 +847,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -863,7 +864,7 @@ impl MessagingAgent for MessagingClient {
         if members.is_empty() {
             return Ok(());
         }
-        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
             Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
         };
         if !ch.is_owner_or_moderator(self.user.id()) {
@@ -875,8 +876,7 @@ impl MessagingAgent for MessagingClient {
         }
 
         let role = params::ChannelMemberRole::new(
-            members.into_iter().map(|id| id.clone())
-                .collect::<Vec<Id>>(),
+            members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>(),
             role,
         );
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
@@ -889,11 +889,11 @@ impl MessagingAgent for MessagingClient {
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -1178,7 +1178,7 @@ impl MessagingWorker {
             };
 
             self.user.create_crypto_context(&sid)?
-                .encrypt_into(unwrap!(msg.body()))
+                .encrypt_into(crate::unwrap!(msg.body()))
         };
 
         let encrypt_call = |msg: &Msg| -> Result<Vec<u8>> {
@@ -1340,7 +1340,7 @@ impl MessagingWorker {
                         return;
                     }
 
-                    if let Err(e) = msg.decrypt_body(unwrap!(sender.rx_crypto_context())) {
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(sender.rx_crypto_context())) {
                         warn!("Error decrypting message body: {}, ignored", e);
                         return;
                     };
@@ -1352,7 +1352,7 @@ impl MessagingWorker {
 
 					// TODO: CHECKME - cache the CryptoContext?
                     let ctxt = self.user.create_crypto_context(msg.from());
-                    if let Err(e) = msg.decrypt_body(unwrap!(ctxt)) {
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(ctxt)) {
                         warn!("Error decrypting call body: {}, ignored", e);
                         return;
                     };
@@ -1364,7 +1364,7 @@ impl MessagingWorker {
 
 					// TODO: CHECKME - cache the CryptoContext?
                     let ctxt = self.user.create_crypto_context(msg.from());
-                    if let Err(e) = msg.decrypt_body(unwrap!(ctxt)) {
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(ctxt)) {
                         warn!("Error decrypting notitification body: {}, ignored", e);
                         return;
                     };
@@ -1531,19 +1531,15 @@ impl MessagingWorker {
             warn!("Empty RPC response received from {}, ignored", msg.from());
             return;
         };
-        {
-            use hex::ToHex;
-            let body_hex = body.encode_hex::<String>();
-            println!("RPC response body (hex): {}", body_hex);
-        }
+
+        dump_hex("RPC response body", body);
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
             error!("Error parsing RPC response from {}, ignored", msg.from());
             return;
         };
-
         let Some(call) = self.pending_calls.remove(preparsed.id()) else {
-            error!("Unmatched RPC response ID {} from {}, ignored", preparsed.id(), msg.from());
+            error!("Unexpected RPC response from {}, ignored", msg.from());
             return;
         };
 
@@ -1551,22 +1547,16 @@ impl MessagingWorker {
             RPCMethod::DeviceList => {
                 let complete = |rc: Result<Vec<ClientDevice>>| {
                     if let Some(Promise::GetDeviceList(arc)) = call.promise() {
-                        lock!(arc).complete(rc)
+                        crate::lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
-                let devices = match preparsed.result::<Vec<ClientDevice>>() {
-                    Ok(v) => v,
+                complete(match preparsed.result() {
+                    Ok(v) => Ok(v),
                     Err(e) => {
-                        complete(err_from(e));
-                        return;
+                        println!("Debug: DeviceList error: {:?}", e);
+                        err_from(e)
                     }
-                };
-                complete(Ok(devices))
+                })
             },
             RPCMethod::DeviceRevoke => {
                 let complete = |rc: Result<()>| {
@@ -1574,16 +1564,10 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
-                if let Err(e) = preparsed.result::<bool>() {
-                    complete(err_from(e));
-                    return;
-                }
-                complete(Ok(()))
+                complete(match preparsed.result() {
+                    Ok(v) => Ok(v),
+                    Err(e) => err_from(e)
+                })
             },
             RPCMethod::ContactPush => {
                 // TODO:
@@ -1594,28 +1578,19 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
-                if let Err(e) = preparsed.result::<bool>() {
-                    complete(err_from(e));
-                    return;
-                }
-                lock!(self.ua).on_contacts_cleared();
-                complete(Ok(()))
+                complete(match preparsed.result() {
+                    Ok(v) => {
+                        crate::lock!(self.ua).on_contacts_cleared();
+                        Ok(v)
+                    },
+                    Err(e) => err_from(e)
+                })
             },
             RPCMethod::ChannelCreate => {
                 let complete = |rc: Result<Channel>| {
                     if let Some(Promise::CreateChannel(arc)) = call.promise() {
                         lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 let mut channel = match preparsed.result::<Channel>() {
                     Ok(v) => v,
@@ -1624,8 +1599,9 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                let session_key = match lock!(self.self_context).decrypt_into(
-                    unwrap!(call.cookie())) {
+
+                let borrowed = crate::lock!(self.self_context);
+                let session_key = match borrowed.decrypt_into(call.cookie().unwrap()) {
                     Ok(v) => v,
                     Err(e) => {
                         complete(err_from(e));
@@ -1650,11 +1626,6 @@ impl MessagingWorker {
                     if let Some(Promise::RemoveChannel(arc)) = call.promise() {
                         lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
@@ -1681,11 +1652,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 let mut channel = match preparsed.result::<Channel>() {
                     Ok(v) => v,
                     Err(e) => {
@@ -1693,8 +1659,8 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                let session_key = match lock!(self.self_context).decrypt_into(
-                    unwrap!(call.cookie())) {
+                let session_key = match crate::lock!(self.self_context).decrypt_into(
+                    crate::unwrap!(call.cookie())) {
                     Ok(v) => v,
                     Err(e) => {
                         complete(err_from(e));
@@ -1719,11 +1685,6 @@ impl MessagingWorker {
                     if let Some(Promise::LeaveChannel(arc)) = call.promise() {
                         lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
@@ -1750,11 +1711,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
@@ -1767,9 +1723,9 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::SetChannelOwner(new_owner) = unwrap!(call.params()) {
+                if let Parameters::SetChannelOwner(new_owner) = crate::unwrap!(call.params()) {
                     channel.set_owner(new_owner.clone());
-                    lock!(self.ua).on_channel_updated(&channel);
+                    crate::lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1779,11 +1735,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
@@ -1796,9 +1747,9 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::SetChannelPermission(new_permission) = unwrap!(call.params()) {
+                if let Parameters::SetChannelPermission(new_permission) = crate::unwrap!(call.params()) {
                     channel.set_permission(new_permission.clone());
-                    lock!(self.ua).on_channel_updated(&channel);
+                    crate::lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1808,11 +1759,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
@@ -1825,7 +1771,7 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::SetChannelName(name) = unwrap!(call.params()) {
+                if let Parameters::SetChannelName(name) = crate::unwrap!(call.params()) {
                     channel.set_name(name.as_str());
                     lock!(self.ua).on_channel_updated(&channel);
                 }
@@ -1837,11 +1783,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
@@ -1854,9 +1795,9 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::SetChannelNotice(notice) = unwrap!(call.params()) {
+                if let Parameters::SetChannelNotice(notice) = crate::unwrap!(call.params()) {
                     channel.set_notice(notice.as_str());
-                    lock!(self.ua).on_channel_updated(&channel);
+                    crate::lock!(self.ua).on_channel_updated(&channel);
                 }
                 complete(Ok(()))
             },
@@ -1865,11 +1806,6 @@ impl MessagingWorker {
                     if let Some(Promise::SetChannelMemberRole(arc)) = call.promise() {
                         lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
@@ -1883,7 +1819,7 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::SetChannelMemberRole(member_role) = unwrap!(call.params()) {
+                if let Parameters::SetChannelMemberRole(member_role) = crate::unwrap!(call.params()) {
                     let role = member_role.role();
                     let changed_members = member_role.members().iter()
                         .map(|id| match channel.member(id) {
@@ -1901,11 +1837,6 @@ impl MessagingWorker {
                         lock!(arc).complete(rc)
                     }
                 };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
-                };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
@@ -1918,32 +1849,27 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::BanChannelMembers(ids) = unwrap!(call.params()) {
+                if let Parameters::BanChannelMembers(ids) = crate::unwrap!(call.params()) {
                     let changed = ids.iter().map(|id| match channel.member(id) {
                             Some(m) => m,
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    lock!(self.ua).on_channel_members_banned(&channel, changed.as_ref());
+                    crate::lock!(self.ua).on_channel_members_banned(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },
             RPCMethod::ChannelUnban => {
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::UnbanChannelMembers(arc)) = call.promise() {
-                        lock!(arc).complete(rc)
+                        crate::lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
                 }
-                let channel = match lock!(self.ua).channel(msg.from()) {
+                let channel = match crate::lock!(self.ua).channel(msg.from()) {
                     Ok(Some(channel)) => channel,
                     Ok(None) => Channel::auto(msg.from()),
                     Err(e) => {
@@ -1951,32 +1877,27 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::UnbanChannelMembers(ids) = unwrap!(call.params()) {
+                if let Parameters::UnbanChannelMembers(ids) = crate::unwrap!(call.params()) {
                     let changed = ids.iter().map(|id| match channel.member(id) {
                             Some(m) => m,
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    lock!(self.ua).on_channel_members_unbanned(&channel, changed.as_ref());
+                    crate::lock!(self.ua).on_channel_members_unbanned(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },
             RPCMethod::ChannelRemove =>{
                 let complete = |rc: Result<()>| {
                     if let Some(Promise::RemoveChannelMembers(arc)) = call.promise() {
-                        lock!(arc).complete(rc)
+                        crate::lock!(arc).complete(rc)
                     }
-                };
-                let err_from = |e: Error| {
-                    let estr = format!("Internal error: {e}");
-                    warn!("{}", estr);
-                    Err(Error::State(estr))
                 };
                 if let Err(e) = preparsed.result::<bool>() {
                     complete(err_from(e));
                     return;
                 }
-                let channel = match lock!(self.ua).channel(msg.from()) {
+                let channel = match crate::lock!(self.ua).channel(msg.from()) {
                     Ok(Some(channel)) => channel,
                     Ok(None) => Channel::auto(msg.from()),
                     Err(e) => {
@@ -1984,13 +1905,13 @@ impl MessagingWorker {
                         return;
                     }
                 };
-                if let Parameters::RemoveChannelMembers(ids) = unwrap!(call.params()) {
+                if let Parameters::RemoveChannelMembers(ids) = crate::unwrap!(call.params()) {
                     let changed = ids.iter().map(|id| match channel.member(id) {
                             Some(m) => m,
                             None => channel::Member::unknown(id)
                         })
                         .collect::<Vec<channel::Member>>();
-                    lock!(self.ua).on_channel_members_removed(&channel, changed.as_ref());
+                    crate::lock!(self.ua).on_channel_members_removed(&channel, changed.as_ref());
                 }
                 complete(Ok(()))
             },
@@ -2007,11 +1928,7 @@ impl MessagingWorker {
             return;
         };
 
-        {
-            use hex::ToHex;
-            let body_hex = body.encode_hex::<String>();
-            println!("Notification body (hex): {}", body_hex);
-        }
+        dump_hex("Notification body", body);
 
         let Ok(mut preparsed) = Notification::from(body) else {
             error!("Error parsing notification from {}, message ignored", msg.from());
@@ -2195,16 +2112,14 @@ impl MessagingWorker {
             // TODO
             return;
         }
-        {
-            use hex::ToHex;
-            let body_hex = body.encode_hex::<String>();
-            println!("RPC request body (hex): {}", body_hex);
-        }
+
+        dump_hex("RPC request body", body);
 
         let Ok(preparsed) = RPCRequest::from(body) else {
-            error!("Failed to parse RPC request from {}, message ignored", msg.from());
+            error!("Error parsing RPC request from {}, ignored", msg.from());
             return;
         };
+
         match preparsed.method() {
             RPCMethod::DeviceList   => {},  // ignored
             RPCMethod::DeviceRevoke => {}   // ignored
@@ -2222,7 +2137,7 @@ impl MessagingWorker {
             RPCMethod::ChannelBan   => {},
             RPCMethod::ChannelUnban => {},
             _ => {
-                error!("Unknown RPC method in response from {}, ignored", msg.from());
+                error!("Unknown RPC method for response from {}, discarded", msg.from());
                 return;
             }
         }
@@ -2248,4 +2163,16 @@ fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
     password.extend_from_slice(&dsign);
 
     bs58::encode(password).into_string()
+}
+
+fn dump_hex(label: &str, data: &[u8]) {
+    use hex::ToHex;
+    let data_hex = data.encode_hex::<String>();
+    println!("dumping(hex) {}: {}", label, data_hex);
+}
+
+fn err_from<T>(e: Error) -> crate::core::Result<T> {
+    let estr = format!("Internal error: {e}");
+    warn!("{}", estr);
+    Err(Error::State(estr))
 }

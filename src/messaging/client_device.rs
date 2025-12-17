@@ -1,25 +1,25 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
 use sha2::{Digest, Sha256};
+#[cfg(test)]
 use bs58;
 
-use crate::{
-	as_secs,
-	Id
-};
+use crate::Id;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub struct ClientDevice {
 	#[serde(skip)]
 	client_id: String,	// MQTT Client ID
 
-	#[serde(rename = "id")]
+	#[serde(rename = "id", with = "crate::serde_id_as_bytes")]
 	id		: Id,
 	#[serde(rename = "n")]
 	name 	: String,
     #[serde(rename = "a")]
-	app_name: Option<String>,
+	app_name: String,
 	#[serde(rename = "c")]
     created	: u64,
 	#[serde(rename = "ls")]
@@ -30,36 +30,28 @@ pub struct ClientDevice {
 
 impl ClientDevice {
 	#[cfg(test)]
-	pub(crate) fn new(id: &Id, device_name: &str, app_name: Option<&str>,
+	pub(crate) fn new(id: &Id, device_name: &str, app_name: &str,
 		created: u64, last_seen: u64, last_address: &str) -> Self {
 
 		Self {
-			id			: id.clone(),
-			name		: device_name.to_string(),
-			app_name	: app_name.map(|v|v.to_string()),
-			last_address: last_address.to_string(),
+			id				: id.clone(),
+			name			: device_name.to_string(),
+			app_name		: app_name.to_string(),
+			last_address	: last_address.to_string(),
 
 			created,
 			last_seen,
-			client_id	: Self::digest(id),
+
+			client_id		: bs58::encode(&Sha256::digest(&id)).into_string()
 		}
-	}
-
-	fn digest(id: &Id) -> String {
-		bs58::encode(
-			&Sha256::digest(id.as_bytes())
-		).into_string()
-	}
-
-	pub fn update_client_id(&mut self) {
-		self.client_id = Self::digest(&self.id);
 	}
 
 	pub fn id(&self) -> &Id {
 		&self.id
 	}
 
-	pub fn client_id(&self) -> &str {
+	#[cfg(test)]
+	pub(crate) fn client_id(&self) -> &str {
 		&self.client_id
 	}
 
@@ -67,8 +59,8 @@ impl ClientDevice {
 		&self.name
 	}
 
-	pub fn app_name(&self) -> Option<&str> {
-		self.app_name.as_deref()
+	pub fn app(&self) -> &str {
+		&self.app_name
 	}
 
 	pub fn created(&self) -> SystemTime {
@@ -97,18 +89,23 @@ impl fmt::Display for ClientDevice {
 			self.client_id
 		)?;
 
-		if self.name.is_empty() {
-			write!(f, ", name=default")?;
+		if !self.name.is_empty() {
+			write!(f, ", name={}", self.name)?;
+		} else {
+			write!(f, ", name=N/A")?;
 		}
-		self.app_name.as_ref().map(|v| {
-			write!(f, ", app={}", v)
-		});
+
+		if !self.app_name.is_empty() {
+			write!(f, ", app={}", self.app_name)?;
+		} else {
+			write!(f, ", app=N/A")?;
+		}
 
 		write!(f, ", created={}", self.created)?;
 		if self.last_seen > 0 {
 			write!(f, ", lastSeen={}, address={}",
-			as_secs!(SystemTime::now()) - self.last_seen,
-			self.last_seen)?;
+			crate::as_secs!(SystemTime::now()) - self.last_seen,
+			self.last_address)?;
 		}
 		write!(f, "]")
 	}

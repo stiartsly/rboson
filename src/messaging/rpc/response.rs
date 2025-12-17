@@ -66,16 +66,21 @@ impl RPCResponse
         self.error.is_some()
     }
 
-    pub(crate) fn result<T>(&mut self) -> Result<T> where T: serde::de::DeserializeOwned {
+    pub(crate) fn result<T>(&mut self) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned
+    {
         if let Some(v) = self.result.take() {
             return serde_cbor::value::from_value(v).map_err(|e|
-                Error::Protocol(format!("Internal error: bad RPC response with error {e}"))
+                Error::Protocol(format!("Internal error {e}: bad RPC response"))
             )
         }
-        if let Some(e) = self.error.take() { // TODO
-            return Err(Error::Protocol("Server error: {e}".into()))
+        if let Some(e) = self.error.take() {
+            // TODO:
+            return Err(Error::Protocol(format!("Server error: {e}")))
+
         }
-        return Err(Error::Protocol("Missing both result and error in RPC response".into()))
+        Err(Error::Protocol("Incomplete RPC response, missing both result and error fields".to_string()))
     }
 
     pub(crate) fn error(&self) -> Option<&RPCError> {

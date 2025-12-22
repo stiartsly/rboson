@@ -128,10 +128,12 @@ impl ChannelMemberRole {
 pub(crate) enum Parameters {
     UserProfile(UserProfile),
     RemoveContact(ContactRemove),
+    #[serde(with="crate::serde_id_as_bytes")]
     RevokeDevice(Id),
     CreateChannel(ChannelCreate),
     JoinChannel(InviteTicket),
     ChannelMemberRole(ChannelMemberRole),
+    #[serde(with="crate::serde_id_as_bytes")]
     SetChannelOwner(Id),
     SetChannelPermission(channel::Permission),
     SetChannelName(String),

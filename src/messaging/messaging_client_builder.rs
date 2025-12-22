@@ -5,8 +5,8 @@ use url::Url;
 use log::{warn, error};
 
 use crate::{
-    Id,
     PeerInfo,
+    NodeInfo,
     signature::KeyPair,
     core::{
         Error,
@@ -46,8 +46,9 @@ pub struct Builder {
     // handler for device registration to acquire user's keypair
     register_request_handler    : Option<Box<dyn Fn(&str) -> Result<bool> + Send + Sync>>,
 
+    api_url             : Option<Url>,
     messaging_peer      : Option<PeerInfo>,
-    messaging_nodeid    : Option<Id>,
+    messaging_node      : Option<NodeInfo>,
 
     repository          : Option<Database>,
     repository_db       : Option<String>,
@@ -79,8 +80,9 @@ impl Builder {
             register_device_only        : false,
             register_request_handler    : None,
 
+            api_url             : None,
             messaging_peer      : None,
-            messaging_nodeid    : None,
+            messaging_node      : None,
 
             repository          : None,
             repository_db       : None,
@@ -178,6 +180,20 @@ impl Builder {
         Ok(self)
     }
 
+    pub fn with_messaging_node(mut self, node: NodeInfo) -> Result<Self> {
+        self.messaging_node = Some(node);
+        Ok(self)
+    }
+
+    pub fn with_api_url(mut self, url: &str) -> Result<Self> {
+        let api_url = Url::parse(&url).map_err(|e|
+            Error::State(format!("Error parsing API URL: {e}"))
+        )?;
+
+        self.api_url = Some(api_url.clone());
+        Ok(self)
+    }
+
     pub fn with_messaging_repository(mut self, path: &str) -> Self {
         self.repository_db = Some(path.to_string());
         self
@@ -225,7 +241,7 @@ impl Builder {
         self
     }
 
-    async fn eligible_check(&self) -> Result<()> {
+    async fn eligible_check(&mut self) -> Result<()> {
         if self.ua.is_some() {
             return Ok(());  // User agent is already set, skip checks
         }
@@ -272,9 +288,29 @@ impl Builder {
                 return Err(Error::State("Peer is not configured".into()));
             };
 
-            if peer.alternative_url().is_none() {
-                Err(Error::State("API URL is not configured".into()))?;
+            if self.api_url.is_some() {
+                return Ok(());
             }
+
+            let url = match peer.alternative_url().as_ref() {
+                Some(url) => Url::parse(url),
+                None =>  {
+                    let Some(node) = self.messaging_node.as_ref() else {
+                        return Err(Error::State(
+                            "Messaging node is not configured to derive API URL".into()
+                        ));
+                    };
+                    Url::parse(
+                        &format!("http://{}:{}",
+                            node.socket_addr().ip(),
+                            peer.port()
+                        )
+                    )
+                }
+            }.map_err(|e|
+                Error::State(format!("Error parsing API URL: {e}"))
+            )?;
+            self.api_url = Some(url);
         }
         Ok(())
     }
@@ -378,7 +414,7 @@ impl Builder {
         }
 
         let mut api_client = api_client::Builder::new()
-            .with_base_url(&self.api_url())
+            .with_base_url(self.api_url())
             .with_home_peerid(self.peer().id())
             .with_user_identity(self.user.as_ref().unwrap())
             .with_device_identity(self.device.as_ref().unwrap())
@@ -468,11 +504,7 @@ impl Builder {
             .expect("Messaging peer is not set")
     }
 
-    fn api_url(&self) -> Url {
-        Url::parse(
-            self.peer().alternative_url().expect("API URL is not set")
-        ).map_err(|e| {
-            Error::State(format!("Invalid API URL: {e}"))
-        }).unwrap()
+    pub(crate) fn api_url(&self) -> &Url {
+        self.api_url.as_ref().expect("API URL is not set")
     }
 }

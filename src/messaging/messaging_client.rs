@@ -90,6 +90,7 @@ pub struct MessagingClient {
     server_context  : Arc<Mutex<CryptoContext>>,
     self_context    : Arc<Mutex<CryptoContext>>,
 
+    api_url         : Url,
     api_client      : Option<APIClient>,
     disconnect      : bool,
 
@@ -142,6 +143,7 @@ impl MessagingClient {
 
             base_index      : RefCell::new(0),
 
+            api_url         : b.api_url().clone(),
             api_client      : None,
             disconnect      : false,
             connected       : Arc::new(Mutex::new(false)),
@@ -177,20 +179,17 @@ impl MessagingClient {
         Ok(Some("TODO".into()))
     }
 
+    pub fn deviceid(&self) -> &Id {
+        self.device.id()
+    }
+
     pub async fn start(&mut self) -> Result<()> {
         info!("Messaging client Started!");
 
         _ = self.load_access_token()?;
 
-        let api_url = match self.peer.alternative_url().as_ref() {
-            None => Err(Error::State("Alternative URL is not set".into())),
-            Some(url) => Url::parse(url).map_err(|e|
-                Error::State(format!("Error parsing API URL: {e}"))
-            )
-        }?;
-
         let mut api_client = api_client::Builder::new()
-            .with_base_url(&api_url)
+            .with_base_url(&self.api_url)
             .with_home_peerid(self.peer.id())
             .with_user_identity(&self.user)
             .with_device_identity(&self.device)
@@ -405,25 +404,24 @@ impl MessagingClient {
         updated_contacts: Vec<Contact>
     ) -> Result<String> {
 
-        let current_version = lock!(self.ua).contacts_version()?;
+        let current_version = crate::lock!(self.ua).contacts_version()?;
+        let update = ContactsUpdate::new(Some(current_version), updated_contacts);
 
         let arc = Arc::new(Mutex::new(promise::StringVal::new()));
         let fut = Promise::PushContactsUpdate(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ContactPush,
-            Some(Parameters::ContactsUpdate(
-                ContactsUpdate::new(Some(current_version), updated_contacts)
-            ))
+            RPCMethod::ContactPush
         )
         .with_recipient(self.peer.id().clone())
+        .with_params(Parameters::ContactsUpdate(update))
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -515,8 +513,7 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::GetDeviceList(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::DeviceList,
-            None,
+            RPCMethod::DeviceList
         )
         .with_recipient(self.peer.id().clone())
         .with_promise(fut.clone());
@@ -542,11 +539,11 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::RevokeDevice(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::DeviceRevoke,
-            Some(Parameters::RevokeDevice(device_id.clone()))
+            RPCMethod::DeviceRevoke
         )
-        .with_promise(fut.clone())
-        .with_recipient(self.peer.id().clone());
+        .with_recipient(self.peer.id().clone())
+        .with_params(Parameters::RevokeDevice(device_id.clone()))
+        .with_promise(fut.clone());
 
         lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -582,12 +579,12 @@ impl MessagingAgent for MessagingClient {
         )?;
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelCreate,
-            Some(Parameters::CreateChannel(params))
+            RPCMethod::ChannelCreate
         )
-        .with_promise(fut.clone())
+        .with_params(Parameters::CreateChannel(params))
+        .with_recipient(crate::unwrap!(self.service_info).peerid().clone()) // why not peerid.
         .with_cookie(cookie)
-        .with_recipient(crate::unwrap!(self.service_info).peerid().clone()); // why not peerid.
+        .with_promise(fut.clone());
 
         crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -609,8 +606,7 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::RemoveChannel(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelDelete,
-            None
+            RPCMethod::ChannelDelete
         )
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
@@ -664,12 +660,12 @@ impl MessagingAgent for MessagingClient {
         )?;
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelJoin,
-            Some(Parameters::JoinChannel(ticket.proof()))
+            RPCMethod::ChannelJoin
         )
         .with_recipient(ticket.channel_id().clone())
-        .with_promise(fut.clone())
-        .with_cookie(cookie);
+        .with_params(Parameters::JoinChannel(ticket.proof()))
+        .with_cookie(cookie)
+        .with_promise(fut.clone());
 
         crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -689,8 +685,7 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::LeaveChannel(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelLeave,
-            None
+            RPCMethod::ChannelLeave
         )
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
@@ -733,10 +728,10 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::SetChannelOwner(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelOwner,
-            Some(Parameters::SetChannelOwner(new_owner.clone()))
+            RPCMethod::ChannelOwner
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelOwner(new_owner.clone()))
         .with_promise(fut.clone());
 
         crate::lock!(self.requests).push_back(req);
@@ -767,10 +762,10 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::SetChannelPerm(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelPermission,
-            Some(Parameters::SetChannelPermission(permission))
+            RPCMethod::ChannelPermission
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelPermission(permission))
         .with_promise(fut.clone());
 
         crate::lock!(self.requests).push_back(req);
@@ -799,16 +794,17 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
         let fut = Promise::SetChannelName(arc.clone());
-        let req = RPCRequest::new(
+        let mut req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelName,
-            name.filter(|v| !v.is_empty()).map(|v| {
-                let nfc = v.nfc().collect::<String>();
-                Parameters::SetChannelName(nfc)
-            })
+            RPCMethod::ChannelName
         )
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
+
+        if let Some(v) = name.filter(|v| !v.is_empty()) {
+            let nfc = v.nfc().collect::<String>();
+            req = req.with_params(Parameters::SetChannelName(nfc));
+        }
 
         crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -836,16 +832,17 @@ impl MessagingAgent for MessagingClient {
 
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
         let fut = Promise::SetChannelNotice(arc.clone());
-        let req = RPCRequest::new(
+        let mut req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelNotice,
-            notice.filter(|v| !v.is_empty()).map(|v| {
-                let nfc = v.nfc().collect::<String>();
-                Parameters::SetChannelNotice(nfc)
-            })
+            RPCMethod::ChannelNotice
         )
         .with_recipient(channel_id.clone())
         .with_promise(fut.clone());
+
+        if let Some(v) = notice.filter(|v| !v.is_empty()) {
+            let nfc = v.nfc().collect::<String>();
+            req = req.with_params(Parameters::SetChannelNotice(nfc));
+        }
 
         crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
@@ -883,10 +880,10 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::SetChannelMemberRole(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelRole,
-            Some(Parameters::SetChannelMemberRole(role))
+            RPCMethod::ChannelRole
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelMemberRole(role))
         .with_promise(fut.clone());
 
         crate::lock!(self.requests).push_back(req);
@@ -924,19 +921,17 @@ impl MessagingAgent for MessagingClient {
         let fut = Promise::BanChannelMembers(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelBan,
-            Some(Parameters::BanChannelMembers(
-                members.into_iter().map(|v| v.clone()).collect::<Vec<Id>>()
-            ))
+            RPCMethod::ChannelBan
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::BanChannelMembers(members))
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -959,23 +954,25 @@ impl MessagingAgent for MessagingClient {
             return Err(Error::State("Client is not connected yet".into()));
         }
 
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
+
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
         let fut = Promise::UnbanChannelMembers(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelUnban,
-            Some(Parameters::UnbanChannelMembers(
-                members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>()
-            ))
+            RPCMethod::ChannelUnban
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::UnbanChannelMembers(members))
         .with_promise(fut.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(fut).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }
@@ -998,23 +995,25 @@ impl MessagingAgent for MessagingClient {
             return Err(Error::State("Client is not connected yet".into()));
         }
 
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
+
         let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
         let promise = Promise::RemoveChannelMembers(arc.clone());
         let req = RPCRequest::new(
             self.next_index(),
-            RPCMethod::ChannelRemove,
-            Some(Parameters::RemoveChannelMembers(
-                members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>())
-            )
+            RPCMethod::ChannelRemove
         )
         .with_recipient(channel_id.clone())
+        .with_params(Parameters::RemoveChannelMembers(members))
         .with_promise(promise.clone());
 
-        lock!(self.requests).push_back(req);
+        crate::lock!(self.requests).push_back(req);
         self.notifier.notify_one();
 
         match Waiter::new(promise).await {
-            Ok(_) => lock!(arc).result(),
+            Ok(_) => crate::lock!(arc).result(),
             Err(e) => Err(e)
         }
     }

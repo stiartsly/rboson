@@ -44,11 +44,11 @@ pub(crate) struct RPCRequest
 
 impl RPCRequest
 {
-    pub(crate) fn new(id: u32, method: RPCMethod, params: Option<Parameters>) -> Self {
+    pub(crate) fn new(id: u32, method: RPCMethod) -> Self {
         Self {
             id,
             method,
-            params,
+            params: None,
             cookie: None,
             promise: None,
             _response: None,
@@ -68,6 +68,11 @@ impl RPCRequest
 
     pub(crate) fn with_recipient(mut self, recipient: Id) -> Self {
         self.to = Some(recipient);
+        self
+    }
+
+    pub(crate) fn with_params(mut self, params: Parameters) -> Self {
+        self.params = Some(params);
         self
     }
 

@@ -10,6 +10,7 @@ use prompt::MyPrompt;
 mod cmds {
     pub(crate) mod channel_cmd;
     pub(crate) mod device_cmd;
+    pub(crate) mod info_cmd;
 }
 
 use boson::{
@@ -40,6 +41,7 @@ fn build_cli() -> Command {
         .subcommand_required(true)
         .subcommand(cmds::channel_cmd::channel_cli())
         .subcommand(cmds::device_cmd::device_cli())
+        .subcommand(cmds::info_cmd::info_cli())
         .help_template("{subcommands}");
         //.override_help("My custom help message\n");
 
@@ -77,7 +79,7 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
 
                 println!("Deleting channel: {}", id);
                 _ = client.lock().unwrap().remove_channel(&id).await.map_err(|e| {
-                    println!("Failed to delete channel: {{{}}}", e);
+                    println!("Error deleting channel: {}", e);
                 }).map(|_| {
                     println!("Channel {} is deleted.", id);
                 });
@@ -103,9 +105,9 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
 
                 println!("Leaving a channel: {}", id);
                 _ = client.lock().unwrap().leave_channel(&id).await.map_err(|e| {
-                    println!("Failed to leave channel: {{{}}}", e);
+                    println!("Error leaving channel: {}", e);
                 }).map(|_| {
-                    println!("Left channel {}", id);
+                    println!("Channel {} left.", id);
                 });
             }
 
@@ -146,7 +148,23 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
 
             Some(("info", m)) => {
                 let id = m.get_one::<String>("ID").unwrap();
-                println!("[OK] Retrieving channel info: {}", id);
+                let Ok(channel_id) = Id::try_from(id.as_str()) else {
+                    println!("Error: invalid channel id: {}", id);
+                    return;
+                };
+
+                let rc = client.lock().unwrap().channel(&channel_id).await;
+                match rc {
+                    Ok(Some(channel)) => {
+                        println!("Channel info: {}", channel);
+                    },
+                    Ok(None) => {
+                        println!("No channel found with id: {}", id);
+                    },
+                    Err(e) => {
+                        println!("Failed to create channel ticket: {}", e);
+                    }
+                }
             }
             Some(("list", _m)) => {
                 println!("[OK] Listing channels");
@@ -177,10 +195,24 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
             }
             Some(("revoke", m)) => {
                 let id = m.get_one::<String>("id").unwrap();
-                println!("[OK] Device revoked: id={}", id);
+                let Ok(id) = Id::try_from(id.as_str()) else {
+                    println!("Error: invalid device id {}", id);
+                    return;
+                };
+                _ = client.lock().unwrap().revoke_device(&id).await.map_err(|e| {
+                    println!("Error revoking device: {e}");
+                }).map(|_| {
+                    println!("Device {} is revoked.", id);
+                });
             }
-            _ => println!("Unknown device subcommand"),
+            _ => println!("Unknown device command"),
         },
+
+        Some(("me", _)) => {
+            println!("Show my information:");
+            println!(" userid:\t{}", client.lock().unwrap().userid());
+            println!(" deviceid:\t{}", client.lock().unwrap().deviceid());
+        }
         _ => println!("Unknown 1111 command"),
     }
 }
@@ -239,7 +271,7 @@ async fn main(){
 
     let mut path = String::new();
     path.push_str(cfg.data_dir());
-    path.push_str("/messaging");
+    path.push_str("/messaging.cache");
 
     let mut appdata_store = AppDataStoreBuilder::new("im")
         .with_path(path.as_str())
@@ -299,7 +331,6 @@ async fn main(){
         .with_app_name("test-im")
         .with_messaging_peer(peer.clone()).unwrap()
         .with_messaging_repository("test-repo")
-       // .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
         .register_user_and_device(ucfg.password().map_or("secret", |v|v))
         .with_connection_listener(ConnectionListenerTest)
         .with_message_listener(MessageListenerTest)

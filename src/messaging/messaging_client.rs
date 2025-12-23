@@ -1531,7 +1531,7 @@ impl MessagingWorker {
             return;
         };
 
-        dump_hex("RPC response body", body);
+        crate::dump_hex("RPC response body", body);
 
         let Ok(mut preparsed) = RPCResponse::from(body) else {
             error!("Error parsing RPC response from {}, ignored", msg.from());
@@ -1927,7 +1927,7 @@ impl MessagingWorker {
             return;
         };
 
-        dump_hex("Notification body", body);
+        crate::dump_hex("Notification body", body);
 
         let Ok(mut preparsed) = Notification::from(body) else {
             error!("Error parsing notification from {}, message ignored", msg.from());
@@ -2112,7 +2112,7 @@ impl MessagingWorker {
             return;
         }
 
-        dump_hex("RPC request body", body);
+        crate::dump_hex("RPC request body", body);
 
         let Ok(preparsed) = RPCRequest::from(body) else {
             error!("Error parsing RPC request from {}, ignored", msg.from());
@@ -2162,12 +2162,6 @@ fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
     password.extend_from_slice(&dsign);
 
     bs58::encode(password).into_string()
-}
-
-fn dump_hex(label: &str, data: &[u8]) {
-    use hex::ToHex;
-    let data_hex = data.encode_hex::<String>();
-    println!("dumping(hex) {}: {}", label, data_hex);
 }
 
 fn err_from<T>(e: Error) -> crate::core::Result<T> {

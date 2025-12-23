@@ -197,6 +197,13 @@ impl IsEmpty for bool {
     }
 }
 
+#[allow(unused)]
+fn dump_hex(label: &str, data: &[u8]) {
+    use hex::ToHex;
+    let data_hex = data.encode_hex::<String>();
+    println!("dumping(hex) {}: {}", label, data_hex);
+}
+
 // serde Id as base58 string
 mod serde_id_as_base58 {
     use crate::Id;

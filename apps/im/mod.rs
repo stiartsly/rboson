@@ -212,8 +212,11 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
             println!("Show my information:");
             println!(" userid:\t{}", client.lock().unwrap().userid());
             println!(" deviceid:\t{}", client.lock().unwrap().deviceid());
+            println!(" \nShow information of messaging service: ");
+            println!(" peerid:\t{}", client.lock().unwrap().messaging_peer().id());
+            println!(" nodeid:\t{}", client.lock().unwrap().messaging_peer().nodeid());
         }
-        _ => println!("Unknown 1111 command"),
+        _ => println!("Unknown command"),
     }
 }
 
@@ -292,14 +295,14 @@ async fn main(){
         return;
     };
 
-    let Some(ni) = appdata_store.service_node() else {
+    let Some(_ni) = appdata_store.service_node() else {
         eprintln!("Node hosting the peer not found!!!");
         node.lock().unwrap().stop();
         return;
     };
 
-    println!("Messaging Peer: {}", peer);
-    println!("Messaging Node: {}", ni);
+    //println!("Messaging Peer: {}", peer);
+    //println!("Messaging Node: {}", ni);
 
     let usk: signature::PrivateKey = match ucfg.private_key().try_into() {
         Ok(v) => v,
@@ -342,7 +345,7 @@ async fn main(){
     let mut client = match result {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Creating messaging client instance error: {{{e}}}");
+            eprintln!("Creating messaging client instance error: {}", e);
             node.lock().unwrap().stop();
             return;
         }

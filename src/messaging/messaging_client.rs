@@ -121,10 +121,6 @@ impl MessagingClient {
         let user = lock!(ua).user().unwrap().identity().clone();
         let device = lock!(ua).device().unwrap().identity().unwrap().clone();
 
-        println!("peerid    : {}", peer.id());
-        println!("userid    : {}", user.id());
-        println!("deviceid  : {}", device.id());
-
         lock!(ua).harden();
         drop(ua);
 
@@ -181,6 +177,10 @@ impl MessagingClient {
 
     pub fn deviceid(&self) -> &Id {
         self.device.id()
+    }
+
+    pub fn messaging_peer(&self) -> &PeerInfo {
+        &self.peer
     }
 
     pub async fn start(&mut self) -> Result<()> {
@@ -1551,10 +1551,7 @@ impl MessagingWorker {
                 };
                 complete(match preparsed.result() {
                     Ok(v) => Ok(v),
-                    Err(e) => {
-                        println!("Debug: DeviceList error: {:?}", e);
-                        err_from(e)
-                    }
+                    Err(e) => err_from(e)
                 })
             },
             RPCMethod::DeviceRevoke => {

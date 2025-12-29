@@ -98,22 +98,22 @@ impl Builder {
         }
     }
 
-    pub fn with_new_user_key(mut self) -> Self {
+    pub fn with_new_user_key(&mut self) -> &mut Self {
         self.user = Some(CryptoIdentity::new());
         self
     }
 
-    pub fn with_user_key(mut self, keypair: KeyPair) -> Self {
+    pub fn with_user_key(&mut self, keypair: KeyPair) -> &mut Self {
         self.user = Some(CryptoIdentity::from_keypair(keypair));
         self
     }
 
-    pub fn with_user_key_from_private_key(mut self, private_key: &[u8]) -> Result<Self> {
+    pub fn with_user_key_from_private_key(&mut self, private_key: &[u8]) -> Result<&mut Self> {
         self.user = Some(CryptoIdentity::from_private_key(private_key)?);
         Ok(self)
     }
 
-    pub fn with_user_name(mut self, name: &str) -> Self {
+    pub fn with_user_name(&mut self, name: &str) -> &mut Self {
         self.user_name = match !name.is_empty() {
             true  => Some(name.nfc().collect::<String>()),
             false => None,
@@ -121,27 +121,27 @@ impl Builder {
         self
     }
 
-    pub fn with_new_device_key(mut self) -> Self {
+    pub fn with_new_device_key(&mut self) -> &mut Self {
         self.device = Some(CryptoIdentity::new());
         self
     }
 
-    pub fn with_device_key(mut self, keypair: KeyPair) -> Self {
+    pub fn with_device_key(&mut self, keypair: KeyPair) -> &mut Self {
         self.device = Some(CryptoIdentity::from_keypair(keypair));
         self
     }
 
-    pub fn with_device_key_from_private_key(mut self, private_key: &[u8]) -> Result<Self> {
+    pub fn with_device_key_from_private_key(&mut self, private_key: &[u8]) -> Result<&mut Self> {
         self.device = Some(CryptoIdentity::from_private_key(private_key)?);
         Ok(self)
     }
 
-    pub fn with_device_name(mut self, name: &str) -> Self {
+    pub fn with_device_name(&mut self, name: &str) -> &mut Self {
         self.device_name = Some(name.nfc().collect::<String>());
         self
     }
 
-    pub fn with_app_name(mut self, name: &str) -> Self {
+    pub fn with_app_name(&mut self, name: &str) -> &mut Self {
         self.app_name = match !name.is_empty() {
             true  => Some(name.nfc().collect::<String>()),
             false => None,
@@ -149,43 +149,43 @@ impl Builder {
         self
     }
 
-    pub fn with_device_node(mut self, node: Arc<Mutex<Node>>) -> Self {
+    pub fn with_device_node(&mut self, node: Arc<Mutex<Node>>) -> &mut Self {
         self.node = Some(node.clone());
         self
     }
 
-    pub fn register_user_and_device(mut self, passphrase: &str) -> Self {
+    pub fn register_user_and_device(&mut self, passphrase: &str) -> &mut Self {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_user_and_device = true;
         self
     }
 
-    pub fn register_device(mut self, passphrase: &str) -> Self  {
+    pub fn register_device(&mut self, passphrase: &str) -> &mut Self  {
         self.passphrase = Some(passphrase.nfc().collect::<String>());
         self.register_device_only = true;
         self
     }
 
     pub fn with_device_registeration_request_handler(
-        mut self,
+        &mut self,
         handler: Box<dyn Fn(&str) -> Result<bool> + Send + Sync>
-    ) -> Self {
+    ) -> &mut Self {
         self.register_request_handler = Some(handler);
         self.register_device_only = true;
         self
     }
 
-    pub fn with_messaging_peer(mut self, peer: PeerInfo) -> Result<Self> {
+    pub fn with_messaging_peer(&mut self, peer: PeerInfo) -> Result<&mut Self> {
         self.messaging_peer = Some(peer);
         Ok(self)
     }
 
-    pub fn with_messaging_node(mut self, node: NodeInfo) -> Result<Self> {
+    pub fn with_messaging_node(&mut self, node: NodeInfo) -> Result<&mut Self> {
         self.messaging_node = Some(node);
         Ok(self)
     }
 
-    pub fn with_api_url(mut self, url: &str) -> Result<Self> {
+    pub fn with_api_url(&mut self, url: &str) -> Result<&mut Self> {
         let api_url = Url::parse(&url).map_err(|e|
             Error::State(format!("Error parsing API URL: {e}"))
         )?;
@@ -194,42 +194,42 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn with_messaging_repository(mut self, path: &str) -> Self {
+    pub fn with_messaging_repository(&mut self, path: &str) -> &mut Self {
         self.repository_db = Some(path.to_string());
         self
     }
 
-    pub fn with_connection_listener(mut self,
+    pub fn with_connection_listener(&mut self,
         listener: impl ConnectionListener + 'static
-    ) -> Self {
+    ) -> &mut Self {
         self.connection_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_profile_listener(mut self,
+    pub fn with_profile_listener(&mut self,
         listener: impl ProfileListener + 'static
-    ) -> Self {
+    ) -> &mut Self {
         self.profile_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_message_listener(mut self,
+    pub fn with_message_listener(&mut self,
         listener: impl MessageListener + 'static
-    ) -> Self {
+    ) -> &mut Self {
         self.message_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_channel_listener(mut self,
+    pub fn with_channel_listener(&mut self,
         listener: impl ChannelListener + 'static
-    ) -> Self {
+    ) -> &mut Self {
         self.channel_listener = Some(Box::new(listener));
         self
     }
 
-    pub fn with_contact_listener(mut self,
+    pub fn with_contact_listener(&mut self,
         listener: impl ContactListener + 'static
-    ) -> Self {
+    ) -> &mut Self {
         self.contact_listener = Some(Box::new(listener));
         self
     }
@@ -307,9 +307,9 @@ impl Builder {
                         )
                     )
                 }
-            }.map_err(|e|
+            }.map_err(|e| {
                 Error::State(format!("Error parsing API URL: {e}"))
-            )?;
+            })?;
             self.api_url = Some(url);
         }
         Ok(())
@@ -424,6 +424,7 @@ impl Builder {
         let device = crate::lock!(ua).device().cloned();
 
         if self.register_user_and_device {
+            println!(">>>> Registering user with device");
             api_client.register_user_with_device(
                 crate::unwrap!(self.passphrase),
                 crate::unwrap!(self.user_name),
@@ -440,7 +441,8 @@ impl Builder {
         }
 
         if user.is_some() {
-            let cred = api_client.register_device(
+            println!(">>>> Registering device with user");
+            let cred = api_client.register_device_with_user(
                 crate::unwrap!(self.passphrase),
                 crate::unwrap!(device).name(),
                 crate::unwrap!(device).app_name()
@@ -478,7 +480,7 @@ impl Builder {
         Ok(())
     }
 
-    pub async fn build_into(mut self) -> Result<MessagingClient> {
+    pub async fn build_into(&mut self) -> Result<MessagingClient> {
         self.eligible_check().await?;
 
         let ua = match self.ua.is_some() {
@@ -487,7 +489,7 @@ impl Builder {
         };
 
         self.register_client(ua).await?;
-        MessagingClient::new(self)
+        MessagingClient::new(&self)
     }
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {

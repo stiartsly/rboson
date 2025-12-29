@@ -73,6 +73,7 @@ impl<T> GenericContact<T> where T: Clone{
         session_key: Vec<u8>,
         remark: Option<String>
     ) -> Result<Self> {
+
         unimplemented!()
     }
 

@@ -26,14 +26,13 @@ use crate::messaging::{
     user_agent::UserAgentCaps,
 
     message::Message,
-    contact::GenericContact,
-    channel::{self, Member, Channel, ChannelData, Role},
+    channel::{Member, Channel, Role},
     messaging_repository::MessagingRepository,
     persistence::database::Database,
 
     profile_listener::ProfileListenerMut,
     message_listener::MessageListenerMut,
-    channel_listener::ChannelListener,
+    channel_listener::{ChannelListener, ChannelListenerMut},
 
 };
 
@@ -53,6 +52,8 @@ pub struct UserAgent {
     conversations       : HashMap<Id, Conversation>,
 
     hardened: bool,
+
+    channels    : HashMap<Id, Channel>,
 }
 
 #[allow(unused)]
@@ -71,6 +72,8 @@ impl UserAgent {
             conversations       : HashMap::new(),
 
             hardened: false,
+
+            channels            : HashMap::new(),
         }
     }
 
@@ -114,7 +117,7 @@ impl UserAgent {
             Err(Error::State("UserAgent is hardened".into()))?;
         }
         if !peer.is_valid() {
-            Err(Error::Argument("Peer info {peer} is invalid!".into()))?;
+            Err(Error::Argument(format!("Peer info {} is invalid!", peer)))?;
         }
 
         self.peer = Some(peer.clone());
@@ -334,48 +337,56 @@ impl ContactListener for UserAgent {
     }
 }
 
-impl ChannelListener for UserAgent {
-    fn on_joined_channel(&self, _channel: &Channel) {
+impl ChannelListenerMut for UserAgent {
+    fn on_joined_channel(&mut self, channel: &Channel) {
+        self.channels.insert(
+            channel.id().clone(),
+            channel.clone()
+        );
+
         println!("on_joined_channel called");
+        self.channel_listeners.iter().for_each(|listener| {
+            listener.on_joined_channel(channel);
+        });
     }
 
-    fn on_left_channel(&self, _channel: &Channel) {
+    fn on_left_channel(&mut self, _channel: &Channel) {
         unimplemented!()
     }
 
-    fn on_channel_deleted(&self, _channel: &Channel) {
+    fn on_channel_deleted(&mut self, _channel: &Channel) {
         println!("on_channel_deleted called");
     }
 
-    fn on_channel_updated(&self, _channel: &Channel) {
+    fn on_channel_updated(&mut self, _channel: &Channel) {
         unimplemented!()
     }
 
-    fn on_channel_members(&self, _channel: &Channel, _members: &[Member]) {
+    fn on_channel_members(&mut self, _channel: &Channel, _members: &[Member]) {
         unimplemented!()
     }
 
-    fn on_channel_member_joined(&self, _channel: &Channel, _member: &Member) {
+    fn on_channel_member_joined(&mut self, _channel: &Channel, _member: &Member) {
         unimplemented!()
     }
 
-    fn on_channel_member_left(&self, _channel: &Channel, _member: &Member) {
+    fn on_channel_member_left(&mut self, _channel: &Channel, _member: &Member) {
         unimplemented!()
     }
 
-    fn on_channel_members_removed(&self, _channel: &Channel, _members: &[Member]) {
+    fn on_channel_members_removed(&mut self, _channel: &Channel, _members: &[Member]) {
         unimplemented!()
     }
 
-    fn on_channel_members_banned(&self, _channel: &Channel, _anned: &[Member]) {
+    fn on_channel_members_banned(&mut self, _channel: &Channel, _anned: &[Member]) {
         unimplemented!()
     }
 
-    fn on_channel_members_unbanned(&self, _channel: &Channel, _unbanned: &[Member]) {
+    fn on_channel_members_unbanned(&mut self, _channel: &Channel, _unbanned: &[Member]) {
         unimplemented!()
     }
 
-    fn on_channel_members_role_changed(&self,
+    fn on_channel_members_role_changed(&mut self,
         _channel: &Channel,
         _changed: &[Member],
         _role: Role,
@@ -533,7 +544,7 @@ impl UserAgentCaps for UserAgent {
             self.device.is_some() &&
             self.peer.is_some() &&
             //self.repository.is_some() &&
-            crate::unwrap!(self.peer).is_valid() &&
+            //crate::unwrap!(self.peer).is_valid() &&
             crate::unwrap!(self.peer).alternative_url().is_some()
     }
 
@@ -628,20 +639,8 @@ impl UserAgentCaps for UserAgent {
         unimplemented!()
     }
 
-    fn channel(&self, _channel_id: &Id) -> Result<Option<Channel>> {
-        // TODO: implement channel retrieval logic.
-        let channel_data = ChannelData::new(
-            Id::random(),
-            channel::Permission::OwnerInvite,
-            Some("test channel".into())
-        );
-
-        let channel = GenericContact::new(
-            Id::random(),
-            Id::random(),
-            channel_data
-        );
-        Ok(Some(channel))
+    fn channel(&self, channel_id: &Id) -> Result<Option<Channel>> {
+        Ok(self.channels.get(channel_id).map(|v|v.clone()))
     }
 
     fn contacts_version(&self) -> Result<String> {

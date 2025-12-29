@@ -32,6 +32,7 @@ use boson::messaging::{
     MessageListener,
     ContactListener,
     ProfileListener,
+    InviteTicket,
 };
 
 fn build_cli() -> Command {
@@ -88,13 +89,19 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
             Some(("join", m)) => {
                 let ticket = m.get_one::<String>("TICKET").unwrap();
                 println!("Joining channel with ticket: {}", ticket);
-                /*
-                _ = client.lock().unwrap().join_channel(ticket).await.map_err(|e| {
-                    println!("Failed to join channel: {{{}}}", e);
+
+                let ticket = match InviteTicket::from_hex(ticket) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!("Error parsing invite ticket: {}", e);
+                        return;
+                    }
+                };
+                _ = client.lock().unwrap().join_channel(&ticket).await.map_err(|e| {
+                    println!("Failed to join channel: {}", e);
                 }).map(|_| {
                     println!("Joined channel with ticket: {}", ticket);
                 });
-                */
             }
             Some(("leave", m)) => {
                 let id = m.get_one::<String>("ID").unwrap();
@@ -139,6 +146,7 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
                 match rc {
                     Ok(ticket) => {
                         println!("Channel ticket created: {}", ticket);
+                        println!("ticket: {}", ticket.to_hex().unwrap());
                     }
                     Err(e) => {
                         println!("Failed to create channel ticket: {{{}}}", e);
@@ -169,8 +177,12 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
             Some(("list", _m)) => {
                 println!("[OK] Listing channels");
             }
-            _ => {
-                println!(">>>> Unknown channel subcommand");
+
+            Some((c,_)) => {
+                println!(">>>> Unknown channel subcommand {}", c);
+            },
+            None => {
+                println!(">>> No commmands provided")
             }
         },
 
@@ -227,6 +239,9 @@ async fn execute_command(matches: ArgMatches, client: &Arc<Mutex<MessagingClient
 struct Options {
     #[arg(short, long, value_name = "FILE")]
     config: String,
+
+    #[arg(long)]
+    shadow: bool,
 
     #[arg(short='D', long)]
     daemonize: bool
@@ -325,8 +340,19 @@ async fn main(){
     let user_key = signature::KeyPair::from(&usk);
     let device_key = signature::KeyPair::from(&dsk);
 
-    let result = ClientBuilder::new()
-        .with_user_key(user_key)
+    println!("paswword: {}", ucfg.password().unwrap());
+
+    let mut client = ClientBuilder::new();
+    let pswd = ucfg.password().unwrap();
+    if !opts.shadow {
+        println!("register user...");
+        client.register_user_and_device(pswd)
+    } else {
+        println!("register device...");
+        client.register_device(pswd)
+    };
+
+    let rc = client.with_user_key(user_key)
         .with_user_name(ucfg.name().unwrap_or("guest"))
         .with_device_key(device_key)
         .with_device_name("test-device")
@@ -334,7 +360,6 @@ async fn main(){
         .with_app_name("test-im")
         .with_messaging_peer(peer.clone()).unwrap()
         .with_messaging_repository("test-repo")
-        .register_user_and_device(ucfg.password().map_or("secret", |v|v))
         .with_connection_listener(ConnectionListenerTest)
         .with_message_listener(MessageListenerTest)
         .with_contact_listener(ContactListenerTest)
@@ -342,10 +367,10 @@ async fn main(){
         .build_into()
         .await;
 
-    let mut client = match result {
+    let mut client = match rc {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Creating messaging client instance error: {}", e);
+            println!("Creating messaging client error: {}", e);
             node.lock().unwrap().stop();
             return;
         }

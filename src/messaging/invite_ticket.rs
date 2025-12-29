@@ -13,22 +13,22 @@ const DEFAULT_EXPIRATION: u64 = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash)]
 pub struct InviteTicket {
-    #[serde(rename = "c")]
+    #[serde(rename = "c", with = "crate::serde_id_as_bytes")]
     channel_id: Id,
 
-    #[serde(rename = "i")]
-    inviter:    Id,
+    #[serde(rename = "i", with = "crate::serde_id_as_bytes")]
+    inviter: Id,
 
-    #[serde(rename = "p", skip_serializing_if = "crate::is_empty")]
-    is_public:  bool,
+    #[serde(rename = "p", skip_serializing_if = "crate::is_none_or_empty")]
+    is_public: Option<bool>,
 
     #[serde(rename = "e", skip_serializing_if = "crate::is_empty")]
-    expire:     u64,
+    expire: u64,
 
     #[serde(rename = "s")]
-    sig:       Vec<u8>,
+    sig: Vec<u8>,
 
-    #[serde(rename = "sk", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "sk", skip_serializing_if="crate::is_none_or_empty")]
     session_key: Option<Vec<u8>>
 }
 
@@ -45,7 +45,7 @@ impl InviteTicket {
         Self {
             channel_id,
             inviter,
-            is_public,
+            is_public: Some(is_public),
             expire,
             sig,
             session_key
@@ -61,7 +61,7 @@ impl InviteTicket {
     }
 
     pub fn is_public(&self) -> bool {
-        self.is_public
+        self.is_public.unwrap_or(false)
     }
 
     pub fn is_expired(&self) -> bool {
@@ -74,7 +74,7 @@ impl InviteTicket {
 
     pub fn is_valid(&self, invitee: &Id) -> bool {
         let digest = {
-            let invitee = match self.is_public {
+            let invitee = match self.is_public.unwrap_or(false) {
                 true => &Id::max(),
                 false => invitee
             };
@@ -94,14 +94,14 @@ impl InviteTicket {
     }
 
     pub fn proof(&self) -> Self {
-        Self::new(
-            self.channel_id.clone(),
-            self.inviter.clone(),
-            self.is_public,
-            self.expire,
-            self.sig.clone(),
-            None
-        )
+        Self {
+            channel_id: self.channel_id.clone(),
+            inviter: self.inviter.clone(),
+            is_public: self.is_public,
+            expire: self.expire,
+            sig: self.sig.clone(),
+            session_key: None
+        }
     }
 
     #[cfg(test)]
@@ -126,10 +126,30 @@ impl InviteTicket {
     }
 
     #[allow(unused)]
-    fn to_json(&self) -> Result<String> {
-        serde_json::to_string(self).map_err(|e|
-            Error::Argument(format!("Failed to serialize InviteTicket to string: {}", e))
-        )
+    pub fn to_hex(&self) -> Result<String> {
+        let cbor = serde_cbor::to_vec(self).map_err(|e|
+            Error::Argument(format!("Error serializing invite ticket to hex: {}", e))
+        )?;
+
+        use hex::ToHex;
+        Ok(cbor.encode_hex::<String>())
+    }
+
+    #[allow(unused)]
+    pub fn from_hex(hex:&str) -> Result<Self> {
+        use hex::FromHex;
+        let bytes = Vec::from_hex(hex).map_err(|e| {
+            Error::Argument(format!("Error decoding hex string: {}", e))
+        })?;
+
+        let ticket = serde_cbor::from_slice::<InviteTicket>(&bytes).map_err(|e| {
+            Error::Argument(format!(
+                "Error deserializing invite ticket from cbor: {}",
+                e
+            ))
+        })?;
+
+        Ok(ticket)
     }
 }
 
@@ -149,7 +169,7 @@ impl fmt::Display for InviteTicket {
             self.channel_id,
             self.inviter
         )?;
-        if self.is_public {
+        if self.is_public.unwrap_or(false) {
             write!(f, ", public")?;
         }
 

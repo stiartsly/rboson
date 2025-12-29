@@ -44,7 +44,7 @@ pub(crate) fn channel_cli() -> Command {
         .subcommand(
             Command::new("ticket")
                 .about("Create a ticket")
-                .arg(arg!(<ID> "The channel id to join for which the ticket is created"))
+                .arg(arg!(<ID> "The channel id to join on which the ticket is created"))
                 .arg(arg!(--invitee <ID> "The invitee id").required(false))
         )
         .help_template("{subcommands}")

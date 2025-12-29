@@ -191,7 +191,7 @@ impl APIClient {
         })?.error_for_status_ref() {
             match e.status() {
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State("{e}".into()))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };
@@ -284,7 +284,7 @@ impl APIClient {
                     return Ok(());
                 },
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State(format!("{}",e)))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };
@@ -297,7 +297,7 @@ impl APIClient {
         Ok(())
     }
 
-    pub(crate) async fn register_device(&mut self,
+    pub(crate) async fn register_device_with_user(&mut self,
         passphrase: &str,
         device_name: &str,
         app_name: &str
@@ -355,8 +355,17 @@ impl APIClient {
             Error::State(format!("Sending http request error {e}"))
         })?.error_for_status_ref() {
             match e.status() {
+                Some(StatusCode::CONFLICT) => {
+                    warn!("User already exists, trying to refresh access token");
+                    self.access_token().await?;
+                    return Ok(UserProfile::new(
+                        self.user.clone(),
+                        "guest".to_string(),
+                        true
+                    ))
+                },
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State("{e}".into()))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };
@@ -400,7 +409,7 @@ impl APIClient {
         let nonce = self.increment_nonce();
         let sig = self.device.sign_into(nonce.as_bytes()).unwrap();
         let data = RequestData {
-            deviceId    : self.device.id(),
+            deviceId    : &self.device.id().clone(),
             deviceName  : device_name,
             appName     : app_name,
             nonce       : nonce.as_bytes(),
@@ -409,21 +418,22 @@ impl APIClient {
 
         let url = self.base_url.join("/api/v1/devices/registrations").unwrap();
         let rsp = self.client.post(url)
-            .header(HTTP_HEADER_CONTENT_TYPE, HTTP_BODY_FORMAT_JSON)
             .header(HTTP_HEADER_ACCEPT, HTTP_BODY_FORMAT_JSON)
             .json(&data)
             .send()
             .await;
+
 
         if let Err(e) = rsp.as_ref().map_err(|e| {
             Error::State(format!("Sending http request error {e}"))
         })?.error_for_status_ref() {
             match e.status() {
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State("{e}".into()))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };
+
         let rid = rsp.unwrap().json::<ResponseData>().await.map_err(|e| {
             Error::State(format!("Deserializing json error: {e}"))
         })?.registrationId;
@@ -475,7 +485,7 @@ impl APIClient {
         })?.error_for_status_ref() {
             match e.status() {
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State("{e}".into()))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };
@@ -548,7 +558,7 @@ impl APIClient {
         })?.error_for_status_ref() {
             match e.status() {
                 Some(StatusCode::BAD_REQUEST) | _ => {
-                    Err(Error::State("{e}".into()))?
+                    Err(Error::State(format!("{e}")))?
                 },
             }
         };

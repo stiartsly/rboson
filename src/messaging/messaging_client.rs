@@ -47,7 +47,6 @@ use crate::messaging::{
     ClientBuilder,
     MessagingAgent,
     ConnectionListener,
-    ChannelListener,
     ContactListener,
     ProfileListener,
     profile::Profile,
@@ -55,6 +54,9 @@ use crate::messaging::{
     channel::{self, Role, Permission, Channel},
     message_listener::{
         MessageListenerMut,
+    },
+    channel_listener::{
+        ChannelListenerMut
     },
     rpc::{
         method::RPCMethod,
@@ -111,7 +113,7 @@ pub struct MessagingClient {
 
 #[allow(dead_code)]
 impl MessagingClient {
-    pub(crate) fn new(b: ClientBuilder) -> Result<Self> {
+    pub(crate) fn new(b: &ClientBuilder) -> Result<Self> {
         let ua = b.ua();
         if !lock!(ua).is_configured() {
             return Err(Error::State("User agent is not configured".into()));
@@ -244,47 +246,6 @@ impl MessagingClient {
 
     pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
         APIClient::service_ids(url).await
-    }
-
-    async fn sign_into_invite_ticket(&self,
-        channel_id: &Id,
-        invitee: Option<&Id>
-    ) -> Result<InviteTicket> {
-        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
-            return Err(Error::Argument("No channel {} was found in local agent.".into()));
-        };
-
-        let expire = SystemTime::now() + Duration::from_secs(InviteTicket::EXPIRATION);
-        let expire = crate::as_secs!(expire);
-        let sha256 = {
-            let mut sha256 = Sha256::new();
-            sha256.update(&channel_id);
-            sha256.update(&self.user.id());
-
-            let invitee = match invitee {
-                Some(id) => id,
-                None => &Id::max()
-            };
-            sha256.update(&invitee);
-            sha256.update(&expire.to_le_bytes());
-            sha256.finalize().to_vec()
-        };
-
-        let sig = self.user.sign_into(&sha256)?;
-        let sk = channel.session_keypair().unwrap().private_key();
-        let sk = match invitee {
-            Some(invitee) => self.user.encrypt_into(invitee, sk.as_ref())?,
-            None => sk.as_ref().to_vec()
-        };
-
-        Ok(InviteTicket::new(
-            channel_id.clone(),
-            self.user.id().clone(),
-            invitee.is_none(),
-            expire,
-            sig,
-            Some(sk)
-        ))
     }
 
     async fn attempt_connect(&mut self, url: &Url) -> Result<()> {
@@ -703,7 +664,43 @@ impl MessagingAgent for MessagingClient {
         channel_id: &Id,
         invitee: Option<&Id>
     ) -> Result<InviteTicket> {
-        self.sign_into_invite_ticket(channel_id, invitee).await
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
+            return Err(Error::Argument("No channel {} found in user agent.".into()));
+        };
+
+        let expire = crate::as_ms!(
+            SystemTime::now() + Duration::from_millis(InviteTicket::EXPIRATION)
+        );
+
+        let shasum = {
+            let mut sha = Sha256::new();
+            sha.update(channel_id);
+            sha.update(self.user.id());
+
+            let id = match invitee {
+                Some(id) => id,
+                None => &Id::max()
+            };
+            sha.update(id);
+            sha.update(&expire.to_be_bytes());
+            sha.finalize().to_vec()
+        };
+
+        let sig = self.user.sign_into(&shasum)?;
+        let sk = channel.session_keypair().unwrap().private_key();
+        let sk = match invitee {
+            Some(invitee) => self.user.encrypt_into(invitee, sk.as_bytes())?,
+            None => sk.as_bytes().to_vec()
+        };
+
+        Ok(InviteTicket::new(
+            channel_id.clone(),
+            self.user.id().clone(),
+            invitee.is_none(),
+            expire as u64, // TODO
+            sig,
+            Some(sk)
+        ))
     }
 
     async fn set_channel_owner(&mut self,

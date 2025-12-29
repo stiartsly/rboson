@@ -18,7 +18,7 @@ use crate::messaging::{
     channel::Channel
 };
 
-pub trait UserAgentCaps: Send + ConnectionListener + ChannelListener + ProfileListener{
+pub trait UserAgentCaps: Send + ConnectionListener + ProfileListener{
     fn user(&self) -> Option<&UserProfile>;
     fn device(&self) -> Option<&DeviceProfile>;
     fn peer(&self) -> Option<&PeerInfo>;

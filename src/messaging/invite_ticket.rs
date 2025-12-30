@@ -73,19 +73,13 @@ impl InviteTicket {
     }
 
     pub fn is_valid(&self, invitee: &Id) -> bool {
-        let digest = {
-            let invitee = match self.is_public.unwrap_or(false) {
-                true => &Id::max(),
-                false => invitee
-            };
-
-            let mut v = Sha256::new();
-            v.update(self.channel_id.as_bytes());
-            v.update(self.inviter.as_bytes());
-            v.update(invitee.as_bytes());
-            v.update(&self.expire.to_le_bytes());
-            v.finalize().to_vec()
-        };
+        let digest = Self::digest(
+            &self.channel_id,
+            &self.inviter,
+            invitee,
+            self.is_public.unwrap_or(false),
+            self.expire
+        );
 
         self.inviter
             .to_signature_key()
@@ -104,12 +98,11 @@ impl InviteTicket {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn digest(channel_id: &Id,
         inviter: &Id,
+        invitee: &Id,
         is_public: bool,
-        expire: u64,
-        invitee: &Id
+        expire: u64
     ) -> Vec<u8> {
         let invitee = if is_public {
             &Id::max()
@@ -118,10 +111,10 @@ impl InviteTicket {
         };
 
         let mut v = Sha256::new();
-        v.update(channel_id.as_bytes());
-        v.update(inviter.as_bytes());
-        v.update(invitee.as_bytes());
-        v.update(&expire.to_le_bytes());
+        v.update(channel_id);
+        v.update(inviter);
+        v.update(invitee);
+        v.update(&expire.to_be_bytes());
         v.finalize().to_vec()
     }
 

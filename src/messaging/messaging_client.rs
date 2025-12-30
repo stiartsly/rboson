@@ -590,6 +590,7 @@ impl MessagingAgent for MessagingClient {
         if ticket.is_expired() {
             Err(Error::Argument("Invite ticket is expired".into()))?
         }
+
         if !ticket.is_valid(self.user.id()) {
             Err(Error::Argument("Invite ticket is not valid for this user".into()))?
         }
@@ -670,21 +671,15 @@ impl MessagingAgent for MessagingClient {
 
         let expire = crate::as_ms!(
             SystemTime::now() + Duration::from_millis(InviteTicket::EXPIRATION)
+        ) as u64;
+
+        let shasum = InviteTicket::digest(
+            channel_id,
+            self.user.id(),
+            invitee.unwrap(),
+            false,
+            expire as u64
         );
-
-        let shasum = {
-            let mut sha = Sha256::new();
-            sha.update(channel_id);
-            sha.update(self.user.id());
-
-            let id = match invitee {
-                Some(id) => id,
-                None => &Id::max()
-            };
-            sha.update(id);
-            sha.update(&expire.to_be_bytes());
-            sha.finalize().to_vec()
-        };
 
         let sig = self.user.sign_into(&shasum)?;
         let sk = channel.session_keypair().unwrap().private_key();
@@ -697,7 +692,7 @@ impl MessagingAgent for MessagingClient {
             channel_id.clone(),
             self.user.id().clone(),
             invitee.is_none(),
-            expire as u64, // TODO
+            expire,
             sig,
             Some(sk)
         ))

@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use unicode_normalization::UnicodeNormalization;
 use log::{error, warn, info, debug, trace};
 use serde_cbor;
-use sha2::{Digest, Sha256};
 use md5;
 use url::Url;
 use tokio::{

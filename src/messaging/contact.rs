@@ -31,19 +31,20 @@ pub enum ContactType {
 
 pub type Contact = GenericContact<()>;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct GenericContact<T> where T: Clone {
     id              : Id,
     auto            : bool,
 
-    session_keypair : Option<signature::KeyPair>,
-    encrypt_keypair : Option<cryptobox::KeyPair>,
+    session_kp      : Option<signature::KeyPair>,
+    encryption_kp   : Option<cryptobox::KeyPair>,
     session_id      : Option<Id>,
 
-    _rx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
-    _tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
+    rx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
+    tx_crypto_context: Option<Arc<Mutex<Box<CryptoContext>>>>,
 
-    home_peerid     : Option<Id>,
+    home_peerid     : Id,
     name            : Option<String>,
     avatar          : bool,
 
@@ -77,46 +78,14 @@ impl<T> GenericContact<T> where T: Clone{
         unimplemented!()
     }
 
-    /*
-    pub(crate) fn new(b: &mut ContactBuilder) -> Self {
-        Self {
-            id          : b.id.clone(),
-            auto        : false,
-            home_peerid : b.home_peerid.clone().unwrap(),
-            name        : b.name.clone(),
-            avatar      : b.avatar,
-            remark      : b.remark.take().unwrap_or_default(),
-            tags        : b.tags.take().unwrap_or_default(),
-            muted       : b.muted,
-            blocked     : b.blocked,
-            deleted     : b.deleted,
-            created     : b.created.duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-            last_modified:b.last_modified.duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-            revision    : b.revision,
-            modified    :   false,
-            last_updated: None,
-            display_name: None,
-
-            session_keypair     : None,
-            encryption_keypair  : None,
-            session_id          : None,
-        }
-    }
-
-    */
-
     pub(crate) fn new(id: Id, home_peerid: Id, addtional: T) -> Self {
         Self {
             id,
             auto            : true,
-            session_keypair : None,
-            encrypt_keypair : None,
+            session_kp      : None,
+            encryption_kp : None,
             session_id      : None,
-            home_peerid     : Some(home_peerid),
+            home_peerid,
             name            : None,
             avatar          : false,
             remark          : Some(String::new()),
@@ -131,8 +100,8 @@ impl<T> GenericContact<T> where T: Clone{
             last_updated    : None,
             display_name    : None,
 
-            _rx_crypto_context: None,
-            _tx_crypto_context: None,
+            rx_crypto_context: None,
+            tx_crypto_context: None,
             derived_data    : Some(addtional),
         }
     }
@@ -149,12 +118,12 @@ impl<T> GenericContact<T> where T: Clone{
         &self.id
     }
 
-    pub fn home_peerid(&self) -> Option<&Id> {
-        self.home_peerid.as_ref()
+    pub fn home_peerid(&self) -> &Id {
+        &self.home_peerid
     }
 
     pub(crate) fn set_home_peerid(&mut self, peerid: Id) {
-        self.home_peerid = Some(peerid);
+        self.home_peerid = peerid;
     }
 
     pub fn is_auto(&self) -> bool {
@@ -171,12 +140,50 @@ impl<T> GenericContact<T> where T: Clone{
     }
 
     pub fn session_keypair(&self) -> Option<&signature::KeyPair> {
-        self.session_keypair.as_ref()
+        self.session_kp.as_ref()
     }
 
-    pub fn session_id(&self) -> Option<Id> {
-        // TODO:
-        unimplemented!()
+    fn init_session_key(&mut self, sk: &[u8]) -> Result<()> {
+        let key = if sk.len() == signature::PrivateKey::BYTES {
+            // Do nothing, no decryption here.
+            None
+        } else if sk.len() == signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
+            let Some(ctxt) = self.self_encryption_context() else {
+                return Err(Error::State("No self encryption context".into()));
+            };
+            let Ok(key) = lock!(ctxt).decrypt_into(sk) else {
+                return Err(Error::Crypto(format!("Error decrypting session key.")))?
+            };
+            Some(key)
+        } else {
+           return Err(Error::Crypto(format!("Invalid session key size")));
+        };
+
+        let kp = KeyPair::try_from(
+            match key {
+                Some(ref v) => v.as_slice(),
+                None => sk,
+            }
+        )?;
+        self.session_id = Some(Id::from(kp.public_key()));
+        self.encryption_kp = Some(cryptobox::KeyPair::from(&kp));
+        self.session_kp = Some(kp);
+
+        Ok(())
+    }
+
+    pub(crate) fn set_session_key(&mut self, sk: &[u8]) -> Result<()> {
+        self.init_session_key(sk)?;
+        self.touch();
+        Ok(())
+    }
+
+    pub(crate) fn has_session_key(&self) -> bool {
+        self.session_kp.is_some()
+    }
+
+    pub fn session_id(&self) -> Option<&Id> {
+        self.session_id.as_ref()
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -198,11 +205,10 @@ impl<T> GenericContact<T> where T: Clone{
     }
 
     pub fn avatar_url(&self) -> Option<String> {
-        if !self.avatar {
-            return None;
+        match self.avatar {
+            true => Some(format!("bmr://{}/{}", self.home_peerid, self.id)),
+            false => None
         }
-        self.home_peerid()
-            .map(|peerid| format!("bmr://{}/{}", peerid, self.id))
     }
 
     pub fn remark(&self) -> Option<&str> {
@@ -286,56 +292,58 @@ impl<T> GenericContact<T> where T: Clone{
         self.last_updated.unwrap_or(SystemTime::UNIX_EPOCH)
     }
 
-    pub fn display_name(&self) -> String {
-        unimplemented!()
+    pub fn display_name(&mut self) -> &str {
+        if let Some(name) = self.display_name.as_ref() {
+            // Do nothing.
+        } else if let Some(remark) = self.remark.as_ref().filter(|v| !v.is_empty()) {
+            self.display_name = Some(remark.to_string());
+        } else if let Some(name) = self.name.as_ref().filter(|v| !v.is_empty()) {
+            self.display_name = Some(name.to_string());
+        } else {
+            self.display_name = Some(self.id.to_abbr_str());
+        }
+        crate::unwrap!(self.display_name)
     }
 
-    pub fn update_profile(&mut self, profile: &Profile) {
-        unimplemented!()
+    pub fn update_profile(&mut self, profile: &Profile) -> Result<()> {
+        if profile.id() != &self.id {
+            return Err(Error::Argument("Profile does not match contact".into()));
+        }
+        if !profile.is_genuine() {
+            return Err(Error::Argument("Profile is not genuine".into()));
+        }
+
+        self.home_peerid = profile.home_peerid().clone();
+        self.name = Some(profile.name().to_string());
+        self.avatar = profile.has_avatar();
+        self.display_name = None;
+
+        self.updated();
+        Ok(())
     }
 
-    pub fn update_contact(&mut self, contact: &Contact) {
-        unimplemented!()
+    pub fn update_contact(&mut self, contact: &Self) -> Result<()> {
+        if contact.id() != &self.id {
+            return Err(Error::Argument("Contact is not matched".into()));
+        }
+
+        self.home_peerid = contact.home_peerid().clone();
+        self.remark = contact.remark.as_ref().map(|v| v.clone());
+        self.tags = contact.tags.as_ref().map(|v| v.clone());
+        self.muted = contact.muted;
+        self.blocked = contact.blocked;
+        self.created = contact.created;
+        self.last_modified = contact.last_modified;
+        self.name = contact.name.as_ref().map(|v| v.clone());
+        self.avatar = contact.avatar;
+        self.display_name = None;
+
+        self.updated();
+        Ok(())
     }
 
     fn self_encryption_context(&self) -> Option<Arc<Mutex<CryptoContext>>> {
         unimplemented!()
-    }
-
-    fn init_session_key(&mut self, private_key: &[u8]) -> Result<()> {
-        let sk = if private_key.len() == signature::PrivateKey::BYTES + CryptoBox::MAC_BYTES + Nonce::BYTES {
-            let Some(ctxt) = self.self_encryption_context() else {
-                return Err(Error::State("No self encryption context".into()));
-            };
-            let Ok(sk) = lock!(ctxt).decrypt_into(private_key) else {
-                return Err(Error::Crypto(format!("Error decrypting session key.")))?
-            };
-            Some(sk)
-        } else if private_key.len() == signature::PrivateKey::BYTES {
-            // DO nothing, already in correct size
-            None
-        } else {
-           return Err(Error::Crypto(format!("Invalid session key size")));
-        };
-
-        let ref_sk = match sk {
-            Some(ref v) => v.as_slice(),
-            None => private_key,
-        };
-
-        let session_keypair = KeyPair::try_from(ref_sk)?;
-        let session_id = Id::from(session_keypair.public_key());
-
-        self.encrypt_keypair = Some(cryptobox::KeyPair::from(&session_keypair));
-        self.session_keypair = Some(session_keypair);
-        self.session_id = Some(session_id);
-        Ok(())
-    }
-
-    pub(crate) fn set_session_key(&mut self, private_key: &[u8]) -> Result<()> {
-        self.init_session_key(private_key)?;
-        self.touch();
-        Ok(())
     }
 
     fn touch(&mut self) {
@@ -348,6 +356,10 @@ impl<T> GenericContact<T> where T: Clone{
         }
         self.last_modified = as_secs!(SystemTime::now());
     }
+
+    fn updated(&mut self) {
+		self.last_updated = Some(SystemTime::now());
+	}
 
     pub(crate) fn rx_crypto_context(&self) -> Result<&CryptoContext> {
         unimplemented!()
@@ -372,42 +384,29 @@ impl Identity for Contact {
     }
 
     fn sign(&self, data: &[u8], sig: &mut [u8]) -> Result<usize> {
-        let Some(keypair) = self.session_keypair.as_ref() else {
-            Err(Error::State("Missing session keypair".into()))?
+        let Some(kp) = self.session_kp.as_ref() else {
+            Err(Error::State("Session keypair is missing".into()))?
         };
-
-        signature::sign(
-            data,
-            sig,
-            keypair.private_key()
-        )
+        signature::sign(data, sig, kp.private_key())
     }
 
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let Some(keypair) = self.session_keypair.as_ref() else {
-            Err(Error::State("Missing session keypair".into()))?
+        let Some(kp) = self.session_kp.as_ref() else {
+            Err(Error::State("Session keypair is missing".into()))?
         };
-
-        signature::sign_into(
-            data,
-            keypair.private_key()
-        )
+        signature::sign_into(data, kp.private_key())
     }
 
     fn verify(&self, data: &[u8], sig: &[u8]) -> Result<()> {
-        let Some(keypair) = self.session_keypair.as_ref() else {
-            Err(Error::State("Missing session keypair".into()))?
+        let Some(kp) = self.session_kp.as_ref() else {
+            Err(Error::State("Session keypair is missing".into()))?
         };
-
-        signature::verify(
-            data,sig,
-            keypair.public_key()
-        )
+        signature::verify(data, sig, kp.public_key())
     }
 
     fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        let Some(kp) = self.encrypt_keypair.as_ref() else {
-            Err(Error::State("Missing encryption keypair".into()))?
+        let Some(kp) = self.encryption_kp.as_ref() else {
+            Err(Error::State("Encryption keypair is missing".into()))?
         };
 
         cryptobox::encrypt(
@@ -420,8 +419,8 @@ impl Identity for Contact {
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let Some(kp) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing encryption keypair".into()));
+        let Some(kp) = self.encryption_kp.as_ref() else {
+            return Err(Error::State("Encryption keypair is missing".into()));
         };
 
         cryptobox::decrypt(
@@ -432,39 +431,12 @@ impl Identity for Contact {
         )
     }
 
-    fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let Some(kp) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing encryption keypair".into()));
-        };
-
-        cryptobox::encrypt_into(
-            plain,
-            &Nonce::random(),
-            &recipient.to_encryption_key(),
-            kp.private_key()
-        )
-    }
-
-    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let Some(kp) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing encryption keypair".into()));
-        };
-
-        cryptobox::decrypt_into(
-            cipher,
-            &sender.to_encryption_key(),
-            kp.private_key()
-        )
-    }
-
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        let Some(kp) = self.encrypt_keypair.as_ref() else {
-            return Err(Error::State("Missing encryption keypair".into()));
+        let Some(kp) = self.encryption_kp.as_ref() else {
+            return Err(Error::State("Encryption keypair is missing".into()));
         };
 
-        CryptoBox::try_from(
-            (&id.to_encryption_key(), kp.private_key())
-        ).map(|v|
+        CryptoBox::try_from((&id.to_encryption_key(), kp.private_key())).map(|v|
             CryptoContext::new(id.clone(), v)
         )
     }

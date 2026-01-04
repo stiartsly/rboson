@@ -2,6 +2,8 @@ use crate::{
     Id,
     Error,
     CryptoContext,
+    CryptoBox,
+    cryptobox::Nonce,
     core::Result,
 };
 
@@ -30,12 +32,14 @@ pub trait Identity {
         Err(Error::NotImplemented("decrypt".into()))
     }
 
-    fn encrypt_into(&self, _rec: &Id, _plain: &[u8]) -> Result<Vec<u8>> {
-        Err(Error::NotImplemented("encrypt_into".into()))
+    fn encrypt_into(&self, rec: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
+        self.encrypt(rec, plain, &mut cipher).map(|_| cipher)
     }
 
-    fn decrypt_into(&self, _sender: &Id, _cipher: &[u8]) -> Result<Vec<u8>> {
-        Err(Error::NotImplemented("decrypt_into".into()))
+    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
+        self.decrypt(sender, cipher, &mut plain).map(|_| plain)
     }
 
     fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {

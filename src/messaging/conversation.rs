@@ -45,8 +45,9 @@ impl Conversation {
         self.interlocutor.id()
     }
 
-    pub fn title(&self) -> String {
-        self.interlocutor.display_name()
+    pub fn title(&self) -> &str {
+        //self.interlocutor.display_name()
+        "TODO"
     }
 
     pub fn avatar(&self) -> Option<String> {

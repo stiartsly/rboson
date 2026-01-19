@@ -244,7 +244,7 @@ impl UserAgent {
         let user = repo.get_config_mult::<UserInfo>(".user").map_err(|e| {
             Error::State("Load user profile failed, error {e}".into())
         })?;
-        let identity = CryptoIdentity::from_private_key(user.privateKey.as_slice()).map_err(|e| {
+        let identity = CryptoIdentity::from(user.privateKey.as_slice()).map_err(|e| {
             Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
         })?;
 
@@ -266,7 +266,7 @@ impl UserAgent {
         let device = repo.get_config_mult::<DeviceInfo>(".device").map_err(|e|
             Error::State("Load device profile failed, error {e}".into())
         )?;
-        let identity = CryptoIdentity::from_private_key(device.privateKey.as_slice()).map_err(|e| {
+        let identity = CryptoIdentity::from(device.privateKey.as_slice()).map_err(|e| {
             Error::State(format!("Failed to create CryptoIdentity from private key: {e}"))
         })?;
 

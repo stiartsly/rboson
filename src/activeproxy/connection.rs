@@ -98,14 +98,12 @@ pub(crate) struct ProxyConnection {
 }
 
 impl Identity for ProxyConnection {
-    type IdentityObject = ProxyConnection;
-
     fn id(&self) -> &Id {
         &self.deviceid
     }
 
-    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        signature::sign_into(data, self.signature_keypair.private_key())
+    fn sign(&self, data: &[u8], sig: &mut [u8]) -> Result<usize> {
+        signature::sign(data, sig, self.signature_keypair.private_key())
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
@@ -118,6 +116,10 @@ impl Identity for ProxyConnection {
 
     fn decrypt(&self, _sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         self.crypto_context.borrow_mut().decrypt(cipher, plain)
+    }
+
+    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
+        unimplemented!()
     }
 }
 

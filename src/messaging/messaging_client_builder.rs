@@ -109,7 +109,7 @@ impl Builder {
     }
 
     pub fn with_user_key_from_private_key(&mut self, private_key: &[u8]) -> Result<&mut Self> {
-        self.user = Some(CryptoIdentity::from_private_key(private_key)?);
+        self.user = Some(CryptoIdentity::from(private_key)?);
         Ok(self)
     }
 
@@ -132,7 +132,7 @@ impl Builder {
     }
 
     pub fn with_device_key_from_private_key(&mut self, private_key: &[u8]) -> Result<&mut Self> {
-        self.device = Some(CryptoIdentity::from_private_key(private_key)?);
+        self.device = Some(CryptoIdentity::from(private_key)?);
         Ok(self)
     }
 

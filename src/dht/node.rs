@@ -520,18 +520,12 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
 }
 
 impl Identity for Node {
-    type IdentityObject = Node;
-
     fn id(&self) -> &Id {
         &self.nodeid
     }
 
     fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
         signature::sign(data, signature, self.signature_keypair.private_key())
-    }
-
-    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        signature::sign_into(data, self.signature_keypair.private_key())
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
@@ -543,19 +537,9 @@ impl Identity for Node {
         cache.get(recipient).lock().unwrap().ctx_mut().encrypt(plain, cipher)
     }
 
-    fn encrypt_into(&self, recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let mut cache = self.crypto_context.lock().unwrap();
-        cache.get(recipient).lock().unwrap().ctx_mut().encrypt_into(plain)
-    }
-
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         let mut cache = self.crypto_context.lock().unwrap();
         cache.get(sender).lock().unwrap().ctx_mut().decrypt(cipher, plain)
-    }
-
-    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let mut cache = self.crypto_context.lock().unwrap();
-        cache.get(sender).lock().unwrap().ctx_mut().decrypt_into(cipher)
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {

@@ -128,7 +128,11 @@ impl Id {
     }
 
     pub fn to_binary_string(&self) -> String {
-        unimplemented!()
+        let mut out = String::with_capacity(ID_BYTES * 8);
+        for b in &self.0 {
+            out.push_str(&format!("{:08b}", b));
+        }
+        out
     }
 
     pub fn to_abbr_str(&self) -> String {

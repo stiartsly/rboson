@@ -377,8 +377,6 @@ impl PartialEq for Contact {
 }
 
 impl Identity for Contact {
-    type IdentityObject = Contact;
-
     fn id(&self) -> &Id {
         &self.id
     }
@@ -388,13 +386,6 @@ impl Identity for Contact {
             Err(Error::State("Session keypair is missing".into()))?
         };
         signature::sign(data, sig, kp.private_key())
-    }
-
-    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let Some(kp) = self.session_kp.as_ref() else {
-            Err(Error::State("Session keypair is missing".into()))?
-        };
-        signature::sign_into(data, kp.private_key())
     }
 
     fn verify(&self, data: &[u8], sig: &[u8]) -> Result<()> {

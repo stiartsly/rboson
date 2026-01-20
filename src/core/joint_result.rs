@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use super::Network;
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,10 @@ impl<T> JointResult<T> {
         self.v4.is_none() && self.v6.is_none()
     }
 
+    pub fn is_complete(&self) -> bool {
+        self.v4.is_some() && self.v6.is_some()
+    }
+
     pub fn has_value(&self) -> bool {
         self.v4.is_some() || self.v6.is_some()
     }
@@ -42,5 +47,12 @@ impl<T> JointResult<T> {
             Network::IPv4 => self.v4 = Some(value),
             Network::IPv6 => self.v6 = Some(value)
         }
+    }
+}
+
+impl Hash for JointResult<()> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.v4.hash(state);
+        self.v6.hash(state);
     }
 }

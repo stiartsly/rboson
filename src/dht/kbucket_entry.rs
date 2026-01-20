@@ -339,7 +339,7 @@ impl fmt::Display for KBucketEntry {
         if self.ni.version() != 0 {
             write!(f,
                 "; ver: {}",
-                version::canonical_version(self.ni.version())
+                version::format_version(self.ni.version())
             )?;
         }
         Ok(())

@@ -22,7 +22,7 @@ pub(crate) fn build(short_name: &str, ver: i32) -> i32 {
     (bytes[1] as u32) << 16 | (ver as u32) & 0x000000FF) as i32
 }
 
-pub(crate) fn canonical_version(ver: i32) -> String {
+pub(crate) fn format_version(ver: i32) -> String {
     let ver = ver as u32;
     if ver == 0 {
         return String::from("N/A");

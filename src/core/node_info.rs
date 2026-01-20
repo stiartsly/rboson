@@ -1,5 +1,5 @@
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::net::{
     SocketAddr,
     IpAddr,
@@ -14,9 +14,9 @@ use super::{
 };
 
 pub(crate) trait Reachable {
-    fn reachable(&self) -> bool;
-    fn unreachable(&self) -> bool;
-    fn set_reachable(&mut self, _: bool);
+    fn reachable(&self) -> bool { false }
+    fn unreachable(&self) -> bool { false }
+    fn set_reachable(&mut self, _: bool) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,46 @@ impl NodeInfo {
 
     pub fn with_version(id: Id, addr: SocketAddr, ver: i32) -> Self {
         Self {id, addr, ver}
+    }
+
+    pub const fn ip(&self) -> IpAddr {
+        self.addr.ip()
+    }
+
+    pub fn host(&self) -> String {
+        self.addr.ip().to_string()
+    }
+
+    pub const fn port(&self) -> u16 {
+        self.addr.port()
+    }
+
+    pub const fn socket_addr(&self) -> &SocketAddr {
+        &self.addr
+    }
+
+    pub const fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub const fn version(&self) -> i32 {
+        self.ver
+    }
+
+    pub fn format_version(&self) -> String {
+        version::format_version(self.ver)
+    }
+
+    pub fn is_ipv4(&self) -> bool {
+        self.addr.ip().is_ipv4()
+    }
+
+    pub fn is_ipv6(&self) -> bool {
+        self.addr.ip().is_ipv6()
+    }
+
+    pub fn matches(&self, other: &NodeInfo) -> bool {
+        self.id == other.id || self.addr == other.addr
     }
 
     pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
@@ -56,42 +96,6 @@ impl NodeInfo {
         Some(Self {id, addr, ver: 0})
     }
 
-    pub const fn ip(&self) -> IpAddr {
-        self.addr.ip()
-    }
-
-    pub const fn port(&self) -> u16 {
-        self.addr.port()
-    }
-
-    pub const fn socket_addr(&self) -> &SocketAddr {
-        &self.addr
-    }
-
-    pub const fn id(&self) -> &Id {
-        &self.id
-    }
-
-    pub const fn version(&self) -> i32 {
-        self.ver
-    }
-
-    pub fn version_str(&self) -> String {
-        version::canonical_version(self.ver)
-    }
-
-    pub fn is_ipv4(&self) -> bool {
-        self.addr.ip().is_ipv4()
-    }
-
-    pub fn is_ipv6(&self) -> bool {
-        self.addr.ip().is_ipv6()
-    }
-
-    pub fn matches(&self, other: &NodeInfo) -> bool {
-        self.id == other.id || self.addr == other.addr
-    }
-
     pub(crate) fn to_cbor(&self) -> Value {
         let addr = match self.addr.ip() {
             IpAddr::V4(addr4) => addr4.octets().to_vec(),
@@ -106,25 +110,23 @@ impl NodeInfo {
     }
 }
 
-impl Reachable for NodeInfo {
-    fn reachable(&self) -> bool { false }
-    fn unreachable(&self) -> bool { false }
-    fn set_reachable(&mut self, _: bool) {}
-}
-
+impl Reachable for NodeInfo {}
 impl Hash for NodeInfo {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        0x6030A.hash(state); // 'n'
         self.id.hash(state);
-        0x6e.hash(state); // + 'n'
+        self.addr.hash(state);
+        self.ver.hash(state);
     }
 }
 
 impl fmt::Display for NodeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "<{},{}>",
+            "<{}@{}:{}>",
             self.id,
-            self.addr
+            self.addr.ip(),
+            self.addr.port()
         )
     }
 }

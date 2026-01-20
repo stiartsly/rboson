@@ -522,7 +522,7 @@ impl DHT {
 
         warn!("Error from {}/{} - {}:{}, txid {}",
             downcasted.origin(),
-            version::canonical_version(downcasted.ver()),
+            version::format_version(downcasted.ver()),
             downcasted.code(),
             downcasted.msg(),
             downcasted.txid()

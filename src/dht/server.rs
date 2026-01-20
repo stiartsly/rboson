@@ -327,7 +327,7 @@ where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
         warn!("Transaction id matched, socket address did not, ignoring message, request: {} -> response: {}, version: {}",
             req.borrow().remote_addr(),
             msg.borrow().origin(),
-            version::canonical_version(msg.borrow().ver())
+            version::format_version(msg.borrow().ver())
         );
 
         // but expect an upcoming timeout if it's really just a misbehaving node

@@ -162,7 +162,7 @@ impl fmt::Display for Message {
 
         write!(f,
             ",v:{}",
-            version::canonical_version(self.ver())
+            version::format_version(self.ver())
         )?;
         Ok(())
     }

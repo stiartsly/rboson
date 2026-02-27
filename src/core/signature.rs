@@ -249,33 +249,6 @@ impl fmt::Display for PublicKey {
 #[derive(Clone, Debug)]
 pub struct KeyPair(PrivateKey, PublicKey);
 
-impl TryFrom<&[u8]> for KeyPair {
-    type Error = Error;
-
-    fn try_from(sk: &[u8]) -> Result<Self> {
-        if sk.len() != PrivateKey::BYTES {
-            return Err(Error::Argument(format!(
-                "Incorrect private key size {}, expected {}",
-                sk.len(),
-                PrivateKey::BYTES
-            )));
-        }
-
-        let mut pk = [0u8; PublicKey::BYTES];
-        unsafe { // Always success
-            crypto_sign_ed25519_sk_to_pk(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk)
-            );
-        }
-
-        Ok(KeyPair(
-            PrivateKey::try_from(sk).unwrap(),
-            PublicKey(pk)
-        ))
-    }
-}
-
 impl KeyPair {
     pub const SEED_BYTES: usize = 32;
 
@@ -358,6 +331,33 @@ impl KeyPair {
     pub fn clear(&mut self) {
         self.0.clear();
         self.1.clear();
+    }
+}
+
+impl TryFrom<&[u8]> for KeyPair {
+    type Error = Error;
+
+    fn try_from(sk: &[u8]) -> Result<Self> {
+        if sk.len() != PrivateKey::BYTES {
+            return Err(Error::Argument(format!(
+                "Incorrect private key size {}, expected {}",
+                sk.len(),
+                PrivateKey::BYTES
+            )));
+        }
+
+        let mut pk = [0u8; PublicKey::BYTES];
+        unsafe { // Always success
+            crypto_sign_ed25519_sk_to_pk(
+                as_uchar_ptr_mut!(pk),
+                as_uchar_ptr!(sk)
+            );
+        }
+
+        Ok(KeyPair(
+            PrivateKey::try_from(sk).unwrap(),
+            PublicKey(pk)
+        ))
     }
 }
 

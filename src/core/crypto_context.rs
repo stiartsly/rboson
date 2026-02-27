@@ -14,6 +14,8 @@ pub struct CryptoContext {
 }
 
 unsafe impl Send for CryptoContext {}
+
+#[allow(unused)]
 impl CryptoContext {
     pub(crate) fn new(id: Id, crypto_box: CryptoBox) -> CryptoContext {
         Self {

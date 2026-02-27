@@ -22,7 +22,7 @@ use crate::{
         config::ActiveProxyConfig,
         Result
     },
-    dht::DEFAULT_DHT_PORT,
+    config::DEFAULT_DHT_PORT,
 };
 
 #[derive(Clone, Serialize, Deserialize)]

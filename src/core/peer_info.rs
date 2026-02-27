@@ -1,120 +1,100 @@
 use std::fmt;
-use std::mem;
 use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
-use ciborium::Value;
+use rand::RngCore;
 
 use super::{
     Id,
+    error::{Error, Result},
+    Identity,
     signature,
-    signature::{KeyPair, PrivateKey}
+    signature::{KeyPair, PrivateKey},
 };
 
-// No signature field here, which would be calculated on creation.
-#[derive(Clone)]
-pub struct PeerBuilder<'a> {
-    keypair: Option<&'a KeyPair>,
-    nodeid: &'a Id,
-    origin: Option<&'a Id>,
-    port: u16,
-    url: Option<&'a str>,
+pub struct PeerBuilder {
+    keypair: Option<KeyPair>,
+    nonce: Option<Vec<u8>>,
+    seq: i32,
+    node: Option<Arc<Mutex<dyn Identity>>>,
+    fingerprint: u64,
+    endpoint: String,
+    extra: Option<Vec<u8>>,
 }
 
-impl<'a> PeerBuilder<'a> {
-    pub fn new(nodeid: &'a Id) -> Self {
+impl PeerBuilder {
+    pub fn new(endpoint: &str) -> Self {
         Self {
             keypair: None,
-            nodeid,
-            origin: None,
-            port: 0,
-            url: None,
+            nonce: None,
+            seq: 0,
+            node: None,
+            fingerprint: 0,
+            endpoint: endpoint.nfc().collect::<String>(),
+            extra: None,
         }
     }
 
-    pub fn with_keypair(&mut self, keypair: Option<&'a KeyPair>) -> &mut Self {
-        self.keypair = keypair;
+    pub fn with_nonce(mut self, nonce: &[u8]) -> Self {
+        self.nonce = Some(nonce.to_vec());
         self
     }
 
-    pub fn with_origin(&mut self, origin: Option<&'a Id>) -> &mut Self {
-        self.origin = origin;
+    pub fn with_extra(mut self, extra: &[u8]) -> Self {
+        self.extra = Some(extra.to_vec());
         self
     }
 
-    pub fn with_port(&mut self, port: u16) -> &mut Self {
-        self.port = port;
+    pub fn with_node(mut self, node: Arc<Mutex<dyn Identity>>) -> Self {
+        self.node = Some(node);
         self
     }
 
-    pub fn with_alternative_url(&mut self, alternative_url: Option<&'a str>) -> &mut Self {
-        self.url = alternative_url;
+    pub fn with_fingerprint(mut self, fingerprint: u64) -> Self {
+        self.fingerprint = fingerprint;
         self
     }
 
-    pub fn build(&self) -> PeerInfo {
-        PeerInfo::new(self)
+    pub fn with_sequence_number(mut self, seq: i32) -> Self {
+        self.seq = seq;
+        self
     }
-}
 
-pub(crate) struct PackBuilder {
-    pk: Option<Id>,
-    nodeid: Id,
-    origin: Option<Id>,
-    sk: Option<PrivateKey>,
-    port: u16,
-    url: Option<String>,
-    sig: Option<Vec<u8>>,
-}
+    pub fn with_key(mut self, kp: KeyPair) -> Self {
+        self.keypair = Some(kp);
+        self
+    }
 
-impl PackBuilder {
-    pub(crate) fn new(nodeid: Id) -> Self {
-        Self {
-            pk: None,
-            nodeid,
-            origin: None,
-            sk: None,
-            port: 0,
-            url: None,
-            sig: None,
+    pub fn with_private_key(mut self, sk: &[u8]) -> Result<Self> {
+        self.keypair = Some(KeyPair::try_from(sk)?);
+        Ok(self)
+    }
+
+    pub fn build(self) -> Result<PeerInfo> {
+        if self.endpoint.is_empty() {
+            return Err(Error::State("Missing endpoint.".into()));
         }
-    }
+        if self.seq < 0 {
+            return Err(Error::State("Invalid sequence number".into()));
+        }
+        if let Some(nonce) = self.nonce.as_ref() {
+            if nonce.len() != PeerInfo::NONCE_BYTES {
+                return Err(Error::State(format!("Invalid nonce length {}, expected {}", nonce.len(), PeerInfo::NONCE_BYTES)));
+            }
+        }
 
-    pub(crate) fn with_peerid(mut self, id: Option<Id>) -> Self {
-        self.pk = id;
-        self
-    }
 
-    pub(crate) fn with_origin(mut self, origin: Option<Id>) -> Self {
-        self.origin = origin;
-        self
-    }
-
-    pub(crate) fn with_sk(mut self, sk: Option<PrivateKey>) -> Self {
-        self.sk = sk;
-        self
-    }
-
-    pub(crate) fn with_port(mut self, port: u16) -> Self {
-        self.port = port;
-        self
-    }
-
-    pub(crate) fn with_url(mut self, url: Option<String>) -> Self {
-        self.url = url;
-        self
-    }
-
-    pub(crate) fn with_sig(mut self, sig: Option<Vec<u8>>) -> Self {
-        self.sig = sig;
-        self
-    }
-
-    pub fn build(self) -> PeerInfo {
-        assert!(self.pk.is_some());
-        assert!(self.sig.is_some());
-        PeerInfo::packed(self)
+        PeerInfo::new(
+            self.keypair.as_ref(),
+            self.node.clone(),
+            self.nonce.as_ref().map(|v| v.as_slice()),
+            self.seq,
+            self.fingerprint,
+            self.endpoint,
+            self.extra
+        )
     }
 }
 
@@ -122,209 +102,280 @@ impl PackBuilder {
 pub struct PeerInfo {
     pk: Id,
     sk: Option<PrivateKey>,
-    nodeid: Id,
-    origin: Option<Id>,
-    port: u16,
-    url: Option<String>,
+    nonce: Vec<u8>,
+    seq: i32,
+
+    nodeid: Option<Id>,
+    node_sig: Option<Vec<u8>>,
+
     sig: Vec<u8>,
+    fingerprint: u64,
+    endpoint: String,
+    extra: Option<Vec<u8>>,
 }
 
 impl PeerInfo {
-    fn new(b: &PeerBuilder) -> Self {
-        let kp = match b.keypair.as_ref() {
-            Some(v) => v,
-            None => &KeyPair::random()
+    pub const NONCE_BYTES: usize = 24;
+
+    fn new(
+        keypair_opt: Option<&KeyPair>,
+        node: Option<Arc<Mutex<dyn Identity>>>,
+        nounce: Option<&[u8]>,
+        seq: i32,
+        fingerprint: u64,
+        endpoint: String,
+        extra: Option<Vec<u8>>,
+    ) -> Result<Self> {
+        let kp = match keypair_opt {
+            Some(k) => k.clone(),
+            None => KeyPair::random(),
         };
 
+        let pk = Id::from(kp.public_key());
+        let nonce = if let Some(nonce) = nounce {
+            if nonce.len() != Self::NONCE_BYTES {
+                return Err(Error::State(format!("Invalid nonce length {}, expected {}", nonce.len(), Self::NONCE_BYTES)));
+            }
+            nonce.to_vec()
+        } else {
+            let mut nonce = vec![0u8; Self::NONCE_BYTES];
+            rand::thread_rng().fill_bytes(&mut nonce);
+            nonce
+        };
+
+        let mut nodeid: Option<Id> = None;
+        let mut node_sig: Option<Vec<u8>> = None;
+
+        if let Some(node_arc) = node.as_ref() {
+            let id = node_arc.lock().unwrap().id().clone();
+
+            let mut sha = Sha256::new();
+            sha.update(pk.as_bytes());
+            sha.update(id.as_bytes());
+            sha.update(nonce.as_slice());
+            let digest = sha.finalize().to_vec();
+
+            let sig = node_arc.lock().unwrap().sign_into(digest.as_slice())?;
+
+            nodeid = Some(id);
+            node_sig = Some(sig);
+        }
+
         let mut peer = PeerInfo {
-            pk: Id::from(kp.public_key()),
+            pk: pk.clone(),
             sk: Some(kp.to_private_key()),
-            nodeid: b.nodeid.clone(),
-            origin: b.origin.map(|v|v.clone()),
-            port: b.port,
-            url: b.url.map(|v| v.nfc().collect::<String>()),
+            nonce: nonce.clone(),
+            seq,
+            nodeid,
+            node_sig,
+            fingerprint,
+            endpoint,
+            extra,
             sig: Vec::new(),
         };
 
-        peer.sig = signature::sign_into(
-            &peer.digest(),
-            peer.sk.as_ref().unwrap()
-        ).unwrap();
-        peer
+        peer.sig = signature::sign_into(peer.digest().as_slice(), kp.private_key())?;
+        Ok(peer)
     }
 
-    fn packed(mut b: PackBuilder) -> Self {
-        PeerInfo {
-            pk: b.pk.take().unwrap(),
-            sk: b.sk.take(),
-            nodeid: mem::take(&mut b.nodeid),
-            origin: b.origin.take(),
-            port: b.port,
-            url: b.url.take().map(|v|v.nfc().collect::<String>()),
-            sig: b.sig.take().unwrap(),
-        }
+    pub fn builder(endpoint: &str) -> PeerBuilder {
+        PeerBuilder::new(endpoint)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
-        let mut pk: Option<Id> = None;
-        let mut nodeid: Option<Id> = None;
-        let mut url: Option<String> = None;
-        let mut sig: Option<Vec<u8>> = None;
-        let mut port = 0;
-
-        let root = input.as_map()?;
-        for (k,v) in root {
-            let k = k.as_text()?;
-            match k {
-                "id" => pk = Some(Id::from_cbor(v)?),
-                "nodeid" => nodeid = Some(Id::from_cbor(v)?),
-                "port" => port = v.as_integer()?.try_into().unwrap(),
-                "url" => url = v.as_text().map(|v|v.to_string()),
-                "sig" => sig = Some(v.as_bytes()?.to_vec()),
-                _ => return None,
-            }
-        }
-
-        let Some(nodeid) = nodeid else {
-            return None;
-        };
-        let Some(pk) = pk else {
-            return None;
-        };
-        let Some(sig) = sig else {
-            return None;
-        };
-
-        Some(PackBuilder::new(nodeid)
-            .with_peerid(Some(pk))
-            .with_port(port)
-            .with_url(url.map(|v|v.to_string()))
-            .with_sig(Some(sig.to_vec()))
-            .build())
-    }
-
-    pub const fn id(&self) -> &Id {
+    pub fn id(&self) -> &Id {
         &self.pk
     }
 
-    pub const fn has_private_key(&self) -> bool {
+    pub fn has_private_key(&self) -> bool {
         self.sk.is_some()
     }
 
-    pub const fn private_key(&self) -> Option<&PrivateKey> {
+    pub fn private_key(&self) -> Option<&PrivateKey> {
         self.sk.as_ref()
     }
 
-    pub const fn nodeid(&self) -> &Id {
-        &self.nodeid
+    pub fn nonce(&self) -> &[u8] {
+        self.nonce.as_slice()
     }
 
-    pub fn origin(&self) -> &Id {
-        self.origin.as_ref().unwrap_or_else(|| self.nodeid())
+    pub fn sequence_number(&self) -> i32 {
+        self.seq
     }
 
-    pub const fn port(&self) -> u16 {
-        self.port
+    pub fn nodeid(&self) -> Option<&Id> {
+        self.nodeid.as_ref()
     }
 
-    pub const fn has_alternative_url(&self) -> bool {
-        self.url.is_some()
+    pub fn node_signature(&self) -> Option<&[u8]> {
+        self.node_sig.as_deref()
     }
 
-    pub fn alternative_url(&self) -> Option<&str> {
-        self.url.as_deref()
+    pub fn is_authenticated(&self) -> bool {
+        self.nodeid.is_some() && self.node_sig.is_some()
     }
 
     pub fn signature(&self) -> &[u8] {
-        &self.sig
+        self.sig.as_slice()
     }
 
-    pub fn is_delegated(&self) -> bool {
-        self.origin.is_some()
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+
+    pub fn endpoint(&self) -> &str {
+        self.endpoint.as_str()
+    }
+
+    pub fn has_extra(&self) -> bool {
+        self.extra.as_ref().map(|v| !v.is_empty()).unwrap_or(false)
+    }
+
+    pub fn extra_data(&self) -> Option<&[u8]> {
+        self.extra.as_deref()
+    }
+
+    pub fn without_private_key(&self) -> Self {
+        if self.sk.is_none() {
+            return self.clone();
+        }
+        let mut s = self.clone();
+        s.sk = None;
+        s
+    }
+
+    pub fn update(&self,
+        endpoint: &str,
+        node: Option<Arc<Mutex<dyn Identity>>>,
+        extra: Option<Vec<u8>>
+    ) -> Result<Self> {
+        if self.sk.is_none() {
+            return Err(Error::State("Not the owner of the peer info".into()));
+        }
+        if endpoint.is_empty() {
+            return Err(Error::State("Invalid endpoint".into()));
+        }
+
+        let endpoint_nfc = endpoint.nfc().collect::<String>();
+        let extra_bytes = extra.filter(|v| !v.is_empty());
+
+        if endpoint_nfc == self.endpoint &&
+            self.nodeid.is_none() == node.is_none() &&
+            self.extra == extra_bytes {
+            return Ok(self.clone());
+        }
+
+        // If current has an authenticating node, validate replacement
+        if self.nodeid.is_some() {
+            if node.is_none() {
+                return Err(Error::State("Cannot authenticate peer info without owner node".into()));
+            }
+            let node_id = node.as_ref().unwrap().lock().unwrap().id().clone();
+            if node_id != self.nodeid.clone().unwrap() {
+                return Err(Error::State("Cannot authenticate peer info with a different node".into()));
+            }
+        }
+
+        let sequence_number = self.seq + 1;
+        let sk = self.sk.as_ref().unwrap();
+        let kp = KeyPair::from(sk);
+
+        PeerInfo::new(
+            Some(&kp),
+            node,
+            None,
+            sequence_number,
+            self.fingerprint,
+            endpoint_nfc,
+            extra_bytes
+        )
     }
 
     pub fn is_valid(&self) -> bool {
-        assert_eq!(
-            self.sig.len(),
-            signature::Signature::BYTES,
-            "Invalid signature data length {}, should be {}",
-            self.sig.len(),
-            signature::Signature::BYTES
-        );
+        if self.sig.len() != signature::Signature::BYTES {
+            return false;
+        }
+        if self.nonce.len() != Self::NONCE_BYTES {
+            return false;
+        }
+
+        if let Some(nodeid) = self.nodeid.as_ref() {
+            if self.node_sig.is_none() {
+                return false;
+            }
+            let mut sha = Sha256::new();
+            sha.update(self.pk.as_bytes());
+            sha.update(nodeid.as_bytes());
+            sha.update(self.nonce.as_slice());
+            let digest = sha.finalize().to_vec();
+
+            return signature::verify(
+                digest.as_slice(),
+                self.node_sig.as_ref().unwrap().as_slice(),
+                &nodeid.to_signature_key()
+            ).is_ok()
+        } else if self.node_sig.is_some() {
+            return false;
+        }
 
         signature::verify(
-            self.digest().as_ref(),
+            self.digest().as_slice(),
             self.sig.as_slice(),
             &self.pk.to_signature_key()
         ).is_ok()
     }
 
-    pub(crate) fn digest(&self) -> Vec<u8> {
-        let mut sha256 = Sha256::new();
-        sha256.update(self.pk.as_bytes());
-        sha256.update(self.nodeid.as_bytes());
-        if let Some(origin) = self.origin.as_ref() {
-            sha256.update(origin.as_bytes())
+    fn digest(&self) -> Vec<u8> {
+        let mut sha = Sha256::new();
+        sha.update(self.pk.as_bytes());
+        sha.update(self.nonce.as_slice());
+        sha.update(self.seq.to_be_bytes().as_ref());
+        if let Some(nodeid) = self.nodeid.as_ref() {
+            sha.update(nodeid.as_bytes());
+            sha.update(self.node_sig.as_ref().unwrap().as_slice());
         }
-        sha256.update(self.port.to_be_bytes().as_ref());
-        if let Some(url) = self.url.as_ref() {
-            sha256.update(url.nfc().collect::<String>().as_bytes());
-        };
-        sha256.finalize().to_vec()
-    }
-
-    #[allow(unused)]
-    pub(crate) fn to_cbor(&self) -> Value {
-        Value::Map(vec![
-            (
-                Value::Text(String::from("id")),
-                self.id().to_cbor(),
-            ),
-            (
-                Value::Text(String::from("nodeid")),
-                self.nodeid().to_cbor(),
-            ),
-            (
-                Value::Text(String::from("port")),
-                Value::Integer(self.port().into()),
-            ),
-            (
-                Value::Text(String::from("url")),
-                self.alternative_url().map_or(
-                    Value::Null,
-                    |url| Value::Text(url.to_string())
-                ),
-            ),
-            (
-                Value::Text(String::from("sig")),
-                Value::Bytes(self.signature().to_vec())
-            )
-        ])
+        sha.update(self.fingerprint.to_be_bytes().as_ref());
+        sha.update(self.endpoint.as_bytes());
+        if let Some(extra) = self.extra.as_ref() {
+            sha.update(extra.as_slice());
+        }
+        sha.finalize().to_vec()
     }
 }
 
 impl Hash for PeerInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.pk.hash(state);
-        self.nodeid.hash(state);
-        self.origin().hash(state);
-        self.port.hash(state);
-        self.url.hash(state);
+        self.nonce.hash(state);
+        self.seq.hash(state);
+        if let Some(v) = self.nodeid.as_ref() {
+            v.hash(state);
+        }
+        if let Some(v) = self.node_sig.as_ref() {
+            v.hash(state);
+        }
         self.sig.hash(state);
+        self.fingerprint.hash(state);
+        self.endpoint.hash(state);
+
+        if let Some(v) = self.extra.as_ref() {
+            v.hash(state);
+        }
     }
 }
 
 impl fmt::Display for PeerInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{},{},", self.pk, self.nodeid)?;
-        if self.is_delegated() {
-            write!(f, "{},", self.origin())?;
+        write!(f, "id:{}", self.pk)?;
+        write!(f, ",endpoint:{}", self.endpoint)?;
+        if self.fingerprint != 0 { write!(f, ",sn:{}", self.fingerprint)?; }
+        if self.seq > 0 { write!(f, ",seq:{}", self.seq)?; }
+        if let Some(nodeid) = self.nodeid.as_ref() {
+            write!(f, ",nodeId:{}", nodeid.to_base58())?;
         }
-        write!(f, "{}", self.port)?;
-        if let Some(url) = self.url.as_ref() {
-            write!(f, ",{}", url)?;
+        if let Some(node_sig) = self.node_sig.as_ref() {
+            write!(f, ",nodeSig:{}", hex::encode(node_sig))?;
         }
+        write!(f, ",sig:{}", hex::encode(&self.sig))?;
         Ok(())
     }
 }

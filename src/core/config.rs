@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 use log::LevelFilter;
 
 use crate::NodeInfo;
-use crate::dht::DEFAULT_DHT_PORT;
+
+pub const DEFAULT_DHT_PORT: u16 = 19001;
 
 pub trait UserConfig: Send + Sync {
     fn name(&self) -> Option<&str> { None }

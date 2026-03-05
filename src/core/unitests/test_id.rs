@@ -57,3 +57,21 @@ fn test_shift() {
     assert_eq!(v as u8, 224);
     assert_eq!(u as u8, 32);
 }
+
+#[test]
+fn test_serde() {
+    let id1_str = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let id1 = Id::try_from(id1_str).expect("invalid hex Id");
+    let cbor = serde_cbor::to_vec(&id1).expect("failed to serialize Id to CBOR");
+    let id2: Id = serde_cbor::from_slice(&cbor).expect("failed to deserialize Id from CBOR");
+    let id2_str = id2.to_hexstr();
+    assert_eq!(id1_str, id2_str);
+    assert_eq!(id1, id2);
+
+    let id1_b58 = id1.to_base58();
+    let json = serde_json::to_string(&id1_b58).expect("failed to serialize Id to JSON");
+    let id3: Id = serde_json::from_str(&json).expect("failed to deserialize Id from JSON");
+    let id3_b58 = id3.to_base58();
+    assert_eq!(id1, id3);
+    assert_eq!(id1_b58, id3_b58);
+}

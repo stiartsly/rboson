@@ -1,12 +1,20 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::result::Result as SResult;
 use std::net::{
     SocketAddr,
     IpAddr,
     Ipv4Addr,
     Ipv6Addr
 };
-use ciborium::Value;
+use serde::{
+    Serialize,
+    Deserialize,
+    Serializer,
+    Deserializer,
+    de::{self, Visitor, SeqAccess},
+    ser::{SerializeTuple},
+};
 
 use super::{
     Id,
@@ -74,40 +82,6 @@ impl NodeInfo {
     pub fn matches(&self, other: &NodeInfo) -> bool {
         self.id == other.id || self.addr == other.addr
     }
-
-    pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
-        let map = input.as_array()?;
-        let id  = Id::from_cbor(map.get(0)?)?;
-        let ip  = map.get(1)?.as_bytes()?;
-        let port: u16 = map.get(2)?.as_integer()?.try_into().unwrap();
-        let addr = match ip.len() {
-            4 => {
-                let ip: [u8; 4] = ip.as_slice().try_into().unwrap();
-                IpAddr::V4(Ipv4Addr::from(ip))
-            },
-            16 => {
-                let ip: [u8; 16] = ip.as_slice().try_into().unwrap();
-                IpAddr::V6(Ipv6Addr::from(ip))
-            },
-            _ => return None,
-        };
-        let addr = SocketAddr::new(addr, port);
-
-        Some(Self {id, addr, ver: 0})
-    }
-
-    pub(crate) fn to_cbor(&self) -> Value {
-        let addr = match self.addr.ip() {
-            IpAddr::V4(addr4) => addr4.octets().to_vec(),
-            IpAddr::V6(addr6) => addr6.octets().to_vec(),
-        };
-
-        Value::Array(vec![
-            self.id.to_cbor(),
-            Value::Bytes(addr),
-            Value::Integer(self.addr.port().into())
-        ])
-    }
 }
 
 impl Reachable for NodeInfo {}
@@ -128,5 +102,75 @@ impl fmt::Display for NodeInfo {
             self.addr.ip(),
             self.addr.port()
         )
+    }
+}
+
+impl Serialize for NodeInfo {
+    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_tuple(3)?;
+        let addr = match self.addr.ip() {
+            IpAddr::V4(addr4) => addr4.octets().to_vec(),
+            IpAddr::V6(addr6) => addr6.octets().to_vec(),
+        };
+
+        state.serialize_element(&self.id)?;
+        state.serialize_element(&addr)?;
+        state.serialize_element(&self.addr.port())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeInfo {
+    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ImplVisitor;
+
+        impl<'de> Visitor<'de> for ImplVisitor {
+            type Value = NodeInfo;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("node info tuple")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> SResult<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let id: Id = seq.next_element()?
+                        .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+
+                let ip_bytes: Vec<u8> = seq.next_element()?
+                    .ok_or_else(||de::Error::invalid_length(1, &self))?;
+
+                let port: u16 = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+
+                let ip = match ip_bytes.len() {
+                    4 => {
+                        let ip: [u8; 4] = ip_bytes.as_slice().try_into().unwrap();
+                        IpAddr::V4(Ipv4Addr::from(ip))
+                    },
+                    16 => {
+                        let ip: [u8; 16] = ip_bytes.as_slice().try_into().unwrap();
+                        IpAddr::V6(Ipv6Addr::from(ip))
+                    },
+                    _ => return Err(de::Error::invalid_value(de::Unexpected::Bytes(&ip_bytes), &self)),
+                };
+
+                Ok(NodeInfo {
+                    id,
+                    addr:
+                    SocketAddr::new(ip, port),
+                    ver: 0
+                })
+            }
+        }
+
+        deserializer.deserialize_tuple(4, ImplVisitor)
     }
 }

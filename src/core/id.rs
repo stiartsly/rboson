@@ -2,11 +2,13 @@ use std::cmp::Ordering;
 use std::str::FromStr;
 use std::ops::Deref;
 use std::fmt;
-use ciborium::value::Value;
+use std::result::Result as SResult;
 use bs58;
 use serde::{
     Serialize,
     Deserialize,
+    ser::Serializer,
+    de::{self, Deserializer, Visitor}
 };
 
 use crate::{
@@ -25,7 +27,7 @@ pub const MAX_ID: Id = Id::max();
 
 pub const DID_PREFIX: &str = "did:boson:";
 
-#[derive(Debug, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Hash)]
 pub struct Id(
     [u8; ID_BYTES]
 );
@@ -41,9 +43,17 @@ impl Id {
         Id(input)
     }
 
-    pub(crate) fn from_cbor(input: &Value) -> Option<Self> {
-        let bytes = input.as_bytes()?;
-        Some(Id(bytes.as_slice().try_into().unwrap()))
+    pub fn try_from_bytes(input: &[u8]) -> Result<Self> {
+        if input.len() != ID_BYTES {
+            return Err(Error::Argument(format!(
+                "Invalid bytes length {} for ID, expected length {}",
+                input.len(),
+                ID_BYTES
+            )));
+        }
+        let mut bytes = [0u8; ID_BYTES];
+        bytes.copy_from_slice(input);
+        Ok(Id(bytes))
     }
 
     pub fn try_from_hexstr(input: &str) -> Result<Self> {
@@ -147,10 +157,6 @@ impl Id {
         cryptobox::PublicKey::try_from(&self.to_signature_key()).unwrap()
     }
 
-    pub(crate) fn to_cbor(&self) -> Value {
-        Value::Bytes(self.0.to_vec())
-    }
-
     pub fn distance(&self, other: &Id) -> Id {
         let mut bytes = [0u8; ID_BYTES];
         for i in 0..ID_BYTES {
@@ -198,14 +204,7 @@ impl Id {
 impl TryFrom<&[u8]> for Id {
     type Error = Error;
     fn try_from(input: &[u8]) -> Result<Self> {
-        if input.len() != ID_BYTES {
-            return Err(Error::Argument(format!(
-                "Invalid bytes length {} for ID, expected length {}",
-                input.len(),
-                ID_BYTES
-            )));
-        }
-        Ok(Id(input.try_into().unwrap()))
+        Id::try_from_bytes(input)
     }
 }
 
@@ -298,4 +297,58 @@ pub(crate) fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
     let mask = (0xff80 >> (depth & 0x07)) as u8;
     dst.0[idx] &= !mask;
     dst.0[idx] |= src.0[idx] & mask;
+}
+
+impl Serialize for Id {
+    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&self.to_base58())
+        } else {
+            serializer.serialize_bytes(&self.0)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Id {
+    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct IdVisitor;
+
+        impl<'de> Visitor<'de> for IdVisitor {
+            type Value = Id;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a base58 string or 32 bytes")
+            }
+
+            fn visit_str<E>(self, value: &str) -> SResult<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                println!(">>> visit_str: {}", value);
+                Id::try_from(value)
+                    .map_err(|e| de::Error::custom(format!("Invalid ID string: {e}")))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> SResult<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                println!(">>> visit_bytes: {}", v.len());
+                Id::try_from_bytes(v)
+                    .map_err(|e| de::Error::custom(format!("Invalid ID bytes: {e}")))
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(IdVisitor)
+        } else {
+            deserializer.deserialize_bytes(IdVisitor)
+        }
+    }
 }

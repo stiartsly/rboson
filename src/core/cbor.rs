@@ -2,6 +2,7 @@ use std::io::{Error, ErrorKind};
 use ciborium_io::{Read, Write};
 
 #[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct Writer<'a> {
     buf: &'a mut Vec<u8>,
 }
@@ -21,6 +22,7 @@ impl<'a> Write for Writer<'a> {
     }
 }
 
+#[allow(unused)]
 impl<'a> Writer<'a> {
     pub(crate) fn new(input: &'a mut Vec<u8>) -> Self {
         Self { buf: input }
@@ -28,6 +30,7 @@ impl<'a> Writer<'a> {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
@@ -53,6 +56,7 @@ impl<'a> Read for Reader<'a> {
     }
 }
 
+#[allow(unused)]
 impl<'a> Reader<'a> {
     pub(crate) fn new(input: &'a [u8]) -> Self {
         Self {

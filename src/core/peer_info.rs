@@ -1,6 +1,11 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
+use serde::{
+    Serialize, Deserialize, Serializer, Deserializer,
+    ser::SerializeTuple,
+    de::{self, Visitor, SeqAccess}
+};
 
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
@@ -180,6 +185,32 @@ impl PeerInfo {
 
     pub fn builder(endpoint: &str) -> PeerBuilder {
         PeerBuilder::new(endpoint)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn packed(
+        pk: Id,
+        nonce: Vec<u8>,
+        seq: i32,
+        nodeid: Option<Id>,
+        node_sig: Option<Vec<u8>>,
+        sig: Vec<u8>,
+        fingerprint: u64,
+        endpoint: String,
+        extra: Option<Vec<u8>>,
+    ) -> Self {
+        Self {
+            pk,
+            sk: None,
+            nonce,
+            seq,
+            nodeid,
+            node_sig,
+            sig,
+            fingerprint,
+            endpoint,
+            extra,
+        }
     }
 
     pub fn id(&self) -> &Id {
@@ -377,5 +408,83 @@ impl fmt::Display for PeerInfo {
         }
         write!(f, ",sig:{}", hex::encode(&self.sig))?;
         Ok(())
+    }
+}
+
+impl Serialize for PeerInfo {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_tuple(9)?;
+        s.serialize_element(&self.pk)?;
+        s.serialize_element(&self.nonce)?;
+        if self.seq >= 0 {
+            s.serialize_element(&self.seq)?;
+        }
+        if let Some(nodeid) = self.nodeid.as_ref() {
+            s.serialize_element(nodeid)?;
+            s.serialize_element(self.node_sig.as_ref().unwrap())?;
+        }
+        s.serialize_element(&self.sig)?;
+        s.serialize_element(&self.fingerprint)?;
+        s.serialize_element(&self.endpoint)?;
+        if let Some(extra) = self.extra.as_ref() {
+            s.serialize_element(extra)?;
+        }
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PeerInfo {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PeerVisitor;
+
+        impl<'de> Visitor<'de> for PeerVisitor {
+            type Value = PeerInfo;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("peer info tuple")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let pk: Id = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &"9 elements"))?;
+                let nonce: Vec<u8> = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &"9 elements"))?;
+                let seqno: i32 = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(2, &"9 elements"))?;
+                let nodeid: Option<Id> = seq.next_element()?;
+                let node_sig: Option<Vec<u8>> = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(4, &"9 elements"))?;
+                let sig: Vec<u8> = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(5, &"9 elements"))?;
+                let fingerprint: u64 = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(6, &"9 elements"))?;
+                let endpoint: String = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(7, &"9 elements"))?;
+                let extra: Option<Vec<u8>> = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(8, &"9 elements"))?;
+
+                Ok(PeerInfo::packed(
+                    pk,
+                    nonce,
+                    seqno,
+                    nodeid,
+                    node_sig,
+                    sig,
+                    fingerprint,
+                    endpoint,
+                    extra
+                ))
+            }
+        }
+        deserializer.deserialize_tuple(9, PeerVisitor)
     }
 }

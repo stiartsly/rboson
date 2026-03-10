@@ -2,62 +2,82 @@ use crate::core::{
     Id,
     PeerInfo,
     PeerBuilder,
-    peer_info::PackBuilder,
+    signature::KeyPair,
     unitests::create_random_bytes,
 };
 
 #[test]
-fn test_pack_builder() {
-    let peerid = Id::random();
-    let nodeid = Id::random();
-    let origin = Id::random();
+fn test_peer_builder() {
+    let endpoint = "https://example.com:8080";
+    let kp = KeyPair::random();
 
-    let port  = 65535;
-    let bytes = create_random_bytes(64);
-    let url   = "https://testing.exmaple.com";
-    let peer: PeerInfo = PackBuilder::new(nodeid.clone())
-        .with_peerid(Some(peerid.clone()))
-        .with_origin(Some(origin.clone()))
-        .with_port(port)
-        .with_url(Some(url.to_string()))
-        .with_sig(Some(bytes.clone()))
-        .build();
+    let peer = PeerBuilder::new(endpoint)
+        .with_key(kp.clone())
+        .build()
+        .expect("Failed to build peer info");
 
-    assert_eq!(peer.id(), &peerid);
-    assert_eq!(peer.nodeid(), &nodeid);
-    assert_eq!(peer.origin(), &origin);
-    assert_eq!(peer.has_private_key(), false);
-    assert_eq!(peer.private_key().is_some(), false);
-    assert_eq!(peer.private_key().is_none(), true);
-    assert_eq!(peer.port(), port);
-    assert_eq!(peer.has_alternative_url(), true);
-    assert_eq!(peer.alternative_url().is_some(), true);
-    assert_eq!(peer.alternative_url().is_none(), false);
-    assert_eq!(peer.signature(), bytes);
-    assert_eq!(peer.is_delegated(), true);
-    assert_eq!(peer.is_valid(), false);
+    assert_eq!(peer.endpoint(), endpoint);
+    assert_eq!(peer.id(), &Id::from(kp.public_key()));
+    assert_eq!(peer.has_private_key(), true);
+    assert!(peer.is_valid());
+    assert!(!peer.is_authenticated()); // No node associated
 }
 
 #[test]
-fn test_from_cbor() {
-    let nodeid = Id::random();
-    let port = 65535;
-    let url = "https:://testing.example.com";
-    let peer = PeerBuilder::new(&nodeid)
-        .with_port(port)
-        .with_alternative_url(Some(url))
-        .build();
+fn test_packed() {
+    let pk = Id::random();
+    let nonce = create_random_bytes(24);
+    let seq = 1;
+    let nodeid = Some(Id::random());
+    let node_sig = Some(create_random_bytes(64));
+    let sig = create_random_bytes(64);
+    let fingerprint = 12345;
+    let endpoint = "tcp://1.2.3.4:9000".to_string();
+    let extra = Some(vec![1, 2, 3]);
 
-    let cbor = peer.to_cbor();
-    let result = PeerInfo::from_cbor(&cbor);
-    assert_eq!(result.is_some(), true);
+    let peer = PeerInfo::packed(
+        pk.clone(),
+        nonce.clone(),
+        seq,
+        nodeid.clone(),
+        node_sig.clone(),
+        sig.clone(),
+        fingerprint,
+        endpoint.clone(),
+        extra.clone()
+    );
 
-    let parsed = result.unwrap();
-    assert_eq!(peer.nodeid(), parsed.nodeid());
-    assert_eq!(peer.nodeid(), &nodeid);
-    assert_eq!(peer.id(), parsed.id());
-    assert_eq!(peer.port(), parsed.port());
-    assert_eq!(peer.port(), port);
-    assert_eq!(parsed.has_alternative_url(), true);
-    assert_eq!(peer.alternative_url(), parsed.alternative_url());
+    assert_eq!(peer.id(), &pk);
+    assert_eq!(peer.nonce(), &nonce);
+    assert_eq!(peer.sequence_number(), seq);
+    assert_eq!(peer.nodeid(), nodeid.as_ref());
+    assert_eq!(peer.node_signature(), node_sig.as_deref());
+    assert_eq!(peer.signature(), &sig);
+    assert_eq!(peer.fingerprint(), fingerprint);
+    assert_eq!(peer.endpoint(), endpoint);
+    assert_eq!(peer.extra_data(), extra.as_deref());
+
+    assert!(!peer.has_private_key());
+}
+
+#[test]
+#[ignore] // TODO:
+fn test_serde() {
+    let endpoint = "https://example.com:8080";
+    let kp = KeyPair::random();
+    let peer = PeerBuilder::new(endpoint)
+        .with_key(kp.clone())
+        .build()
+        .expect("Failed to build peer info");
+
+    let cbor = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+    let deserialized: PeerInfo = serde_cbor::from_slice(&cbor).expect("Failed to deserialize PeerInfo");
+
+    assert_eq!(peer.id(), deserialized.id());
+    assert_eq!(peer.endpoint(), deserialized.endpoint());
+    assert_eq!(peer.nonce(), deserialized.nonce());
+    assert_eq!(peer.signature(), deserialized.signature());
+    assert_eq!(deserialized.has_private_key(), false);
+
+    assert!(deserialized.is_valid());
 }

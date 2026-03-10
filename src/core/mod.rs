@@ -61,6 +61,7 @@ mod unitests {
     mod test_version;
     mod test_value;
     mod test_node_info;
+    mod test_peer_info;
 
     #[allow(non_upper_case_globals)]
     static create_random_bytes: fn(usize) -> Vec<u8> = crate::random_bytes;

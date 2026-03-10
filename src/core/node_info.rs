@@ -106,20 +106,20 @@ impl fmt::Display for NodeInfo {
 }
 
 impl Serialize for NodeInfo {
-    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
+    fn serialize<S>(&self, ser: S) -> SResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_tuple(3)?;
+        let mut s = ser.serialize_tuple(3)?;
         let addr = match self.addr.ip() {
             IpAddr::V4(addr4) => addr4.octets().to_vec(),
             IpAddr::V6(addr6) => addr6.octets().to_vec(),
         };
 
-        state.serialize_element(&self.id)?;
-        state.serialize_element(&addr)?;
-        state.serialize_element(&self.addr.port())?;
-        state.end()
+        s.serialize_element(&self.id)?;
+        s.serialize_element(&addr)?;
+        s.serialize_element(&self.addr.port())?;
+        s.end()
     }
 }
 

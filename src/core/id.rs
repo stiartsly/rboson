@@ -330,7 +330,6 @@ impl<'de> Deserialize<'de> for Id {
             where
                 E: de::Error,
             {
-                println!(">>> visit_str: {}", value);
                 Id::try_from(value)
                     .map_err(|e| de::Error::custom(format!("Invalid ID string: {e}")))
             }
@@ -339,7 +338,6 @@ impl<'de> Deserialize<'de> for Id {
             where
                 E: de::Error,
             {
-                println!(">>> visit_bytes: {}", v.len());
                 Id::try_from_bytes(v)
                     .map_err(|e| de::Error::custom(format!("Invalid ID bytes: {e}")))
             }

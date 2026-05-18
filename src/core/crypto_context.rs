@@ -1,11 +1,11 @@
 use crate::{
     Id,
-    Error,
-    core::Result,
+    Result,
+    errors::CryptoError,
     cryptobox::{CryptoBox, Nonce, PrivateKey}
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CryptoContext {
     id          : Id,
     crypto_box  : CryptoBox,
@@ -15,7 +15,6 @@ pub struct CryptoContext {
 
 unsafe impl Send for CryptoContext {}
 
-#[allow(unused)]
 impl CryptoContext {
     pub(crate) fn new(id: Id, crypto_box: CryptoBox) -> CryptoContext {
         Self {
@@ -26,14 +25,11 @@ impl CryptoContext {
         }
     }
 
-    pub(crate) fn from_private_key(id: Id, pk: &PrivateKey) -> CryptoContext {
-        let crypto_box = CryptoBox::try_from((&id.to_encryption_key(), pk)).unwrap();
-        Self {
+    pub(crate) fn from_private_key(id: Id, sk: &PrivateKey) -> CryptoContext {
+        Self::new(
             id,
-            crypto_box,
-            next_nonce  : Nonce::random(),
-            last_peer_nonce: None
-        }
+            CryptoBox::try_from((&id.to_encryption_key(), sk)).unwrap()
+        )
     }
 
     pub fn id(&self) -> &Id {
@@ -60,7 +56,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".into()));
+                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks".into()));
             }
         }
         self.crypto_box.decrypt(cipher, plain)
@@ -70,7 +66,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(Error::Crypto("Using inconsistent nonce with risking of replay attacks".into()));
+                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks".into()));
             }
         }
         self.crypto_box.decrypt_into(&cipher)

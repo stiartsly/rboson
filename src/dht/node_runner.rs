@@ -32,7 +32,7 @@ use crate::dht::{
     data_storage::DataStorage
 };
 
-use crate::dht::future::{
+use crate::dht::promise::{
     Cmd,
     Command,
     FindNodeCmd,
@@ -167,7 +167,7 @@ impl NodeRunner {
         result.map(|peers| {
             peers.iter().for_each(|item| {
                 debug!("Reannouce the peers {}",  item.id());
-                cloned_storage.borrow_mut().update_peer_last_announce(item.id(), item.origin())
+                cloned_storage.borrow_mut().update_peer_last_announce(item.id(), item.nodeid().as_ref().unwrap())
                     .map_err(|e| warn!("{}", e))
                     .ok();
 
@@ -312,7 +312,7 @@ impl NodeRunner {
         let ndhts = self.dht_num;
         let found = Rc::new(RefCell::new(found));
         let completion = Rc::new(RefCell::new(0));
-        let complete_fn = Rc::new(RefCell::new(
+        let complete_fn = Arc::new(Mutex::new(
             move |ni: Option<NodeInfo> | {
                 *completion.borrow_mut() += 1;
                 ni.map(|ni| found.borrow_mut().set_value(

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::error::Error;
 use std::collections::HashMap;
 use std::time::{Duration,SystemTime};
 use std::hash::Hash;
@@ -8,8 +9,7 @@ use serde_json::{Map, Value};
 use crate::{
     as_secs,
     Id,
-    Error,
-    error::Result,
+    errors::{Result, ArgumentError, BeforeValidPeriodError, ExpiredError, SignatureError},
     signature,
     CryptoIdentity,
 };
@@ -176,15 +176,15 @@ impl Credential {
     pub fn validate(&self) -> Result<()> {
         let now = as_secs!(SystemTime::now());
         if self.valid_from.is_some() && self.valid_from.unwrap() > now {
-            return Err(Error::BeforeValidPeriod("Credential is not yet valid".into()));
+            return Err(BeforeValidPeriodError::new("Credential is not yet valid".into()).into());
         }
         if self.valid_until.is_some() && self.valid_until.unwrap() < now {
-            return Err(Error::Expired("Credential has expired".into()));
+            return Err(ExpiredError::new("Credential has expired".into()).into());
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("Credential signature is not valid".into())),
+            false => Err(SignatureError::new("Credential signature is not valid".into()).into()),
         }
     }
 
@@ -227,21 +227,21 @@ impl fmt::Display for Credential {
 }
 
 impl TryFrom<&str> for Credential {
-    type Error = Error;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e|
-            Error::Argument(format!("Failed to parse Credential from string: {}", e))
+            ArgumentError::new(format!("Failed to parse Credential from string: {}", e)).into()
         )
     }
 }
 
 impl TryFrom<&[u8]> for Credential {
-    type Error = Error;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_json::from_slice(data).map_err(|e|
-            Error::Argument(format!("Failed to parse Credential from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse Credential from bytes: {}", e)).into()
         )
     }
 }

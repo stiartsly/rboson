@@ -1,69 +1,76 @@
-use std::any::Any;
 use std::collections::LinkedList;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use log::{error, debug};
 
 use crate::dht::{
-    kbucket::KBucket,
-    kbucket_entry::KBucketEntry,
+    node_entry::NodeEntry,
     rpccall::RpcCall,
     dht::DHT,
-    msg::{
-        ping_req::Message,
-        msg::Msg,
+    msg::msg::Message,
+    task::task::{Task, TaskData},
+    routing::{
+        kbucket::KBucket,
+        kbucket_entry::KBucketEntry,
     }
 };
-
-use super::task::{
-    Task,
-    TaskData
-};
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PingOption {
-    CheckAll = 0,
-    RemoveOnTimeout = 1,
-    ProbeCache = 3
-}
 
 pub(crate) struct PingRefreshTask {
     base_data: TaskData,
 
-    bucket: Rc<RefCell<KBucket>>,
-    todo: Rc<RefCell<LinkedList<Rc<RefCell<KBucketEntry>>>>>,
+    todo: Arc<Mutex<LinkedList<KBucketEntry>>>,
 
+    // Whether to ping all nodes in the bucket, regardless of their ping status.
     check_all: bool,
-    _probe_cache: bool,
+
+	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
+
+	// Whether to ping a replacement node from the bucket’s cache.
+    probe_replacement: bool,
 }
 
 impl PingRefreshTask {
-    pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
-        bucket: Rc<RefCell<KBucket>>,
-        option: PingOption
-    ) -> Self {
-        let mut task = Self {
+    pub(crate) fn new(dht: Arc<Mutex<DHT>>) -> Self {
+        Self {
             base_data: TaskData::new(dht),
-            bucket: bucket,
-            todo: Rc::new(RefCell::new(LinkedList::new())),
+            todo: Arc::new(Mutex::new(LinkedList::new())),
 
-            check_all:          option == PingOption::CheckAll,
-            _probe_cache:       option == PingOption::ProbeCache,
-            remove_on_timeout:  option == PingOption::RemoveOnTimeout
-        };
-        task.sync_from_bucket();
-        task
+            check_all           : false,
+            probe_replacement   : false,
+            remove_on_timeout   : false,
+        }
     }
 
-    fn sync_from_bucket(&mut self) {
-        self.bucket.borrow_mut().update_refresh_time();
-        self.bucket.borrow().entries().iter().for_each(|entry| {
-            if entry.borrow().needs_ping() || self.check_all || self.remove_on_timeout {
-                self.todo.borrow_mut().push_back(entry.clone())
+    pub(crate) fn with_check_all(&mut self, check_all: bool) -> &mut Self {
+        self.check_all = check_all;
+        self
+    }
+
+    pub(crate) fn remove_on_timeout(&mut self, remove_on_timeout: bool) -> &mut Self {
+        self.remove_on_timeout = remove_on_timeout;
+        self
+    }
+
+    pub(crate) fn with_probe_replacement(&mut self, replacement: bool) -> &mut Self {
+        self.probe_replacement = replacement;
+        self
+    }
+
+    pub(crate) fn bucket(&mut self, bucket: Arc<Mutex<KBucket>>) -> &mut Self {
+        bucket.lock().unwrap().update_refresh_time();
+
+        let mut todo = self.todo.lock().unwrap();
+        let mut entries = bucket.lock().unwrap().entries();
+        while let Some(entry) = entries.pop() {
+            if self.check_all || self.remove_on_timeout || entry.needs_ping() {
+                if todo.len() >= KBucket::MAX_ENTRIES*2 {
+                    break;
+                }
+                todo.push_back(entry);
             }
-        })
+        }
+        drop(todo);
+        self
     }
 }
 
@@ -76,48 +83,52 @@ impl Task for PingRefreshTask {
         &mut self.base_data
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn call_timeout(&mut self, call: &RpcCall) {
+        if !self.remove_on_timeout {
+            return;
+        }
+
+        let target_id = call.target_id();
+        // CAUSION:
+        // Should not use the original bucket object,
+        // because the routing table is dynamic, maybe already changed.
+        debug!("{}#{} removing timeout entry {} from routing table",
+            self.name(),
+            self.id(),
+            target_id
+        );
+
+        let rt = self.base_data.dht().lock().unwrap().rt();
+        rt.lock().unwrap().remove(&target_id);
     }
 
-    fn update(&mut self) {
-        while self.can_request() {
-            let cn = match self.todo.borrow().front() {
-                Some(cn) => cn.clone(),
+    fn iterate(&mut self) {
+        while self.can_dorequest() {
+            let kentry = match self.todo.lock().unwrap().front() {
+                Some(v) => v.clone(),
                 None => break,
             };
 
-            if !self.check_all && !cn.borrow().needs_ping() {
-                self.todo.borrow_mut().pop_front();
+            if !self.check_all && !kentry.needs_ping() {
+                _ = self.todo.lock().unwrap().pop_front();
             }
 
-            let msg  = Rc::new(RefCell::new(
-                Box::new(Message::new()) as Box<dyn Msg>
-            ));
+            let msg = Arc::new(Mutex::new(Message::ping_req()));
             let todo = self.todo.clone();
-            let ni = cn.borrow().ni();
+            let ke = NodeEntry::from_kentry(kentry);
 
-            self.send_call(ni, msg, Box::new(move|_| {
-                todo.borrow_mut().pop_front();
+            self.send_call(ke, msg, Box::new(move|_| {
+                todo.lock().unwrap().pop_front();
             })).map_err(|e| {
                error!("Error on sending 'pingRequest' message: {}", e);
             }).ok();
         }
     }
 
-    fn call_timeout(&mut self, call: &RpcCall) {
-        if self.remove_on_timeout {
-            return;
-        }
-
-        // CAUSION:
-        // Should not use the original bucket object,
-        // because the routing table is dynamic, maybe already changed.
-        debug!("Removing invalid entry from routing table");
-
-        Task::data(self).dht()
-            .borrow().rt()
-            .borrow_mut()
-            .remove(call.target_id());
+    fn is_done(&self) -> bool {
+        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
     }
 }
+
+unsafe impl Send for PingRefreshTask {}
+unsafe impl Sync for PingRefreshTask {}

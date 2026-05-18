@@ -1,75 +1,66 @@
-use std::any::Any;
-use std::rc::Rc;
-use std::cell::RefCell;
-use log::{warn, error};
+use std::sync::{Arc, Mutex};
+use log::{debug, error, warn};
 
-use crate::{
-    Id,
-    Value,
-    Network
-};
-
+use crate::{Id, Network};
 use crate::dht::{
-    constants,
     dht::DHT,
     rpccall::RpcCall,
-    kclosest_nodes::KClosestNodes,
+    node_entry::NodeEntry,
+    eligible_value::EligibleValue,
     msg::{
-        msg::{Method, Kind, Msg},
-        lookup_req::{Msg as LookupRequest},
-        lookup_rsp::{Msg as LookupResponse},
-        find_value_req as req,
-        find_value_rsp as rsp
-    }
-};
-
-use super::{
-    task::{Task, TaskData},
-    lookup_task::{LookupTask, LookupTaskData},
+        lookup_rsp::LookupResponse,
+        msg::{Body, Message},
+    },
+    routing::{
+        kbucket::KBucket,
+        kbucket_entry::KBucketEntry,
+        kclosest_nodes::KClosestNodes,
+    },
+    task::{
+        lookup_task::{LookupTask, LookupTaskData},
+        task::{Task, TaskData, TaskResult},
+    },
 };
 
 pub(crate) struct ValueLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
-
     expected_seq: i32,
-    result_fn: Box<dyn FnMut(Rc<RefCell<Box<dyn Task>>>, Option<Rc<Value>>)>,
-    listeners: Vec<Box<dyn FnMut(&mut dyn Task)>>,
+
+    result: EligibleValue
 }
 
 impl ValueLookupTask {
-    pub(crate) fn new(dht: Rc<RefCell<DHT>>, target: Rc<Id>) -> Self {
+    pub(crate) fn new(
+        dht: Arc<Mutex<DHT>>,
+        target: Id,
+        expected_seq: i32,
+        done_on_eligible_result: bool
+    ) -> Self {
         Self {
             base_data: TaskData::new(dht),
-            lookup_data: LookupTaskData::new(target),
-            expected_seq: -1,
-            result_fn: Box::new(|_,_|{}),
-            listeners: Vec::new(),
+            lookup_data: LookupTaskData::new(target.clone(), done_on_eligible_result),
+            expected_seq,
+            result: EligibleValue::new(target, expected_seq),
         }
-    }
-
-    pub(crate) fn set_result_fn<F>(&mut self, f: F)
-    where F: FnMut(Rc<RefCell<Box<dyn Task>>>, Option<Rc<Value>>) + 'static,
-    {
-        self.result_fn = Box::new(f);
-    }
-
-    pub(crate) fn with_expected_seq(&mut self, seq: i32) {
-        self.expected_seq = seq;
     }
 }
 
 impl LookupTask for ValueLookupTask {
+    fn base_data(&self) -> &TaskData {
+        &Task::data(self)
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        Task::data(self).dht()
+    }
+
     fn data(&self) -> &LookupTaskData {
         &self.lookup_data
     }
 
     fn data_mut(&mut self) -> &mut LookupTaskData {
         &mut self.lookup_data
-    }
-
-    fn dht(&self) -> Rc<RefCell<DHT>> {
-        Task::data(self).dht()
     }
 }
 
@@ -82,118 +73,139 @@ impl Task for ValueLookupTask {
         &mut self.base_data
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn add_listener(&mut self, cb: Box<dyn FnMut(&mut dyn Task)>) {
-        self.listeners.push(cb);
-
-    }
-    fn notify_completion(&mut self) {
-        while let Some(mut cb) = self.listeners.pop() {
-            cb(self)
-        }
+    fn result(&self) -> Option<TaskResult> {
+        self.result.value().as_ref().map(|v| TaskResult::Value(v.clone()))
     }
 
     fn prepare(&mut self) {
-        let nodes = {
-            let mut kns = KClosestNodes::with_filter(
-                LookupTask::target(self),
-                Task::data(self).dht().borrow().ni(),
-                Task::data(self).dht().borrow().rt(),
-                constants::MAX_ENTRIES_PER_BUCKET *2,
-                move |_| true
+        let entries:Vec<KBucketEntry> = {
+            let mut kns = KClosestNodes::new(
+                self.dht().lock().unwrap().rt(),
+                self.target().clone(),
+                KBucket::MAX_ENTRIES *3
             );
-            kns.fill(false);
-            kns.as_nodes()
+            kns.set_filter(|v| v.eligible_for_local_lookup());
+            kns.fill();
+            kns.into()
         };
-        self.add_candidates(&nodes);
+
+        debug!("{}#{} initialized {} candidates for target {}",
+            self.name(),
+            self.id(),
+            entries.len(),
+            self.target()
+        );
+        self.add_candidates_with_kentries(entries);
     }
 
-    fn update(&mut self) {
-        while self.can_request() {
+    fn iterate(&mut self) {
+        LookupTask::iterate(self);
+
+        while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
                 None => break,
             };
 
-            let msg = Rc::new(RefCell::new({
-                let mut msg = Box::new(req::Message::new());
-                msg.with_target(self.target());
-                msg.with_want4(self.dht().borrow().network() == Network::IPv4);
-                msg.with_want6(self.dht().borrow().network() == Network::IPv6);
-                if self.expected_seq >= 0 {
-                    msg.with_seq(self.expected_seq);
-                }
-                msg as Box<dyn Msg>
-            }));
+            let entry = NodeEntry::from_candidate(next.clone());
+            let network = self.dht().lock().unwrap().network();
+            let msg = Arc::new(Mutex::new(Message::find_value_req(
+                self.target().clone(),
+                network.is_ipv4(),
+                network.is_ipv6(),
+                self.expected_seq,
+            )));
 
-            let next = next.clone();
-            let ni = next.borrow().ni();
-
-            self.send_call(ni, msg, Box::new(move|_| {
-                next.borrow_mut().set_sent();
+            _ = self.send_call(entry, msg, Box::new(move |_| {
+                next.lock().unwrap().set_sent();
             })).map_err(|e| {
-               error!("Error on sending 'findValue' message: {}", e);
-            }).ok();
+                error!("Error on sending 'find_value' request: {}", e);
+            });
         }
     }
 
-    fn call_responsed(&mut self, call: &RpcCall, msg: Rc<RefCell<Box<dyn Msg>>>) {
-        if !call.matches_id()||
-            msg.borrow().kind() != Kind::Response ||
-            msg.borrow().method() != Method::FindValue {
+    fn call_responsed(&mut self, call: &RpcCall) {
+        LookupTask::call_responsed(self, call);
+
+        if call.id_mismatched() {
             return;
         }
 
-        let borrowed = msg.borrow();
-        let msg = match borrowed.as_any().downcast_ref::<rsp::Message>() {
-            Some(v) => v,
-            None => return
+        let msg = call.rsp().unwrap();
+        let locked_msg = msg.lock().unwrap();
+        let Some(Body::FindValueRsp(body)) = locked_msg.body() else {
+            warn!("{}#{} ignoring non LookupValue response from {}",
+                self.name(),
+                self.id(),
+                call.target_id()
+            );
+            return;
         };
-        LookupTask::call_responsed(self, call, msg);
 
-        if let Some(value) = msg.value() {
-            let target = LookupTask::target(self);
-            let id = value.id();
-
-            if *target != id {
-                warn!("Responsed value id {} mismatched with expected {}", id, target);
+        if let Some(value) = body.value() {
+            if !self.result.update(value.clone(), true) {
+                warn!(
+                    "{}#{} dropping value response from {} due to ineligible value data",
+                    self.name(),
+                    self.id(),
+                    call.target_id()
+                );
                 return;
             }
-            if !value.is_valid() {
-                warn!("Responsed value {} is invalid, signature mismatch", id);
-                return;
-            }
-
-            if self.expected_seq >=0 && value.sequence_number() < self.expected_seq {
-                warn!("Responsed value {} is outdated, sequence {}, expected {}",
-                    id, value.sequence_number(), self.expected_seq);
-                return;
+            if !self.result.is_empty() {
+                if LookupTask::done_on_eligible_result(self) {
+                    debug!("{}#{} value is eligible, mark lookup done",
+                        self.name(),
+                        self.id()
+                    );
+                    LookupTask::mark_lookup_done(self);
+                } else {
+                    debug!("{}#{} value is ineligible, continue iteration for more precise results",
+                        self.name(),
+                        self.id()
+                    );
+                }
             }
         } else {
-            let network = self.dht().borrow().network();
+            let network = self.dht().lock().unwrap().network();
             let nodes = match network {
-                Network::IPv4 => LookupResponse::nodes4(msg),
-                Network::IPv6 => LookupResponse::nodes6(msg)
+                Network::IPv4 => body.nodes4(),
+                Network::IPv6 => body.nodes6()
             };
 
-            if let Some(nodes) = nodes {
-                if !nodes.is_empty() {
-                    self.add_candidates(nodes);
-                }
+            let Some(nodes) = nodes.filter(|v|v.is_empty()) else {
+                warn!("{}#{} received empty nodes list from {}, ignoring",
+                    self.name(),
+                    self.id(),
+                    call.target_id()
+                );
+                return;
             };
+
+            self.add_candidates_with_nodes(nodes.to_vec());
+
+            debug!("{}#{} added {} additional candidates from {} for target {}",
+                self.name(),
+                self.id(),
+                nodes.len(),
+                call.target_id(),
+                self.target()
+            );
         }
-
-        (self.result_fn)(self.base_data.task(), msg.value());
     }
 
     fn call_error(&mut self, call: &RpcCall) {
-        LookupTask::call_error(self, call)
+        LookupTask::call_error(self, call);
     }
 
     fn call_timeout(&mut self, call: &RpcCall) {
-        LookupTask::call_timeout(self, call)
+        LookupTask::call_timeout(self, call);
+    }
+
+    fn is_done(&self) -> bool {
+        LookupTask::is_done(self)
     }
 }
+
+unsafe impl Send for ValueLookupTask {}
+unsafe impl Sync for ValueLookupTask {}

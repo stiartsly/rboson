@@ -3,9 +3,9 @@ use unicode_normalization::UnicodeNormalization;
 use serde_json::Map;
 
 use crate::{
-    Error,
+    Result,
+    errors::ArgumentError,
     CryptoIdentity,
-    core::Result,
 };
 
 use crate::did::{
@@ -32,7 +32,7 @@ impl CardBuilder {
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            Err(Error::Argument("Credential subject does not match identity".into()))?;
+            Err(ArgumentError::new("Credential subject does not match identity".into()))?;
         }
 
         self.credentials.insert(credential.id().to_string(), credential);
@@ -41,11 +41,11 @@ impl CardBuilder {
 
     pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> Result<&mut Self> {
         if credentials.is_empty() {
-            Err(Error::Argument("Credentials cannot be empty".into()))?;
+            Err(ArgumentError::new("Credentials cannot be empty".into()))?;
         }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                Err(Error::Argument("The subject of one Credential does not match identity".into()))?;
+                Err(ArgumentError::new("The subject of one Credential does not match identity".into()))?;
             }
         }
 
@@ -63,7 +63,7 @@ impl CardBuilder {
     where T: serde::Serialize
     {
         if claims.is_empty() {
-            Err(Error::Argument("Claims cannot be empty".into()))?;
+            Err(ArgumentError::new("Claims cannot be empty".into()))?;
         }
         self.with_credential(
             Credential::builder(self.identity.clone())
@@ -83,7 +83,7 @@ impl CardBuilder {
         where T: serde::Serialize
     {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
-            Err(Error::Argument("Service id, type and endpoint cannot be empty".into()))?;
+            Err(ArgumentError::new("Service id, type and endpoint cannot be empty".into()))?;
         }
 
         let mut map = Map::new();

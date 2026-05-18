@@ -1,9 +1,5 @@
 use std::cmp::Ordering;
-use crate::core::{
-    id,
-    Id,
-    ID_BITS,
-};
+use crate::core::Id;
 
 #[test]
 fn test_three_way_compare() {
@@ -21,32 +17,32 @@ fn test_bites_equal() {
     let id2 = Id::try_from("0x4833af415166cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8").expect("invalid hex Id");
 
     for i in 0..45 {
-        assert_eq!(id::bits_equal(&id1, &id2, i), true);
+        assert_eq!(Id::bits_equal(&id1, &id2, i), true);
     }
-    for i in 45.. ID_BITS as i32 {
-        assert_eq!(id::bits_equal(&id1, &id2, i), false);
+    for i in 45.. Id::BITS as i32 {
+        assert_eq!(Id::bits_equal(&id1, &id2, i), false);
     }
 
     let id2 = id1.clone();
-    for i in 0.. ID_BITS as i32 {
-        assert_eq!(id::bits_equal(&id1, &id2, i), true);
+    for i in 0.. Id::BITS as i32 {
+        assert_eq!(Id::bits_equal(&id1, &id2, i), true);
     }
 
     let id2 = Id::try_from("0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb9").expect("invalid hex Id");
-    for i in 0..ID_BITS as i32 -1 {
-        assert_eq!(id::bits_equal(&id1, &id2, i), true);
+    for i in 0..Id::BITS as i32 -1 {
+        assert_eq!(Id::bits_equal(&id1, &id2, i), true);
     }
-    let result = id::bits_equal(&id1, &id2, ID_BITS as i32 -1);
+    let result = Id::bits_equal(&id1, &id2, Id::BITS as i32 -1);
     assert_eq!(result, false);
 }
 
 #[test]
 fn test_bites_copy() {
     let id1 = Id::try_from("0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8").expect("invalid hex Id");
-    for i in 0.. ID_BITS as i32 {
+    for i in 0.. Id::BITS as i32 {
         let mut id2 = Id::random();
-        id::bits_copy(&id1, &mut id2, i);
-        assert_eq!(id::bits_equal(&id1, &id2, i), true)
+        Id::bits_copy(&id1, &mut id2, i);
+        assert_eq!(Id::bits_equal(&id1, &id2, i), true)
     }
 }
 
@@ -59,19 +55,23 @@ fn test_shift() {
 }
 
 #[test]
-fn test_serde() {
-    let id1_str = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
-    let id1 = Id::try_from(id1_str).expect("invalid hex Id");
-    let cbor = serde_cbor::to_vec(&id1).expect("failed to serialize Id to CBOR");
-    let id2: Id = serde_cbor::from_slice(&cbor).expect("failed to deserialize Id from CBOR");
-    let id2_str = id2.to_hexstr();
-    assert_eq!(id1_str, id2_str);
-    assert_eq!(id1, id2);
+fn test_serde_cbor() {
+    let id_str = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let id = Id::try_from(id_str).expect("invalid hex Id");
+    let ser = serde_cbor::to_vec(&id).expect("failed to serialize Id to CBOR");
+    let des: Id = serde_cbor::from_slice(&ser).expect("failed to deserialize Id from CBOR");
+    let id2_str = des.to_hexstr();
+    assert_eq!(id_str, id2_str);
+    assert_eq!(id, des);
+}
 
-    let id1_b58 = id1.to_base58();
-    let json = serde_json::to_string(&id1_b58).expect("failed to serialize Id to JSON");
-    let id3: Id = serde_json::from_str(&json).expect("failed to deserialize Id from JSON");
-    let id3_b58 = id3.to_base58();
-    assert_eq!(id1, id3);
-    assert_eq!(id1_b58, id3_b58);
+#[test]
+fn test_serde_json() {
+    let id_str = "0x4833af415161cbd0a3ef83aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
+    let id = Id::try_from(id_str).expect("invalid hex Id");
+    let ser = serde_json::to_string(&id).expect("failed to serialize Id to JSON");
+    let des: Id = serde_json::from_str(&ser).expect("failed to deserialize Id from JSON");
+    let id2_str = des.to_hexstr();
+    assert_eq!(id_str, id2_str);
+    assert_eq!(id, des);
 }

@@ -1,25 +1,30 @@
-use std::rc::Rc;
 use crate::Id;
 use crate::dht::msg::{
-    msg::Msg,
-    lookup_req::Msg as LookupMsg,
-    find_peer_req::Message,
+    lookup_req::LookupRequest,
+    find_peer_req::FindPeerRequest,
 };
 
 #[test]
-fn test_cbor() {
-    let peerid = Rc::new(Id::random());
-    let mut msg = Message::new();
-    msg.with_target(peerid.clone());
-    msg.with_want4(true);
+fn test_serde() {
+    let peerid = Id::random();
+    let expected_seq = 5;
+    let expected_count = 10;
+    let req = FindPeerRequest::new(
+        peerid.clone(),
+        true,
+        false,
+        expected_seq,
+        expected_count
+    );
 
-    let cval = msg.ser();
-    let mut decoded_msg = Message::new();
-    let result = decoded_msg.from_cbor(&cval);
-    assert_eq!(result.is_some(), true);
-    assert_eq!(decoded_msg.target(), msg.target());
-    assert_eq!(decoded_msg.target(), peerid);
-    assert_eq!(decoded_msg.want4(), true);
-    assert_eq!(decoded_msg.want6(), false);
-    assert_eq!(decoded_msg.want_token(), true);
+    let cbor = serde_cbor::to_vec(&req)
+        .expect("Serialization failed");
+    let decoded: FindPeerRequest = serde_cbor::from_slice(&cbor)
+        .expect("Deserialization failed");
+
+    assert_eq!(decoded.target(), &peerid);
+    assert_eq!(decoded.want4(), true);
+    assert_eq!(decoded.want6(), false);
+    assert_eq!(decoded.expected_seq(), expected_seq);
+    assert_eq!(decoded.expected_count(), expected_count);
 }

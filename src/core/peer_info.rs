@@ -1,4 +1,5 @@
 use std::fmt;
+use std::result::Result as SResult;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use serde::{
@@ -9,13 +10,13 @@ use serde::{
 
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
-use rand::RngCore;
 
 use super::{
     Id,
-    error::{Error, Result},
     Identity,
     signature,
+    Result,
+    errors::StateError,
     signature::{KeyPair, PrivateKey},
 };
 
@@ -79,14 +80,15 @@ impl PeerBuilder {
 
     pub fn build(self) -> Result<PeerInfo> {
         if self.endpoint.is_empty() {
-            return Err(Error::State("Missing endpoint.".into()));
+            return Err(StateError::new("Missing endpoint.".into()));
         }
         if self.seq < 0 {
-            return Err(Error::State("Invalid sequence number".into()));
+            return Err(StateError::new("Invalid sequence number".into()));
         }
         if let Some(nonce) = self.nonce.as_ref() {
             if nonce.len() != PeerInfo::NONCE_BYTES {
-                return Err(Error::State(format!("Invalid nonce length {}, expected {}", nonce.len(), PeerInfo::NONCE_BYTES)));
+                return Err(StateError::new(format!("Invalid nonce length {}, expected {}",
+                nonce.len(), PeerInfo::NONCE_BYTES)));
             }
         }
 
@@ -124,8 +126,8 @@ impl PeerInfo {
 
     fn new(
         keypair_opt: Option<&KeyPair>,
-        node: Option<Arc<Mutex<dyn Identity>>>,
-        nounce: Option<&[u8]>,
+        node_identity: Option<Arc<Mutex<dyn Identity>>>,
+        nonce: Option<&[u8]>,
         seq: i32,
         fingerprint: u64,
         endpoint: String,
@@ -137,22 +139,25 @@ impl PeerInfo {
         };
 
         let pk = Id::from(kp.public_key());
-        let nonce = if let Some(nonce) = nounce {
-            if nonce.len() != Self::NONCE_BYTES {
-                return Err(Error::State(format!("Invalid nonce length {}, expected {}", nonce.len(), Self::NONCE_BYTES)));
+        let nonce = match nonce {
+            Some(v) => {
+                if v.len() != Self::NONCE_BYTES {
+                    return Err(StateError::new(format!("Invalid nonce length {}, expected {}", v.len(), Self::NONCE_BYTES)));
+                }
+                v.to_vec()
+            },
+            None => {
+                let mut v = vec![0u8; Self::NONCE_BYTES];
+                rand::fill(&mut v);
+                v
             }
-            nonce.to_vec()
-        } else {
-            let mut nonce = vec![0u8; Self::NONCE_BYTES];
-            rand::thread_rng().fill_bytes(&mut nonce);
-            nonce
         };
 
         let mut nodeid: Option<Id> = None;
         let mut node_sig: Option<Vec<u8>> = None;
 
-        if let Some(node_arc) = node.as_ref() {
-            let id = node_arc.lock().unwrap().id().clone();
+        if let Some(identity) = node_identity.as_ref() {
+            let id = identity.lock().unwrap().id().clone();
 
             let mut sha = Sha256::new();
             sha.update(pk.as_bytes());
@@ -160,16 +165,16 @@ impl PeerInfo {
             sha.update(nonce.as_slice());
             let digest = sha.finalize().to_vec();
 
-            let sig = node_arc.lock().unwrap().sign_into(digest.as_slice())?;
+            let sig = identity.lock().unwrap().sign_into(&digest)?;
 
             nodeid = Some(id);
             node_sig = Some(sig);
         }
 
         let mut peer = PeerInfo {
-            pk: pk.clone(),
+            pk,
             sk: Some(kp.to_private_key()),
-            nonce: nonce.clone(),
+            nonce,
             seq,
             nodeid,
             node_sig,
@@ -187,7 +192,6 @@ impl PeerInfo {
         PeerBuilder::new(endpoint)
     }
 
-    #[allow(unused)]
     pub(crate) fn packed(
         pk: Id,
         nonce: Vec<u8>,
@@ -280,10 +284,10 @@ impl PeerInfo {
         extra: Option<Vec<u8>>
     ) -> Result<Self> {
         if self.sk.is_none() {
-            return Err(Error::State("Not the owner of the peer info".into()));
+            return Err(StateError::new("Not the owner of the peer info".into()));
         }
         if endpoint.is_empty() {
-            return Err(Error::State("Invalid endpoint".into()));
+            return Err(StateError::new("Invalid endpoint".into()));
         }
 
         let endpoint_nfc = endpoint.nfc().collect::<String>();
@@ -298,11 +302,11 @@ impl PeerInfo {
         // If current has an authenticating node, validate replacement
         if self.nodeid.is_some() {
             if node.is_none() {
-                return Err(Error::State("Cannot authenticate peer info without owner node".into()));
+                return Err(StateError::new("Cannot authenticate peer info without owner node".into()));
             }
             let node_id = node.as_ref().unwrap().lock().unwrap().id().clone();
             if node_id != self.nodeid.clone().unwrap() {
-                return Err(Error::State("Cannot authenticate peer info with a different node".into()));
+                return Err(StateError::new("Cannot authenticate peer info with a different node".into()));
             }
         }
 
@@ -398,8 +402,12 @@ impl fmt::Display for PeerInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "id:{}", self.pk)?;
         write!(f, ",endpoint:{}", self.endpoint)?;
-        if self.fingerprint != 0 { write!(f, ",sn:{}", self.fingerprint)?; }
-        if self.seq > 0 { write!(f, ",seq:{}", self.seq)?; }
+        if self.fingerprint != 0 {
+            write!(f, ",sn:{}", self.fingerprint)?;
+        }
+        if self.seq > 0 {
+            write!(f, ",seq:{}", self.seq)?;
+        }
         if let Some(nodeid) = self.nodeid.as_ref() {
             write!(f, ",nodeId:{}", nodeid.to_base58())?;
         }
@@ -412,32 +420,28 @@ impl fmt::Display for PeerInfo {
 }
 
 impl Serialize for PeerInfo {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, ser: S) -> SResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_tuple(9)?;
+        let seq = (self.seq != 0).then_some(self.seq);
+        let fingerprint = (self.fingerprint != 0).then_some(self.fingerprint);
+        let mut s = ser.serialize_tuple(9)?;
         s.serialize_element(&self.pk)?;
         s.serialize_element(&self.nonce)?;
-        if self.seq >= 0 {
-            s.serialize_element(&self.seq)?;
-        }
-        if let Some(nodeid) = self.nodeid.as_ref() {
-            s.serialize_element(nodeid)?;
-            s.serialize_element(self.node_sig.as_ref().unwrap())?;
-        }
+        s.serialize_element(&seq)?;
+        s.serialize_element(&self.nodeid)?;
+        s.serialize_element(&self.node_sig)?;
         s.serialize_element(&self.sig)?;
-        s.serialize_element(&self.fingerprint)?;
+        s.serialize_element(&fingerprint)?;
         s.serialize_element(&self.endpoint)?;
-        if let Some(extra) = self.extra.as_ref() {
-            s.serialize_element(extra)?;
-        }
+        s.serialize_element(&self.extra)?;
         s.end()
     }
 }
 
 impl<'de> Deserialize<'de> for PeerInfo {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(des: D) -> SResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -450,7 +454,7 @@ impl<'de> Deserialize<'de> for PeerInfo {
                 formatter.write_str("peer info tuple")
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+            fn visit_seq<A>(self, mut seq: A) -> SResult<Self::Value, A::Error>
             where
                 A: SeqAccess<'de>,
             {
@@ -458,33 +462,27 @@ impl<'de> Deserialize<'de> for PeerInfo {
                     .ok_or_else(|| de::Error::invalid_length(0, &"9 elements"))?;
                 let nonce: Vec<u8> = seq.next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &"9 elements"))?;
-                let seqno: i32 = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(2, &"9 elements"))?;
-                let nodeid: Option<Id> = seq.next_element()?;
-                let node_sig: Option<Vec<u8>> = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(4, &"9 elements"))?;
+                let seqno = seq.next_element::<Option<i32>>()?
+                    .flatten()
+                    .unwrap_or_default();
+                let nodeid = seq.next_element::<Option<Id>>()?
+                    .flatten();
+                let node_sig = seq.next_element::<Option<Vec<u8>>>()?
+                    .flatten();
                 let sig: Vec<u8> = seq.next_element()?
                     .ok_or_else(|| de::Error::invalid_length(5, &"9 elements"))?;
-                let fingerprint: u64 = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(6, &"9 elements"))?;
+                let fingerprint = seq.next_element::<Option<u64>>()?
+                    .flatten()
+                    .unwrap_or_default();
                 let endpoint: String = seq.next_element()?
                     .ok_or_else(|| de::Error::invalid_length(7, &"9 elements"))?;
-                let extra: Option<Vec<u8>> = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(8, &"9 elements"))?;
-
+                let extra = seq.next_element::<Option<Vec<u8>>>()?
+                    .flatten();
                 Ok(PeerInfo::packed(
-                    pk,
-                    nonce,
-                    seqno,
-                    nodeid,
-                    node_sig,
-                    sig,
-                    fingerprint,
-                    endpoint,
-                    extra
+                    pk, nonce, seqno, nodeid, node_sig, sig, fingerprint, endpoint, extra
                 ))
             }
         }
-        deserializer.deserialize_tuple(9, PeerVisitor)
+        des.deserialize_tuple(9, PeerVisitor)
     }
 }

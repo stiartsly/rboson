@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    core::{Error, Result},
+    Error,
+    Result,
+    errors::ArgumentError,
     CryptoIdentity,
 };
 
@@ -69,7 +71,7 @@ impl VouchBuilder {
     where T: serde::Serialize {
 
         if claims.is_empty() {
-            return Err(Error::Argument("Claims cannot be empty".into()));
+            return Err(ArgumentError::new("Claims cannot be empty".into()).into());
         }
 
         self.credentials.insert(
@@ -109,7 +111,7 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.credentials.is_empty() {
-            return Err(Error::Argument("Credentials cannot be empty".into()));
+            return Err(ArgumentError::new("Credentials cannot be empty".into()).into());
         }
 
         let types = match self.types.is_empty() {

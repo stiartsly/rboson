@@ -18,14 +18,9 @@ use serde::{
 
 use super::{
     Id,
-    version
+    version,
+    Network,
 };
-
-pub(crate) trait Reachable {
-    fn reachable(&self) -> bool { false }
-    fn unreachable(&self) -> bool { false }
-    fn set_reachable(&mut self, _: bool) {}
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeInfo {
@@ -39,8 +34,8 @@ impl NodeInfo {
         Self {id, addr, ver: 0}
     }
 
-    pub fn with_version(id: Id, addr: SocketAddr, ver: i32) -> Self {
-        Self {id, addr, ver}
+    pub fn set_version(&mut self, ver: i32) {
+        self.ver = ver;
     }
 
     pub const fn ip(&self) -> IpAddr {
@@ -61,6 +56,10 @@ impl NodeInfo {
 
     pub const fn id(&self) -> &Id {
         &self.id
+    }
+
+    pub fn network(&self) -> Network {
+        Network::from(self.socket_addr())
     }
 
     pub const fn version(&self) -> i32 {
@@ -84,7 +83,6 @@ impl NodeInfo {
     }
 }
 
-impl Reachable for NodeInfo {}
 impl Hash for NodeInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         0x6030A.hash(state); // 'n'
@@ -119,22 +117,23 @@ impl Serialize for NodeInfo {
         s.serialize_element(&self.id)?;
         s.serialize_element(&addr)?;
         s.serialize_element(&self.addr.port())?;
+
+        // TODO: discard version information
         s.end()
     }
 }
 
 impl<'de> Deserialize<'de> for NodeInfo {
-    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    fn deserialize<D>(des: D) -> SResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct ImplVisitor;
-
         impl<'de> Visitor<'de> for ImplVisitor {
             type Value = NodeInfo;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("node info tuple")
+                formatter.write_str("NodeInfo struct")
             }
 
             fn visit_seq<A>(self, mut seq: A) -> SResult<Self::Value, A::Error>
@@ -142,7 +141,7 @@ impl<'de> Deserialize<'de> for NodeInfo {
                 A: SeqAccess<'de>,
             {
                 let id: Id = seq.next_element()?
-                        .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let ip_bytes: Vec<u8> = seq.next_element()?
                     .ok_or_else(||de::Error::invalid_length(1, &self))?;
@@ -164,13 +163,12 @@ impl<'de> Deserialize<'de> for NodeInfo {
 
                 Ok(NodeInfo {
                     id,
-                    addr:
-                    SocketAddr::new(ip, port),
+                    addr: SocketAddr::new(ip, port),
                     ver: 0
                 })
             }
         }
 
-        deserializer.deserialize_tuple(4, ImplVisitor)
+        des.deserialize_tuple(4, ImplVisitor)
     }
 }

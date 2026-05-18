@@ -1,139 +1,154 @@
 use std::fmt;
-use std::rc::Rc;
-use std::any::Any;
-use ciborium::Value as CVal;
-
-use crate::{
-    Id,
-    Error,
-    core::{version, Result}
+use std::result::Result as SResult;
+use serde::{
+    Deserialize, Serialize,
+    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
+    ser::{SerializeMap, Serializer}
 };
 
-use super::{
-    msg::{
-        Kind, Method, Msg,
-        Data as MsgData
-    },
-    lookup_req::{
-        Msg as LookupRequest,
-        Data as LookupRequestData
-    },
+use crate::Id;
+use super::lookup_req::{
+    LookupRequest,
+    Data as LookupData
 };
 
-pub(crate) struct Message {
-    base_data   : MsgData,
-    lookkup_data: LookupRequestData,
+pub(crate) struct FindPeerRequest {
+    data: LookupData,
+    expected_seq: i32,
+    expected_count: i32,
 }
 
-impl Msg for Message {
-    fn data(&self) -> &MsgData {
-        &self.base_data
+impl FindPeerRequest {
+    pub(crate) fn new(
+        target: Id,
+        want4: bool,
+        want6: bool,
+        expected_seq: i32,
+        expected_count: i32,
+    ) -> Self {
+        Self {
+            data: LookupData::new(target, want4, want6, false),
+            expected_seq,
+            expected_count,
+        }
     }
 
-    fn data_mut(&mut self) -> &mut MsgData {
-        &mut self.base_data
+    pub(crate) fn expected_seq(&self) -> i32 {
+        self.expected_seq
     }
 
-    fn from_cbor(&mut self, input: &CVal) -> Option<()> {
-        let root = input.as_map()?;
-        for (k,v) in root {
-            let k = k.as_text()?;
-            match k {
-                "y" => {},
-                "t" => {
-                    let txid = v.as_integer()?.try_into().unwrap();
-                    self.set_txid(txid);
-                },
-                "v" => {
-                    let ver = v.as_integer()?.try_into().unwrap();
-                    self.set_ver(ver);
-                },
-                "q" => {
-                    let map = v.as_map()?;
-                    for (k, v) in map {
-                        let k = k.as_text()?;
-                        match k {
-                            "w" => {
-                                let want: i32 = v.as_integer()?.try_into().unwrap();
-                                self.with_want4((want & 0x01) != 0);
-                                self.with_want6((want & 0x02) != 0);
-                                self.with_want_token((want & 0x04) != 0);
-                            },
-                            "t" => {
-                                self.with_target(Rc::new(Id::from_cbor(v)?));
-                            },
-                            _ => return None,
-                        }
-                    }
-                },
-                _ => return None,
+    pub(crate) fn expected_count(&self) -> i32 {
+        self.expected_count
+    }
+}
+
+impl LookupRequest for FindPeerRequest {
+    fn data(&self) -> &LookupData {
+        &self.data
+    }
+
+    fn data_mut(&mut self) -> &mut LookupData {
+        &mut self.data
+    }
+}
+
+impl Serialize for FindPeerRequest {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut s = se.serialize_map(None)?;
+        s.serialize_entry("t", self.target())?;
+        s.serialize_entry("w", &self.want())?;
+        if self.expected_seq >= 0 {
+            s.serialize_entry("cas", &self.expected_seq)?;
+        }
+        if self.expected_count > 0 {
+            s.serialize_entry("e", &self.expected_count)?;
+        }
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FindPeerRequest {
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug)]
+        enum Field {
+            Want,           // "w"
+            Target,         // "t"
+            ExpectedSeq,    // "cas"
+            ExpectedCount,  // "e"
+            Ignore          // Ignore unknown fields
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(de)?;
+                match key.as_str() {
+                    "t"     => Ok(Field::Target),
+                    "w"     => Ok(Field::Want),
+                    "cas"   => Ok(Field::ExpectedSeq),
+                    "e"     => Ok(Field::ExpectedCount),
+                    _       => Ok(Field::Ignore)
+                }
             }
         }
-        Some(())
-    }
 
-    fn ser(&self) -> CVal {
-        let mut root = Msg::to_cbor(self);
-        if let Some(map) = root.as_map_mut() {
-            map.push((
-                CVal::Text(Kind::Request.to_key().to_string()),
-                LookupRequest::to_cbor(self)
-            ));
+        struct FieldVisiter;
+        impl<'de> Visitor<'de> for FieldVisiter {
+            type Value = FindPeerRequest;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("FindPeerRequest")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut target: Option<Id> = None;
+                let mut want: i32 = 0;
+                let mut expected_seq = -1;
+                let mut expected_count = 0;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Target => target = Some(map.next_value::<Id>()?),
+                        Field::Want => want = map.next_value()?,
+                        Field::ExpectedSeq  => expected_seq = map.next_value()?,
+                        Field::ExpectedCount => expected_count = map.next_value()?,
+                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                    }
+                }
+
+                if expected_seq < -1 {
+                    return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
+                }
+                if expected_count <= 0 {
+                    return Err(de::Error::custom("expected_count must be at least larger than 0"));
+                }
+
+                Ok(FindPeerRequest::new(
+                    target.ok_or_else(|| de::Error::missing_field("t"))?,
+                    (want & 0x01) != 0,
+                    (want & 0x02) != 0,
+                    expected_seq,
+                    expected_count
+                ))
+            }
         }
-        root
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+        de.deserialize_map(FieldVisiter)
     }
 }
 
-impl LookupRequest for Message {
-    fn data(&self) -> &LookupRequestData {
-        &self.lookkup_data
-    }
-
-    fn data_mut(&mut self) -> &mut LookupRequestData {
-        &mut self.lookkup_data
-    }
-}
-
-impl Message {
-    pub(crate) fn new() -> Self {
-        Message {
-            lookkup_data: LookupRequestData::new(true),
-            base_data: MsgData::new(
-                Kind::Request,
-                Method::FindPeer,
-                0
-            )
-        }
-    }
-}
-
-impl TryFrom<CVal> for Box<Message> {
-    type Error = Error;
-    fn try_from(input: CVal) -> Result<Box<Message>> {
-        let mut msg = Self::new(Message::new());
-        if let None =  msg.from_cbor(&input) {
-                return Err(Error::Protocol(
-                    format!("Invalid cobor value for find_peer_req message")));
-        }
-        Ok(msg)
-    }
-}
-
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "y:{},m:{},t:{},q:{{t:{},w:{}}},v:{}",
-            self.kind(),
-            self.method(),
-            self.txid() as u32,
-            self.target(),
-            self.want(),
-            version::format_version(self.ver())
-        )?;
-        Ok(())
+impl fmt::Display for FindPeerRequest {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        unimplemented!()
     }
 }

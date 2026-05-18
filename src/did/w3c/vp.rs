@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     Error,
+    Result,
+    errors::{ArgumentError, SignatureError},
     CryptoIdentity,
-    core::Result,
 };
 
 use crate::did::{
@@ -202,7 +203,7 @@ impl VerifiablePresentation {
     pub fn validate(&self) -> Result<()> {
          match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("VP signature is not valid".to_string())),
+            false => Err(SignatureError::new("VP signature is not valid".into())),
         }
     }
 
@@ -260,7 +261,7 @@ impl TryFrom<&str> for VerifiablePresentation {
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e|
-            Error::Argument(format!("Failed to parse VP from string: {}", e))
+            ArgumentError::new(format!("Failed to parse VP from string: {}", e)).into()
         )
     }
 }
@@ -278,7 +279,7 @@ impl TryFrom<&[u8]> for VerifiablePresentation {
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e|
-            Error::Argument(format!("Failed to parse VP from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse VP from bytes: {}", e)).into()
         )
     }
 }

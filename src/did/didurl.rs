@@ -5,7 +5,11 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     Id,
     Error,
-    core::Result,
+    Result,
+    errors::{
+        StateError,
+        MalformedError,
+    }
 };
 
 use crate::did::{
@@ -69,17 +73,17 @@ impl DIDUrl {
     pub fn parse(did_url: &str) -> Result<Self>{
         let trimmed: &str = did_url.trim();
         if trimmed.is_empty() {
-            return Err(Error::State("DIDUrl cannot be empty".into()));
+            return Err(StateError::new("DIDUrl cannot be empty".into()).into());
         }
 
         let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
         if parts.len() != 3 && parts.len() != 1 {
-            return Err(Error::Malformed(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)));
+            return Err(MalformedError::new(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)).into());
         }
 
         let scheme = if parts.len() == 3 {
             if parts[0] != DID_SCHEME {
-                return Err(Error::Malformed(format!("Invalid DIDUrl scheme: {}", parts[0])));
+                return Err(MalformedError::new(format!("Invalid DIDUrl scheme: {}", parts[0])).into());
             }
             Some(DID_SCHEME)
         } else {
@@ -87,7 +91,7 @@ impl DIDUrl {
         };
         let method = if parts.len() == 3 {
             if parts[1] != DID_METHOD {
-                return Err(Error::Malformed(format!("Unsupported DIDUrl method: {}", parts[1])));
+                return Err(MalformedError::new(format!("Unsupported DIDUrl method: {}", parts[1])).into());
             }
             Some(DID_METHOD)
         } else {
@@ -125,8 +129,9 @@ impl DIDUrl {
             None => None,
         };
 
-        let id = remainder.parse::<Id>()
-            .map_err(|_| Error::Malformed(format!("Invalid DIDUrl method specific id: {}", remainder)))?;
+        let id = remainder.parse::<Id>().map_err(|_|
+            MalformedError::new(format!("Invalid DIDUrl method specific id: {}", remainder))
+        )?;
 
         Ok(Self {
             scheme: scheme.map(|s| s.to_string()),

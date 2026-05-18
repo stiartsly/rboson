@@ -1,17 +1,13 @@
 use std::collections::LinkedList;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
-use super::task::{
-    Task,
-    State
-};
+use super::task::{Task, State};
 
 const MAX_ACTIVE_TASKS: usize = 16;
 
 pub(crate) struct TaskManager {
-    queued:     LinkedList<Rc<RefCell<Box<dyn Task>>>>,
-    running:    LinkedList<Rc<RefCell<Box<dyn Task>>>>,
+    queued:     LinkedList<Arc<Mutex<dyn Task>>>,
+    running:    LinkedList<Arc<Mutex<dyn Task>>>,
     canceling: bool,
 }
 
@@ -24,28 +20,28 @@ impl TaskManager {
         }
     }
 
-    pub(crate) fn add(&mut self, task: Rc<RefCell<Box<dyn Task>>>) {
-        self.add_prior(task, false)
+    pub(crate) fn add(&mut self, task: Arc<Mutex<Box<dyn Task>>>) {
+        //self.add_prior(task, false)
     }
 
     pub(crate) fn add_prior(&mut self,
-        task: Rc<RefCell<Box<dyn Task>>>,
+        task: Arc<Mutex<dyn Task>>,
         prior: bool) {
         if self.canceling {
             return;
         }
 
-        if task.borrow().state() == State::Running {
+        if task.lock().unwrap().state() == State::Running {
             self.running.push_back(task);
             return;
         }
 
         let expected = vec![State::Initial];
-        if !task.borrow_mut().set_state(&expected, State::Queued) {
-            return;
-        }
+       // if !task.lock().unwrap().set_state(&expected, State::Queued) {
+       //     return;
+       // }
 
-        task.borrow_mut().set_cloned(task.clone());
+       // task.lock().unwrap().set_cloned(task.clone());
         match prior {
             true => self.queued.push_front(task),
             false => self.queued.push_back(task),
@@ -63,15 +59,15 @@ impl TaskManager {
     pub(crate) fn dequeue(&mut self) {
         while self.can_dequeue() {
             let task = self.queued.pop_front().unwrap();
-            if task.borrow().is_finished() {
+            if task.lock().unwrap().is_complete() {
                 continue;
             }
-            if task.borrow().is_canceled() {
+            if task.lock().unwrap().is_canceled() {
                 continue;
             }
 
-            task.borrow_mut().start();
-            if !task.borrow().is_finished() { // TODO: how can we tackle the jobs on running queue.
+            task.lock().unwrap().start();
+            if !task.lock().unwrap().is_complete() { // TODO: how can we tackle the jobs on running queue.
                 self.running.push_back(task);
             }
         }
@@ -80,10 +76,10 @@ impl TaskManager {
     pub(crate) fn cancel_all(&mut self) {
         self.canceling = true;
         while let Some(t) = self.running.pop_front() {
-            t.borrow_mut().cancel();
+            t.lock().unwrap().cancel();
         }
         while let Some(t) = self.queued.pop_front() {
-            t.borrow_mut().cancel();
+            t.lock().unwrap().cancel();
         }
         self.canceling = false;
     }

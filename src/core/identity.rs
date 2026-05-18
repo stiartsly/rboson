@@ -4,13 +4,13 @@ use crate::{
     CryptoBox,
     cryptobox::Nonce,
     Signature,
-    core::Result,
+    Result,
 };
 
-pub trait Identity {
+pub trait Identity: Send + Sync {
     fn id(&self) -> &Id;
     fn sign(&self, _data: &[u8], _sig: &mut [u8]) -> Result<usize>;
-    fn verify(&self, _data: &[u8], _sig: &[u8]) -> Result<()>;
+    fn verify(&self, _data: &[u8], _sig: &[u8]) -> Result<bool>;
 
     fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
         let mut v = vec![0u8; Signature::BYTES];

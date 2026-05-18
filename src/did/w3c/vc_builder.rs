@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     Id,
-    error::{Error, Result},
+    errors::{Result, ArgumentError},
     CryptoIdentity,
 };
 
@@ -65,21 +65,21 @@ impl VerifiableCredentialBuilder {
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            Err(Error::Argument("Credential Id cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential Id cannot be empty".into()))?;
         }
 
         if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = id.parse::<DIDUrl>().map_err(|_| {
-                Error::Argument(format!("Id must has the fragment part: {}", id))
+                ArgumentError::new(format!("Id must has the fragment part: {}", id))
             })?;
 
             if url.fragment().is_none() {
-                Err(Error::Argument("Id must has the fragment part".into()))?;
+                Err(ArgumentError::new("Id must has the fragment part".into()))?;
             }
 
             /*
             if url.id() != self.issuer.id() {
-                Err(Error::Argument(format!(
+                Err(ArgumentError::new(format!(
                     "Invalid credential id: should be the subject id based DIDURL: {}",
                     url
                 )))?;
@@ -96,7 +96,7 @@ impl VerifiableCredentialBuilder {
         context: &str
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(Error::Argument("Credential type cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential type cannot be empty".into()))?;
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -122,7 +122,7 @@ impl VerifiableCredentialBuilder {
         contexts: Vec<&str>
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(Error::Argument("Credential type cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential type cannot be empty".into()))?;
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -230,19 +230,19 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            Err(Error::Argument("VC Id cannot be empty".into()))?;
+            Err(ArgumentError::new("VC Id cannot be empty".into()))?;
         }
         let Some(id) = self.id.as_ref() else {
-            return Err(Error::Argument("VC Id cannot be empty".into()));
+            return Err(ArgumentError::new("VC Id cannot be empty".into()));
         };
         if self.claims.is_empty() {
-            return Err(Error::Argument("VC Claims can not be empty".into()));
+            return Err(ArgumentError::new("VC Claims can not be empty".into()));
         }
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = id.parse::<DIDUrl>()?;
             if url.fragment().is_none() {
-                return Err(Error::Argument("VC Id must has the fragment part".into()));
+                return Err(ArgumentError::new("VC Id must has the fragment part".into()));
             }
             url
         } else {

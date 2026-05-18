@@ -10,24 +10,46 @@ use crate::core::{
  - from_private_key(..)
  */
 
-#[test]
-fn test_from_private_key() {
+fn create_contexts_from_private_key() -> (CryptoContext, CryptoContext) {
     let sig_kp1 = signature::KeyPair::random();
     let sig_kp2 = signature::KeyPair::random();
     let box_kp1 = cryptobox::KeyPair::from(&sig_kp1);
     let box_kp2 = cryptobox::KeyPair::from(&sig_kp2);
 
-    let id1 = Id::from(sig_kp1.to_public_key());
-    let id2 = Id::from(sig_kp2.to_public_key());
+    let id1 = Id::from(sig_kp1.public_key());
+    let id2 = Id::from(sig_kp2.public_key());
 
-    let ctx1 = CryptoContext::from_private_key(&id2, &box_kp1.private_key());
-    let mut ctx2 = CryptoContext::from_private_key(&id1, &box_kp2.private_key());
+    let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key());
+    let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key());
 
-    assert_eq!(&id2, ctx1.id());
-    assert_eq!(&id1, ctx2.id());
+    (ctx1, ctx2)
+}
+
+fn create_contexts_from_cryptobox() -> (CryptoContext, CryptoContext) {
+    let sig_kp1 = signature::KeyPair::random();
+    let sig_kp2 = signature::KeyPair::random();
+    let box_kp1 = cryptobox::KeyPair::from(&sig_kp1);
+    let box_kp2 = cryptobox::KeyPair::from(&sig_kp2);
+
+    let id1 = Id::from(sig_kp1.public_key());
+    let id2 = Id::from(sig_kp2.public_key());
+
+    let box1 = cryptobox::CryptoBox::try_from((box_kp2.public_key(), box_kp1.private_key())).unwrap();
+    let box2 = cryptobox::CryptoBox::try_from((box_kp1.public_key(), box_kp2.private_key())).unwrap();
+    let ctx1 = CryptoContext::new(id2.clone(), box1);
+    let ctx2 = CryptoContext::new(id1, box2);
+
+    (ctx1, ctx2)
+}
+
+#[test]
+fn test_from_private_key() {
+    let (ctx1, mut ctx2) = create_contexts_from_private_key();
+    let plain = b"Hello, World!";
+
+    assert_ne!(ctx1.id(), ctx2.id());
 
     // testing encrypt_into and decrypt_into methods
-    let plain = "Hello, World!".as_bytes();
     let result = ctx2.encrypt_into(plain);
     assert!(result.is_ok());
 
@@ -39,7 +61,6 @@ fn test_from_private_key() {
     assert_eq!(plain, decrypted.as_slice());
 
     // testing encrypt and decrypt methods
-    let plain = "Hello, World!".as_bytes();
     let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
     let result = ctx2.encrypt(plain, &mut cipher);
     assert!(result.is_ok());
@@ -60,24 +81,12 @@ fn test_from_private_key() {
 
 #[test]
 fn test_from_cryptobox() {
-    let sig_kp1 = signature::KeyPair::random();
-    let sig_kp2 = signature::KeyPair::random();
-    let box_kp1 = cryptobox::KeyPair::from(&sig_kp1);
-    let box_kp2 = cryptobox::KeyPair::from(&sig_kp2);
+    let (ctx1, mut ctx2) = create_contexts_from_cryptobox();
+    let plain = b"Hello, World!";
 
-    let id1 = Id::from(sig_kp1.to_public_key());
-    let id2 = Id::from(sig_kp2.to_public_key());
-
-    let box1 = cryptobox::CryptoBox::try_from((box_kp2.public_key(), box_kp1.private_key())).unwrap();
-    let box2 = cryptobox::CryptoBox::try_from((box_kp1.public_key(), box_kp2.private_key())).unwrap();
-    let ctx1 = CryptoContext::new(&id2, box1);
-    let mut ctx2 = CryptoContext::new(&id1, box2);
-
-    assert_eq!(&id2, ctx1.id());
-    assert_eq!(&id1, ctx2.id());
+    assert_ne!(ctx1.id(), ctx2.id());
 
     // testing encrypt_into and decrypt_into methods
-    let plain = "Hello, World!".as_bytes();
     let result = ctx2.encrypt_into(plain);
     assert!(result.is_ok());
 
@@ -89,7 +98,6 @@ fn test_from_cryptobox() {
     assert_eq!(plain, decrypted.as_slice());
 
     // testing encrypt and decrypt methods
-    let plain = "Hello, World!".as_bytes();
     let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
     let result = ctx2.encrypt(plain, &mut cipher);
     assert!(result.is_ok());
@@ -106,4 +114,16 @@ fn test_from_cryptobox() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), decrypted.len());
     assert_eq!(plain, decrypted.as_slice());
+}
+
+#[test]
+fn test_decrypt_tampered_ciphertext() {
+    let (ctx1, mut ctx2) = create_contexts_from_private_key();
+    let plain = b"Hello, World!";
+    let mut cipher = ctx2.encrypt_into(plain).unwrap();
+    let last = cipher.len() - 1;
+    cipher[last] ^= 0x01;
+
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_err());
 }

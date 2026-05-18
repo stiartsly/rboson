@@ -9,7 +9,9 @@ use serde_json::{Map, Value};
 use crate::{
     as_secs,
     Id,
-    error::{Error, Result},
+    Error,
+    Result,
+    errors::{SignatureError, ExpiredError, BeforeValidPeriodError, ArgumentError},
     CryptoIdentity,
 };
 
@@ -258,15 +260,15 @@ impl VerifiableCredential {
     pub fn validate(&self) -> Result<()> {
         let now = as_secs!(SystemTime::now());
         if self.valid_from.is_some() && self.valid_from.unwrap() > now {
-            return Err(Error::BeforeValidPeriod("VC is not yet valid".into()));
+            return Err(BeforeValidPeriodError::new("VC is not yet valid".into()));
         }
         if self.valid_until.is_some() && self.valid_until.unwrap() < now {
-            return Err(Error::Expired("VC has expired".into()));
+            return Err(ExpiredError::new("VC has expired".into()));
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("VC signature is not valid".into())),
+            false => Err(SignatureError::new("VC signature is not valid".into())),
         }
     }
 
@@ -317,7 +319,7 @@ impl TryFrom<&str> for VerifiableCredential {
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e|
-            Error::Argument(format!("Failed to parse VC from string: {}", e))
+            ArgumentError::new(format!("Failed to parse VC from string: {}", e)).into()
         )
     }
 }
@@ -327,7 +329,7 @@ impl FromStr for VerifiableCredential {
 
     fn from_str(s: &str) -> Result<Self> {
         serde_json::from_str(s).map_err(|e|
-            Error::Argument(format!("Failed to parse VC from string: {}", e))
+            ArgumentError::new(format!("Failed to parse VC from string: {}", e)).into()
         )
     }
 }
@@ -337,7 +339,7 @@ impl TryFrom<&[u8]> for VerifiableCredential {
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e|
-            Error::Argument(format!("Failed to parse VC from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse VC from bytes: {}", e)).into()
         )
     }
 }

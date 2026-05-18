@@ -1,5 +1,8 @@
+use std::sync::{Arc, Mutex};
 use crate::core::{
     Id,
+    signature,
+    CryptoIdentity,
     PeerInfo,
     PeerBuilder,
     signature::KeyPair,
@@ -61,8 +64,7 @@ fn test_packed() {
 }
 
 #[test]
-#[ignore] // TODO:
-fn test_serde() {
+fn test_serde_simple() {
     let endpoint = "https://example.com:8080";
     let kp = KeyPair::random();
     let peer = PeerBuilder::new(endpoint)
@@ -70,14 +72,51 @@ fn test_serde() {
         .build()
         .expect("Failed to build peer info");
 
-    let cbor = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
-    let deserialized: PeerInfo = serde_cbor::from_slice(&cbor).expect("Failed to deserialize PeerInfo");
+    let ser = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+    let des: PeerInfo = serde_cbor::from_slice(&ser).expect("Failed to deserialize PeerInfo");
 
-    assert_eq!(peer.id(), deserialized.id());
-    assert_eq!(peer.endpoint(), deserialized.endpoint());
-    assert_eq!(peer.nonce(), deserialized.nonce());
-    assert_eq!(peer.signature(), deserialized.signature());
-    assert_eq!(deserialized.has_private_key(), false);
+    assert_eq!(peer.id(), des.id());
+    assert_eq!(peer.endpoint(), des.endpoint());
+    assert_eq!(peer.nonce(), des.nonce());
+    assert_eq!(peer.signature(), des.signature());
+    assert_eq!(des.sequence_number(), 0);
+    assert_eq!(des.fingerprint(), 0);
+    assert_eq!(des.nodeid(), None);
+    assert_eq!(des.node_signature(), None);
+    assert_eq!(des.extra_data(), None);
+    assert_eq!(des.has_private_key(), false);
 
-    assert!(deserialized.is_valid());
+    assert!(des.is_valid());
 }
+
+#[test] // case6
+fn test_serde_full() {
+    let endpoint = "http://localhost:8080";
+    let node_kp = signature::KeyPair::random();
+    let node_identity = CryptoIdentity::from_keypair(node_kp);
+    let node = Arc::new(Mutex::new(node_identity));
+    let peer_kp = signature::KeyPair::random();
+    let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
+    rand::fill(&mut nonce);
+    let rc = PeerBuilder::new(endpoint)
+        .with_key(peer_kp.clone())
+        .with_nonce(&nonce)
+        .with_node(node.clone())
+        .with_sequence_number(101)
+        .with_fingerprint(100)
+        .build();
+    let peer = rc.expect("Failed to create a Peer");
+
+    let ser = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+    let des: PeerInfo = serde_cbor::from_slice(&ser).expect("Failed to deserialize PeerInfo");
+
+    assert_eq!(peer.id(), des.id());
+    assert_eq!(des.private_key(), None);
+    assert_eq!(peer.nodeid(), des.nodeid());
+    assert_eq!(peer.node_signature(), des.node_signature());
+    assert_eq!(peer.is_authenticated(), true);
+    assert_eq!(peer.sequence_number(), des.sequence_number());
+    assert_eq!(peer.endpoint(), des.endpoint());
+    assert_eq!(peer.fingerprint(), des.fingerprint());
+}
+

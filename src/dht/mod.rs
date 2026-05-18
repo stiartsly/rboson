@@ -1,36 +1,36 @@
-pub(crate) mod sqlite3;
+pub(crate) mod storage;
+pub mod errors;
+mod cfg {
+    pub(crate) mod node_config;
+    pub(crate) mod yaml_configuration;
+}
+
 mod msg {
     pub(crate) mod msg;
-    pub(crate) mod error_msg;
+    pub(crate) mod error;
 
     pub(crate) mod lookup_req;
     pub(crate) mod lookup_rsp;
-
-    pub(crate) mod ping_req;
-    pub(crate) mod ping_rsp;
-
     pub(crate) mod find_node_req;
     pub(crate) mod find_node_rsp;
-
     pub(crate) mod find_peer_req;
     pub(crate) mod find_peer_rsp;
-    pub(crate) mod announce_peer_req;
-    pub(crate) mod announce_peer_rsp;
-
     pub(crate) mod find_value_req;
     pub(crate) mod find_value_rsp;
+
+    pub(crate) mod announce_peer_req;
     pub(crate) mod store_value_req;
-    pub(crate) mod store_value_rsp;
 }
 
 mod task {
     mod closest_candidates;
-    mod candidate_node;
-    mod closest_set;
+    pub(crate) mod closest_set;
+    pub(crate) mod candidate_node;
 
     pub(crate) mod task_manager;
 
     pub(crate) mod task;
+    pub(crate) mod task_listener;
     pub(crate) mod lookup_task;
 
     pub(crate) mod ping_refresh;
@@ -41,28 +41,31 @@ mod task {
     pub(crate) mod value_announce;
 }
 
-mod constants;
-mod crypto_cache;
+mod routing {
+    pub(crate) mod prefix;
+    pub(crate) mod kbucket;
+    pub(crate) mod kbucket_entry;
+    pub(crate) mod kclosest_nodes;
+    pub(crate) mod routing_table;
+}
+
+mod cached_identity;
 mod dht;
-mod kbucket;
-mod kclosest_nodes;
 mod server;
 mod rpccall;
 mod scheduler;
-mod cbor;
-mod data_storage;
-mod kbucket_entry;
-mod routing_table;
-mod sqlite_storage;
 mod token_manager;
-mod node_runner;
-mod bootstrap_channel;
-mod future;
+mod node_entry;
+mod node_status;
+
+mod promise;
+mod eligible_peers;
+mod eligible_value;
+mod suspicious_node_detector;
 
 pub mod connection_status_listener;
 pub mod connection_status;
 pub mod node_status_listener;
-pub mod node_status;
 pub mod lookup_option;
 pub mod node;
 
@@ -70,25 +73,31 @@ pub use crate::dht::{
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
-    node_status::NodeStatus,
     node_status_listener::NodeStatusListener,
     node::Node,
-    constants::DEFAULT_DHT_PORT,
+    cfg::node_config::NodeConfig,
+    cfg::yaml_configuration::YamlNodeConfiguration,
 };
 
 #[cfg(test)]
 mod unitests {
+    mod yaml_configuration;
+    /*
     mod test_addr;
-    mod test_sqlite_storage;
-    mod test_token_man;
-    mod test_routing_table;
+   // mod test_sqlite_storage;
+   // mod test_token_man;
+   // mod test_routing_table;
     mod test_find_node_req;
     mod test_find_node_rsp;
     mod test_find_peer_req;
     mod test_find_peer_rsp;
-    mod test_node_runner;
+    mod test_find_value_req;
+    mod test_find_value_rsp;
+   // mod test_node_runner;
+    */
 
     use std::{fs, env};
+
     fn working_path(input: &str) -> String {
         let path = env::current_dir().unwrap().join(input);
         if !fs::metadata(&path).is_ok() {

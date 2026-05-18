@@ -2,9 +2,9 @@ use super::{
     Id,
     cryptobox::{self, Nonce, CryptoBox},
     signature,
-    Result,
     Identity,
-    CryptoContext
+    CryptoContext,
+    errors::Result,
 };
 
 #[derive(Clone, Debug)]
@@ -14,17 +14,9 @@ pub struct CryptoIdentity {
     encryption_keypair: cryptobox::KeyPair,
 }
 
-
-
 impl CryptoIdentity {
     pub fn new() -> CryptoIdentity {
         Self::from_keypair(signature::KeyPair::random())
-    }
-
-    pub fn from(private_key: &[u8]) -> Result<CryptoIdentity> {
-        Ok(Self::from_keypair(
-            signature::KeyPair::try_from(private_key)?
-        ))
     }
 
     pub fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
@@ -51,7 +43,7 @@ impl CryptoIdentity {
         Identity::sign_into(self, data)
     }
 
-    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         Identity::verify(self, data, signature)
     }
 
@@ -73,7 +65,7 @@ impl Identity for CryptoIdentity {
         signature::sign(data, signature, self.keypair.private_key())
     }
 
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         signature::verify(data, signature, self.keypair.public_key())
     }
 
@@ -111,8 +103,35 @@ impl PartialEq for CryptoIdentity {
     }
 }
 
+impl TryFrom<&[u8]> for CryptoIdentity {
+    type Error = super::Error;
+
+    fn try_from(private_key: &[u8]) -> Result<Self> {
+        signature::KeyPair::try_from(private_key).map(Self::from_keypair)
+    }
+}
+
+impl From<signature::PrivateKey> for CryptoIdentity {
+    fn from(private_key: signature::PrivateKey) -> Self {
+        Self::from(&private_key)
+    }
+}
+
+impl From<&signature::PrivateKey> for CryptoIdentity {
+    fn from(private_key: &signature::PrivateKey) -> Self {
+        Self::from_keypair(signature::KeyPair::from(private_key))
+    }
+}
+
 impl AsRef<CryptoIdentity> for CryptoIdentity {
     fn as_ref(&self) -> &CryptoIdentity {
         self
+    }
+}
+
+impl Drop for CryptoIdentity {
+    fn drop(&mut self) {
+        self.keypair.clear();
+        self.encryption_keypair.clear()
     }
 }

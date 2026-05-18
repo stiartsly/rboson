@@ -1,31 +1,29 @@
-use std::any::Any;
-use std::rc::Rc;
-use std::cell::RefCell;
-use log::error;
+use std::sync::{Arc, Mutex};
+use log::{debug, warn, error};
 
+use crate::dht::node_entry::NodeEntry;
 use crate::{
     Id,
-    id::MAX_ID,
     Network,
-    NodeInfo
+    NodeInfo,
 };
 
 use crate::dht::{
-    constants,
-    rpccall::RpcCall,
     dht::DHT,
-    kclosest_nodes::KClosestNodes,
+    rpccall::RpcCall,
+    routing::{
+        kbucket::KBucket,
+        kclosest_nodes::KClosestNodes,
+        kbucket_entry::KBucketEntry,
+    },
     msg::{
-        find_node_req as req,
-        find_node_rsp as rsp,
-        msg::{Method, Kind, Msg},
-        lookup_req::{Msg as LookupRequest},
-        lookup_rsp::{Msg as LookupResponse},
-    }
+        msg::{Body, Message},
+        lookup_rsp::LookupResponse,
+    },
 };
 
 use super::{
-    task::{Task, TaskData},
+    task::{Task, TaskData, TaskResult},
     lookup_task::{LookupTask, LookupTaskData},
 };
 
@@ -33,53 +31,77 @@ pub(crate) struct NodeLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
 
-    bootstrap : bool,
+    // Whether this is a bootstrap lookup, starting from nodes farthest
+    // from the local node.
+    bootstrap: bool,
+	// Whether to request tokens in FIND_NODE RPCs for subsequent operations.
     want_token: bool,
-    result_fn: Option<Box<dyn FnMut(&mut dyn Task, Option<Rc<NodeInfo>>)>>,
-    listeners: Vec<Box<dyn FnMut(&mut dyn Task)>>,
+    // Whether the task should filter the target node during the lookup process.
+    want_target: bool,
+
+    result: Option<NodeInfo>,
 }
 
 impl NodeLookupTask {
-    pub(crate) fn new(target: Rc<Id>, dht: Rc<RefCell<DHT>>) -> Self {
+    pub(crate) fn new(dht: Arc<Mutex<DHT>>, target: Id, done_on_eligible_result: bool) -> Self {
         Self {
             base_data: TaskData::new(dht),
-            lookup_data: LookupTaskData::new(target),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
             bootstrap: false,
             want_token: false,
-            result_fn: Some(Box::new(|_,_|{})),
-            listeners: Vec::new(),
+            want_target: false,
+            result: None,
         }
     }
 
-    pub(crate) fn set_bootstrap(&mut self, bootstrap: bool) {
-        self.bootstrap = bootstrap
+    pub(crate) fn with_bootstrap(&mut self, bootstrap: bool) -> &mut Self {
+        self.bootstrap = bootstrap;
+        self
     }
 
-    pub(crate) fn set_want_token(&mut self, token: bool) {
-        self.want_token = token
+    pub(crate) fn is_bootstrap(&self) -> bool {
+        self.bootstrap
     }
 
-    pub(crate) fn inject_candidates(&mut self, nodes: &[Rc<NodeInfo>]) {
-        self.add_candidates(nodes)
+    pub(crate) fn with_want_token(&mut self, token: bool) -> &mut Self {
+        self.want_token = token;
+        self
     }
 
-    pub(crate) fn set_result_fn<F>(&mut self, f: F)
-    where F: FnMut(&mut dyn Task , Option<Rc<NodeInfo>>) + 'static {
-        self.result_fn = Some(Box::new(f));
+    pub(crate) fn want_token(&self) -> bool {
+        self.want_token
+    }
+
+    pub(crate) fn with_want_target(&mut self, want_target: bool) -> &mut Self {
+        self.want_target = want_target;
+        self
+    }
+
+    pub(crate) fn want_target(&self) -> bool {
+        self.want_target
+    }
+
+    pub(crate) fn with_inject_candidates(&mut self, nodes: Vec<NodeInfo>) -> &mut Self {
+        self.add_candidates_with_nodes(nodes);
+        self
     }
 }
 
 impl LookupTask for NodeLookupTask {
+    fn base_data(&self) -> &TaskData {
+        &Task::data(self)
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        Task::data(self).dht()
+    }
+
     fn data(&self) -> &LookupTaskData {
         &self.lookup_data
     }
 
     fn data_mut(&mut self) -> &mut LookupTaskData {
         &mut self.lookup_data
-    }
-
-    fn dht(&self) -> Rc<RefCell<DHT>> {
-        Task::data(self).dht()
     }
 }
 
@@ -92,105 +114,120 @@ impl Task for NodeLookupTask {
         &mut self.base_data
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn add_listener(&mut self, cb: Box<dyn FnMut(&mut dyn Task)>) {
-        self.listeners.push(cb);
-
-    }
-    fn notify_completion(&mut self) {
-        while let Some(mut cb) = self.listeners.pop() {
-            cb(self)
-        }
+    fn result(&self) -> Option<TaskResult> {
+        self.result.as_ref().map(|v| TaskResult::NodeInfo(v.clone()))
     }
 
     fn prepare(&mut self) {
-       let nodes = {
-            // if we're bootstrapping start from the bucket that has the greatest
-            // possible distance from ourselves so we discover new things along
-            // the (longer) path.
-            let target = match self.bootstrap {
-                true => Rc::new(self.target().distance(&MAX_ID)),
-                false => self.target().clone()
-            };
-
-            // delay the filling of the todo list until we actually start the task
-            let mut kns = KClosestNodes::with_filter(
-                target,
-                Task::data(self).dht().borrow().ni(),
-                Task::data(self).dht().borrow().rt(),
-                constants::MAX_ENTRIES_PER_BUCKET *2,
-                move |e| e.borrow().is_eligible_for_nodes_list()
-            );
-            kns.fill(false);
-            kns.as_nodes()
+        let target = match self.bootstrap {
+            true => self.target().distance(&Id::MAX_ID),
+            false => self.target().clone()
         };
 
-        self.add_candidates(&nodes);
+        let entries:Vec<KBucketEntry> = {
+            let dht = self.dht();
+            let locked_dht = dht.lock().unwrap();
+            let rt = locked_dht.rt();
+
+            let mut kns = KClosestNodes::new(
+                rt,
+                target.clone(),
+                KBucket::MAX_ENTRIES *3
+            );
+            kns.set_filter(|v| v.eligible_for_local_lookup());
+            kns.fill();
+            kns.into()
+        };
+
+        debug!("{}#{} initialized {} candidates for target {}",
+            self.name(),
+            self.id(),
+            entries.len(),
+            target,
+        );
+        self.add_candidates_with_kentries(entries);
     }
 
-    fn update(&mut self) {
-        while self.can_request() {
+    fn iterate(&mut self) {
+        LookupTask::iterate(self);
+
+        while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
-                Some(next) => next.clone(),
+                Some(next) => next,
                 None => break
             };
 
-            let msg = Rc::new(RefCell::new({
-                let mut msg = Box::new(req::Message::new());
-                msg.with_target(self.target());
-                msg.with_want4(true);
-                msg.with_want6(false);
-                msg.with_want_token(self.want_token);
-                msg as Box<dyn Msg>
-            }));
+            let ne = NodeEntry::from_candidate(next.clone());
+            let network = self.dht().lock().unwrap().network();
+            let msg = Arc::new(Mutex::new(Message::find_node_req(
+                LookupTask::target(self).clone(),
+                network.is_ipv4(),
+                network.is_ipv6(),
+                self.want_token()
+            )));
 
-            let next = next.clone();
-            let ni = next.borrow().ni();
-
-            self.send_call(ni, msg, Box::new(move|_| {
-                next.borrow_mut().set_sent();
+            _ = self.send_call(ne, msg, Box::new(move|_| {
+                next.lock().unwrap().set_sent();
             })).map_err(|e| {
-                error!("Error on sending 'findNode' message: {}", e);
-            }).ok();
+                error!("Error on sending 'findNode' request message: {}", e);
+            });
         }
     }
 
-    fn call_responsed(&mut self, call: &RpcCall, msg: Rc<RefCell<Box<dyn Msg>>>) {
-        if !call.matches_id()||
-            msg.borrow().kind() != Kind::Response ||
-            msg.borrow().method() != Method::FindNode {
+    fn call_responsed(&mut self, call: &RpcCall) {
+        LookupTask::call_responsed(self, call);
+
+        if call.id_mismatched() {
             return;
         }
 
-        let borrowed = msg.borrow();
-        let msg = match borrowed.as_any().downcast_ref::<rsp::Message>() {
-            Some(v) => v,
-            None => return
+        let msg = call.rsp().unwrap();
+        let locked_msg = msg.lock().unwrap();
+        let Some(Body::FindNodeRsp(body)) = locked_msg.body() else {
+            warn!("{}#{} ignoring non LookupNode response from {}",
+                self.name(),
+                self.id(),
+                call.target_id()
+            );
+            return;
         };
 
-        LookupTask::call_responsed(self, call, msg);
-
-        let network = self.dht().borrow().network();
+        let network = self.dht().lock().unwrap().network();
         let nodes = match network {
-            Network::IPv4 => LookupResponse::nodes4(msg),
-            Network::IPv6 => LookupResponse::nodes6(msg)
+            Network::IPv4 => body.nodes4(),
+            Network::IPv6 => body.nodes6(),
         };
 
-        if let Some(nodes) = nodes {
-            if !nodes.is_empty() {
-                self.add_candidates(nodes);
-            }
-            for item in nodes.iter() {
-                if *self.target() == *item.id() {
-                    let mut cb = self.result_fn.take();
-                    (cb.as_mut().unwrap())(self, Some(item.clone()));
-                    self.result_fn = cb;
-                }
-            }
+        let Some(nodes) = nodes.filter(|v|v.is_empty()) else {
+            return;
         };
+
+        self.add_candidates_with_nodes(nodes.to_vec());
+
+        debug!("{}#{} added {} additional candidates from {} for target {}",
+            self.name(),
+            self.id(),
+            nodes.len(),
+            call.target_id(),
+            self.target()
+        );
+
+        if !self.want_target() {
+            return;
+        }
+
+        for item in nodes.iter() {
+            if self.target() == item.id() {
+                self.result = Some(item.clone());
+                break;
+            }
+        }
+
+        if self.result.is_some() {
+            if LookupTask::done_on_eligible_result(self) {
+                LookupTask::mark_lookup_done(self);
+            }
+        }
     }
 
     fn call_error(&mut self, call: &RpcCall) {
@@ -202,6 +239,10 @@ impl Task for NodeLookupTask {
     }
 
     fn is_done(&self) -> bool {
-        self.base_data.is_done() || LookupTask::is_done(self) // TODO: || ->> &&
+        LookupTask::is_done(self)
     }
 }
+
+unsafe impl Send for NodeLookupTask {}
+unsafe impl Sync for NodeLookupTask {}
+

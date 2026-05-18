@@ -1,65 +1,68 @@
-use std::rc::Rc;
 use std::net::SocketAddr;
-use crate::{
-    Id,
-    NodeInfo,
-};
-
+use crate::{Id, NodeInfo};
 use crate::dht::msg::{
-    msg::Msg,
-    lookup_rsp::Msg as LookupMsg,
-    find_node_rsp::Message
+    lookup_rsp::LookupResponse,
+    find_node_rsp::FindNodeResponse,
 };
 
 #[test]
-fn test_cbor() {
+fn test_serde() {
     let nodeid = Id::random();
     let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-    let ni = Rc::new(NodeInfo::new(nodeid.clone(), addr.clone()));
+    let ni = NodeInfo::new(nodeid.clone(), addr);
+    let token = 29001;
 
-    let mut msg = Message::new();
-    msg.populate_closest_nodes4(vec![ni.clone()]);
+    let rsp = FindNodeResponse::new(
+        Some(vec![ni.clone()]),
+        None,
+        token
+    );
 
-    let cval = msg.ser();
-    let mut decoded_msg = Message::new();
-    let result = decoded_msg.from_cbor(&cval);
-    assert_eq!(result.is_some(), true);
-    assert_eq!(decoded_msg.token(), 0);
-    assert_eq!(decoded_msg.nodes4().is_some(), true);
-    assert_eq!(decoded_msg.nodes6().is_some(), false);
+    let cbor = serde_cbor::to_vec(&rsp)
+        .expect("Serialization failed");
+    let decoded: FindNodeResponse = serde_cbor::from_slice(cbor.as_slice())
+        .expect("Deserialization failed");
 
-    let nodes4 = decoded_msg.nodes4().unwrap();
+    assert_eq!(decoded.token(), token);
+    assert_eq!(decoded.nodes4().is_some(), true);
+    assert_eq!(decoded.nodes6().is_some(), false);
+
+    let nodes4 = decoded.nodes4().unwrap();
     assert_eq!(nodes4.len(), 1);
     assert_eq!(nodes4[0], ni);
 }
 
 #[test]
-fn test_cbor_with_ipv6() {
+fn test_serde_with_ipv6() {
     let nodeid = Id::random();
     let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-    let ni4 = Rc::new(NodeInfo::new(nodeid.clone(), addr.clone()));
+    let ni4 = NodeInfo::new(nodeid.clone(), addr);
 
     let nodeid = Id::random();
     let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
-    let ni6 = Rc::new(NodeInfo::new(nodeid.clone(), addr.clone()));
+    let ni6 = NodeInfo::new(nodeid.clone(), addr);
+    let token = 29001;
 
-    let mut msg = Message::new();
-    msg.populate_closest_nodes4(vec![ni4.clone()]);
-    msg.populate_closest_nodes6(vec![ni6.clone()]);
+    let rsp = FindNodeResponse::new(
+        Some(vec![ni4.clone()]),
+        Some(vec![ni6.clone()]),
+        token
+    );
 
-    let cval = msg.ser();
-    let mut decoded_msg = Message::new();
-    let result = decoded_msg.from_cbor(&cval);
-    assert_eq!(result.is_some(), true);
-    assert_eq!(decoded_msg.token(), 0);
-    assert_eq!(decoded_msg.nodes4().is_some(), true);
-    assert_eq!(decoded_msg.nodes6().is_some(), true);
+    let cbor = serde_cbor::to_vec(&rsp)
+        .expect("Serialization failed");
+    let decoded: FindNodeResponse = serde_cbor::from_slice(cbor.as_slice())
+        .expect("Deserialization failed");
 
-    let nodes4 = decoded_msg.nodes4().unwrap();
+    assert_eq!(decoded.token(), token);
+    assert_eq!(decoded.nodes4().is_some(), true);
+    assert_eq!(decoded.nodes6().is_some(), true);
+
+    let nodes4 = decoded.nodes4().unwrap();
     assert_eq!(nodes4.len(), 1);
     assert_eq!(nodes4[0], ni4);
 
-    let nodes6 = decoded_msg.nodes6().unwrap();
+    let nodes6 = decoded.nodes6().unwrap();
     assert_eq!(nodes6.len(), 1);
     assert_eq!(nodes6[0], ni6);
 }

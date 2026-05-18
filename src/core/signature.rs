@@ -1,7 +1,6 @@
+use std::{fmt, mem};
 use std::str::FromStr;
 use static_assertions::const_assert;
-use std::fmt;
-use std::mem;
 use bs58::decode;
 use hex::FromHexError;
 
@@ -27,7 +26,13 @@ use crate::{
     as_uchar_ptr,
     as_uchar_ptr_mut
 };
-use super::{ Error, Result};
+use super::{
+    Error, Result,
+    errors::{
+        ArgumentError,
+        CryptoError,
+    }
+};
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
 const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);
@@ -54,7 +59,7 @@ impl PrivateKey {
 
     pub fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
         if signature.len() != Signature::BYTES {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "Incorrect signature length {}, expected {}",
                 signature.len(),
                 Signature::BYTES
@@ -93,7 +98,7 @@ impl TryFrom<&[u8]> for PrivateKey {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect private key size {}, should be {}",
                 bytes.len(),
                 Self::BYTES
@@ -112,13 +117,13 @@ impl TryFrom<&str> for PrivateKey {
                 hex::decode_to_slice(&input[2..], &mut bytes[..])
                 .map_err(|e| match e {
                     FromHexError::InvalidHexCharacter { c, index } => {
-                        Error::Argument(format!("Invalid hex character {} at position {}", c, index))
+                        ArgumentError::new(format!("Invalid hex character {} at position {}", c, index))
                     },
                     FromHexError::OddLength => {
-                        Error::Argument(format!("Odd hex string length {}", input.len()))
+                        ArgumentError::new(format!("Odd hex string length {}", input.len()))
                     },
                     FromHexError::InvalidStringLength => {
-                        Error::Argument(format!("Invalid hex string length"))
+                        ArgumentError::new(format!("Invalid hex string length"))
                     }
                 })?;
             },
@@ -128,13 +133,13 @@ impl TryFrom<&str> for PrivateKey {
                 .onto(&mut bytes[..])
                 .map_err(|e| match e {
                     decode::Error::BufferTooSmall => {
-                        Error::Argument(format!("Invalid base58 string length"))
+                        ArgumentError::new(format!("Invalid base58 string length"))
                     },
                     decode::Error::InvalidCharacter { character, index } => {
-                        Error::Argument(format!("Invalid base58 character {} at {}", character, index))
+                        ArgumentError::new(format!("Invalid base58 character {} at {}", character, index))
                     },
                     _ => {
-                        Error::Argument(format!("Invalid base58 with unknown error"))
+                        ArgumentError::new(format!("Invalid base58 with unknown error"))
                     }
                 })?;
             }
@@ -178,7 +183,7 @@ impl TryFrom<&[u8]> for PublicKey {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect public key size {}, expected {}",
                 bytes.len(),
                 Self::BYTES
@@ -203,9 +208,9 @@ impl PublicKey {
         self.0.fill(0);
     }
 
-    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         if signature.len() != Signature::BYTES {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "Incorrect signature length {}, should be {}",
                 signature.len(),
                 Signature::BYTES
@@ -220,10 +225,7 @@ impl PublicKey {
                 as_uchar_ptr!(self.0),
             )
         };
-        match rc == 0 {
-            true => Ok(()),
-            false => Err(Error::Crypto(format!("Data verification failed")))
-        }
+        Ok(rc == 0)
     }
 }
 
@@ -291,7 +293,7 @@ impl KeyPair {
 
     pub fn try_from_seed<'a>(seed: &[u8]) -> Result<Self> {
         if seed.len() != KeyPair::SEED_BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect seed buffer size {}, expected {}",
                 seed.len(),
                 KeyPair::SEED_BYTES
@@ -339,7 +341,7 @@ impl TryFrom<&[u8]> for KeyPair {
 
     fn try_from(sk: &[u8]) -> Result<Self> {
         if sk.len() != PrivateKey::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect private key size {}, expected {}",
                 sk.len(),
                 PrivateKey::BYTES
@@ -447,7 +449,7 @@ impl Signature {
 
     pub fn sign(&mut self, signature: &mut [u8], sk: &PrivateKey) -> Result<usize> {
         if signature.len() != Signature::BYTES {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "Incorrect signature length {}, should be {}",
                 signature.len(),
                 Signature::BYTES
@@ -472,9 +474,9 @@ impl Signature {
             .map(|_| sig)
     }
 
-    pub fn verify(&mut self, signature: &[u8], pk: &PublicKey) -> Result<()> {
+    pub fn verify(&mut self, signature: &[u8], pk: &PublicKey) -> Result<bool> {
         if signature.len() != Signature::BYTES {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "Incorrect signature length {}, should be {}",
                 signature.len(),
                 Signature::BYTES
@@ -490,10 +492,7 @@ impl Signature {
             )
         };
 
-        match rc == 0 {
-            true => Ok(()),
-            false => Err(Error::Crypto(format!("Data verification failed")))
-        }
+        Ok(rc == 0)
     }
 }
 
@@ -511,6 +510,6 @@ pub fn sign_into(data: &[u8], sk: &PrivateKey) -> Result<Vec<u8>> {
     sk.sign_into(data)
 }
 
-pub fn verify(data: &[u8], signature: &[u8], pk: &PublicKey) -> Result<()> {
+pub fn verify(data: &[u8], signature: &[u8], pk: &PublicKey) -> Result<bool> {
     pk.verify(data, signature)
 }

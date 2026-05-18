@@ -1,5 +1,4 @@
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use std::collections::LinkedList;
 
 use rbtree::RBTree;
@@ -106,10 +105,10 @@ impl Scheduler {
     }
 }
 
-pub(crate) fn run_jobs(s: Rc<RefCell<Scheduler>>) {
-    s.borrow_mut().sync_time();
+pub(crate) fn run_jobs(s: Arc<Mutex<Scheduler>>) {
+    s.lock().unwrap().sync_time();
 
-    let mut timer = match s.borrow_mut().pop_jobs() {
+    let mut timer = match s.lock().unwrap().pop_jobs() {
         Some(timer) => timer,
         None => return
     };
@@ -120,6 +119,6 @@ pub(crate) fn run_jobs(s: Rc<RefCell<Scheduler>>) {
             Some(interval) => interval,
             None => continue,
         };
-        s.borrow_mut().add_job(next_start, job);
+        s.lock().unwrap().add_job(next_start, job);
     }
 }

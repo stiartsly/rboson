@@ -27,7 +27,7 @@ use crate::dht::{
     crypto_cache::CryptoCache,
     node_runner::NodeRunner,
     bootstrap_channel::BootstrapChannel,
-    future::{Command}
+    promise::{Command}
 };
 
 static PATH1: Lazy<String> = Lazy::new(|| working_path("node_runner1/"));

@@ -1,136 +1,122 @@
 use std::fmt;
-use std::rc::Rc;
-use std::any::Any;
-use ciborium::Value as CVal;
-
-use crate::{
-    Id,
-    Error,
-    core::{version, Result}
+use std::result::Result as SResult;
+use serde::{
+    Deserialize, Serialize,
+    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
+    ser::{SerializeMap, Serializer}
 };
 
-use super::{
-    msg::{
-        Kind, Method, Msg,
-        Data as MsgData
-    },
-    lookup_req::{
-        Msg as LookupRequest,
-        Data as LookupRequestData
-    },
+use crate::Id;
+use super::lookup_req::{
+    LookupRequest,
+    Data as LookupData
 };
 
-pub(crate) struct Message {
-    base_data: MsgData,
-    lookup_data: LookupRequestData,
+pub(crate) struct FindNodeRequest {
+    data: LookupData,
 }
 
-impl Msg for Message {
-    fn data(&self) -> &MsgData {
-        &self.base_data
+impl FindNodeRequest {
+    pub(crate) fn new(
+        target: Id,
+        want4: bool,
+        want6: bool,
+        want_token: bool
+    ) -> Self {
+        Self {
+            data: LookupData::new(target, want4, want6, want_token)
+        }
+    }
+}
+
+impl LookupRequest for FindNodeRequest {
+    fn data(&self) -> &LookupData {
+        &self.data
     }
 
-    fn data_mut(&mut self) -> &mut MsgData {
-        &mut self.base_data
+    fn data_mut(&mut self) -> &mut LookupData {
+        &mut self.data
     }
+}
 
-    fn from_cbor(&mut self, input: &CVal) -> Option<()> {
-        let root = input.as_map()?;
-        for (k, v) in root {
-            let k = k.as_text()?;
-            match k {
-                "y" => {},
-                "t" => {
-                    let txid = v.as_integer()?.try_into().unwrap();
-                    self.set_txid(txid);
-                },
-                "v" => {
-                    let ver = v.as_integer()?.try_into().unwrap();
-                    self.set_ver(ver);
-                },
-                "q" => {
-                    let map = v.as_map()?;
-                    for (k, v) in map {
-                        let k = k.as_text()?;
-                        match k {
-                            "w" => {
-                                let want: i32 = v.as_integer()?.try_into().unwrap();
-                                self.with_want4((want & 0x01) != 0);
-                                self.with_want6((want & 0x02) != 0);
-                                self.with_want_token((want & 0x04) != 0);
-                            },
-                            "t" => self.with_target(Rc::new(Id::from_cbor(v)?)),
-                            _ => return None,
-                        }
-                    }
-                },
-                _ => return None,
+impl Serialize for FindNodeRequest {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut s = se.serialize_map(None)?;
+        s.serialize_entry("t", self.target())?;
+        s.serialize_entry("w", &self.want())?;
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FindNodeRequest {
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        enum Field {
+            Want,           // "w"  - i32 (bitmask: 0x01 for want4, 0x02 for want6, 0x04 for want_token)
+            Target,         // "t"  - Id
+            Ignore          // Ignore unknown fields
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(de)?;
+                match key.as_str() {
+                    "w" => Ok(Field::Want),
+                    "t" => Ok(Field::Target),
+                    _   => Ok(Field::Ignore)
+                }
             }
         }
-        Some(())
-    }
 
-    fn ser(&self) -> CVal {
-        let mut root = Msg::to_cbor(self);
-        root.as_map_mut().map(|map|
-            map.push((
-                CVal::Text(String::from("q")),
-                LookupRequest::to_cbor(self)
-            )
-        ));
-        root
-    }
+        struct FieldVisiter;
+        impl<'de> Visitor<'de> for FieldVisiter {
+            type Value = FindNodeRequest;
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a FindNodeRequest struct")
+                }
 
-impl LookupRequest for Message {
-    fn data(&self) -> &LookupRequestData {
-        &self.lookup_data
-    }
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut target: Option<Id> = None;
+                let mut want: i32 = 0;
 
-    fn data_mut(&mut self) -> &mut LookupRequestData {
-        &mut self.lookup_data
-    }
-}
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Target   => target = Some(map.next_value::<Id>()?),
+                        Field::Want     => want = map.next_value()?,
+                        Field::Ignore   => _ = map.next_value::<IgnoredAny>()?,
+                    }
+                }
 
-impl Message {
-    pub(crate) fn new() -> Self {
-        Message {
-            lookup_data: LookupRequestData::new(true),
-            base_data: MsgData::new(
-                Kind::Request,
-                Method::FindNode,
-                0
-            )
+                Ok(FindNodeRequest::new(
+                    target.ok_or_else(|| de::Error::missing_field("t"))?,
+                    want & 0x01 != 0,
+                    want & 0x02 != 0,
+                    want & 0x04 != 0
+                ))
+            }
         }
+        de.deserialize_map(FieldVisiter)
     }
 }
 
-impl TryFrom<CVal> for Box<Message> {
-    type Error = Error;
-    fn try_from(input: CVal) -> Result<Box<Message>> {
-        let mut msg = Self::new(Message::new());
-        if let None =  msg.from_cbor(&input) {
-            return Err(Error::Protocol(
-                format!("Invalid cobor value for find_node_req message")));
-        }
-        Ok(msg)
-    }
-}
-
-impl fmt::Display for Message {
+impl fmt::Display for FindNodeRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "y:{},m:{},t:{},q:{{t:{},w:{}}},v:{}",
-            self.kind(),
-            self.method(),
-            self.txid() as u32,
+            "t:{},w:{}",
             self.target(),
-            self.want(),
-            version::format_version(self.ver())
+            self.want()
         )?;
         Ok(())
     }

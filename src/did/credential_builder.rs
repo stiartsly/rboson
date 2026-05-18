@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::{
     as_secs,
     Id,
-    error::{Error, Result},
+    errors::{Result, ArgumentError},
     CryptoIdentity,
 };
 
@@ -151,10 +151,10 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            return Err(Error::Argument("Id cannot be empty".into()));
+            return Err(ArgumentError::new("Id cannot be empty".into()).into());
         }
         if self.claims.is_empty() {
-            return Err(Error::Argument("Claims cannot be empty".into()));
+            return Err(ArgumentError::new("Claims cannot be empty".into()).into());
         }
 
         let id = self.identity.id().clone();

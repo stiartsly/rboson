@@ -1,16 +1,12 @@
-use std::any::Any;
+use std::sync::{Arc, Mutex};
 use std::collections::LinkedList;
-use std::rc::Rc;
-use std::cell::RefCell;
 use log::error;
 
 use crate::PeerInfo;
 use crate::dht::{
     dht::DHT,
-    msg::{
-        msg::Msg,
-        announce_peer_req as req,
-    }
+    msg::msg::Message,
+    node_entry::NodeEntry,
 };
 
 use super::{
@@ -22,30 +18,29 @@ use super::{
 pub(crate) struct PeerAnnounceTask {
     base_data: TaskData,
 
-    listeners: Vec<Box<dyn FnMut(&mut dyn Task)>>,
-
-    todo: Rc<RefCell<LinkedList<Rc<RefCell<CandidateNode>>>>>,
-    peer: Rc<PeerInfo>,
+    todo: Arc<Mutex<LinkedList<Arc<Mutex<CandidateNode>>>>>,
+    peer: PeerInfo,
+    expected_seq: i32,
 }
 
 impl PeerAnnounceTask {
-    pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
-        closest: Rc<RefCell<ClosestSet>>,
-        peer: Rc<PeerInfo>
-    ) -> Self {
-        let todo: LinkedList<_> = closest.borrow()
-            .entries()
-            .iter()
-            .cloned()
-            .collect();
-
+    pub(crate) fn new(dht: Arc<Mutex<DHT>>, peer: PeerInfo, expected_seq: i32) -> Self {
         Self {
             base_data: TaskData::new(dht),
-            listeners: Vec::new(),
             peer,
-            todo: Rc::new(RefCell::new(todo)),
+            todo: Arc::new(Mutex::new(LinkedList::new())),
+            expected_seq,
         }
+    }
+
+    pub(crate) fn with_closest(&mut self, closest: ClosestSet) -> &mut Self {
+        let mut locked = self.todo.lock().unwrap();
+        let mut entries = closest.entries();
+        while let Some(cn) = entries.pop() {
+            locked.push_back(cn);
+        }
+        drop(locked);
+        self
     }
 }
 
@@ -58,42 +53,40 @@ impl Task for PeerAnnounceTask {
         &mut self.base_data
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn add_listener(&mut self, cb: Box<dyn FnMut(&mut dyn Task)>) {
-        self.listeners.push(cb);
-
-    }
-    fn notify_completion(&mut self) {
-        while let Some(mut cb) = self.listeners.pop() {
-            cb(self)
-        }
-    }
-
-    fn update(&mut self) {
-        while self.can_request() {
-            let cn = match self.todo.borrow().front() {
+    fn iterate(&mut self) {
+        while self.can_dorequest() {
+            let cn = match self.todo.lock().unwrap().front() {
                 Some(cn) => cn.clone(),
                 None => break,
             };
 
-            let msg = Rc::new(RefCell::new({
-                let mut msg = Box::new(req::Message::new());
-                msg.with_peer(self.peer.clone());
-                msg.with_token(cn.borrow().token());
-                msg as Box<dyn Msg>
-            }));
+            let token = cn.lock().unwrap().token();
+            if token == 0 {
+                self.todo.lock().unwrap().pop_front();
+                continue;
+            }
+
+            let msg = Arc::new(Mutex::new(Message::announce_peer_req(
+                self.peer.clone(),
+                token,
+                self.expected_seq,
+            )));
 
             let todo = self.todo.clone();
-            let ni = cn.borrow().ni();
+            let ne   = NodeEntry::from_candidate(cn);
 
-            self.send_call(ni, msg, Box::new(move|_| {
-                todo.borrow_mut().pop_front();
+            self.send_call(ne, msg, Box::new(move|_| {
+                todo.lock().unwrap().pop_front();
             })).map_err(|e| {
                error!("Error on sending 'announcePeer' message: {}", e);
             }).ok();
         }
     }
+
+    fn is_done(&self) -> bool {
+        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
+    }
 }
+
+unsafe impl Send for PeerAnnounceTask {}
+unsafe impl Sync for PeerAnnounceTask {}

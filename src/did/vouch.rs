@@ -8,7 +8,12 @@ use crate::{
     Id,
     signature,
     CryptoIdentity,
-    core::{Error, Result},
+    errors::{
+        Error,
+        Result,
+        ArgumentError,
+        SignatureError
+    },
 };
 
 use crate::did::{
@@ -125,12 +130,12 @@ impl Vouch {
 
     pub fn validate(&self) -> Result<()> {
         if self.signature.is_empty() {
-            return Err(Error::Signature("Vouch signature is empty".into()));
+            return Err(ArgumentError::new("Vouch signature is empty".into()).into());
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("Vouch signature is not valid".into())),
+            false => Err(SignatureError::new("Vouch signature is not valid".into()).into()),
         }
     }
 
@@ -167,7 +172,7 @@ impl TryFrom<&str> for Vouch {
 
     fn try_from(input: &str) -> Result<Self> {
         serde_json::from_str(input).map_err(|e| {
-            Error::Argument(format!("Failed to parse Vouch from string: {}", e))
+            ArgumentError::new(format!("Failed to parse Vouch from string: {}", e)).into()
         })
     }
 }
@@ -185,7 +190,7 @@ impl TryFrom<&[u8]> for Vouch {
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e| {
-            Error::Argument(format!("Failed to parse Vouch from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse Vouch from bytes: {}", e)).into()
         })
     }
 }

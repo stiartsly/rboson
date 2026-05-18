@@ -1,11 +1,8 @@
 use std::fmt;
 use std::cmp::Ordering;
+use crate::core::Id;
 
-use super::{
-    id, Id, ID_BITS,
-};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Prefix {
     depth: i32,
     id: Id,
@@ -20,10 +17,10 @@ impl Prefix {
     }
 
     pub fn from_id(src: &Id, depth: i32) -> Self {
-       assert!(depth < ID_BITS as i32);
+       assert!(depth < Id::BITS as i32);
 
         let mut id = Id::default();
-        id::bits_copy(src, &mut id, depth);
+        Id::bits_copy(src, &mut id, depth);
 
         Self {id, depth }
     }
@@ -37,11 +34,11 @@ impl Prefix {
     }
 
     pub fn is_prefix_of(&self, id: &Id) -> bool {
-        id::bits_equal(&self.id, id, self.depth)
+        Id::bits_equal(&self.id, id, self.depth)
     }
 
     pub const fn is_splittable(&self) -> bool {
-        self.depth < (id::ID_BITS - 1) as i32
+        self.depth < (Id::BITS - 1) as i32
     }
 
     pub fn first(&self) -> Id {
@@ -50,10 +47,10 @@ impl Prefix {
 
     pub fn last(&self) -> Id {
         let prefix = Prefix {
-            id: id::MAX_ID,
+            id: Id::MAX_ID,
             depth: self.depth,
         };
-        let trailing_bits = prefix.id.distance(&id::MAX_ID);
+        let trailing_bits = prefix.id.distance(&Id::MAX_ID);
         self.id.distance(&trailing_bits)
     }
 
@@ -87,12 +84,12 @@ impl Prefix {
 
     pub fn is_sibling_of(&self, other: &Prefix) -> bool {
         self.depth == other.depth &&
-            id::bits_equal(&self.id, &other.id, self.depth - 1)
+            Id::bits_equal(&self.id, &other.id, self.depth - 1)
     }
 
     pub fn random_id(&self) -> Id {
         let mut id = Id::random();
-        id::bits_copy(&self.id, &mut id, self.depth);
+        Id::bits_copy(&self.id, &mut id, self.depth);
         id
     }
 

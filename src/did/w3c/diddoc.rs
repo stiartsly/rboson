@@ -1,4 +1,5 @@
 use std::fmt;
+use std::error::Error;
 use std::str::FromStr;
 use std::time::SystemTime;
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     Id,
-	error::{Error, Result},
+	errors::{Result, SignatureError, ArgumentError},
 	CryptoIdentity,
 };
 
@@ -340,7 +341,7 @@ impl DIDDocument {
 	pub fn validate(&self) -> Result<()> {
 		match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("Document signature is not valid".into())),
+            false => Err(SignatureError::new("Document signature is not valid".into())),
         }
 	}
 
@@ -398,17 +399,17 @@ impl PartialEq<Self> for DIDDocument {
 }
 
 impl TryFrom<&str> for DIDDocument {
-    type Error = Error;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e| {
-            Error::Argument(format!("Failed to parse DIDDocument from string: {}", e))
+            ArgumentError::new(format!("Failed to parse DIDDocument from string: {}", e)).into()
         })
     }
 }
 
 impl FromStr for DIDDocument {
-	type Err = Error;
+	type Err = Box<dyn Error + Send + Sync>;
 
 	fn from_str(s: &str) -> Result<Self> {
 		Self::try_from(s)
@@ -416,11 +417,11 @@ impl FromStr for DIDDocument {
 }
 
 impl TryFrom<&[u8]> for DIDDocument {
-    type Error = Error;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e| {
-            Error::Argument(format!("Failed to parse DIDDocument from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse DIDDocument from bytes: {}", e)).into()
         })
     }
 }

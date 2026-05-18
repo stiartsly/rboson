@@ -28,7 +28,8 @@ use crate::{
 
 use super::{
     signature,
-    Error, Result
+    Error, Result,
+    errors::{ArgumentError, CryptoError},
 };
 
 const_assert!(PrivateKey::BYTES == crypto_box_SECRETKEYBYTES as usize);
@@ -61,7 +62,7 @@ impl TryFrom<&[u8]> for PrivateKey {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect private key size {}, should be {}",
                 bytes.len(),
                 Self::BYTES
@@ -83,7 +84,7 @@ impl TryFrom<&signature::PrivateKey> for PrivateKey {
         };
 
         if rc != 0 {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "converts Ed25519 key to x25519 key failed."
             )))
         }
@@ -134,7 +135,7 @@ impl TryFrom<&[u8]> for PublicKey {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect public key size {}, expected {}",
                 bytes.len(),
                 Self::BYTES
@@ -156,7 +157,7 @@ impl TryFrom<&signature::PublicKey> for PublicKey {
         };
 
         if rc != 0 {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "converts Ed25519 key to x25519 key failed."
             )))
         }
@@ -222,7 +223,7 @@ impl TryFrom<&[u8]> for Nonce {
     type Error = Error;
     fn try_from(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != Self::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Incorrect nonce key size {}, expected {}",
                 bytes.len(),
                 Self::BYTES
@@ -291,7 +292,7 @@ impl KeyPair {
 
     pub fn try_from_seed(seed: &[u8]) -> Result<Self> {
         if seed.len() != KeyPair::SEED_BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Invalid seed size {}, should be {}",
                 seed.len(),
                 KeyPair::SEED_BYTES
@@ -337,12 +338,11 @@ impl TryFrom<&[u8]> for KeyPair {
     type Error = Error;
     fn try_from(sk: &[u8]) -> Result<Self> {
         if sk.len() != PrivateKey::BYTES {
-            return Err(Error::Argument(
-                format!("Invalid private key size {}, expected: {}",
-                    sk.len(),
-                    PrivateKey::BYTES
-                )
-            ));
+            return Err(ArgumentError::new(format!(
+                "Invalid private key size {}, expected: {}",
+                sk.len(),
+                PrivateKey::BYTES
+            )));
         }
 
         let mut pk = [0u8; PublicKey::BYTES];
@@ -410,7 +410,7 @@ impl AsRef<PublicKey> for KeyPair {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CryptoBox([u8; Self::SYMMETRIC_KEY_BYTES]);
 
 impl CryptoBox {
@@ -436,7 +436,7 @@ impl CryptoBox {
     ) -> Result<usize> {
         let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
         if cipher.len() < expected_len {
-            return Err(Error::Argument(format!("The input buffer is insufficient.")));
+            return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
         }
 
         cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
@@ -452,7 +452,7 @@ impl CryptoBox {
 
         match rc == 0 {
             true => Ok(expected_len),
-            false => return Err(Error::Crypto(format!("Data encryption failed")))
+            false => return Err(CryptoError::new(format!("Data encryption failed")))
         }
     }
 
@@ -470,7 +470,7 @@ impl CryptoBox {
     ) -> Result<usize> {
         let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
         if plain.len() < expected_len {
-            return Err(Error::Argument(format!("The input buffer is insufficient.")));
+            return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
         }
 
         let cipher_len = cipher.len() - Nonce::BYTES;
@@ -487,7 +487,7 @@ impl CryptoBox {
 
         match rc == 0 {
             true => Ok(expected_len),
-            false => return Err(Error::Crypto(format!("Data decryption failed")))
+            false => return Err(CryptoError::new(format!("Data decryption failed")))
         }
     }
 
@@ -511,7 +511,7 @@ impl TryFrom<(&PublicKey, &PrivateKey)> for CryptoBox {
             )
         };
         if rc != 0 {
-            return Err(Error::Crypto(format!(
+            return Err(CryptoError::new(format!(
                 "Compute symmetric key failed, wrong public key or private key"
             )));
         }
@@ -534,7 +534,7 @@ pub fn encrypt(plain: &[u8],
 ) -> Result<usize> {
     let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
     if cipher.len() < expected_len {
-        return Err(Error::Argument(format!("The input buffer is insufficient.")));
+        return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
     }
 
     cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
@@ -550,7 +550,7 @@ pub fn encrypt(plain: &[u8],
     };
     match rc == 0 {
         true => Ok(expected_len),
-        false => return Err(Error::Crypto(format!("Data encryption failed")))
+        false => return Err(CryptoError::new(format!("Data encryption failed")))
     }
 }
 
@@ -570,7 +570,7 @@ pub fn decrypt(cipher: &[u8],
 ) -> Result<usize> {
     let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
     if plain.len() < expected_len {
-        return Err(Error::Argument(format!("The input buffer is insufficient.")));
+        return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
     }
 
     let cipher_len = cipher.len() - Nonce::BYTES;
@@ -588,7 +588,7 @@ pub fn decrypt(cipher: &[u8],
 
     match rc == 0 {
         true => Ok(expected_len),
-        false => return Err(Error::Crypto(format!("Data decryption failed")))
+        false => return Err(CryptoError::new(format!("Data decryption failed")))
     }
 }
 

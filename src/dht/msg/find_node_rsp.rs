@@ -1,151 +1,129 @@
 use std::fmt;
-use std::rc::Rc;
-use std::any::Any;
-use ciborium::Value as CVal;
-
-use crate::{
-    NodeInfo,
-    Error,
-    core::{version, Result}
+use std::result::Result as SResult;
+use serde_cbor::value::to_value;
+use serde::{
+    Deserialize, Serialize,
+    de::{Deserializer, MapAccess, Visitor, IgnoredAny},
+    ser::{Serializer, SerializeMap },
 };
 
-use super::{
-    msg::{
-        Kind, Method, Msg,
-        Data as MsgData
-    },
-    lookup_rsp::{
-        Msg as LookupResponse,
-        Data as LookupResponseData
-    },
+use crate::NodeInfo;
+use super::lookup_rsp::{
+    LookupResponse,
+    Data as LookupData
 };
-
-pub(crate) struct Message {
-    base_data   : MsgData,
-    lookup_data : LookupResponseData,
+pub(crate) struct FindNodeResponse {
+    data   : LookupData,
 }
 
-impl Msg for Message {
-    fn data(&self) -> &MsgData {
-        &self.base_data
+impl FindNodeResponse {
+    pub(crate) fn new(
+        nodes4: Option<Vec<NodeInfo>>,
+        nodes6: Option<Vec<NodeInfo>>,
+        token: i32
+    ) -> Self {
+        Self {
+            data: LookupData::new(nodes4, nodes6, token)
+        }
+    }
+}
+
+impl LookupResponse for FindNodeResponse {
+    fn data(&self) -> &LookupData {
+        &self.data
     }
 
-    fn data_mut(&mut self) -> &mut MsgData {
-        &mut self.base_data
+    fn data_mut(&mut self) -> &mut LookupData {
+        &mut self.data
     }
+}
 
-    fn from_cbor(&mut self, input: &CVal) -> Option<()> {
-        let root = input.as_map()?;
-        for (k, v) in root {
-            let k = k.as_text()?;
-            match k {
-                "y" => {},
-                "t" => {
-                    let txid = v.as_integer()?.try_into().unwrap();
-                    self.set_txid(txid);
-                },
-                "v" => {
-                    let ver = v.as_integer()?.try_into().unwrap();
-                    self.set_ver(ver);
-                },
-                "r" => {
-                    let map = v.as_map()?;
-                    for (k, v) in map {
-                        let k = k.as_text()?;
-                        match k {
-                            "n4" => {
-                                self.populate_closest_nodes4({
-                                    let mut nodes = Vec::new();
-                                    for item in v.as_array()?.iter() {
-                                        nodes.push(Rc::new(NodeInfo::from_cbor(item)?));
-                                    }
-                                    nodes
-                                });
-                            },
-                            "n6" => {
-                                self.populate_closest_nodes6({
-                                    let mut nodes = Vec::new();
-                                    for item in v.as_array()?.iter() {
-                                        nodes.push(Rc::new(NodeInfo::from_cbor(item)?));
-                                    }
-                                    nodes
-                                });
-                            },
-                            "tok" => {
-                                self.populate_token(
-                                    v.as_integer()?.try_into().unwrap()
-                                );
-                            }
-                            _ => return None
-                        }
-                    }
-                },
-                _ => return None,
+impl Serialize for FindNodeResponse {
+    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut s = serializer.serialize_map(None)?;
+        if let Some(ns4) = self.nodes4() {
+            let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
+                    "Failed to convert nodes4 to CBOR Value"
+                ))?;
+            s.serialize_entry("n4", &value)?;
+        }
+        if let Some(ns6) = self.nodes6() {
+            let value = to_value(&ns6).map_err(|_| serde::ser::Error::custom(
+                    "Failed to convert nodes6 to CBOR Value"
+                ))?;
+            s.serialize_entry("n6", &value)?;
+        }
+        s.serialize_entry("tok", &self.token())?;
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FindNodeResponse {
+    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug)]
+        enum Field {
+            Nodes4,         // "n4" - Vec<NodeInfo>
+            Nodes6,         // "n6" - Vec<NodeInfo>
+            Token,          // "tok" - i32,
+            Ignore
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(deserializer)?;
+                match key.as_str() {
+                    "n4"    => Ok(Field::Nodes4),
+                    "n6"    => Ok(Field::Nodes6),
+                    "tok"   => Ok(Field::Token),
+                    _       => Ok(Field::Ignore), // Ignore unknown fields
+                }
             }
         }
-        Some(())
-    }
 
-    fn ser(&self) -> CVal {
-        let mut root = Msg::to_cbor(self);
-        if let Some(map) = root.as_map_mut() {
-            map.push(
-                (CVal::Text(String::from("r")),
-                LookupResponse::to_cbor(self)
-            ));
+        struct FieldVisiter;
+
+        impl<'de> Visitor<'de> for FieldVisiter {
+            type Value = FindNodeResponse;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("invalid FindNodeResponse")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut nodes4: Option<Vec<NodeInfo>> = None;
+                let mut nodes6: Option<Vec<NodeInfo>> = None;
+                let mut token: i32 = 0;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Nodes4   => nodes4 = Some(map.next_value()?),
+                        Field::Nodes6   => nodes6 = Some(map.next_value()?),
+                        Field::Token    => token = map.next_value()?,
+                        Field::Ignore   => _ = map.next_value::<IgnoredAny>()?,
+                    }
+                }
+
+                Ok(FindNodeResponse::new(nodes4, nodes6, token))
+            }
         }
-        root
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+        deserializer.deserialize_map(FieldVisiter)
     }
 }
 
-impl LookupResponse for Message {
-    fn data(&self) -> &LookupResponseData {
-        &self.lookup_data
-    }
-
-    fn data_mut(&mut self) -> &mut LookupResponseData {
-        &mut self.lookup_data
-    }
-}
-
-impl Message {
-   pub(crate) fn new() -> Self {
-        Message {
-            lookup_data: LookupResponseData::new(),
-            base_data: MsgData::new(
-                Kind::Response,
-                Method::FindNode,
-                0
-            ),
-        }
-    }
-}
-
-impl TryFrom<CVal> for Box<Message> {
-    type Error = Error;
-    fn try_from(input: CVal) -> Result<Box<Message>> {
-        let mut msg = Self::new(Message::new());
-        if let None =  msg.from_cbor(&input) {
-            return Err(Error::Protocol(
-                format!("Invalid cobor value for find_node_rsp message")));
-        }
-        Ok(msg)
-    }
-}
-
-impl fmt::Display for Message {
+impl fmt::Display for FindNodeResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "y:{},m:{},t:{},r:{{",
-            self.kind(),
-            self.method(),
-            self.txid() as u32
-        )?;
-
         if let Some(nodes4) = self.nodes4() {
             let mut first = true;
             if !nodes4.is_empty() {
@@ -177,10 +155,6 @@ impl fmt::Display for Message {
         if self.token() != 0 {
             write!(f, ",tok:{}", self.token())?;
         }
-        write!(f,
-            "}},v:{}",
-            version::format_version(self.ver())
-        )?;
         Ok(())
     }
 }

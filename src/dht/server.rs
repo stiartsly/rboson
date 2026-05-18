@@ -1,412 +1,389 @@
-use std::rc::Rc;
-use std::cell::RefCell;
-use std::time::SystemTime;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::collections::{HashMap, LinkedList};
+use std::time::{SystemTime, Duration};
+use std::collections::{HashSet, HashMap};
 
-use log::{warn, error};
+use log::{info, warn, error, trace};
 use tokio::{
-    io,
-    runtime,
+    task,
     net::UdpSocket,
-    time::{sleep, interval_at, Duration}
 };
 
 use crate::{
-    elapsed_ms,
     Id,
-    Error,
-    core::{id, version},
-    dht::{
-        constants,
-        dht::DHT,
-        rpccall::RpcCall,
-        node_runner::NodeRunner,
-        scheduler::{self, Scheduler},
-        msg::msg::{self, Msg},
-        msg::msg::{deser, serialize},
+    Network,
+    CryptoBox,
+    CryptoIdentity,
+    errors::{
+        Result,
+        NetworkError,
+        ProtocolError,
+        CryptoError
     }
 };
 
-pub(crate) struct Server<> {
-    nodeid: Rc<Id>,
-    // started: SystemTime,
+use crate::dht::{
+    rpccall::RpcCall,
+    msg::msg::Message,
+    suspicious_node_detector::{
+        SuspiciousNodeDetector,
+        DefaultSuspiciousNodeDetector
+    },
+};
 
-    recv_msg_num: i32,
-    recv_msg_num_at_last_reachable_check: i32,
+pub(crate) struct RpcServer {
+    identity        : Arc<Mutex<CryptoIdentity>>,
+    socket_addr     : SocketAddr,
 
-    reachable: bool,
-    last_reachable_check: SystemTime,
+    suspicious_node_detector: Option<DefaultSuspiciousNodeDetector>,
 
-    calls: Rc<RefCell<HashMap<i32, Rc<RefCell<RpcCall>>>>>,
+    pending_calls   : HashMap<i32, Arc<Mutex<RpcCall>>>,
 
-    queue4: Option<Rc<RefCell<LinkedList<Rc<RefCell<Box<dyn Msg>>>>>>>,
-    scheduler:  Rc<RefCell<Scheduler>>,
+    recv_pkts       : u32,
+    recv_pkts_at_last_reachable_check: u32,
 
+    last_reachable_check: Option<SystemTime>,
+    reachable       : bool,
+
+    reachable_cb    : Option<Box<dyn Fn(bool) + Send>>,
+
+    message_cb      : Option<Box<dyn Fn(Arc<Mutex<Message>>) + Send>>,
+    call_sent_cb    : Option<Box<dyn Fn(Arc<Mutex<RpcCall>>) + Send>>,
+    call_timeout_cb : Option<Box<dyn Fn(Arc<Mutex<RpcCall>>) + Send>>,
+
+    start_time      : Option<SystemTime>,
+    is_running      : bool,
+
+    worker          : Option<task::JoinHandle<()>>,
+    socket          : Option<UdpSocket>,
 }
 
-impl Server {
-    pub fn new(nodeid: Rc<Id>) -> Self {
+impl RpcServer {
+    const MAX_ACTIVE_CALLS: usize = 64;
+
+    pub(crate) fn new(
+        sock_addr: &SocketAddr,
+        identity: Arc<Mutex<CryptoIdentity>>,
+        suspicious_node_detector: Option<DefaultSuspiciousNodeDetector>,
+    ) -> Self {
+
         Self {
-            nodeid,
-            // started: SystemTime::UNIX_EPOCH,
+            identity,
+            socket_addr: sock_addr.clone(),
+            suspicious_node_detector,
+            pending_calls: HashMap::new(),
 
-            recv_msg_num: 0,
-            recv_msg_num_at_last_reachable_check: 0,
-
+            recv_pkts: 0,
+            recv_pkts_at_last_reachable_check: 0,
+            last_reachable_check: None,
             reachable: false,
-            last_reachable_check: SystemTime::UNIX_EPOCH,
 
-            calls: Rc::new(RefCell::new(HashMap::new())),
-            queue4: Some(Rc::new(RefCell::new(LinkedList::new()))),
+            reachable_cb    : None,
+            message_cb      : None,
+            call_sent_cb    : None,
+            call_timeout_cb : None,
 
-            scheduler: Rc::new(RefCell::new(Scheduler::new())),
+            start_time: None,
+            is_running: false,
+
+            worker: None,
+            socket: None,
         }
     }
 
-    pub(crate) fn scheduler(&self) -> Rc<RefCell<Scheduler>> {
-        self.scheduler.clone()
+    fn identity(&self) -> Arc<Mutex<CryptoIdentity>> {
+        self.identity.clone()
     }
 
-    pub(crate) fn nodeid(&self) -> &Id {
-        &self.nodeid
+    pub(crate) fn has_pending_calls(&self) -> bool {
+        self.pending_calls.len() > 0
     }
 
-    pub(crate) fn number_of_acitve_calls(&self) -> usize {
-        self.calls.borrow().len()
+    pub(crate) fn id(&self) -> Id {
+        self.identity.lock().unwrap().id().clone()
     }
 
-    pub(crate) fn start(&mut self) {}
+    pub(crate) fn network(&self) -> Network {
+        Network::from(self.socket_addr())
+    }
 
-    pub(crate) fn stop(&mut self) {
-        self.scheduler().borrow_mut()
-            .cancel();
+    pub(crate) fn socket_addr(&self) -> &SocketAddr {
+        &self.socket_addr
+    }
+
+    pub(crate) fn set_reachable(&mut self, reachable: bool) {
+        if self.reachable == reachable {
+            return;
+        }
+
+        self.reachable = reachable;
+        if let Some(cb) = self.reachable_cb.as_ref() {
+            cb(reachable);
+        }
+    }
+
+    pub(crate) fn set_reachable_cb<F>(&mut self, cb: F)
+    where
+        F: Fn(bool) + Send + 'static,
+    {
+        self.reachable_cb = Some(Box::new(cb));
     }
 
     pub(crate) fn is_reachable(&self) -> bool {
         self.reachable
     }
 
-    fn recv_msg_num_incr(&mut self) {
-        self.recv_msg_num += 1;
+    pub(crate) fn is_running(&self) -> bool {
+        self.is_running
     }
 
-    pub(crate) fn update_reachability(&mut self) {
-        // Avoid pinging too frequently if we're not receiving any response
-        // (the connection might be dead)
-        if self.recv_msg_num != self.recv_msg_num_at_last_reachable_check {
-            self.reachable = true;
-            self.last_reachable_check = SystemTime::now();
-            self.recv_msg_num_at_last_reachable_check = self.recv_msg_num;
+    pub(crate) fn age(&self) -> Duration {
+        unimplemented!()
+    }
+
+    pub(crate) fn set_message_cb<F>(&mut self, cb: F)
+    where
+        F: Fn(Arc<Mutex<Message>>) + Send + 'static,
+    {
+        self.message_cb = Some(Box::new(cb));
+    }
+
+    pub(crate) fn set_call_sent_cb<F>(&mut self, cb: F)
+    where
+        F: Fn(Arc<Mutex<RpcCall>>) + Send + 'static,
+    {
+        self.call_sent_cb = Some(Box::new(cb));
+    }
+
+    pub(crate) fn set_call_timeout_cb<F>(&mut self, cb: F)
+    where
+        F: Fn(Arc<Mutex<RpcCall>>) + Send + 'static,
+    {
+        self.call_timeout_cb = Some(Box::new(cb));
+    }
+
+    pub(crate) async fn start(server: Arc<Mutex<Self>>) -> Result<()> {
+        let socket = UdpSocket::bind(
+            server.lock().unwrap().socket_addr()
+        ).await.map_err(|e| {
+            NetworkError::new(format!("{e}"))
+        })?;
+
+        _ = Some(task::spawn_blocking(async move || {
+            loop {
+
+                server.lock().unwrap().is_running = true;
+                server.lock().unwrap().reachable = true;
+                server.lock().unwrap().start_time = Some(SystemTime::now());
+
+                info!("RPC server started at {}",
+                    server.lock().unwrap().socket_addr()
+                );
+
+                let mut buff = vec![0u8; 1024];
+                let rc = socket.recv_from(&mut buff).await;
+                let (len, from) = match rc {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("DHT RPC server datagram socket error: {e}");
+                        continue;
+                    }
+                };
+
+                let cloned = server.clone();
+                Self::handle_packet(cloned, &buff[..len], &from).await;
+            }
+        }));
+
+        Ok(())
+    }
+
+    pub(crate) fn stop(server: Arc<Mutex<Self>>) {
+        let worker = server.lock().unwrap().worker.take();
+        if worker.is_none() {
+            return;
+        }
+        if !server.lock().unwrap().is_running {
             return;
         }
 
-        if elapsed_ms!(self.last_reachable_check) >  constants::RPC_SERVER_REACHABILITY_TIMEOUT {
-            self.reachable = false;
+        server.lock().unwrap().is_running = false;
+        server.lock().unwrap().reachable = false;
+        server.lock().unwrap().start_time = None;
+
+        server.lock().unwrap().pending_calls.clear();
+
+        info!("RPC server stopped at {}", server.lock().unwrap().socket_addr());
+    }
+
+    async fn handle_packet(server: Arc<Mutex<RpcServer>>, data: &[u8], from: &SocketAddr) {
+
+        if data.len() < Id::BYTES + CryptoBox::MAC_BYTES + Message::MIN_BYTES {
+            warn!("Ignored invalid packet(too short) from {}", from);
+
+            // TODO: handle suspicious node
+            return;
         }
-    }
 
-    pub(crate) fn send_msg(&mut self, msg: Rc<RefCell<Box<dyn Msg>>>) {
-        msg.borrow_mut().set_id(self.nodeid());
-        self.queue4.as_ref().unwrap().borrow_mut().push_back(msg);
-    }
+        // Extract and validate remote ID
+        let fromid = Id::try_from(&data[0.. Id::BYTES]).unwrap();
+        let identity = server.lock().unwrap().identity();
 
-    pub(crate) fn send_call(&mut self, call: Rc<RefCell<RpcCall>>) {
-        let txid  = call.borrow().txid();
-        self.calls.borrow_mut().insert(txid, call.clone());
-
-        let calls_cloned = self.calls.clone();
-        call.borrow_mut().set_responsed_fn(|_,_| {});
-        call.borrow_mut().set_stalled_fn(|_| {});
-        call.borrow_mut().set_timeout_fn(move |c| {
-            if calls_cloned.borrow_mut().remove(&txid).is_some() {
-                c.dht().borrow_mut().on_timeout(c);
-            };
-        });
-
-        if let Some(msg) = call.borrow().req() {
-            msg.borrow_mut().set_txid(txid);
-            msg.borrow_mut().with_associated_call(call.clone());
-            self.send_msg(msg);
+        let rc = identity.lock().unwrap().decrypt_into(&fromid, &data[Id::BYTES ..]);
+        let plain = match rc {
+            Ok(v) => v,
+            Err(err) => {
+                warn!("Decrypt packet from {} error: {}, ignored it", from, err);
+                return;
+            }
         };
+
+        let mut msg = match serde_cbor::from_slice::<Message>(&plain) {
+            Ok(msg) => msg,
+            Err(err) => {
+                warn!("Got a wrong packet from {} with {}, ignored it", from, err);
+                return;
+            }
+        };
+
+        msg.set_id(fromid);
+        msg.set_remote(fromid.clone(), from.clone());
+
+        trace!("Received {}:{} from {}@{}: {}", msg.method(), msg.kind(),
+				fromid, from, msg);
+
+
+        // Handle request message
+        if msg.is_req() {
+            // TODO: handle metric stuff.
+
+            let locked_server = server.lock().unwrap();
+            let cb = locked_server.message_cb.as_ref();
+            if let Some(cb) = cb {
+                cb(Arc::new(Mutex::new(msg)));
+            }
+            drop(locked_server);
+            return;
+        }
+
+        let locked_server = server.lock().unwrap();
+        let call = locked_server.pending_calls.get(&msg.txid()).cloned();
+        drop(locked_server);
+
+        if let Some(call) = call {
+            let req = call.lock().unwrap().req();
+            if req.lock().unwrap().remote_addr() == from {
+
+                if msg.method() != req.lock().unwrap().method() {
+
+                    warn!("Got response with wrong method {} from {}@{} for {}",
+                        msg.method(), fromid, from, req.lock().unwrap().method());
+
+                    // call.lock().unwrap().respond_wrong_method();
+                    // TODO: suspicious node handling
+
+                    return;
+                }
+
+                // Remove all to prevent timeout race, defense against timeout race.
+                let removed = server.lock().unwrap().pending_calls.remove(&msg.txid()).is_some();
+                if !removed {
+                    call.lock().unwrap().respond(
+                        Arc::new(Mutex::new(msg))
+                    );
+
+                    let locked_server = server.lock().unwrap();
+                    let cb = locked_server.call_sent_cb.as_ref();
+                    if let Some(cb) = cb {
+                        cb(call.clone());
+                    }
+                    drop(locked_server);
+
+                    // TODO: handle metric stuff.
+                }
+
+                return;
+            }
+
+            // Handle inconsistent socket (e.g., NAT issues or attack)
+			// - the message is not a request
+			// - the transaction ID matched
+			// - response source did not match request destination
+			// this happening by chance is exceedingly unlikely indicates either port-mangling NAT,
+			// a multihomed host listening on any-local address or some kind of attack
+			warn!("Node address not consistent, ignored. request: {} <- response: {}@{}",
+                    call.lock().unwrap().target().id(), fromid, from);
+
+            // TODO: handle suspicious stuff.
+
+            // TODO: handle metric stuff.
+
+			// but expect an upcoming timeout if it's really just a misbehaving node
+            call.lock().unwrap().respond_inconsistent_socket(
+                Arc::new(Mutex::new(msg))
+            );
+			return;
+        }
+
+        // TODO: handle suspicious stuff.
+        // TODO: handle metric stuff.
     }
-}
 
-pub(crate) fn run_loop(
-    runner: Rc<RefCell<NodeRunner>>,
-    server: Rc<RefCell<Server>>,
-    dht4: Option<Rc<RefCell<DHT>>>,
-    dht6: Option<Rc<RefCell<DHT>>>,
-    quit: Arc<Mutex<bool>>) -> io::Result<()>
-{
-    let rt = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-
-    rt.block_on(async move {
-        let mut sock4 = None;
-        let mut buff4 = None;
-        let mut queu4 = None;
-
-        if let Some(dht) = dht4.as_ref() {
-            sock4 = Some(UdpSocket::bind(dht.borrow().addr()).await?);
-            buff4 = Some(Rc::new(RefCell::new(vec![0u8; 1024])));
-            queu4 = server.borrow_mut().queue4.clone();
+    pub(crate) async fn send_call(&mut self, call: Arc<Mutex<RpcCall>>) {
+        if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
+            error!("Too many active calls, cannot send the call.");
+            return;
         }
 
-        let mut sock6 = None;
-        let mut buff6 = None;
-        let mut queu6 = None;
+        let msg  = call.lock().unwrap().req();
+        let txid = call.lock().unwrap().txid();
 
-        if let Some(dht) = dht6.as_ref() {
-            sock6 = Some(UdpSocket::bind(dht.borrow().addr()).await?);
-            buff6 = Some(Rc::new(RefCell::new(vec![0u8; 1024])));
-            queu6 = None;
-        }
+        self.pending_calls.insert(txid, call.clone());
 
-        let mut interval = interval_at(
-            server.borrow().scheduler.borrow().next_timeout(),
-            Duration::from_secs(60*60)
-        );
-
-        let mut running = true;
-        while running {
-            tokio::select! {
-                res = read_socket(sock4.as_ref(), buff4.as_ref(), server.clone(), |id, encrypted| {
-                    runner.borrow().decrypt_into(id, encrypted)
-                }), if sock4.is_some() => {
-                    match res {
-                        Ok(data) => {
-                            if let Some(msg) = data {
-                                dht4.as_ref().unwrap().borrow_mut().on_message(msg)
-                            }
-                        },
-                        Err(_) => {},
-                    }
+        match self.send_msg(msg).await {
+            Ok(_) => {
+                call.lock().unwrap().sent();
+                if let Some(cb) = self.call_sent_cb.as_ref() {
+                    cb(call);
                 }
-
-                res = read_socket(sock6.as_ref(), buff6.as_ref(), server.clone(), |id, encrypted| {
-                    runner.borrow().decrypt_into(id, encrypted)
-                }), if sock6.is_some() => {
-                    match res {
-                        Ok(data) => {
-                            if let Some(msg) = data {
-                                dht6.as_ref().unwrap().borrow_mut().on_message(msg)
-                            }
-                        },
-                        Err(_) => {},
-                    }
-                }
-
-                res = write_socket(sock4.as_ref(), queu4.as_ref(), dht4.as_ref(), |id, plain| {
-                    runner.borrow().encrypt_into(id, plain)
-                }), if sock4.is_some() => {
-                    match res {
-                        Ok(_) => {},
-                        Err(_) => {},
-                    }
-                }
-
-                res = write_socket(sock6.as_ref(), queu6.as_ref(), dht4.as_ref(), |id, plain| {
-                    runner.borrow().encrypt_into(id, plain)
-                }), if sock6.is_some() => {
-                    match res {
-                        Ok(_) => {},
-                        Err(_) => {},
-                    }
-                }
-
-                _ = interval.tick() => {
-                    let scheduler = server.borrow().scheduler();
-                    scheduler::run_jobs(scheduler);
-                }
-            }
-
-            if *quit.lock().unwrap() {
-                running = false;
-            }
-            if server.borrow().scheduler.borrow().is_updated() {
-                interval.reset_at(server.borrow().scheduler.borrow().next_timeout());
+            },
+            Err(e) => {
+                self.pending_calls.remove(&txid);
+                call.lock().unwrap().fail(e);
             }
         }
+
+        unimplemented!()
+    }
+
+    pub(crate) async fn send_msg(&mut self, msg: Arc<Mutex<Message>>) -> Result<()> {
+        msg.lock().unwrap().set_id(self.id());
+
+        let locked_msg = msg.lock().unwrap();
+        let plain = serde_cbor::to_vec(&*locked_msg).map_err(|e| {
+            ProtocolError::new(format!("INTERNAL ERROR: failed to serialize message: {e}"))
+        })?;
+
+        let encrypted = self.identity().lock().unwrap().encrypt_into(
+            locked_msg.remote_id(),
+            &plain
+        ).map_err(|e| {
+            CryptoError::new(format!("INTERNAL ERROR: failed to encrypt message: {e}"))
+        })?;
+
+        let mut buf = Vec::new() as Vec<u8>;
+        buf.extend_from_slice(msg.lock().unwrap().id().as_bytes());
+        buf.extend_from_slice(&encrypted);
+
+        let socket = match self.socket.as_ref() {
+            Some(s) => s,
+            None => return Err(NetworkError::new("INTERNAL ERROR: socket not initialized".into())),
+        };
+
+        if let Err(e) = socket.send_to(&buf, msg.lock().unwrap().remote_addr()).await {
+            return Err(NetworkError::new(format!("INTERNAL ERROR: failed to send message: {}", e)));
+        };
 
         Ok(())
-    })
-}
-
-async fn read_socket<F>(
-    socket: Option<&UdpSocket>,
-    buffer: Option<&Rc<RefCell<Vec<u8>>>>,
-    server: Rc<RefCell<Server>>,
-    mut decrypt: F
-) -> Result<Option<Rc<RefCell<Box<dyn Msg>>>>, io::Error>
-where F: FnMut(&Id, &mut [u8]) -> Result<Vec<u8>, Error>
-{
-    let socket = match socket {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    let buf = match buffer {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    let mut buf = buf.borrow_mut();
-    let (len, from) = socket.recv_from(&mut buf).await?;
-    let from_id = Id::try_from(&buf[0.. id::ID_BYTES]).unwrap();
-
-    let plain = match decrypt(&from_id, &mut buf[id::ID_BYTES .. len]) {
-        Ok(v) => v,
-        Err(err) => {
-            warn!("Decrypt packet from {} error: {}, ignored it", from, err);
-            return Ok(None);
-        }
-    };
-
-    let msg = match deser(&plain) {
-        Ok(msg) => msg,
-        Err(err) => {
-            warn!("Got a wrong packet from {} with {}, ignored it", from, err);
-            return Ok(None);
-        }
-    };
-
-    server.borrow_mut().recv_msg_num_incr();
-
-    msg.borrow_mut().set_id(&from_id);
-    msg.borrow_mut().set_origin(&from);
-/*
-    #[cfg(debug_assertions)]
-    {
-        use log::debug;
-        debug!("Received message: {}/{} from {}:[size: {}] - {}",
-            msg.borrow().method(),
-            msg.borrow().kind(),
-            from,
-            len,
-            msg.borrow());
     }
-*/
-    // txid should not be zero if it's not Error message.
-    if msg.borrow().kind() != msg::Kind::Error && msg.borrow().txid() == 0 {
-        warn!("Received a message with invalid txid, discarded it");
-        return Ok(None);
-    }
-
-    // Just respond to incoming request, no need to match them to pending requests
-    if msg.borrow().kind() == msg::Kind::Request {
-        return Ok(Some(msg));
-    }
-
-    // Check if it's a response to an outstanding request.
-    let calls = server.borrow().calls.clone();
-    let call = calls.borrow_mut().remove(&msg.borrow().txid());
-
-    if let Some(call) = call {
-        let req = match call.borrow().req() {
-            Some(v) => v.clone(),
-            None => return Ok(None)
-        };
-
-        if req.borrow().remote_addr() == msg.borrow().origin() {
-            msg.borrow_mut().with_associated_call(call.clone());
-            call.borrow_mut().responsed(msg.clone());
-
-            return Ok(Some(msg.clone()));
-        }
-
-        // 1. the message is not a request
-        // 2. transaction ID matched
-        // 3. request destination did not match response source!!
-        // this happening by chance is exceedingly unlikely
-        // indicates either port-mangling NAT, a multhomed host listening on any-local address
-        // or some kind of attack ignore response
-
-        warn!("Transaction id matched, socket address did not, ignoring message, request: {} -> response: {}, version: {}",
-            req.borrow().remote_addr(),
-            msg.borrow().origin(),
-            version::format_version(msg.borrow().ver())
-        );
-
-        // but expect an upcoming timeout if it's really just a misbehaving node
-        call.borrow_mut().responsed_socket_mismatch();
-        call.borrow_mut().stall();
-        return Ok(None);
-    }
-
-    // a) it's not a request
-    // b) didn't find a call
-    // c) up-time is high enough that it's not a stray from a restart
-    // did not expect this response
-    if msg.borrow().kind() == msg::Kind::Response { // && elapsed_ms!(self.started) > 2 * 60 * 1000 {
-        warn!("Can not find rpc call for response {}", msg.borrow());
-        return Ok(None);
-    }
-
-    if msg.borrow().kind() == msg::Kind::Error {
-        return Ok(Some(msg));
-    }
-
-    warn!("Unknown message, gnored it {}.", msg.borrow());
-    Ok(None)
-}
-
-async fn write_socket<F>(
-    socket: Option<&UdpSocket>,
-    queue: Option<&Rc<RefCell<LinkedList<Rc<RefCell<Box<dyn Msg>>>>>>>,
-    dht: Option<&Rc<RefCell<DHT>>>,
-    mut encrypt: F) -> Result<(), io::Error>
-where F: FnMut(&Id, &[u8]) -> Result<Vec<u8>, Error>
-{
-    let socket = match socket {
-        Some(v) => v,
-        None => return Ok(()),
-    };
-
-    let dht = match dht {
-        Some(v) => v.clone(),
-        None => return Ok(()),
-    };
-
-    let queue = match queue {
-        Some(v) => v.clone(),
-        None => return Ok(()),
-    };
-
-    let msg = match queue.borrow_mut().pop_front() {
-        Some(v) => v,
-        None => {
-            sleep(Duration::from_millis(1000)).await;
-            return Ok(())
-        }
-    };
-
-    if let Some(call) = msg.borrow().associated_call() {
-        let scheduler = dht.borrow().server().borrow().scheduler();
-
-        dht.borrow_mut().on_send(call.borrow_mut().target_id());
-        call.borrow_mut().send(scheduler);
-    }
-
-    let plain = serialize(msg.clone());
-    let encrypted = match encrypt(msg.borrow().remote_id(), &plain) {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Encrypting packet for message {} error: {}", msg.borrow(), e);
-            return Ok(())
-        },
-    };
-
-    let mut buf = Vec::new() as Vec<u8>;
-    buf.extend_from_slice(msg.borrow().id().as_bytes());
-    buf.extend_from_slice(&encrypted);
-
-    match socket.send_to(&buf, msg.borrow().remote_addr()).await {
-        Ok(_) => {},
-        Err(e) => warn!("Sending message failed {}", e),
-    };
-
-    Ok(())
 }

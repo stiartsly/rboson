@@ -355,10 +355,6 @@ impl Config for Configuration {
         self.port
     }
 
-    fn access_control_dir(&self) -> Option<&str> {
-        unimplemented!()
-    }
-
     fn data_dir(&self) -> &str {
         &self.data_dir
     }

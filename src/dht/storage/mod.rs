@@ -1,15 +1,17 @@
+pub(crate) mod data_storage;
+pub(crate) mod sqlite_storage;
 pub(crate) mod models;
 mod schema;
 mod sql;
 
-use crate::dht::sqlite3::models::{
+use crate::dht::storage::models::{
     Valore,
     NewValore,
     Peer,
     NewPeer
 };
 
-use crate::dht::sqlite3::schema::valores::{
+use crate::dht::storage::schema::valores::{
     dsl::valores,
     id          as val_id,
     persistent  as val_persistent,
@@ -17,7 +19,7 @@ use crate::dht::sqlite3::schema::valores::{
     announced   as val_announced,
 };
 
-use crate::dht::sqlite3::schema::peers::{
+use crate::dht::storage::schema::peers::{
     dsl::peers,
     id          as peer_id,
     persistent  as peer_persistent,
@@ -91,7 +93,7 @@ pub(crate) fn put_value(
     conn: &mut SqliteConnection,
     v: NewValore
 ) -> Result<bool, Error> {
-    use crate::dht::sqlite3::schema::valores;
+    use crate::dht::storage::schema::valores;
     diesel::insert_into(valores::table)  // TOOD: Filter the existed one.
         .values(&v)
         .execute(conn)
@@ -204,7 +206,7 @@ pub(crate) fn put_peer(
     conn: &mut SqliteConnection,
     v: NewPeer
 ) -> Result<bool, Error> {
-    use crate::dht::sqlite3::schema::peers;
+    use crate::dht::storage::schema::peers;
     diesel::insert_into(peers::table) // TOOD: Filter the existed one.
         .values(&v)
         .execute(conn)

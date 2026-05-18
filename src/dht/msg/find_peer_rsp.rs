@@ -1,236 +1,162 @@
 use std::fmt;
-use std::rc::Rc;
-use std::any::Any;
-use ciborium::Value as CVal;
-
-use crate::{
-    Id,
-    PeerInfo,
-    NodeInfo,
-    Error,
-    core::{
-        version,
-        Result,
-        peer_info::PackBuilder
-    }
+use std::result::Result as SResult;
+use serde_cbor::value::to_value;
+use serde::{
+    Deserialize, Serialize,
+    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
+    ser::{SerializeMap, Serializer}
 };
 
-use super::{
-    msg::{
-        Kind, Method, Msg,
-        Data as MsgData
-    },
-    lookup_rsp::{
-        Msg as LookupResponse,
-        Data as LookuResponseData
-    },
+use crate::{ NodeInfo, PeerInfo };
+use super::lookup_rsp::{
+    LookupResponse,
+    Data
 };
 
-pub(crate) struct Message {
-    base_data   : MsgData,
-    lookup_data : LookuResponseData,
-
-    peers       : Vec<PeerInfo>,
+pub(crate) struct FindPeerResponse {
+    pub(crate) data: Data,
+    pub(crate) peers: Option<Vec<PeerInfo>>,
 }
 
-impl Msg for Message {
-    fn data(&self) -> &MsgData {
-        &self.base_data
+impl FindPeerResponse {
+    pub(crate) fn new(
+        nodes4: Option<Vec<NodeInfo>>,
+        nodes6: Option<Vec<NodeInfo>>
+    ) -> Self {
+        Self {
+            data: Data::new(nodes4, nodes6, 0),
+            peers: None,
+        }
     }
 
-    fn data_mut(&mut self) -> &mut MsgData {
-        &mut self.base_data
+    pub(crate) fn from(peers: Vec<PeerInfo>) -> Self {
+        Self {
+            data: Data::new(None, None, 0),
+            peers: Some(peers),
+        }
     }
 
-    fn from_cbor(&mut self, input: &CVal) -> Option<()> {
-        let root = input.as_map()?;
-        for (k,v) in root {
-            let k = k.as_text()?;
-            match k {
-                "y" => {},
-                "t" => {
-                    let txid = v.as_integer()?.try_into().unwrap();
-                    self.set_txid(txid);
-                },
-                "v" => {
-                    let ver = v.as_integer()?.try_into().unwrap();
-                    self.set_ver(ver);
-                },
-                "r" => {
-                    let map = v.as_map()?;
-                    for (k,v) in map {
-                        let k = k.as_text()?;
-                        match k {
-                            "n4" => {
-                                self.populate_closest_nodes4({
-                                    let mut nodes = Vec::new();
-                                    for item in v.as_array()?.iter() {
-                                        nodes.push(Rc::new(NodeInfo::from_cbor(item)?));
-                                    }
-                                    nodes
-                                });
-                            },
-                            "n6" => {
-                                self.populate_closest_nodes6({
-                                    let mut nodes = Vec::new();
-                                    for item in v.as_array()?.iter() {
-                                        nodes.push(Rc::new(NodeInfo::from_cbor(item)?));
-                                    }
-                                    nodes
-                                });
-                            },
-                            "tok" => {
-                                self.populate_token(
-                                    v.as_integer()?.try_into().unwrap()
-                                );
-                            },
-                            "p" => {
-                                let v = v.as_array()?;
-                                let mut leading_peer = true;
-                                let mut peerid = None;
-                                for item in v.iter() {
-                                    let v = item.as_array()?;
-                                    if leading_peer {
-                                        peerid = Some(Id::from_cbor(v.get(0)?)?);
-                                        leading_peer = false;
-                                    }
-                                    let nodeid = Id::from_cbor(v.get(1)?)?;
-                                    let origin = match v.get(2)?.is_null() {
-                                        true => None,
-                                        false => Id::from_cbor(v.get(2)?)
-                                    };
-                                    let port = v.get(3)?.as_integer()?.try_into().unwrap();
-                                    let alt = v.get(4)?.as_text();
-                                    let sig = v.get(5)?.as_bytes()?;
+    pub(crate) fn has_peers(&self) -> bool {
+        self.peers.as_ref().map_or(false, |p| !p.is_empty())
+    }
 
-                                    let peer = PackBuilder::new(nodeid)
-                                        .with_peerid(peerid.clone())
-                                        .with_origin(origin)
-                                        .with_port(port)
-                                        .with_url(alt.map(|v|v.to_string()))
-                                        .with_sig(Some(sig.to_vec()))
-                                        .build();
-                                    self.peers.push(peer);
-                                };
-                            }
-                            _ => return None
-                        }
-                    }
-                },
-                _ => return None,
+    pub(crate) fn peers(&self) -> Option<&[PeerInfo]> {
+        self.peers.as_deref()
+    }
+}
+
+impl LookupResponse for FindPeerResponse {
+    fn data(&self) -> &Data {
+        &self.data
+    }
+
+    fn data_mut(&mut self) -> &mut Data {
+        &mut self.data
+    }
+}
+
+impl Serialize for FindPeerResponse {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = se.serialize_map(None)?;
+        if let Some(peers) = self.peers.as_ref() {
+            let value = to_value(&peers).map_err(|_| serde::ser::Error::custom(
+                "Failed to convert peers to CBOR Value"
+            ))?;
+            s.serialize_entry("p", &value)?;
+        } else {
+            if let Some(ns4) = self.nodes4() {
+                let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
+                    "Failed to convert nodes4 to CBOR Value"
+                ))?;
+                s.serialize_entry("n4", &value)?;
+            }
+            if let Some(ns6) = self.nodes6() {
+                let value = to_value(&ns6).map_err(|_| serde::ser::Error::custom(
+                    "Failed to convert nodes6 to CBOR Value"
+                ))?;
+                s.serialize_entry("n6", &value)?;
             }
         }
-        Some(())
-    }
-
-    fn ser(&self) -> CVal {
-        let mut array = vec![];
-
-        let mut leading_peer = true;
-        self.peers.iter().for_each(|item| {
-            let peer_id = if leading_peer {
-                leading_peer = false;
-                item.id().to_cbor()
-            } else {
-                CVal::Null
-            };
-
-            let nodeid  = item.nodeid().to_cbor();
-            let port    = CVal::Integer(item.port().into());
-            let sig     = CVal::Bytes(item.signature().to_vec());
-            let origin  = match item.is_delegated() {
-                true => item.origin().to_cbor(),
-                false => CVal::Null
-            };
-            let alt_url = item.alternative_url()
-                .map_or(CVal::Null, |url|CVal::Text(url.to_string()));
-
-            let mut peer = vec![];
-            peer.push(peer_id);
-            peer.push(nodeid);
-            peer.push(origin);
-            peer.push(port);
-            peer.push(alt_url);
-            peer.push(sig);
-            array.push(CVal::Array(peer));
-        });
-
-        let mut rsp = LookupResponse::to_cbor(self);
-        if let Some(map) = rsp.as_map_mut() {
-            map.push((
-                CVal::Text(String::from("p")),
-                CVal::Array(array))
-            );
-        }
-
-        let mut root = Msg::to_cbor(self);
-        if let Some(map) = root.as_map_mut() {
-            map.push((
-                CVal::Text(String::from("r")),
-                rsp
-            ));
-        }
-        root
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+        s.end()
     }
 }
 
-impl LookupResponse for Message {
-    fn data(&self) -> &LookuResponseData {
-        &self.lookup_data
-    }
-
-    fn data_mut(&mut self) -> &mut LookuResponseData {
-        &mut self.lookup_data
-    }
-}
-
-impl Message {
-    pub(crate) fn new() -> Self {
-        Self {
-            lookup_data: LookuResponseData::new(),
-            base_data: MsgData::new(
-                Kind::Response,
-                Method::FindPeer,
-                0
-            ),
-            peers: Vec::new(),
+impl<'de> Deserialize<'de> for FindPeerResponse {
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug)]
+        enum Field {
+            Nodes4,         // "n4"
+            Nodes6,         // "n6"
+            Token,          // "tok"
+            Peers,          // "p"
+            Ignore          // Ignore unknown fields
         }
-    }
 
-    pub(crate) fn peers(&self) -> &[PeerInfo] {
-        self.peers.as_ref()
-    }
-
-    pub(crate) fn populate_peers(&mut self, peers: Vec<PeerInfo>) {
-        self.peers = peers
-    }
-}
-
-impl TryFrom<CVal> for Box<Message> {
-    type Error = Error;
-    fn try_from(input: CVal) -> Result<Box<Message>> {
-        let mut msg = Self::new(Message::new());
-        if let None =  msg.from_cbor(&input) {
-                return Err(Error::Protocol(
-                    format!("Invalid cobor value for find_peer_rsp message")));
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(de)?;
+                match key.as_str() {
+                    "n4"    => Ok(Field::Nodes4),
+                    "n6"    => Ok(Field::Nodes6),
+                    "p"     => Ok(Field::Peers),
+                    "tok"   => Ok(Field::Token),
+                    _       => Ok(Field::Ignore),
+                }
+            }
         }
-        Ok(msg)
+
+        struct FieldVisiter;
+        impl<'de> Visitor<'de> for FieldVisiter {
+            type Value = FindPeerResponse;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("FindPeerResponse")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut nodes4 = None;
+                let mut nodes6 = None;
+                let mut peers = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Nodes4 => nodes4 = map.next_value()?,
+                        Field::Nodes6 => nodes6 = map.next_value()?,
+                        Field::Peers => peers = map.next_value()?,
+                        Field::Token |
+                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                    }
+                }
+
+                if nodes4.is_none() && nodes6.is_none() && peers.is_none() {
+                    return Err(de::Error::custom("either \"n4\", \"n6\" or \"p\" must be present"));
+                }
+
+                if let Some(peers) = peers {
+                    Ok(FindPeerResponse::from(peers))
+                } else {
+                    Ok(FindPeerResponse::new(nodes4, nodes6))
+                }
+            }
+        }
+        de.deserialize_map(FieldVisiter)
     }
 }
 
-impl fmt::Display for Message {
+impl fmt::Display for FindPeerResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "y:{},m:{},t:{},r: {{",
-            self.kind(),
-            self.method(),
-            self.txid() as u32,
-        )?;
-
         if let Some(nodes4) = self.nodes4() {
             let mut first = true;
             if !nodes4.is_empty() {
@@ -259,14 +185,14 @@ impl fmt::Display for Message {
             }
         }
 
-        if self.token() != 0 {
-            write!(f, ",tok:{}", self.token())?;
-        }
-
         let mut first = true;
-        if !self.peers.is_empty() {
+        if let Some(peers) = self.peers.as_ref() {
+            if peers.is_empty() {
+                return Ok(());
+            }
+
             write!(f, ",p:")?;
-            for item in self.peers.iter() {
+            for item in peers.iter() {
                 if !first {
                     first = false;
                     write!(f, ",")?;
@@ -274,11 +200,6 @@ impl fmt::Display for Message {
                 write!(f, "[{}]", item)?;
             }
         }
-
-        write!(f,
-            "}},v:{}",
-            version::format_version(self.ver())
-        )?;
         Ok(())
     }
 }

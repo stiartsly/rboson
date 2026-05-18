@@ -1,49 +1,23 @@
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use diesel::prelude::*;
-use log::{debug, warn};
 
 use crate::{
     as_ms,
-    elapsed_ms,
     Id,
     PeerInfo,
     Value,
-    cryptobox::Nonce,
-    signature::PrivateKey,
     Error,
-    core::{
-        peer_info::PackBuilder as PeerPackBuilder,
-        value::PackBuilder as ValuePackBuilder,
-        Result,
-    },
+    Result,
+    errors::StateError,
     dht::{
-        constants,
-        data_storage::DataStorage,
-
+        storage::data_storage::DataStorage,
     }
 };
 
-use crate::dht::sqlite3::{
-    models::NewValore,
-    models::NewPeer,
+use crate::dht::storage::{
     user_version,
     drop_tbs,
     create_tbs,
-    remove_expired_values,
-    remove_expired_peers,
-    get_value,
-    put_value,
-    update_value_last_announce,
-    remove_value,
-    persistent_values,
-    value_ids,
-    get_peers,
-    get_peer,
-    put_peer,
-    update_peer_last_announce,
-    remove_peer,
-    persistent_peers,
-    peer_ids
 };
 
 pub(crate) struct SqliteStorage {
@@ -60,6 +34,136 @@ impl SqliteStorage {
     }
 }
 
+unsafe impl Send for SqliteStorage {}
+unsafe impl Sync for SqliteStorage {}
+
+impl DataStorage for SqliteStorage {
+    fn initialize(
+        &mut self,
+        _: Duration,
+        _: Duration) -> Result<()> {
+        Ok(())
+    }
+
+    fn open(&mut self, path: &str) -> Result<()> {
+        let connection = match SqliteConnection::establish(&path) {
+            Ok(c) => c,
+            Err(e) => return Err(Error::from(e))
+        };
+        self.connection = Some(connection);
+
+        // if we change the schema,
+        // we should check the user version, do the schema update,
+        // then increase the user_version;
+        let ver  = user_version(self.conn());
+        let conn = self.connection.as_mut().unwrap();
+        if ver < 4 && !drop_tbs(conn) {
+            return Err(StateError::new("Failed to update db tables".into()));
+        }
+        if !create_tbs(conn) {
+            return Err(StateError::new("Failed to update SQLite Text".into()));
+        }
+
+        Ok(())
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.connection = None;
+        Ok(())
+    }
+
+    fn purge(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn put_value(&mut self,
+        _: Value,
+        _persistent: Option<bool>
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn get_value(&self, _: &Id) -> Result<Option<Value>> {
+        unimplemented!()
+    }
+
+    fn get_values(&self)-> Result<Vec<Value>> {
+        unimplemented!()
+    }
+
+    fn update_value_announced_time(&mut self,  _: &Id) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn remove_value(&mut self, _: &Id) -> Result<()> {
+        unimplemented!()
+    }
+
+    // methods related to peer(s)
+
+    fn put_peer(&mut self,
+        _peer: PeerInfo,
+        _persistent: Option<bool>
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn put_peers(&mut self,
+        _: Vec<PeerInfo>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn get_peer(&self,
+        _: &Id,
+        _: u64
+    ) -> Result<Option<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers(&self, _: &Id) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers_with_expected_seq(&self,
+        _: &Id,
+        _: i32,
+        _: i32
+    ) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers_authenticated_by(&self,
+        _: &Id,
+        _: &Id
+    ) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers_all(& self) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn update_peer_announced_time(&mut self,
+        _: &Id,
+        _: u64
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn remove_peer(&mut self,
+        _: &Id,
+        _: u64
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn remove_peers(&mut self, _: &Id) -> Result<()> {
+        unimplemented!()
+    }
+}
+
+/*
 impl DataStorage for SqliteStorage {
     fn open(&mut self, path: &str) -> Result<()> {
         let connection = match SqliteConnection::establish(&path) {
@@ -82,11 +186,12 @@ impl DataStorage for SqliteStorage {
 
         Ok(())
     }
-    fn close(&mut self) {
+    fn close(&mut self) -> Result<()> {
         self.connection = None;
+        Ok(())
     }
 
-    fn expire(&mut self) {
+    fn expire(&mut self) -> Result<()> {
         debug!("Remove all expired values and peers from local SQLite storage.");
 
         let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
@@ -98,20 +203,21 @@ impl DataStorage for SqliteStorage {
         remove_expired_peers(self.conn(), before as i64)
             .map_err(|e| warn!("Removing expired peers from SQLite storage error: {}", e))
             .ok();
+        Ok(())
     }
 
     fn value(&mut self, id: &Id) -> Result<Option<Value>> {
         let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
         match get_value(self.conn(), id.as_bytes(), before as i64) {
             Ok(Some(v)) => {
-                let peer = ValuePackBuilder::new(v.data)
-                    .with_pk(v.publicKey  .as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()))
-                    .with_sk(v.privateKey .as_ref().map(|v| PrivateKey::try_from(v.as_slice()).unwrap()))
-                    .with_rec(v.recipient .as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()))
-                    .with_nonce(v.nonce   .as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()))
-                    .with_sig(v.signature)
-                    .with_seq(v.sequenceNumber)
-                    .build();
+                let value = Value::packed(
+                    v.publicKey.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
+                    v.recipient.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
+                    v.nonce.as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()),
+                    v.signature,
+                    v.data,
+                    v.sequenceNumber
+                );
 
                 // Retaining them solely to eliminate compilation warnings.
                 _ = v.id;
@@ -119,11 +225,12 @@ impl DataStorage for SqliteStorage {
                 _ = v.announced;
                 _ = v.persistent;
 
-                Ok(Some(peer))
+                Ok(Some(value))
             },
             Ok(None) => Ok(None),
             Err(e) => Err(Error::from(e))
         }
+        Ok(None)
     }
 
     fn remove_value(&mut self, id: &Id) -> Result<()> {
@@ -201,14 +308,14 @@ impl DataStorage for SqliteStorage {
 
         let values = values.into_iter()
             .filter_map(|v| {
-                let value = ValuePackBuilder::new(v.data)
-                    .with_pk(v.publicKey  .as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()))
-                    .with_sk(v.privateKey .as_ref().map(|v| PrivateKey::try_from(v.as_slice()).unwrap()))
-                    .with_rec(v.recipient .as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()))
-                    .with_nonce(v.nonce   .as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()))
-                    .with_sig(v.signature)
-                    .with_seq(v.sequenceNumber)
-                    .build();
+                let value = Value::packed(
+                    v.publicKey.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
+                    v.recipient.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
+                    v.nonce.as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()),
+                    v.signature,
+                    v.data,
+                    v.sequenceNumber
+                );
 
                 // Retaining them solely to eliminate compilation warnings.
                 _ = v.id;
@@ -233,8 +340,7 @@ impl DataStorage for SqliteStorage {
             }).map_err(|e| Error::from(e))
     }
 
-    fn peers(&mut self, peer_id: &Id, max_peers: usize) -> Result<Vec<PeerInfo>> {
-        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
+    fn peers(&mut self, _eer_id: &Id, _max_peers: usize) -> Result<Vec<PeerInfo>> {
         let result = get_peers( self.conn(),
             peer_id.as_bytes(),
             max_peers as i64,
@@ -270,7 +376,7 @@ impl DataStorage for SqliteStorage {
         Ok(peers)
     }
 
-    fn peer(&mut self, id: &Id, origin: &Id) -> Result<Option<PeerInfo>> {
+    fn peer(&mut self, _id: &Id) -> Result<Option<PeerInfo>> {
         let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
         match get_peer(self.conn(), id.as_bytes(), origin.as_bytes(), timestamp as i64) {
             Ok(Some(v)) => {
@@ -291,23 +397,25 @@ impl DataStorage for SqliteStorage {
             Ok(None) => Ok(None),
             Err(e) => return Err(Error::from(e))
         }
+        unimplemented!()
     }
 
-    fn remove_peer(&mut self, peer_id: &Id, origin: &Id) -> Result<()> {
+    fn remove_peer(&mut self, peer_id: &Id) -> Result<()> {
         remove_peer(self.conn(), peer_id.as_bytes(), origin.as_bytes())
             .and_then(|_| Ok(()))
             .map_err(|e| Error::from(e))
+        unimplemented!()
     }
 
     fn put_peers(&mut self, _peer: &[PeerInfo]) -> Result<()> {
-        //TOOD: unimplemented!()
-        Ok(())
+        unimplemented!()
     }
 
     fn put_peer(&mut self,
-        peer: &PeerInfo,
-        persistent: Option<bool>,
-        update_last_announce: Option<bool>
+        _peer: &PeerInfo,
+        expected_seq: Option<i32>,
+        _persistent: Option<bool>,
+        _update_last_announce: Option<bool>
     ) -> Result<()> {
         if !peer.is_valid() {
             return Err(Error::Argument(format!("peer signature validation failed.")));
@@ -329,6 +437,7 @@ impl DataStorage for SqliteStorage {
         put_peer(self.conn(), p)
             .and_then(|_| Ok(()))
             .map_err(|e| Error::from(e))
+        unimplemented!()
     }
 
     fn update_peer_last_announce(&mut self, target: &Id, origin: &Id) -> Result<()> {
@@ -340,6 +449,7 @@ impl DataStorage for SqliteStorage {
                 timestamp)
             .and_then(|_| Ok(()))
             .map_err(|e| Error::from(e))
+        unimplemented!()
     }
 
     fn persistent_peers(&mut self, before: &SystemTime) -> Result<Vec<PeerInfo>> {
@@ -374,6 +484,7 @@ impl DataStorage for SqliteStorage {
             }).collect();
 
         Ok(peers)
+        unimplemented!()
     }
 
     fn peer_ids(&mut self) -> Result<Vec<Id>> {
@@ -385,8 +496,10 @@ impl DataStorage for SqliteStorage {
                     .collect();
                 Ok(ids)
             }).map_err(|e| Error::from(e))
+        unimplemented!()
     }
 }
+*/
 
 #[inline(always)]
 fn ms_since_epoch() -> u128 {

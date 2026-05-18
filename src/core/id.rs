@@ -5,8 +5,7 @@ use std::fmt;
 use std::result::Result as SResult;
 use bs58;
 use serde::{
-    Serialize,
-    Deserialize,
+    Serialize,Deserialize,
     ser::Serializer,
     de::{self, Deserializer, Visitor}
 };
@@ -16,84 +15,85 @@ use crate::{
     cryptobox,
     signature,
     Error,
-    error::Result
+    Result,
+    errors::ArgumentError,
 };
-
-pub const ID_BYTES: usize = 32;
-pub const ID_BITS:  usize = 256;
-
-pub const MIN_ID: Id = Id::min();
-pub const MAX_ID: Id = Id::max();
 
 pub const DID_PREFIX: &str = "did:boson:";
 
-#[derive(Debug, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Hash)]
 pub struct Id(
-    [u8; ID_BYTES]
+    [u8; Id::BYTES]
 );
 
 impl Id {
+    pub const BYTES: usize = 32;
+    pub const BITS:  usize = 256;
+
+    pub const MAX_ID: Id = Id::max();
+    pub const MIN_ID: Id = Id::min();
+
     pub fn random() -> Self {
-        let mut bytes = [0u8; ID_BYTES];
+        let mut bytes = [0u8; Id::BYTES];
         randomize_bytes(&mut bytes);
         Id(bytes)
     }
 
-    pub fn from_bytes(input: [u8; ID_BYTES]) -> Self {
+    pub fn from_bytes(input: [u8; Id::BYTES]) -> Self {
         Id(input)
     }
 
     pub fn try_from_bytes(input: &[u8]) -> Result<Self> {
-        if input.len() != ID_BYTES {
-            return Err(Error::Argument(format!(
+        if input.len() != Id::BYTES {
+            return Err(ArgumentError::new(format!(
                 "Invalid bytes length {} for ID, expected length {}",
                 input.len(),
-                ID_BYTES
+                Id::BYTES
             )));
         }
-        let mut bytes = [0u8; ID_BYTES];
+        let mut bytes = [0u8; Id::BYTES];
         bytes.copy_from_slice(input);
         Ok(Id(bytes))
     }
 
     pub fn try_from_hexstr(input: &str) -> Result<Self> {
         let Some(input) = input.strip_prefix("0x") else {
-            return Err(Error::Argument("Hex format strings must have a '0x' prefix.".into()));
+            return Err(ArgumentError::new("Hex format strings must have a '0x' prefix.".into()));
         };
 
-        let mut bytes = [0u8; ID_BYTES];
+        let mut bytes = [0u8; Id::BYTES];
         hex::decode_to_slice(input, &mut bytes[..]).map_err(|e|
-            Error::Argument(format!("Invalid hex format string: {e}"))
+            ArgumentError::new(format!("Invalid hex format string: {e}"))
         )?;
         Ok(Id(bytes))
     }
 
     pub fn try_from_base58(input: &str) -> Result<Self> {
         if input.starts_with("0x") {
-            return Err(Error::Argument("Base58 format strings must not have a '0x' prefix.".into()));
+            return Err(ArgumentError::new("Base58 format strings must not have a '0x' prefix.".into()));
         }
 
-        let mut bytes = [0u8; ID_BYTES];
+        let mut bytes = [0u8; Id::BYTES];
         bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
             .map_err(|e| {
                 println!(">>> e: {}, input:{}", e, input);
-                Error::Argument(format!("Invalid base58 format string: {e}"))
+                ArgumentError::new(format!("Invalid base58 format string: {e}"))
         })?;
         Ok(Id(bytes))
     }
 
     //  Creates an id with the specified bit set to 1.
     pub fn try_from_bit_at(index: usize) -> Result<Self> {
-        if index >= ID_BITS {
-            return Err(Error::Argument(format!(
+        if index >= Id::BITS {
+            return Err(ArgumentError::new(format!(
                 "Index {} is out of bounds for ID with {} bits",
-                index, ID_BITS
+                index, Id::BITS
             )));
         }
 
-        let mut bytes = [0u8; ID_BYTES];
+        let mut bytes = [0u8; Id::BYTES];
         let byte_index = index / 8;
         let bit_index = index % 8;
 
@@ -102,15 +102,15 @@ impl Id {
     }
 
     pub const fn min() -> Self {
-        Id([0x0; ID_BYTES])
+        Id([0x0; Id::BYTES])
     }
 
     pub const fn max() -> Self {
-        Id([0xFF; ID_BYTES])
+        Id([0xFF; Id::BYTES])
     }
 
     pub const fn zero() -> Self {
-        Id([0u8; ID_BYTES])
+        Id([0u8; Id::BYTES])
     }
 
     pub fn to_hexstr(&self) -> String {
@@ -138,7 +138,7 @@ impl Id {
     }
 
     pub fn to_binary_string(&self) -> String {
-        let mut out = String::with_capacity(ID_BYTES * 8);
+        let mut out = String::with_capacity(Id::BYTES * 8);
         for b in &self.0 {
             out.push_str(&format!("{:08b}", b));
         }
@@ -158,45 +158,92 @@ impl Id {
     }
 
     pub fn distance(&self, other: &Id) -> Id {
-        let mut bytes = [0u8; ID_BYTES];
-        for i in 0..ID_BYTES {
+        let mut bytes = [0u8; Id::BYTES];
+        for i in 0..Id::BYTES {
             bytes[i] = self.0[i] ^ other.0[i];
         }
         Id(bytes)
     }
 
     pub const fn size(&self) -> usize {
-        ID_BYTES
+        Id::BYTES
     }
 
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_slice()
     }
 
+    #[allow(unused)]
     pub(crate) fn update(&mut self, cb: impl Fn(&mut [u8])) {
         cb(self.0.as_mut_slice());
     }
 
+    /*
+    Order::Less     : means a is closer to the target than b.
+    Order::Greater  : means a is farther from the target than b.
+    Order::Equal    : means a and b are equidistant from the target.
+     */
     pub(crate) fn three_way_compare(&self, a: &Self, b: &Self) -> Ordering {
-        let mut mmi = ID_BYTES;
-        for i in 0..ID_BYTES {
+        let mut mmi = Id::BYTES;
+        for i in 0..Id::BYTES {
             if a.0[i] != b.0[i] {
                 mmi = i;
                 break;
             }
         }
-        if mmi == ID_BYTES {
+        if mmi == Id::BYTES {
             return Ordering::Equal;
         }
 
-        let ua = a.0[mmi] ^ self.0[mmi];
-        let ub = b.0[mmi] ^ self.0[mmi];
+        let _a = a.0[mmi] ^ self.0[mmi];
+        let _b = b.0[mmi] ^ self.0[mmi];
 
-        ua.cmp(&ub)
+        _a.cmp(&_b)
     }
 
     pub fn distance_between(a: &Id, b: &Id) -> Id {
         a.distance(b)
+    }
+
+    pub(crate) fn bits_equal(a: &Id, b: &Id, depth: i32) -> bool {
+        if depth == -1 {
+            return true;
+        }
+
+        let mut mmi = usize::MAX;
+        for i in 0..Id::BYTES {
+            if a.0[i] != b.0[i] {
+                mmi = i;
+                break;
+            }
+        }
+
+        let idx = (depth >> 3) as usize;
+        let diff: u8 = a.0[idx] ^ b.0[idx];
+        // Create a bitmask with the lower n bits set
+        let mask = (0xff80 >> (depth & 0x07)) as u8;
+        // Use the bitmask to check if the lower bits are all zeros
+        let is_diff = (diff & mask) == 0;
+
+        match mmi == idx {
+            true => is_diff,
+            false => mmi > idx,
+        }
+    }
+
+    pub(crate) fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
+        if depth == -1 {
+            return;
+        }
+
+        let idx = (depth >> 3) as usize;
+        if idx > 0 {
+            dst.0[..idx].copy_from_slice(&src.0[..idx]);
+        }
+
+        let mask = (0xff80 >> (depth & 0x07)) as u8;
+        dst.0[idx] &= !mask;
+        dst.0[idx] |= src.0[idx] & mask;
     }
 }
 
@@ -258,67 +305,23 @@ impl fmt::Binary for Id {
     }
 }
 
-pub(crate) fn bits_equal(a: &Id, b: &Id, depth: i32) -> bool {
-    if depth == -1 {
-        return true;
-    }
-
-    let mut mmi = usize::MAX;
-    for i in 0..ID_BYTES {
-        if a.0[i] != b.0[i] {
-            mmi = i;
-            break;
-        }
-    }
-
-    let idx = (depth >> 3) as usize;
-    let diff: u8 = a.0[idx] ^ b.0[idx];
-    // Create a bitmask with the lower n bits set
-    let mask = (0xff80 >> (depth & 0x07)) as u8;
-    // Use the bitmask to check if the lower bits are all zeros
-    let is_diff = (diff & mask) == 0;
-
-    match mmi == idx {
-        true => is_diff,
-        false => mmi > idx,
-    }
-}
-
-pub(crate) fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
-    if depth == -1 {
-        return;
-    }
-
-    let idx = (depth >> 3) as usize;
-    if idx > 0 {
-        dst.0[..idx].copy_from_slice(&src.0[..idx]);
-    }
-
-    let mask = (0xff80 >> (depth & 0x07)) as u8;
-    dst.0[idx] &= !mask;
-    dst.0[idx] |= src.0[idx] & mask;
-}
-
-impl Serialize for Id {
-    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+ impl Serialize for Id {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where S: Serializer,
     {
-        if serializer.is_human_readable() {
-            serializer.serialize_str(&self.to_base58())
-        } else {
-            serializer.serialize_bytes(&self.0)
+        match se.is_human_readable() {
+            true => se.serialize_str(&self.to_base58()),
+            false => se.serialize_bytes(&self.0),
         }
     }
 }
 
 impl<'de> Deserialize<'de> for Id {
-    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct IdVisitor;
-
         impl<'de> Visitor<'de> for IdVisitor {
             type Value = Id;
 
@@ -327,26 +330,25 @@ impl<'de> Deserialize<'de> for Id {
             }
 
             fn visit_str<E>(self, value: &str) -> SResult<Self::Value, E>
-            where
-                E: de::Error,
+            where E: de::Error,
             {
-                Id::try_from(value)
-                    .map_err(|e| de::Error::custom(format!("Invalid ID string: {e}")))
+                Id::try_from(value).map_err(|e|
+                    de::Error::custom(format!("Invalid ID string: {e}"))
+                )
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> SResult<Self::Value, E>
-            where
-                E: de::Error,
+            where E: de::Error,
             {
-                Id::try_from_bytes(v)
-                    .map_err(|e| de::Error::custom(format!("Invalid ID bytes: {e}")))
+                Id::try_from_bytes(v).map_err(|e|
+                    de::Error::custom(format!("Invalid ID bytes: {e}"))
+                )
             }
         }
 
-        if deserializer.is_human_readable() {
-            deserializer.deserialize_str(IdVisitor)
-        } else {
-            deserializer.deserialize_bytes(IdVisitor)
+        match de.is_human_readable() {
+            true => de.deserialize_str(IdVisitor),
+            false => de.deserialize_bytes(IdVisitor),
         }
     }
 }

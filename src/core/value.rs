@@ -1,22 +1,21 @@
 use std::fmt;
+use std::result::Result as SResult;
 use sha2::{Digest, Sha256};
 use serde::{
-    Serialize, Deserialize, Serializer, Deserializer,
+    Serialize, Deserialize,
+    Serializer, Deserializer,
     ser::SerializeStruct,
     de::{self, Visitor, MapAccess}
 };
 
-use crate::unwrap;
 use super::{
+    Id,
     cryptobox,
     signature,
-    Id,
-    signature::{
-        KeyPair,
-        PrivateKey
-    },
+    signature::{KeyPair, PrivateKey},
     cryptobox::Nonce,
-    Error, Result
+    Result,
+    errors::ArgumentError
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +32,19 @@ pub struct Value {
 #[derive(Clone)]
 pub struct ValueBuilder<'a> {
     data: &'a [u8],
+}
+
+impl<'a> ValueBuilder<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+
+    pub fn build(&self) -> Result<Value> {
+        if self.data.is_empty() {
+            return Err(ArgumentError::new("Value data cannot be empty".into()));
+        }
+        Ok(Value::new(self))
+    }
 }
 
 #[derive(Clone)]
@@ -54,19 +66,7 @@ pub struct EncryptedBuilder<'a> {
     seq: i32,
 }
 
-impl<'a> ValueBuilder<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        assert!(!data.is_empty());
-        Self { data }
-    }
 
-    pub fn build(&self) -> Result<Value> {
-        if self.data.len() == 0 {
-            return Err(Error::Argument(format!("Value data cannot be empty")));
-        }
-        Ok(Value::new(self))
-    }
-}
 
 impl<'a> SignedBuilder<'a> {
     pub fn new(data: &'a [u8]) -> Self {
@@ -94,10 +94,10 @@ impl<'a> SignedBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Value> {
-        if self.data.len() == 0 {
-            return Err(Error::Argument(format!("Value data cannot be empty")));
+        if self.data.is_empty() {
+            return Err(ArgumentError::new("Value data cannot be empty".into()));
         }
-        Ok(Value::signed(self))
+        Value::signed(self)
     }
 }
 
@@ -128,16 +128,16 @@ impl<'a> EncryptedBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Value> {
-        if self.data.len() == 0 {
-            return Err(Error::Argument(format!("Value data cannot be empty")));
+        if self.data.is_empty() {
+            return Err(ArgumentError::new("Value data cannot be empty".into()));
         }
-        Ok(Value::encrypted(self))
+        Value::encrypted(self)
     }
 }
 
 impl Value {
     fn new(b: &ValueBuilder) -> Value {
-        assert!(b.data.len() > 0);
+        assert!(!b.data.is_empty());
 
         Self {
             pk: None,
@@ -150,8 +150,8 @@ impl Value {
         }
     }
 
-    fn signed(b: &SignedBuilder) -> Value {
-        assert!(b.data.len() > 0);
+    fn signed(b: &SignedBuilder) -> Result<Value> {
+        assert!(!b.data.is_empty());
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
@@ -172,12 +172,16 @@ impl Value {
             value.serialize_signature_data().as_slice(),
             value.sk.as_ref().unwrap()
         );
-        value.sig = sig.ok();
-        value
+
+        match sig {
+            Ok(s) => value.sig = Some(s),
+            Err(e) => return Err(e.into())
+        }
+        Ok(value)
     }
 
-    fn encrypted(b: &EncryptedBuilder) -> Value {
-        assert!(b.data.len() > 0);
+    fn encrypted(b: &EncryptedBuilder) -> Result<Value> {
+        assert!(!b.data.is_empty());
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
@@ -196,26 +200,25 @@ impl Value {
 
         let encryption_sk = cryptobox::PrivateKey::try_from(
             value.sk.as_ref().unwrap()
-        ).unwrap();
+        )?;
 
         // encrypt data.
         value.data = cryptobox::encrypt_into(
             value.data.as_ref(),
             value.nonce.as_ref().unwrap(),
-            &unwrap!(value.recipient).to_encryption_key(),
+            &value.recipient.as_ref().unwrap().to_encryption_key(),
             &encryption_sk,
-        ).ok().unwrap();
+        )?;
 
         // sign data
         let sig = signature::sign_into(
             value.serialize_signature_data().as_slice(),
             value.sk.as_ref().unwrap()
-        );
-        value.sig = sig.ok();
-        value
+        )?;
+        value.sig = Some(sig);
+        Ok(value)
     }
 
-    #[allow(unused)]
     pub(crate) fn packed(
         pk: Option<Id>,
         recipient: Option<Id>,
@@ -254,6 +257,10 @@ impl Value {
 
     pub const fn recipient(&self) -> Option<&Id> {
         self.recipient.as_ref()
+    }
+
+    pub const fn has_private_key(&self) -> bool {
+        self.sk.is_some()
     }
 
     pub const fn private_key(&self) -> Option<&signature::PrivateKey> {
@@ -360,12 +367,6 @@ impl fmt::Display for Value {
     }
 }
 
-impl Into<Id> for Value {
-    fn into(self: Value) -> Id {
-        self.id()
-    }
-}
-
 pub fn value_id(value: &Value) -> Id {
     value.id()
 }
@@ -404,7 +405,7 @@ impl Serialize for Value {
 }
 
 impl<'de> Deserialize<'de> for Value {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -419,7 +420,7 @@ impl<'de> Deserialize<'de> for Value {
         }
 
         impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<Field, D::Error>
+            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
             where
                 D: Deserializer<'de>,
             {
@@ -445,13 +446,13 @@ impl<'de> Deserialize<'de> for Value {
                 formatter.write_str("struct Value")
             }
 
-            fn visit_map<V>(self, mut map: V) -> std::result::Result<Self::Value, V::Error>
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where
                 V: MapAccess<'de>,
             {
                 let mut pk: Option<Id> = None;
                 let mut recipient: Option<Id> = None;
-                let mut nonce: Option<Vec<u8>> = None;
+                let mut raw_nonce: Option<Vec<u8>> = None;
                 let mut sig: Option<Vec<u8>> = None;
                 let mut seq: i32 = 0;
                 let mut data: Option<Vec<u8>> = None;
@@ -460,23 +461,26 @@ impl<'de> Deserialize<'de> for Value {
                     match key {
                         Field::Key              => pk = Some(map.next_value()?),
                         Field::Recipient        => recipient = Some(map.next_value()?),
-                        Field::Nonce            => nonce = Some(map.next_value()?),
+                        Field::Nonce            => raw_nonce = Some(map.next_value()?),
                         Field::Signature        => sig = Some(map.next_value()?),
                         Field::SequenceNumber   => seq = map.next_value()?,
                         Field::Data             => data = Some(map.next_value()?),
                     }
                 }
 
+                let nonce = if let Some(raw_nonce) = raw_nonce.as_ref() {
+                    if raw_nonce.len() != Nonce::BYTES {
+                        return Err(de::Error::custom(
+                            format!("Invalid nonce length: expected {} bytes, got {}", Nonce::BYTES, raw_nonce.len())));
+                    }
+                    Some(Nonce::try_from(raw_nonce.as_slice())
+                        .map_err(|e| de::Error::custom(format!("Invalid nonce: {}", e)))?)
+                } else {
+                    None
+                };
+
                 let data = data.ok_or_else(|| de::Error::missing_field("v"))?;
-                Ok(Value {
-                    pk,
-                    sk: None,
-                    recipient,
-                    nonce: nonce.map(|n| Nonce::try_from(n.as_slice()).unwrap()),
-                    sig,
-                    data,
-                    seq
-                })
+                Ok(Value::packed(pk, recipient, nonce, sig, data, seq))
             }
         }
         deserializer.deserialize_map(ValueVisitor)

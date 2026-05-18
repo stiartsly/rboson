@@ -16,6 +16,13 @@ impl Network {
     pub fn is_ipv6(&self) -> bool {
         self == &Network::IPv6
     }
+
+    pub fn can_use_address(&self, addr: &SocketAddr) -> bool {
+        match self {
+            Network::IPv4 => addr.is_ipv4(),
+            Network::IPv6 => addr.is_ipv6(),
+        }
+    }
 }
 
 impl From<&SocketAddr> for Network {

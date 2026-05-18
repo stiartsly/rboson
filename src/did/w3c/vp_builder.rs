@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    Error,
+    Result,
+    errors::ArgumentError,
     CryptoIdentity,
-    core::Result,
 };
 
 use crate::did::{
@@ -56,15 +56,15 @@ impl VerifiablePresentationBuilder {
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            return Err(Error::Argument("Credential Id cannot be empty".into()));
+            return Err(ArgumentError::new("Credential Id cannot be empty".into()));
         }
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = DIDUrl::parse(&id).map_err(|_| {
-                Error::Argument(format!("Id must has the fragment part: {}", id))
+                ArgumentError::new(format!("Id must has the fragment part: {}", id))
             })?;
             if url.fragment().is_none() {
-                Err(Error::Argument("Id must has the fragment part".into()))?;
+                Err(ArgumentError::new("Id must has the fragment part".into()))?;
             }
             url
         } else {
@@ -86,7 +86,7 @@ impl VerifiablePresentationBuilder {
         contexts: Vec<&str>
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            return Err(Error::Argument("Credential type cannot be empty".into()));
+            return Err(ArgumentError::new("Credential type cannot be empty".into()));
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -132,11 +132,11 @@ impl VerifiablePresentationBuilder {
         T: serde::Serialize,
     {
         if id.is_empty() {
-            return Err(Error::Argument("Credential Id cannot be empty".into()));
+            return Err(ArgumentError::new("Credential Id cannot be empty".into()));
         }
 
         if credential_type.is_empty() {
-            return Err(Error::Argument("Credential type cannot be empty".into()));
+            return Err(ArgumentError::new("Credential type cannot be empty".into()));
         }
 
         let vc = VerifiableCredential::builder(self.holder.clone())
@@ -163,7 +163,7 @@ impl BosonIdentityObjectBuilder for VerifiablePresentationBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.credentials.is_empty() {
-            Err(Error::Argument("VCs can not empty for VP".into()))?
+            Err(ArgumentError::new("VCs can not empty for VP".into()))?
         }
 
         let unsigned = VP::unsigned(

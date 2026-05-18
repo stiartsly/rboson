@@ -1,37 +1,35 @@
-use std::rc::Rc;
 use std::time::SystemTime;
+use std::net::SocketAddr;
 
-use crate::{
-    Id,
-    NodeInfo,
-    core::node_info::Reachable,
+use crate::{Id, NodeInfo};
+use crate::dht::{
+    node_entry::Reachability,
+    routing::kbucket_entry::KBucketEntry
 };
 
 #[derive(Clone)]
 pub(crate) struct CandidateNode {
-    ni: Rc<NodeInfo>,
+    ni: NodeInfo,
 
-    last_sent: SystemTime,
-    last_replied: SystemTime,
+    last_sent   : Option<SystemTime>,
+    last_replied: Option<SystemTime>,
+
+    acked: bool,
+    pinged: i32,
 
     reachable: bool,
-
-    // acked: bool,
-    pinged: i32,
     token: i32,
 }
 
 impl CandidateNode {
-    pub(crate) fn new(node: Rc<NodeInfo>, reachable: bool) -> Self {
-        CandidateNode {
-            ni: node,
-            last_sent: SystemTime::UNIX_EPOCH,
-            last_replied: SystemTime::UNIX_EPOCH,
-            reachable,
-
-            // acked: false,
-
+    fn new(ni: NodeInfo, reachable: bool) -> Self {
+        Self {
+            ni,
+            last_sent:      None,
+            last_replied:   None,
             pinged: 0,
+            acked: false,
+            reachable,
             token: 0,
         }
     }
@@ -41,16 +39,16 @@ impl CandidateNode {
     }
 
     pub(crate) fn set_sent(&mut self) {
-        self.last_sent = SystemTime::now();
+        self.last_sent = Some(SystemTime::now());
         self.pinged += 1;
     }
 
     pub(crate) fn clear_sent(&mut self) {
-        self.last_sent = SystemTime::UNIX_EPOCH;
+        self.last_sent = None;
     }
 
-    pub(crate) fn ni(&self) -> Rc<NodeInfo> {
-        self.ni.clone()
+    pub(crate) fn is_sent(&self) -> bool {
+        self.last_sent.is_some()
     }
 
     pub(crate) fn pinged(&self) -> i32 {
@@ -58,7 +56,11 @@ impl CandidateNode {
     }
 
     pub(crate) fn set_replied(&mut self) {
-        self.last_replied = SystemTime::now();
+        self.last_replied = Some(SystemTime::now());
+    }
+
+    pub(crate) fn is_replied(&self) -> bool {
+        self.last_replied.is_some()
     }
 
     pub(crate) fn set_token(&mut self, token: i32) {
@@ -69,25 +71,79 @@ impl CandidateNode {
         self.token
     }
 
+    pub(crate) fn set_acked(&mut self) {
+        self.acked = true;
+    }
+
+    pub(crate) fn is_acked(&self) -> bool {
+        self.acked
+    }
+
     pub(crate) fn is_inflight(&self) -> bool {
-        self.last_sent != SystemTime::UNIX_EPOCH
+        self.last_sent.is_some()
     }
 
     pub(crate) fn is_eligible(&self) -> bool {
-        self.last_sent == SystemTime::UNIX_EPOCH && self.pinged < 3
+        self.last_sent.is_none() && self.pinged < 3
     }
 }
 
-impl Reachable for CandidateNode {
-    fn reachable(&self) -> bool {
+impl From<NodeInfo> for CandidateNode {
+    fn from(ni: NodeInfo) -> Self {
+        Self::new(ni, false)
+    }
+}
+
+impl From<KBucketEntry> for CandidateNode {
+    fn from(entry: KBucketEntry) -> Self {
+        Self::new(
+            entry.as_ref().clone(),
+            entry.is_reachable()
+        )
+    }
+}
+
+impl AsRef<NodeInfo> for CandidateNode {
+    fn as_ref(&self) -> &NodeInfo {
+        &self.ni
+    }
+}
+
+impl Reachability for CandidateNode {
+    fn is_reachable(&self) -> bool {
         self.reachable
     }
 
-    fn unreachable(&self) -> bool {
+    fn is_unreachable(&self) -> bool {
         self.pinged >= 3
     }
 
     fn set_reachable(&mut self, reachable: bool) {
         self.reachable = reachable
+    }
+}
+
+pub(crate) trait AsCandidateNode: Into<CandidateNode> {
+    fn id(&self) -> &Id;
+    fn socket_addr(&self) -> &SocketAddr;
+}
+
+impl AsCandidateNode for NodeInfo {
+    fn id(&self) -> &Id {
+        self.id()
+    }
+
+    fn socket_addr(&self) -> &SocketAddr {
+        self.socket_addr()
+    }
+}
+
+impl AsCandidateNode for KBucketEntry {
+    fn id(&self) -> &Id {
+        self.as_ref().id()
+    }
+
+    fn socket_addr(&self) -> &SocketAddr {
+        self.as_ref().socket_addr()
     }
 }

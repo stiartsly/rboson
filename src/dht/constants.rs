@@ -1,9 +1,7 @@
 pub const DEFAULT_DHT_PORT: u16 = 39001;
 
-pub(crate) const MAX_ENTRIES_PER_BUCKET: usize = 8;
-
 // Refresh interval for a bucket in milliseconds
-pub(crate) const BUCKET_REFRESH_INTERVAL: u128 = 15 * 60 * 1000;
+
 
 // Maximum number of timeouts for considering a K-bucket entry as old and stale
 pub(crate) const KBUCKET_OLD_AND_STALE_TIMEOUT: i32 = 2;
@@ -23,8 +21,6 @@ pub(crate) const RE_ANNOUNCE_INTERVAL: u64 = 5 * 60 * 1000;
 
 
 pub(crate) const DHT_UPDATE_INTERVAL:u64 = 10000;
-pub(crate) const RANDOM_LOOKUP_INTERVAL: u64 = 10 * 60 * 1000;  // 10 minutes
-pub(crate) const RANDOM_PING_INTERVAL: u64 = 10 * 1000;         // 10 seconds
 
 pub(crate) const RPC_SERVER_REACHABILITY_TIMEOUT: u128 = 60 * 1000;
 

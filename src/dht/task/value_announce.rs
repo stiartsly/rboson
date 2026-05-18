@@ -1,20 +1,16 @@
-use std::any::Any;
 use std::collections::LinkedList;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use log::error;
 
 use crate::Value;
 use crate::dht::{
     dht::DHT,
-    msg::{
-        store_value_req as req,
-        msg::Msg
-    }
+    msg::msg::Message,
+    node_entry::NodeEntry,
 };
 
 use super::{
-    task::{Task, TaskData},
+    task::{Task, TaskData, TaskResult},
     closest_set::ClosestSet,
     candidate_node::CandidateNode,
 };
@@ -22,30 +18,33 @@ use super::{
 pub(crate) struct ValueAnnounceTask {
     base_data: TaskData,
 
-    listeners: Vec<Box<dyn FnMut(&mut dyn Task)>>,
-
-    todo: Rc<RefCell<LinkedList<Rc<RefCell<CandidateNode>>>>>,
-    value: Rc<Value>,
+    todo: Arc<Mutex<LinkedList<Arc<Mutex<CandidateNode>>>>>,
+    value: Value,
+    expected_seq: i32,
 }
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
-        closest: Rc<RefCell<ClosestSet>>,
-        value: Rc<Value>
+        dht: Arc<Mutex<DHT>>,
+        value: Value,
+        expected_seq: i32,
     ) -> Self {
-        let todo: LinkedList<_> = closest.borrow()
-            .entries()
-            .iter()
-            .cloned()
-            .collect();
-
         Self {
             base_data: TaskData::new(dht),
-            listeners: Vec::new(),
-            todo: Rc::new(RefCell::new(todo)),
+            todo: Arc::new(Mutex::new(LinkedList::new())),
             value,
+            expected_seq,
         }
+    }
+
+    pub(crate) fn with_closest(&mut self, closest: ClosestSet) -> &mut Self {
+        let mut todo = self.todo.lock().unwrap();
+        let mut entries = closest.entries();
+        while let Some(cn) = entries.pop() {
+            todo.push_back(cn);
+        }
+        drop(todo);
+        self
     }
 }
 
@@ -58,42 +57,44 @@ impl Task for ValueAnnounceTask {
         &mut self.base_data
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn result(&self) -> Option<TaskResult> {
+        None
     }
 
-    fn add_listener(&mut self, cb: Box<dyn FnMut(&mut dyn Task)>) {
-        self.listeners.push(cb);
-
-    }
-    fn notify_completion(&mut self) {
-        while let Some(mut cb) = self.listeners.pop() {
-            cb(self)
-        }
-    }
-
-    fn update(&mut self) {
-        while self.can_request() {
-            let cn = match self.todo.borrow().front() {
+    fn iterate(&mut self) {
+        while self.can_dorequest() {
+            let cn = match self.todo.lock().unwrap().front() {
                 Some(cn) => cn.clone(),
                 None => break,
             };
 
-            let msg = Rc::new(RefCell::new({
-                let val = self.value.clone();
-                let mut msg = Box::new(req::Message::new(Some(val)));
-                msg.with_token(cn.borrow().token());
-                msg as Box<dyn Msg>
-            }));
+            let token = cn.lock().unwrap().token();
+            if token == 0 {
+                self.todo.lock().unwrap().pop_front();
+                continue;
+            }
+
+            let msg = Arc::new(Mutex::new(Message::store_value_req(
+                self.value.clone(),
+                token,
+                self.expected_seq,
+            )));
 
             let todo = self.todo.clone();
-            let ni = cn.borrow().ni();
+            let entry = NodeEntry::from_candidate(cn);
 
-            self.send_call(ni, msg, Box::new(move|_| {
-                todo.borrow_mut().pop_front();
+            self.send_call(entry, msg, Box::new(move|_| {
+                todo.lock().unwrap().pop_front();
             })).map_err(|e| {
                error!("Error on sending 'storeValue' message: {}", e);
             }).ok();
         }
     }
+
+    fn is_done(&self) -> bool {
+        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
+    }
 }
+
+unsafe impl Send for ValueAnnounceTask {}
+unsafe impl Sync for ValueAnnounceTask {}

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Id,
-    Error,
-    core::Result
+    Result,
+    errors::ArgumentError,
 };
 
 use crate::did::{
@@ -126,7 +126,7 @@ impl VerificationMethod {
     pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()> {
         match self {
             VerificationMethod::Reference(ref mut r) => r.update_reference(entity),
-            VerificationMethod::Entity(_) => Err(Error::Argument("Cannot update Entity with Reference".into())),
+            VerificationMethod::Entity(_) => Err(ArgumentError::new("Cannot update Entity with Reference".into()).into()),
         }
     }
 }
@@ -252,11 +252,11 @@ impl Reference {
 
     pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()>{
         if entity.is_reference() {
-            return Err(Error::Argument("Cannot update Reference with another Reference".into()));
+            return Err(ArgumentError::new("Cannot update Reference with another Reference".into()));
         }
 
         if entity.id != self.id {
-            return Err(Error::Argument("Entity ID does not match Reference ID".into()));
+            return Err(ArgumentError::new("Entity ID does not match Reference ID".into()));
         }
         self.entity = Some(entity);
         Ok(())

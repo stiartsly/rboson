@@ -1,21 +1,18 @@
 pub mod core;
 pub mod did;
 pub mod dht;
-pub mod appdata_store;
-pub mod activeproxy;
-pub mod messaging;
+//pub mod appdata_store;
+//pub mod activeproxy;
+//pub mod messaging;
 
 pub use crate::core::{
     id::{
         self,
         Id,
         DID_PREFIX,
-        ID_BYTES,
-        ID_BITS
     },
 
-    error::{self, Error},
-    prefix::{self, Prefix},
+    errors::{self, Error, Result},
     signature::{self, Signature},
     cryptobox::{self, CryptoBox},
     node_info::{self, NodeInfo},
@@ -33,8 +30,8 @@ pub use crate::core::{
     crypto_context::{self, CryptoContext},
     joint_result::{self, JointResult},
 
-    config,
-    default_configuration as configuration,
+    //node_config::{self, NodeConfig},
+    //default_configuration as configuration,
 };
 
 pub use crate::did::{
@@ -50,13 +47,15 @@ pub use crate::did::{
     card_builder,
 };
 
-pub use crate::dht::{
-    node::{self, Node}
-};
+//pub use crate::dht::{
+//    node::{self, Node}
+//};
 
+/*
 pub use crate::activeproxy::{
     ActiveProxyClient
 };
+*/
 
 #[macro_export]
 macro_rules! elapsed_ms {
@@ -101,10 +100,12 @@ macro_rules! lock {
 }
 
 use std::net::IpAddr;
-fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
+use crate::errors::NetworkError;
+use crate::errors::IOError;
+fn local_addr(ipv4: bool) -> Result<IpAddr>{
     let if_addrs = match get_if_addrs::get_if_addrs() {
         Ok(v) => v,
-        Err(e) => return Err(Error::from(e))
+        Err(e) => return Err(e.into()),
     };
 
     for iface in if_addrs {
@@ -115,7 +116,7 @@ fn local_addr(ipv4: bool) -> crate::core::Result<IpAddr>{
             return Ok(ip)
         }
     }
-    Err(Error::Network(format!("No working network interfaces")))
+    Err(NetworkError::new("No working network interfaces".into()))
 }
 
 fn create_dirs(input: &str) -> crate::core::Result<()> {
@@ -125,7 +126,7 @@ fn create_dirs(input: &str) -> crate::core::Result<()> {
     }
 
     std::fs::create_dir_all(path).map_err(|e|
-         Error::Io(format!("Creating directory path {} error: {e}", input))
+        IOError::new(format!("Creating directory path {} error: {e}", input)).into()
     )
 }
 
@@ -204,6 +205,7 @@ fn dump_hex(label: &str, data: &[u8]) {
     println!("dumping(hex) {}: {}", label, data_hex);
 }
 
+/*
 // serde Id as base58 string
 mod serde_id_as_base58 {
     use crate::Id;
@@ -255,7 +257,7 @@ mod serde_id_as_bytes {
         Ok(Id::from_bytes(arr))
     }
 }
-
+*/
 mod serde_option_id_as_base58 {
     use crate::Id;
     use serde::{Deserializer, Serializer};

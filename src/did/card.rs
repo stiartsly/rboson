@@ -9,7 +9,9 @@ use serde_json::{Map, Value};
 use crate::{
     as_secs,
     Id,
-    core::{Error, Result},
+    Error,
+    Result,
+    errors::{ArgumentError, SignatureError},
     signature,
     CryptoIdentity,
 };
@@ -156,12 +158,12 @@ impl Card {
 
     pub fn validate(&self) -> Result<()> {
         if self.signature.is_empty() {
-            return Err(Error::Signature("Card signature is empty".into()));
+            return Err(SignatureError::new("Card signature is empty".into()).into());
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(Error::Signature("Card signature is not valid".into())),
+            false => Err(SignatureError::new("Card signature is not valid".into()).into()),
         }
     }
 
@@ -204,7 +206,7 @@ impl TryFrom<&str> for Card {
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e| {
-            Error::Argument(format!("Failed to parse Card from string: {}", e))
+            ArgumentError::new(format!("Failed to parse Card from string: {}", e)).into()
         })
     }
 }
@@ -214,7 +216,7 @@ impl TryFrom<&[u8]> for Card {
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e| {
-            Error::Argument(format!("Failed to parse Card from bytes: {}", e))
+            ArgumentError::new(format!("Failed to parse Card from bytes: {}", e)).into()
         })
     }
 }

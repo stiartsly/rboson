@@ -41,7 +41,10 @@ fn test_new_with_ipv4() {
 #[test]
 fn test_new_with_ipv6() {
     let id = Id::random();
-    let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 12345);
+    let addr = SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+        12345
+    );
     let node = NodeInfo::new(id.clone(), addr.clone());
     assert_eq!(node.id(), &id);
     assert_eq!(node.ip(), IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
@@ -82,7 +85,9 @@ fn test_matches_with_same_addr() {
 fn test_version() {
     let id = Id::random();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-    let ni = NodeInfo::with_version(id.clone(), addr.clone(), 5);
+    let mut ni = NodeInfo::new(id, addr.clone());
+    ni.set_version(5);
+
     assert_eq!(ni.id(), &id);
     assert_eq!(ni.socket_addr(), &addr);
     assert_eq!(ni.version(), 5);

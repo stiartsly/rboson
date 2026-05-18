@@ -1,5 +1,4 @@
 use std::sync::{Arc, Mutex};
-use rand::RngCore;
 use boson::{
     Id,
     PeerInfo,
@@ -83,14 +82,14 @@ fn test_with_nodeid() {
 }
 
 #[test] // case4
-fn test_with_whole() {
+fn test_full() {
     let endpoint = "http://localhost:8080";
     let node_kp = signature::KeyPair::random();
     let node_identity = CryptoIdentity::from_keypair(node_kp);
     let node = Arc::new(Mutex::new(node_identity));
     let peer_kp = signature::KeyPair::random();
     let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::fill(&mut nonce);
     let rc = PeerBuilder::new(endpoint)
         .with_key(peer_kp.clone())
         .with_nonce(&nonce)
@@ -123,7 +122,7 @@ fn test_equal() {
     let endpoint = "http://localhost:8080";
     let kp = signature::KeyPair::random();
     let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::fill(&mut nonce);
     let rc1 = PeerBuilder::new(endpoint)
         .with_key(kp.clone())
         .with_nonce(&nonce)
@@ -156,7 +155,7 @@ fn test_whole_equal() {
     let node = Arc::new(Mutex::new(node_identity));
     let peer_kp = signature::KeyPair::random();
     let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::fill(&mut nonce);
     let rc = PeerBuilder::new(endpoint)
         .with_key(peer_kp.clone())
         .with_nonce(&nonce)

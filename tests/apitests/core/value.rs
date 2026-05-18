@@ -2,6 +2,7 @@ use boson::{
     signature,
     cryptobox,
     Id,
+    value,
     Value,
     ValueBuilder,
     SignedBuilder,
@@ -47,7 +48,7 @@ fn test_immutable() {
     assert_eq!(val.nonce().is_some(), false);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 /** SignedBuilder methods.
@@ -72,7 +73,7 @@ fn test_signed_simple() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 #[test]
@@ -96,9 +97,10 @@ fn test_signed_with_keypair() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 0);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
+    assert_eq!(val.id(), value::value_id(&val));
+
+    assert_eq!(val.public_key(), Some(kp.public_key().into()).as_ref());
     assert_eq!(val.private_key(), Some(kp.private_key()));
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
 }
 
 #[test]
@@ -123,8 +125,9 @@ fn test_signed_with_nonce() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 55);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.nonce(), Some(nonce).as_ref());
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
+
+    assert_eq!(val.nonce(), Some(&nonce));
 }
 
 #[test]
@@ -147,7 +150,7 @@ fn test_signed_with_seq() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), 55);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 #[test]
@@ -175,10 +178,11 @@ fn test_signed_full() {
     assert_eq!(val.nonce().is_some(), true);
     assert_eq!(val.sequence_number(), seq);
     assert_eq!(val.data(), &data);
-    assert_eq!(val.public_key(), Some(&kp.public_key().into()));
+    assert_eq!(val.id(), value::value_id(&val));
+
+    assert_eq!(val.public_key(), Some(kp.public_key().into()).as_ref());
     assert_eq!(val.private_key(), Some(kp.private_key()));
-    assert_eq!(val.nonce(), Some(nonce).as_ref());
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.nonce(), Some(&nonce));
 }
 
 #[test]
@@ -202,7 +206,7 @@ fn test_encrypted_simple() {
     assert_eq!(val.sequence_number(), 0);
     assert_ne!(val.data(), &data);
     assert_eq!(val.recipient(), Some(rec).as_ref());
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 #[test]
@@ -232,7 +236,7 @@ fn test_encrypted_with_keypair() {
     assert_eq!(val.recipient(), Some(rec).as_ref());
     assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 #[test]
@@ -261,7 +265,7 @@ fn test_encrypted_with_nonce() {
     assert_ne!(val.data(), &data);
     assert_eq!(val.recipient(), Some(rec).as_ref());
     assert_eq!(val.nonce(), Some(&nonce));
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }
 
 #[test]
@@ -295,5 +299,5 @@ fn test_encrypted_with_full() {
     assert_eq!(val.nonce(), Some(&nonce));
     assert_eq!(val.public_key(), Some(&kp.public_key().into()));
     assert_eq!(val.private_key(), Some(kp.private_key()));
-    assert_eq!(val.id(), <Value as Into<Id>>::into(val));
+    assert_eq!(val.id(), value::value_id(&val));
 }

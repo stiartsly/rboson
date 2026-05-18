@@ -54,6 +54,7 @@ mod dht;
 mod server;
 mod rpccall;
 mod scheduler;
+mod scheduler_error;
 mod token_manager;
 mod node_entry;
 mod node_status;
@@ -81,7 +82,10 @@ pub use crate::dht::{
 
 #[cfg(test)]
 mod unitests {
-    mod yaml_configuration;
+    mod test_prefix;
+    mod test_yaml_configuration;
+    mod test_scheduler;
+
     /*
     mod test_addr;
    // mod test_sqlite_storage;

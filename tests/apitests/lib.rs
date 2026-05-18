@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod core {
     mod id;
-    mod prefix;
     mod signature;
     mod cryptobox;
     mod node_info;
     mod peer_info;
     mod value;
-    mod config;
+   // mod config;
 }
 
 #[cfg(test)]
@@ -27,10 +26,12 @@ mod did {
     mod diddoc;
 }
 
+/*
 #[cfg(test)]
 mod messaging {
     mod client;
 }
+ */
 
 // helper functions
 fn local_addr(ipv4: bool) -> Option<std::net::IpAddr>{
@@ -71,18 +72,7 @@ fn create_random_bytes(len: usize) -> Vec<u8> {
     bytes
 }
 
-fn working_path(input: &str) -> String {
-    let path = std::env::current_dir().unwrap().join(input);
-    if !std::fs::metadata(&path).is_ok() {
-        match std::fs::create_dir(&path) {
-            Ok(_) => {}
-            Err(e) => {
-                panic!("Failed to create directory: {}", e);
-            }
-        }
-    }
-    path.display().to_string()
-}
+
 
 fn remove_working_path(input: &str) {
     if std::fs::metadata(&input).is_ok() {

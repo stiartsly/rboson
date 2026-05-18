@@ -189,6 +189,7 @@ impl Node {
         }
 
         if let Some(host6) = self.cfg.host6() {
+            println!(">>>>>v6 line: {}", line!());
             let dht = Arc::new(Mutex::new(DHT::new(
                 self.identity.identity(),
                 Network::IPv6,
@@ -311,52 +312,6 @@ impl Node {
 		}).mapEmpty();
 	}
      */
-/*
-    pub fn start(&self) {
-        let status_ptr: *mut NodeStatus = &mut *(self.status.lock().unwrap());
-        unsafe {
-            if ptr::read_volatile(status_ptr)
-                != NodeStatus::Stopped {
-                return;
-            }
-            ptr::write_volatile(status_ptr,
-                NodeStatus::Initializing
-            );
-        }
-
-        info!("DHT node <{}> is starting...", self.nodeid);
-
-        let path    = self.storage_path.clone();
-        let keypair = self.signature_keypair.clone();
-        let addrs   = self.addrs.clone();
-        let bootstr = self.bootstr_channel.clone();
-        let ctx     = self.crypto_context.clone();
-        let quit    = self.quit.clone();
-        let thread  = thread::spawn(move || {
-            let runner = Rc::new(RefCell::new(NodeRunner::new(
-                path,
-                keypair,
-                addrs,
-                bootstr,
-                ctx
-            )));
-
-            runner.borrow_mut().set_cloned(runner.clone());
-            node_runner::run_loop(
-                runner,
-                quit.clone()
-            );
-        });
-
-        *self.thread.lock().unwrap() = Some(thread);
-        unsafe {
-            ptr::write_volatile(status_ptr,
-                NodeStatus::Running
-            );
-        }
-    }
-    */
-
 /*
     pub fn stop(&self) {
         let status_ptr: *mut NodeStatus = &mut (*self.status.lock().unwrap());

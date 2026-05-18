@@ -1,124 +1,243 @@
-use std::sync::{Arc, Mutex};
-use std::collections::LinkedList;
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use rbtree::RBTree;
-use tokio::time::{Duration, Instant};
+use futures::StreamExt;
+use tokio::{
+    sync::{mpsc, oneshot},
+    task,
+    task::JoinHandle,
+};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 
+
+use crate::{
+    core::errors::Result,
+    dht::scheduler_error::SchedulerError,
+};
+
+type TaskFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+type TaskCallback = Arc<dyn Fn() -> TaskFuture + Send + Sync>;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct TaskHandle {
+    id: u64,
+}
+
+impl TaskHandle {
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+#[derive(Clone)]
 struct Job {
-    cb: Box<dyn FnMut()>,
+    id: u64,
     interval: Option<Duration>,
+    cb: TaskCallback,
+    active: Arc<AtomicBool>,
 }
 
 impl Job {
-    fn new<F>(cb: F, input_interval: u64 /* ms */) -> Self
-    where F: FnMut() + 'static {
-        let mut interval = None;
-        if input_interval > 0 {
-            let d = Duration::from_millis(input_interval);
-            interval = Some(d);
-        }
-
+    fn new(id: u64, interval: Option<Duration>, callback: TaskCallback) -> Self {
         Self {
-            cb: Box::new(cb),
+            id,
             interval,
+            cb: callback,
+            active: Arc::new(AtomicBool::new(true)),
         }
     }
 
-    pub(crate) fn invoke(&mut self) {
+    fn invoke(&self) -> TaskFuture {
         (self.cb)()
+    }
+
+    fn cancel(&self) {
+        self.active.store(false, Ordering::Release);
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
     }
 }
 
-pub(crate) struct Scheduler {
-    updated: bool,  // job has been added or popped recently.
-    now: Instant,   // to retify current time.
+enum Command {
+    Add {
+        delay: Duration,
+        job: Job,
+    },
+    Remove {
+        task_id: u64,
+        reply: oneshot::Sender<bool>,
+    },
+    Stop {
+        reply: oneshot::Sender<()>,
+    },
+}
 
-    timers: RBTree<Instant, LinkedList<Box<Job>>>,
+pub(crate) struct Scheduler {
+    next_taskid: AtomicU64,
+    tx: mpsc::UnboundedSender<Command>,
+    runner: JoinHandle<()>,
 }
 
 impl Scheduler {
     pub(crate) fn new() -> Self {
-        Scheduler {
-            updated: false,
-            now: Instant::now(),
-            timers: RBTree::new(),
+        let (tx, rx) = mpsc::unbounded_channel();
+        let runner = task::spawn(async move {
+            Self::run_loop(rx).await;
+        });
+
+        Self {
+            next_taskid: AtomicU64::new(1),
+            tx,
+            runner,
         }
     }
 
-    // add oneshot job.
-    pub(crate) fn add_oneshot<F>(&mut self, cb: F, start: u64)
-    where F: FnMut() + 'static {
-        self.add_job(
-            Duration::from_millis(start),
-            Box::new(Job::new(cb, 0))
-        );
+    pub(crate) fn add<F, Fut>(
+        &self,
+        delay: Duration,
+        interval: Option<Duration>,
+        cb: F,
+    ) -> Result<TaskHandle>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let taskid = self.next_taskid.fetch_add(1, Ordering::Relaxed);
+        let cb: TaskCallback = Arc::new(move || Box::pin(cb()));
+        let job = Job::new(taskid, interval, cb);
+
+        self.tx
+            .send(Command::Add { delay, job })
+            .map_err(|_| SchedulerError::new(format!("Scheduler closed")))?;
+
+        Ok(TaskHandle { id: taskid })
     }
 
-    // add periodic job with specific interval.
-    pub(crate) fn add<F>(&mut self, cb: F, start: u64, interval: u64)
-    where F: FnMut() + 'static {
-        self.add_job(
-            Duration::from_millis(start),
-            Box::new(Job::new(cb, interval)),
-        );
+    pub(crate) async fn cancel(&self, handle: TaskHandle) -> Result<bool> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(Command::Remove {
+                task_id: handle.id,
+                reply: reply_tx,
+            })
+            .map_err(|_| SchedulerError::new(format!("Scheduler closed")))?;
+
+        Ok(reply_rx.await.map_err(|_| SchedulerError::new(format!("Scheduler closed")))?)
     }
 
-    pub(crate) fn is_updated(&self) -> bool {
-        self.updated
+    pub(crate) async fn stop(&self) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(Command::Stop { reply: reply_tx })
+            .map_err(|_| SchedulerError::new(format!("Scheduler closed")))?;
+
+        Ok(reply_rx.await.map_err(|_| SchedulerError::new(format!("Scheduler closed")))?)
     }
 
-    pub(crate) fn next_timeout(&self) -> Instant {
-        self.timers.iter().next().map_or(
-            self.now + Duration::from_secs(3600), // 60*60
-            |timer| timer.0.clone()
-        )
-    }
+    async fn run_loop(mut rx: mpsc::UnboundedReceiver<Command>) {
+        let mut queue = DelayQueue::new();
+        let mut jobs = HashMap::<u64, Job>::new();
+        let mut keys = HashMap::<u64, Key>::new();
 
-    fn add_job(&mut self, start: Duration, job: Box<Job>) {
-        let start = self.now + start;
+        loop {
+            tokio::select! {
+                biased;
 
-        match self.timers.get_mut(&start) {
-            Some(timer) => {
-                timer.push_back(job);
-            },
-            None => {
-                let mut timer = LinkedList::new();
-                timer.push_back(job);
-                self.timers.insert(start, timer);
+                command = rx.recv() => {
+                    match command {
+                        Some(Command::Add { delay, job }) => {
+                            let task_id = job.id;
+                            if let Some(key) = keys.remove(&task_id) {
+                                let _ = queue.remove(&key);
+                            }
+
+                            let key = queue.insert(task_id, delay);
+                            keys.insert(task_id, key);
+                            jobs.insert(task_id, job);
+                        }
+                        Some(Command::Remove { task_id, reply }) => {
+                            let removed = Self::remove_task(task_id, &mut queue, &mut jobs, &mut keys);
+                            let _ = reply.send(removed);
+                        }
+                        Some(Command::Stop { reply }) => {
+                            jobs.clear();
+                            keys.clear();
+                            queue.clear();
+                            let _ = reply.send(());
+                            break;
+                        }
+                        None => {
+                            if queue.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                maybe_expired = queue.next(), if !queue.is_empty() => {
+                    let Some(expired) = maybe_expired else {
+                        continue;
+                    };
+
+                    let task_id = expired.into_inner();
+                    keys.remove(&task_id);
+
+                    let Some(task) = jobs.get(&task_id).cloned() else {
+                        continue;
+                    };
+
+                    if !task.is_active() {
+                        jobs.remove(&task_id);
+                        continue;
+                    }
+
+                    if let Some(interval) = task.interval {
+                        if task.is_active() {
+                            let key = queue.insert(task_id, interval);
+                            keys.insert(task_id, key);
+                        }
+                    } else {
+                        jobs.remove(&task_id);
+                    }
+
+                    tokio::spawn(async move {
+                        if task.is_active() {
+                            task.invoke().await;
+                        }
+                    });
+                }
+                else => break,
             }
         }
-        self.updated = true;
     }
 
-    #[inline(always)]
-    fn pop_jobs(&mut self) -> Option<LinkedList<Box<Job>>> {
-        self.timers.pop_first().map(|(_,v)| v)
-    }
+    fn remove_task(
+        task_id: u64,
+        queue: &mut DelayQueue<u64>,
+        jobs: &mut HashMap<u64, Job>,
+        keys: &mut HashMap<u64, Key>,
+    ) -> bool {
+        let mut removed = false;
 
-    #[inline(always)]
-    fn sync_time(&mut self) {
-        self.now = Instant::now();
-    }
+        if let Some(job) = jobs.remove(&task_id) {
+            job.cancel();
+            removed = true;
+        }
 
-    pub(crate) fn cancel(&mut self) {
-        self.timers.clear();
-    }
-}
+        if let Some(key) = keys.remove(&task_id) {
+            let _ = queue.remove(&key);
+            removed = true;
+        }
 
-pub(crate) fn run_jobs(s: Arc<Mutex<Scheduler>>) {
-    s.lock().unwrap().sync_time();
-
-    let mut timer = match s.lock().unwrap().pop_jobs() {
-        Some(timer) => timer,
-        None => return
-    };
-
-    while let Some(mut job) = timer.pop_front() {
-        job.invoke();
-        let next_start = match job.interval {
-            Some(interval) => interval,
-            None => continue,
-        };
-        s.lock().unwrap().add_job(next_start, job);
+        removed
     }
 }

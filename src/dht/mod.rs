@@ -85,11 +85,13 @@ mod unitests {
     mod test_prefix;
     mod test_yaml_configuration;
     mod test_scheduler;
+    mod test_rpccall;
+    mod test_token_manager;
 
     /*
     mod test_addr;
    // mod test_sqlite_storage;
-   // mod test_token_man;
+    mod test_token_man;
    // mod test_routing_table;
     mod test_find_node_req;
     mod test_find_node_rsp;

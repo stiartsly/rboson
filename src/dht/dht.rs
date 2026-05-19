@@ -244,9 +244,8 @@ impl DHT {
 
         info!("Periodic: random ping ...");
         let msg = Arc::new(Mutex::new(Message::ping_req()));
-        let call = Arc::new(Mutex::new(RpcCall::from_kentry(
+        let call = Arc::new(Mutex::new(RpcCall::with_kentry(
             entry,
-            self.dht(),
             msg
         )));
         call.lock().unwrap().set_cloned(call.clone());
@@ -586,9 +585,8 @@ impl DHT {
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
             let msg = Message::ping_req();
-            let call = Arc::new(Mutex::new(RpcCall::from_kentry(
+            let call = Arc::new(Mutex::new(RpcCall::with_kentry(
                 entry,
-                self.dht(),
                 Arc::new(Mutex::new(msg))
             )));
 
@@ -1067,9 +1065,8 @@ impl DHT {
                 true
             );
 
-            let call = Arc::new(Mutex::new(RpcCall::from_node(
+            let call = Arc::new(Mutex::new(RpcCall::with_node(
                 node.clone(),
-                dht.clone(),
                 Arc::new(Mutex::new(msg)),
             )));
 

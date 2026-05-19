@@ -61,6 +61,8 @@ pub(crate) struct RpcServer {
 impl RpcServer {
     const MAX_ACTIVE_CALLS: usize = 64;
 
+    pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
+
     pub(crate) fn new(
         sock_addr: &SocketAddr,
         identity: Arc<Mutex<CryptoIdentity>>,

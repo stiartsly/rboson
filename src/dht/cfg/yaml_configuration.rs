@@ -1,23 +1,26 @@
-use std::env;
-use std::fs;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-
+use std::{
+    fmt,
+    env,
+    fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 use log::LevelFilter;
 use serde::Deserialize;
 
 use crate::{
-    errors::{IOError, ArgumentError},
     Id,
     NodeInfo,
-    Result,
     signature,
+    errors::{Result, IOError, ArgumentError},
+    dht::cfg::node_config::{
+        NodeConfig,
+        DEFAULT_DHT_PORT
+    }
 };
 
-use super::node_config::{NodeConfig, DEFAULT_DHT_PORT};
-
 #[derive(Debug, Clone)]
-pub struct YamlNodeConfiguration {
+pub struct NodeConfiguration {
     host4: Option<String>,
     host6: Option<String>,
     port: u16,
@@ -26,13 +29,13 @@ pub struct YamlNodeConfiguration {
     bootstrap_nodes: Vec<NodeInfo>,
     log_level: LevelFilter,
     log_file: Option<String>,
-    enable_devp: bool,
+    devp: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawNodeConfig {
-    host4: Option<String>,
-    host6: Option<String>,
+struct YamlNodeConfig {
+    ipv4: Option<bool>,
+    ipv6: Option<bool>,
     #[serde(default = "default_port")]
     port: u16,
     #[serde(rename = "privateKey")]
@@ -40,43 +43,44 @@ struct RawNodeConfig {
     #[serde(rename = "dataDir")]
     data_dir: Option<String>,
     #[serde(default)]
-    bootstraps: Vec<BootstrapEntry>,
-    logger: Option<RawLoggerConfig>,
+    bootstraps: Vec<YamlNodeEntry>,
+    logger: Option<YamlLoggerConfig>,
     #[serde(rename = "enableDeveloperMode", default)]
-    enable_developer_mode: bool,
+    devp: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawLoggerConfig {
+struct YamlLoggerConfig {
     level: Option<String>,
     #[serde(rename = "logFile")]
     log_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct BootstrapEntry(Id, String, u16);
+struct YamlNodeEntry(Id, String, u16);
 
 fn default_port() -> u16 {
     DEFAULT_DHT_PORT
 }
 
-impl YamlNodeConfiguration {
+impl NodeConfiguration {
     pub fn from_yaml(input: &str) -> Result<Self> {
-        let expanded = expand_env_placeholders(input)?;
-        let raw = serde_yaml::from_str::<RawNodeConfig>(&expanded)
+        let expanded = expand_env(input)?;
+        let config = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
             .map_err(|e| ArgumentError::new(format!("Invalid node.yaml content: {e}")))?;
-        Self::try_from_raw(raw)
+        Self::try_from(config)
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let input = fs::read_to_string(path)
-            .map_err(|e| IOError::new(format!("Reading config {} failed: {e}", path.display())))?;
+        let input = fs::read_to_string(path).map_err(|e|
+            IOError::new(format!("Reading config {} failed: {e}", path.display()))
+        )?;
         Self::from_yaml(&input)
     }
 
     pub fn load_default() -> Result<Self> {
-        let candidates = default_config_paths();
+        let candidates = config_paths();
         let Some(path) = candidates.iter().find(|path| path.exists()) else {
             return Err(ArgumentError::new(format!(
                 "Unable to locate node.yaml in any default location: {}",
@@ -90,28 +94,50 @@ impl YamlNodeConfiguration {
 
         Self::load(path)
     }
+}
 
-    fn try_from_raw(raw: RawNodeConfig) -> Result<Self> {
-        let private_key = signature::PrivateKey::try_from(raw.private_key.as_str())?;
-        let bootstrap_nodes = raw.bootstraps.into_iter()
-            .map(|entry| bootstrap_entry_to_node_info(entry))
+impl TryFrom<YamlNodeConfig> for NodeConfiguration {
+    type Error = crate::Error;
+
+    fn try_from(yaml: YamlNodeConfig) -> Result<Self> {
+        let sk = signature::PrivateKey::try_from(yaml.private_key.as_str())?;
+        let bootstrap_nodes = yaml.bootstraps.into_iter()
+            .map(|entry| NodeInfo::try_from(entry))
             .collect::<Result<Vec<_>>>()?;
 
+        println!("yaml.ipv4: {:?}", yaml.ipv4);
+        println!("yaml.ipv6: {:?}", yaml.ipv6);
+
+        let addr4 = if yaml.ipv4 .unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(true)?.to_string())
+        } else {
+            None
+        };
+        let addr6 = if yaml.ipv6.unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(false)?.to_string())
+        } else {
+            None
+        };
+
+        let logger = yaml.logger.as_ref();
+
         Ok(Self {
-            host4: raw.host4,
-            host6: raw.host6,
-            port: raw.port,
-            private_key,
-            data_dir: expand_data_dir(raw.data_dir),
+            host4   : addr4,
+            host6   : addr6,
+            port    : yaml.port,
+            private_key: sk,
+            data_dir: expand_data_dir(yaml.data_dir),
             bootstrap_nodes,
-            log_level: parse_log_level(raw.logger.as_ref().and_then(|logger| logger.level.as_deref())),
-            log_file: raw.logger.and_then(|logger| logger.log_file),
-            enable_devp: raw.enable_developer_mode,
+            log_level: log_level(logger.and_then(|logger| logger.level.as_deref())),
+            log_file: logger.and_then(|logger| logger.log_file.clone()),
+            devp    : yaml.devp,
         })
     }
 }
 
-impl NodeConfig for YamlNodeConfiguration {
+impl NodeConfig for NodeConfiguration {
     fn host4(&self) -> Option<&str> {
         self.host4.as_deref()
     }
@@ -145,21 +171,30 @@ impl NodeConfig for YamlNodeConfiguration {
     }
 
     fn enable_devp(&self) -> bool {
-        self.enable_devp
+        self.devp
+    }
+
+    fn dump(&self) {
+        println!("{}", self);
     }
 }
 
-fn bootstrap_entry_to_node_info(entry: BootstrapEntry) -> Result<NodeInfo> {
-    let BootstrapEntry(id, host, port) = entry;
-    let addr = format!("{host}:{port}")
-        .parse::<SocketAddr>()
-        .map_err(|e| ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}")))?;
-    Ok(NodeInfo::new(id, addr))
+impl TryFrom<YamlNodeEntry> for NodeInfo {
+    type Error = crate::Error;
+
+    fn try_from(value: YamlNodeEntry) -> Result<NodeInfo> {
+        let YamlNodeEntry(id, host, port) = value;
+        let addr = format!("{host}:{port}")
+            .parse::<SocketAddr>()
+            .map_err(|e|
+                ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
+        )?;
+        Ok(NodeInfo::new(id, addr))
+    }
 }
 
-fn parse_log_level(level: Option<&str>) -> LevelFilter {
-    level
-        .and_then(|value| value.parse::<LevelFilter>().ok())
+fn log_level(level: Option<&str>) -> LevelFilter {
+    level.and_then(|v| v.parse::<LevelFilter>().ok())
         .unwrap_or(LevelFilter::Info)
 }
 
@@ -181,35 +216,36 @@ fn expand_data_dir(data_dir: Option<String>) -> String {
     data_dir
 }
 
-fn expand_env_placeholders(input: &str) -> Result<String> {
-    let mut output = String::with_capacity(input.len());
+fn expand_env(input: &str) -> Result<String> {
+    let mut expanded = String::with_capacity(input.len());
     let mut cursor = 0;
 
     while let Some(offset) = input[cursor..].find("${") {
         let start = cursor + offset;
-        output.push_str(&input[cursor..start]);
+        expanded.push_str(&input[cursor..start]);
 
         let var_start = start + 2;
-        let Some(end_offset) = input[var_start..].find('}') else {
+        let Some(endoff) = input[var_start..].find('}') else {
             return Err(ArgumentError::new("Unclosed environment placeholder in node.yaml".into()));
         };
-        let end = var_start + end_offset;
+        let end = var_start + endoff;
         let name = &input[var_start..end];
-        let value = env::var(name)
-            .map_err(|_| ArgumentError::new(format!("Environment variable {name} is not set")))?;
-        output.push_str(&value);
+        let value = env::var(name).map_err(|_|
+            ArgumentError::new(format!("Environment variable {name} is not set"))
+        )?;
+        expanded.push_str(&value);
         cursor = end + 1;
     }
 
-    output.push_str(&input[cursor..]);
-    Ok(output)
+    expanded.push_str(&input[cursor..]);
+    Ok(expanded)
 }
 
-fn default_config_paths() -> Vec<PathBuf> {
+fn config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    if let Ok(current_dir) = env::current_dir() {
-        paths.push(current_dir.join("node.yaml"));
+    if let Ok(dir) = env::current_dir() {
+        paths.push(dir.join("node.yaml"));
     }
 
     #[cfg(target_os = "windows")]
@@ -225,11 +261,39 @@ fn default_config_paths() -> Vec<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     {
         if let Ok(home) = env::var("HOME") {
-            paths.push(PathBuf::from(home).join(".config").join("boson").join("node.yaml"));
+            paths.push(
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("boson")
+                    .join("node.yaml")
+            );
         }
         paths.push(PathBuf::from("/usr/local/etc/boson/node.yaml"));
         paths.push(PathBuf::from("/etc/boson/node.yaml"));
     }
-
     paths
+}
+
+impl fmt::Display for NodeConfiguration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "node config:")?;
+        write!(f, "\n\thost4: {}", self.host4.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\thost6: {}", self.host6.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\tport: {}", self.port)?;
+        write!(f, "\n\tprivateKey: {}", self.private_key)?;
+        write!(f, "\n\tataDir: {}", self.data_dir)?;
+        write!(f, "\n\tlogLevel: {:?}", self.log_level)?;
+        write!(f, "\n\tlogFile: {}", self.log_file.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\tenableDeveloperMode: {}", self.devp)?;
+
+        if self.bootstrap_nodes.is_empty() {
+            write!(f, "\n\tbootstraps: []")?;
+        } else {
+            write!(f, "\n\tbootstraps:")?;
+            for node in &self.bootstrap_nodes {
+                write!(f, "\n\t- {} {} {}", node.id(), node.host(), node.port())?;
+            }
+        }
+        Ok(())
+    }
 }

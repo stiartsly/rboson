@@ -15,9 +15,9 @@ path = "src/lib.rs"
 name = "apitests"
 path = "tests/apitests/lib.rs"
 
-#[[bin]]
-#name = "shell"
-#path = "apps/shell/main.rs"
+[[bin]]
+name = "shell"
+path = "apps/shell/main.rs"
 
 #[[bin]]
 #name = "launcher"
@@ -28,7 +28,7 @@ path = "tests/apitests/lib.rs"
 #path = "apps/im/mod.rs"
 
 [features]
-devp = []
+devp = ["inspect"]
 inspect = ["devp"]
 default = ["devp"]
 
@@ -71,6 +71,3 @@ indexmap                = "2.13.0"
 
 [dev-dependencies]
 serial_test = "2.0"
-
-#[package.metadata.test]
-#threads = 1

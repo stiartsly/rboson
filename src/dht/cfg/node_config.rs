@@ -17,4 +17,6 @@ pub trait NodeConfig: Send + Sync {
     fn log_file(&self) -> Option<&str> { None }
 
     fn enable_devp(&self) -> bool { false }
+
+    fn dump(&self);
 }

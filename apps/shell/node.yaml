@@ -29,7 +29,7 @@ ipv4: true
 
 # IPv6 address to bind.
 # Uncomment and set to a globally reachable IPv6 address to enable IPv6 support.
-# ipv6: true
+# host6: 2001:db8:85a3::8a2e:370:7334
 
 # Port number for DHT UDP traffic.
 # The default port is 39001. Ensure this port is open in your firewall (UDP).
@@ -45,8 +45,7 @@ port: 39001
 #
 # CAUTION: Keep this key secret. Never share it.
 #
-# Public key: ${NODE_PUBLIC_KEY}
-privateKey: ${NODE_PRIVATE_KEY}
+privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
 
 # Root directory for persistent data.
 # Stores routing tables, caches, and database files.

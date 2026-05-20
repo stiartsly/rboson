@@ -4,8 +4,11 @@ use clap::Parser;
 
 use boson::{
     Id,
-    configuration as cfg,
-    dht::Node,
+    dht::{
+        Node,
+        NodeConfig,
+        NodeConfiguration
+    },
 };
 
 #[derive(Parser, Debug)]
@@ -19,19 +22,16 @@ struct Options {
 #[tokio::main]
 async fn main() {
     let opts = Options::parse();
-    let cfg = cfg::Builder::new()
-        .load(opts.config.as_ref().map_or("default.conf", |v|&v))
-        .map_err(|e| eprintln!("{e}"))
-        .unwrap()
-        .build()
-        .unwrap();
+    let config = NodeConfiguration::load(
+        opts.config.as_deref().unwrap_or("default.conf")
+    ).unwrap();
 
     #[cfg(feature = "inspect")] {
-        cfg.dump();
+        config.dump();
     }
 
-    let node = Node::new(&cfg).unwrap();
-    let _ = node.start();
+    let node = Node::new(Box::new(config)).unwrap();
+    let _ = node.start().await;
 
     thread::sleep(Duration::from_secs(1));
 
@@ -48,7 +48,7 @@ async fn main() {
     thread::sleep(Duration::from_secs(2));
     let peerid: Id = "5vVM1nrCwFh3QqAgbvF3bRgYQL5a2vpFjngwxkiS8Ja6".try_into().unwrap();
     println!("Attemp finding peers with id: {} ...", peerid);
-    match node.find_peer(&peerid, None, None).await {
+    match node.find_peer(&peerid, -1, 8, None).await {
         Ok(val) => {
             if val.is_empty() {
                 println!("Found no peers, try to lookup it later !!!")
@@ -65,5 +65,5 @@ async fn main() {
     }
 
     thread::sleep(Duration::from_secs(10));
-    node.stop();
+    let _ = node.stop().await;
 }

@@ -7,7 +7,7 @@ use boson::{
     core::Result,
     signature,
     dht::{
-        YamlNodeConfiguration,
+        NodeConfiguration,
         Node,
     },
 };
@@ -41,8 +41,7 @@ fn create_node(port: u16, path: &str) -> Result<Node> {
     let private_key = signature::KeyPair::random().private_key().to_string();
     let config_path = format!("{path}/node.yaml");
     let yaml = format!(
-        "host4: {}\nport: {}\nprivateKey: \"{}\"\ndataDir: {}\n",
-        ip,
+        "ipv4: true\nport: {}\nprivateKey: \"{}\"\ndataDir: {}\n",
         port,
         private_key,
         path,
@@ -50,7 +49,7 @@ fn create_node(port: u16, path: &str) -> Result<Node> {
     println!("path: {}", config_path);
 
     fs::write(&config_path, yaml)?;
-    let cfg = YamlNodeConfiguration::load(&config_path).unwrap();
+    let cfg = NodeConfiguration::load(&config_path).unwrap();
 
     Ok(Node::new(Box::new(cfg)).unwrap())
 }

@@ -77,13 +77,13 @@ pub use crate::dht::{
     node_status_listener::NodeStatusListener,
     node::Node,
     cfg::node_config::NodeConfig,
-    cfg::yaml_configuration::YamlNodeConfiguration,
+    cfg::yaml_configuration::NodeConfiguration,
 };
 
 #[cfg(test)]
 mod unitests {
     mod test_prefix;
-    mod test_yaml_configuration;
+    mod test_node_configuration;
     mod test_kclosest_nodes;
     mod test_routing_table;
     mod test_scheduler;

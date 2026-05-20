@@ -58,32 +58,57 @@ impl KClosestNodes {
         self.filter = Box::new(filter);
     }
 
-    pub(crate) fn fill(&mut self) {
-        if self.entries.is_empty() {
-            return;
+    pub(crate) fn filter<F>(&mut self, filter: F) -> &mut Self
+    where
+        F: Fn(&KBucketEntry) -> bool + 'static
+    {
+        let cloned = self.rt.clone();
+        self.filter = Box::new(move |entry: &KBucketEntry| {
+            let rt = cloned.lock().unwrap();
+            filter(entry) && entry.id() != rt.local_id()
+        });
+        self
+    }
+
+    pub(crate) fn fill(&mut self) -> &mut Self {
+        self.entries.clear();
+
+        let empty = {
+            let locked_rt = self.rt.lock().unwrap();
+            locked_rt.buckets().is_empty()
+        };
+
+        if empty {
+            return self;
         }
 
-        let (idx, bucket) = self.rt.lock().unwrap().bucket_of(&self.target);
-        self.add_entries(&bucket);
+        let (idx, buckets) = {
+            let locked_rt = self.rt.lock().unwrap();
+            let (idx, _) = locked_rt.bucket_of(&self.target);
+            let buckets = locked_rt.buckets().iter()
+                .map(|(_, bucket)| bucket.clone())
+                .collect::<Vec<_>>();
+            (idx, buckets)
+        };
 
-        let rt = self.rt.clone();
-        let locked_rt = rt.lock().unwrap();
+        self.add_entries(&buckets[idx]);
 
         let mut low  = idx;
         let mut high = idx;
-        let mut iter = locked_rt.buckets().iter();
-        let len = locked_rt.buckets().len();
+        let len = buckets.len();
 
         while self.entries.len() < self.capacity {
-            let mut low_bucket  = None;
-            let mut high_bucket = None;
+            let low_bucket = if low > 0 {
+                Some(buckets[low - 1].clone())
+            } else {
+                None
+            };
 
-            if low > 0 {
-                low_bucket = iter.nth(low - 1);
-            }
-            if high < len - 1{
-                high_bucket = iter.nth(high + 1);
-            }
+            let high_bucket = if high < len - 1 {
+                Some(buckets[high + 1].clone())
+            } else {
+                None
+            };
 
             if low_bucket.is_none() && high_bucket.is_none() {
                 break;
@@ -91,13 +116,13 @@ impl KClosestNodes {
 
             if low_bucket.is_none() {
                 high += 1;
-                self.add_entries(high_bucket.unwrap().1);
+                self.add_entries(high_bucket.as_ref().unwrap());
             } else if high_bucket.is_none() {
                 low -= 1;
-                self.add_entries(low_bucket.unwrap().1);
+                self.add_entries(low_bucket.as_ref().unwrap());
             } else {
-                let low_bucket = low_bucket.unwrap().1.clone();
-                let high_bucket = high_bucket.unwrap().1.clone();
+                let low_bucket = low_bucket.unwrap();
+                let high_bucket = high_bucket.unwrap();
 
                 let low_prefix = low_bucket.lock().unwrap().prefix().clone();
                 let high_prefix = high_bucket.lock().unwrap().prefix().clone();
@@ -125,6 +150,15 @@ impl KClosestNodes {
             }
         }
         self.shave();
+        self
+    }
+
+    pub(crate) fn entries(&self) -> &Vec<KBucketEntry> {
+        &self.entries
+    }
+
+    pub(crate) fn nodes(&self) -> Vec<NodeInfo> {
+        self.entries.iter().map(|entry| entry.as_ref().clone()).collect()
     }
 
     fn add_entries(&mut self, bucket: &Arc<Mutex<KBucket>>) {
@@ -132,7 +166,7 @@ impl KClosestNodes {
             if (self.filter)(item) {
                 self.entries.push(item.clone())
             }
-        })
+        });
     }
 
     fn shave(&mut self) {

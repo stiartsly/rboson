@@ -9,7 +9,7 @@ pub(crate) struct EligiblePeers {
     target: Id,
     expected_sequence_number: i32,
     expected_count: usize,
-    eligible: HashMap<(Id, u64), PeerInfo>,
+    peers: HashMap<(Id, u64), PeerInfo>,
 }
 
 impl EligiblePeers {
@@ -18,20 +18,20 @@ impl EligiblePeers {
             target,
             expected_sequence_number,
             expected_count,
-            eligible: HashMap::new(),
+            peers: HashMap::new(),
         }
     }
 
     pub(crate) fn size(&self) -> usize {
-        self.eligible.len()
+        self.peers.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.eligible.is_empty()
+        self.peers.is_empty()
     }
 
     pub(crate) fn reached_capacity(&self) -> bool {
-        self.expected_count > 0 && self.eligible.len() >= self.expected_count
+        self.expected_count > 0 && self.peers.len() >= self.expected_count
     }
 
     pub(crate) fn add(&mut self, peers: Vec<PeerInfo>, need_update: bool) -> bool {
@@ -41,7 +41,7 @@ impl EligiblePeers {
 
         for peer in peers {
             let key = (peer.id().clone(), peer.fingerprint());
-            self.eligible
+            self.peers
                 .entry(key)
                 .and_modify(|current| {
                     if current.sequence_number() < peer.sequence_number() {
@@ -67,12 +67,12 @@ impl EligiblePeers {
         let mut to_remove = peers.split_off(self.expected_count as usize);
 
         for peer in to_remove.drain(..) {
-            self.eligible.remove(&(peer.id().clone(), peer.fingerprint()));
+            self.peers.remove(&(peer.id().clone(), peer.fingerprint()));
         }
     }
 
     pub(crate) fn peers(&self) -> Vec<PeerInfo> {
-        let mut peers: Vec<_> = self.eligible.values().cloned().collect();
+        let mut peers: Vec<_> = self.peers.values().cloned().collect();
         peers.sort_by(|left, right| self.peer_order(left, right));
         peers
     }

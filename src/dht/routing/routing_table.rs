@@ -1,13 +1,23 @@
 use std::fmt;
+use std::result::Result as SResult;
 use std::sync::{Arc, Mutex};
 use rbtree::RBTree;
 use libsodium_sys::randombytes_uniform;
+use serde::{
+    Deserialize,
+    Deserializer,
+    Serialize,
+    Serializer,
+    de::{self, MapAccess, Visitor},
+    ser::SerializeStruct,
+};
 
 use crate::{Id};
 
 use crate::dht::{
     node_entry::Reachability,
     routing:: {
+        kclosest_nodes::KClosestNodes,
         prefix::Prefix,
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
@@ -57,6 +67,10 @@ impl RoutingTable {
             .expect("panic: no bucket found, this should never happen")
     }
 
+    pub(crate) fn bucket_at(&self, index: usize) -> Option<Arc<Mutex<KBucket>>> {
+        self.buckets.iter().nth(index).map(|(_, v)| v.clone())
+    }
+
     fn bucket_take(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
         let key = self.buckets.iter()
             .find(|(k,_v)| k.is_prefix_of(target))
@@ -98,18 +112,20 @@ impl RoutingTable {
     }
 
     pub(crate) fn bucket_of(&self, id: &Id) -> (usize, Arc<Mutex<KBucket>>) {
-        let mut idx = 0;
-        let mut bucket = None;
+        self.buckets()
+            .iter()
+            .enumerate()
+            .find(|(_, (k, _))| k.is_prefix_of(id))
+            .map(|(idx, (_, bucket))| (idx, bucket.clone()))
+            .expect("panic: bucket not found, this should never happen")
+    }
 
-        for (k,v) in self.buckets().iter() {
-            if k.is_prefix_of(&self.local_id) {
-                bucket = Some(v.clone());
-                break;
-            }
-            idx += 1;
-        }
-
-        (idx, bucket.expect("panic: bucket not found, this should never happen"))
+    pub(crate) fn closest_nodes(
+        routing_table: Arc<Mutex<Self>>,
+        target: Id,
+        expected: usize,
+    ) -> KClosestNodes {
+        KClosestNodes::new(routing_table, target, expected)
     }
 
     pub(crate) fn put(&mut self, entry: KBucketEntry) {
@@ -117,8 +133,7 @@ impl RoutingTable {
     }
 
     pub(crate) fn remove(&mut self, id: &Id) -> Option<KBucketEntry> {
-       // self._remove(id)
-        unimplemented!()
+        self._remove(id)
     }
 
     pub(crate) fn on_timeout(&mut self, id: &Id) {
@@ -129,8 +144,12 @@ impl RoutingTable {
         self._on_send(id)
     }
 
+    pub(crate) fn on_responded(&mut self, id: &Id, rtt: u64) {
+        self.bucket(id).lock().unwrap().on_responded(id, rtt);
+    }
+
     pub(crate) fn maintenance(&mut self) {
-        // TODO:
+        self._merge_buckets();
     }
 
     // The bucket has already been removed from the routing table
@@ -165,7 +184,11 @@ impl RoutingTable {
             bucket = self.bucket_take(id);
         }
 
-        bucket.lock().unwrap()._put(new_entry);
+        {
+            bucket.lock().unwrap()._put(new_entry);
+        }
+        let prefix = bucket.lock().unwrap().prefix().clone();
+        self.buckets.insert(prefix, bucket);
     }
 
     fn _needs_split(bucket: Arc<Mutex<KBucket>>, new_entry: &KBucketEntry) -> bool {
@@ -182,14 +205,15 @@ impl RoutingTable {
             .is_prefix_of(new_entry.id())
     }
 
-    fn _remove(&mut self, id: &Id) {
+    fn _remove(&mut self, id: &Id) -> Option<KBucketEntry> {
         let bucket = self.bucket(id);
         let to_remove = match bucket.lock().unwrap().entry(id) {
             Some(v) => v.clone(),
-            None => return,
+            None => return None,
         };
 
-        bucket.lock().unwrap()._remove_bad_entry(to_remove, true);
+        let removed = bucket.lock().unwrap()._remove_bad_entry(to_remove, true);
+        removed
     }
 
     fn _on_timeout(&mut self, id: &Id) {
@@ -201,7 +225,44 @@ impl RoutingTable {
     }
 
     fn _merge_buckets(&mut self) {
-        // TODO:
+        let mut idx = 1;
+
+        while idx < self.buckets.len() {
+            let buckets = self.buckets.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>();
+            let left = buckets[idx - 1].clone();
+            let right = buckets[idx].clone();
+
+            let (left_prefix, right_prefix, parent, can_merge) = {
+                let left_locked = left.lock().unwrap();
+                let right_locked = right.lock().unwrap();
+                let left_prefix = left_locked.prefix().clone();
+                let right_prefix = right_locked.prefix().clone();
+                let parent = left_prefix.parent();
+                let can_merge = left_prefix.is_sibling_of(&right_prefix)
+                    && left_locked.size() + right_locked.size() <= KBucket::MAX_ENTRIES;
+                (left_prefix, right_prefix, parent, can_merge)
+            };
+
+            if !can_merge {
+                idx += 1;
+                continue;
+            }
+
+            let left_entries = left.lock().unwrap().entries();
+            let right_entries = right.lock().unwrap().entries();
+            let mut merged = KBucket::new(parent.clone(), self.is_home_bucket(&parent));
+            for entry in left_entries.into_iter().chain(right_entries.into_iter()) {
+                merged._put(entry);
+            }
+
+            self.buckets.remove(&left_prefix);
+            self.buckets.remove(&right_prefix);
+            self.buckets.insert(parent, Arc::new(Mutex::new(merged)));
+
+            if idx > 1 {
+                idx -= 1;
+            }
+        }
     }
 
     /*
@@ -288,123 +349,85 @@ impl RoutingTable {
         }
     }
     */
+}
 
-    pub(crate) fn load(&mut self, _path: &str) {
-    /*
-        let mut fp = match File::open(path) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("Opening persistent file: {} error {}", path, e);
-                return
-            }
-        };
-
-        let mut buf = vec![];
-        if let Err(e) = fp.read_to_end(&mut buf) {
-            warn!("Failed to read persistent file: {}", e);
-            return;
-        };
-
-        let val: ciborium::value::Value;
-        let reader = cbor::Reader::new(&buf);
-        val = ciborium::de::from_reader(reader)
-            .map_err(|e| return e)
-            .ok()
-            .unwrap();
-
-        let root = match val.as_map() {
-            Some(v) => v,
-            None => return,
-        };
-
-        let mut timestamp = SystemTime::UNIX_EPOCH;
-        let mut len = 0;
-
-        for (k,v) in root {
-            let k = match k.as_text() {
-                Some(k) => k,
-                None => return,
-            };
-
-            match k {
-                "timestamp" => {
-                    let v = match v.as_integer() {
-                        Some(v) => v.try_into().unwrap(),
-                        None => return,
-                    };
-                    timestamp += Duration::from_secs(v);
-                },
-                "entries" => {
-                    let v = match v.as_array() {
-                        Some(v) => v,
-                        None => return,
-                    };
-
-                    if v.len() == 0 {
-                        return;
-                    }
-                    for item in v.iter() {
-                        let entry = match KBucketEntry::from_cbor(item) {
-                            Some(v) => v,
-                            None => return,
-                        };
-                        self._put(entry);
-                    }
-                    len = v.len();
-                },
-                _ => return,
-            };
+impl Serialize for RoutingTable {
+    fn serialize<S>(&self, ser: S) -> SResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = ser.serialize_struct("RoutingTable", 2)?;
+        let mut entries = Vec::with_capacity(self.number_of_entries());
+        for (_, bucket) in self.buckets.iter() {
+            entries.extend(bucket.lock().unwrap().entries());
         }
 
-        info!("Loaded {} entries from persistent file, it was {} min old", len,
-            SystemTime::now().duration_since(timestamp).unwrap().as_secs() / 60
-        );
-    */
-    }
-
-    pub(crate) fn save(&self, _path: &str) {
-    /*
-        let mut fp = match File::create(path) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("Failed to creating/opening routing table file with error {}", e);
-                return;
-            }
-        };
-
-        let mut entries = vec![];
-        for bucket in self.buckets.values() {
-            bucket.lock().unwrap().entries().iter().for_each(|item| {
-                entries.push(item.to_cbor());
-            });
-            // TODOO
-        }
-
-        let mut val = Value::Map(vec![
-            (
-                Value::Text(String::from("timestamp")),
-                Value::Integer(SystemTime::now().elapsed().unwrap().as_secs().into())
-            ),
-            (
-                Value::Text(String::from("entries")),
-                Value::Array(entries)
-            )
-        ]);
-
-        let mut buf = vec![];
-        let writer = cbor::Writer::new(&mut buf);
-        let _ = ciborium::ser::into_writer(&mut val, writer);
-
-        if let Err(e) = fp.write_all(&buf) {
-            warn!("Failed to write persistent routing table file with error: {}", e);
-            return;
-        }
-        _ = fp.sync_data();
-    */
+        state.serialize_field("nodeId", &self.local_id)?;
+        state.serialize_field("entries", &entries)?;
+        state.end()
     }
 }
 
+impl<'de> Deserialize<'de> for RoutingTable {
+    fn deserialize<D>(des: D) -> SResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug)]
+        enum Field {
+            NodeId,
+            Entries,
+        }
 
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let key = String::deserialize(deserializer)?;
+                match key.as_str() {
+                    "nodeId" => Ok(Field::NodeId),
+                    "entries" => Ok(Field::Entries),
+                    _ => Err(de::Error::unknown_field(&key, &["nodeId", "entries"])),
+                }
+            }
+        }
+
+        struct RoutingTableVisitor;
+
+        impl<'de> Visitor<'de> for RoutingTableVisitor {
+            type Value = RoutingTable;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct RoutingTable")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut node_id: Option<Id> = None;
+                let mut entries: Vec<KBucketEntry> = Vec::new();
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::NodeId => node_id = Some(map.next_value()?),
+                        Field::Entries => entries = map.next_value()?,
+                    }
+                }
+
+                let node_id = node_id.ok_or_else(|| de::Error::missing_field("nodeId"))?;
+                let mut table = RoutingTable::new(node_id);
+                for entry in entries {
+                    table.put(entry);
+                }
+                Ok(table)
+            }
+        }
+
+        des.deserialize_map(RoutingTableVisitor)
+    }
+}
 
 impl fmt::Display for RoutingTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

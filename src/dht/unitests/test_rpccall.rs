@@ -42,7 +42,7 @@ fn make_matching_response(call: &RpcCall) -> Arc<Mutex<Message>> {
 }
 
 #[test]
-fn test_rpccall_and_expected_rtt() {
+fn test_expected_rtt() {
     let target = make_target("127.0.0.1:40001");
     let req = Arc::new(Mutex::new(Message::ping_req()));
     let mut call = RpcCall::with_node(target.clone(), req.clone());
@@ -67,7 +67,7 @@ fn test_rpccall_and_expected_rtt() {
 }
 
 #[test]
-fn test_rpccall_response_and_update_state() {
+fn test_response_and_update_state() {
     let mut entry = make_kentry("127.0.0.1:40002");
     entry.set_reachable(true);
 
@@ -121,7 +121,7 @@ fn test_rpccall_response_and_update_state() {
 }
 
 #[test]
-fn test_rpccall_stall_timeout_fail_cancel() {
+fn test_stall_timeout_fail_cancel() {
     let target = make_target("127.0.0.1:40004");
     let req = Arc::new(Mutex::new(Message::ping_req()));
     let call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
@@ -174,7 +174,7 @@ fn test_rpccall_stall_timeout_fail_cancel() {
 }
 
 #[tokio::test]
-async fn test_rpccall_scheduler_timeout_canceled_by_response() {
+async fn test_scheduler_timeout_canceled() {
     let target = make_target("127.0.0.1:40006");
     let req = Arc::new(Mutex::new(Message::ping_req()));
     let scheduler = Arc::new(Mutex::new(Scheduler::new()));

@@ -1,64 +1,144 @@
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::Id;
 use crate::dht::{
-    kbucket_entry::KBucketEntry,
-    routing_table::RoutingTable,
+    node_entry::Reachability,
+    routing::{
+        kbucket::KBucket,
+        kbucket_entry::KBucketEntry,
+        routing_table::RoutingTable,
+    },
 };
 
-#[test]
-fn test_put() {
-    let id = Rc::new(Id::random());
-    let mut rt = RoutingTable::new(id.clone());
-    assert_eq!(rt.size(), 1);
-    assert_eq!(rt.size_of_entries(), 0);
-    assert_eq!(rt.buckets().is_empty(), false);
+fn make_id(first_byte: u8, last_byte: u8) -> Id {
+    let mut bytes = [0u8; Id::BYTES];
+    bytes[0] = first_byte;
+    bytes[Id::BYTES - 1] = last_byte;
+    Id::from_bytes(bytes)
+}
 
-    let target = Id::random();
-    assert_eq!(rt.bucket_entry(&target).is_some(), false);
-    assert_eq!(rt.random_entry().is_some(), false);
-    assert_eq!(rt.random_entries(8).len(), 0);
+fn make_reachable_entry(id: Id, addr: &str) -> KBucketEntry {
+    let mut entry = KBucketEntry::new(
+        id,
+        addr.parse::<SocketAddr>().unwrap()
+    );
+    entry.on_responded(20);
+    entry
+}
 
-    let id1 = Id::random();
-    let addr1 = "192.168.1.100:32222".parse::<SocketAddr>().unwrap();
-    let mut entry = KBucketEntry::new(id1.clone(), addr1);
-    entry.signal_response();
-    entry.merge_request_time(SystemTime::now());
+fn fill_and_split_table() -> (RoutingTable, Id, Id) {
+    let local_id = Id::zero();
+    let mut rt = RoutingTable::new(local_id);
 
-    rt.put(Rc::new(RefCell::new(entry)));
-    assert_eq!(rt.size(), 1);
-    assert_eq!(rt.size_of_entries(), 1);
-    assert_eq!(rt.buckets().len(), 1);
+    for i in 0..KBucket::MAX_ENTRIES {
+        let id = make_id(0x00, i as u8 + 1);
+        let entry = make_reachable_entry(id, &format!("127.0.0.1:{}", 30000 + i));
+        rt.put(entry);
+    }
 
-    rt.remove(&id1);
-    assert_eq!(rt.size(), 1);
-    assert_eq!(rt.size_of_entries(), 0);
-    assert_eq!(rt.buckets().len(), 1);
+    let high_id = make_id(0x80, 1);
+    let high_entry = make_reachable_entry(high_id, "127.0.0.1:31000");
+    rt.put(high_entry);
+
+    (rt, make_id(0x00, 1), high_id)
 }
 
 #[test]
-fn test_split() {
-    let id = Rc::new(Id::random());
-    let mut rt = RoutingTable::new(id.clone());
+fn test_basic_accessors_and_remove() {
+    let local_id = Id::random();
+    let mut rt = RoutingTable::new(local_id);
+
     assert_eq!(rt.size(), 1);
-    assert_eq!(rt.size_of_entries(), 0);
-    assert_eq!(rt.buckets().is_empty(), false);
+    assert_eq!(rt.is_empty(), false);
+    assert_eq!(rt.local_id(), &local_id);
+    assert_eq!(rt.is_home_bucket(rt.bucket_at(0).unwrap().lock().unwrap().prefix()), true);
+    assert_eq!(rt.bucket_entry(&Id::random()).is_none(), true);
+    assert_eq!(rt.number_of_entries(), 0);
 
-    for i in 0..1000
-    {
-        let id = Id::random();
-        let addr = format!("192.168.1.100:{}", i+1);
-        let addr = addr.parse::<SocketAddr>().unwrap();
-        let mut input = KBucketEntry::new(id.clone(), addr);
-        input.signal_response();
-        input.merge_request_time(SystemTime::now());
+    let id = make_id(0x00, 1);
+    let entry = make_reachable_entry(id, "127.0.0.1:32000");
+    rt.put(entry);
 
-        rt.put(Rc::new(RefCell::new(input.clone())));
-        // assert_eq!(rt.size_of_entries(), i + 1);
-    }
+    assert_eq!(rt.contains(&id), true);
+    assert_eq!(rt.number_of_entries(), 1);
+    assert_eq!(rt.random_kentry().is_some(), true);
 
-    assert_eq!(true, true);
+    let removed = rt.remove(&id);
+    assert_eq!(removed.is_some(), true);
+    assert_eq!(rt.contains(&id), false);
+    assert_eq!(rt.number_of_entries(), 0);
+}
+
+#[test]
+fn test_bucket_of_and_split() {
+    let (rt, low_id, high_id) = fill_and_split_table();
+
+    assert_eq!(rt.size(), 2);
+
+    let (low_idx, low_bucket) = rt.bucket_of(&low_id);
+    let (high_idx, high_bucket) = rt.bucket_of(&high_id);
+
+    assert_eq!(low_idx, 0);
+    assert_eq!(high_idx, 1);
+    assert_eq!(low_bucket.lock().unwrap().prefix().is_prefix_of(&low_id), true);
+    assert_eq!(high_bucket.lock().unwrap().prefix().is_prefix_of(&high_id), true);
+}
+
+#[test]
+fn test_send_timeout_and_responded() {
+    let local_id = Id::random();
+    let mut rt = RoutingTable::new(local_id);
+    let id = make_id(0x00, 2);
+    let entry = make_reachable_entry(id, "127.0.0.1:32001");
+    rt.put(entry);
+
+    rt.on_send(&id);
+    let sent = rt.bucket_entry(&id).unwrap();
+    assert_eq!(*sent.last_sent() > SystemTime::UNIX_EPOCH, true);
+
+    rt.on_timeout(&id);
+    assert_eq!(rt.bucket_entry(&id).unwrap().failed_requests(), 1);
+
+    rt.on_responded(&id, 55);
+    let responsed = rt.bucket_entry(&id).unwrap();
+    assert_eq!(responsed.is_reachable(), true);
+    assert_eq!(responsed.failed_requests(), 0);
+    assert_eq!(responsed.rtt(), 31);
+}
+
+#[test]
+fn test_closest_nodes_and_serde() {
+    let (rt, low_id, high_id) = fill_and_split_table();
+    let shared = Arc::new(Mutex::new(rt));
+
+    let mut closest = RoutingTable::closest_nodes(shared.clone(), high_id, 4);
+    closest.fill();
+    assert_eq!(closest.size() <= 4, true);
+
+    let cbor = serde_cbor::to_vec(&*shared.lock().unwrap())
+        .expect("Failed to serialize RoutingTable");
+    let restored: RoutingTable = serde_cbor::from_slice(&cbor)
+        .expect("Failed to deserialize RoutingTable");
+
+    assert_eq!(restored.local_id(), &Id::zero());
+    assert_eq!(restored.contains(&low_id), true);
+    assert_eq!(restored.contains(&high_id), true);
+    assert_eq!(restored.number_of_entries(), KBucket::MAX_ENTRIES + 1);
+}
+
+#[test]
+fn test_maintenance_merges_sibling_buckets() {
+    let (mut rt, _, _) = fill_and_split_table();
+
+    let removable_id = make_id(0x80, 1);
+    let removed = rt.remove(&removable_id);
+    assert_eq!(removed.is_some(), true);
+    assert_eq!(rt.size(), 2);
+
+    rt.maintenance();
+
+    assert_eq!(rt.size(), 1);
+    assert_eq!(rt.number_of_entries(), KBucket::MAX_ENTRIES);
 }

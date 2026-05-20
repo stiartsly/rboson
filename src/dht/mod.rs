@@ -90,6 +90,7 @@ mod unitests {
     mod test_kbucket_entry;
     mod test_rpccall;
     mod test_token_manager;
+    mod test_dht;
 
     /*
     mod test_addr;

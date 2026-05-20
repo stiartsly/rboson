@@ -51,6 +51,7 @@ struct YamlNodeConfig {
 
 #[derive(Debug, Deserialize)]
 struct YamlLoggerConfig {
+    #[serde(rename = "logLevel")]
     level: Option<String>,
     #[serde(rename = "logFile")]
     log_file: Option<String>,
@@ -104,9 +105,6 @@ impl TryFrom<YamlNodeConfig> for NodeConfiguration {
         let bootstrap_nodes = yaml.bootstraps.into_iter()
             .map(|entry| NodeInfo::try_from(entry))
             .collect::<Result<Vec<_>>>()?;
-
-        println!("yaml.ipv4: {:?}", yaml.ipv4);
-        println!("yaml.ipv6: {:?}", yaml.ipv6);
 
         let addr4 = if yaml.ipv4 .unwrap_or(false) {
             use crate::local_addr;

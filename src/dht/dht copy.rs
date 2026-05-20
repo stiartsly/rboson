@@ -267,10 +267,11 @@ impl DHT {
         // TODO:
     }
 
-    pub(crate) async fn start(&mut self) -> Result<()> {
+    pub(crate) async fn deploy(&mut self) -> Result<()> {
         if self.is_running {
             return Ok(());
         }
+
         info!("Starting DHT/{}:{} on {} ...", self.network, self.id(), self.addr());
 
         let taskman = Arc::new(Mutex::new(TaskManager::new()));
@@ -279,20 +280,20 @@ impl DHT {
         let dht = self.dht();
         let server = self.server();
         {
-            let mut locked = server.lock().unwrap();
-            locked.set_message_cb({
+            let mut locked_server = server.lock().unwrap();
+            locked_server.set_message_cb({
                 let dht = dht.clone();
                 move |msg| dht.lock().unwrap().on_message(msg)
             });
-            locked.set_call_sent_cb({
+            locked_server.set_call_sent_cb({
                 let dht = dht.clone();
                 move |call| dht.lock().unwrap().on_send(call)
             });
-            locked.set_call_timeout_cb({
+            locked_server.set_call_timeout_cb({
                 let dht = dht.clone();
                 move |call| dht.lock().unwrap().on_timeout(call)
             });
-            locked.set_reachable_cb({
+            locked_server.set_reachable_cb({
                 let dht = dht.clone();
                 move |reachable| {
                     let mut locked_dht = dht.lock().unwrap();
@@ -331,35 +332,71 @@ impl DHT {
 
         self.setup_periodic_tasks();
         self.is_running = true;
-
         info!("Started DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
         Ok(())
+
+/*
+        // Load neighboring nodes from cache storage if they exist.
+        let mut need_ping_cached_rt = false;
+        if let Some(path) = self.store_path.as_ref() {
+            info!("Loading routing table from [{}] ...", path);
+            self.rt.lock().unwrap().load(path);
+            need_ping_cached_rt = self.rt.lock().unwrap().size() > 0;
+        }
+
+        info!("Starting DHT/{} on {}", addr_family!(self.addr()), self.addr());
+        self.is_running  = true;
+        let scheduler = self.server().lock().unwrap().scheduler();
+        let taskman   = self.taskman.clone();
+        scheduler.lock().unwrap().add(move || {
+            taskman.lock().unwrap().dequeue();
+        }, 500, constants::DHT_UPDATE_INTERVAL);
+
+        // fix the first time to persist the routing table: 2 min
+        self.last_saved = self.last_saved.checked_sub(
+            Duration::from_millis(constants::ROUTING_TABLE_PERSIST_INTERVAL + (120 * 1000))
+        ).unwrap();
+
+        self.rt().lock().unwrap().set_dht(self.dht());
+        // Regular dht update.
+        let dht = self.dht();
+        scheduler.lock().unwrap().add(move || {
+            dht.lock().unwrap().update();
+        }, 100, constants::DHT_UPDATE_INTERVAL);
+
+        // Send a ping request to a random node to verify socket liveness.
+        let dht = self.dht();
+        scheduler.lock().unwrap().add(move || {
+            dht.lock().unwrap().random_ping();
+        }, constants::RANDOM_PING_INTERVAL, constants::RANDOM_PING_INTERVAL);
+
+        // Perform a deep lookup to familiarize ourselves with random sections of
+        // the keyspace.
+        let dht = self.dht();
+        scheduler.lock().unwrap().add(move || {
+            dht.lock().unwrap().random_lookup();
+        }, constants::RANDOM_LOOKUP_INTERVAL, constants::RANDOM_LOOKUP_INTERVAL);
+
+        Ok(self.addr().clone())
+*/
     }
 
-    pub(crate) async fn stop(&mut self) {
-        if !self.is_running {
+    pub(crate) fn stop(&mut self) {
+        /*if !self.is_running {
             return;
         }
 
-        info!("Stopping DHT {}:{} on {}:{}......", self.network, self.id(), self.host, self.port);
+        info!("{} started on shutdown ...", addr_family!(self.addr()));
 
+        self.cloned  = None;
         self.is_running = false;
-        self.set_status(ConnectionStatus::Disconnected);
 
-        self.bootstrapping = false;
-
-        if let Some(taskman) = self.taskman.take() {
-            taskman.lock().unwrap().cancel_all();
+        info!("Persisting routing table on shutdown ...");
+        if let Some(path) = self.store_path.take() {
+            self.rt.lock().unwrap().save(&path);
         }
-
-        {
-            let server = self.server();
-            let mut locked = server.lock().unwrap();
-            locked.set_reachable_cb(|_| {});
-        }
-        RpcServer::stop(self.server());
-
-        info!("Stopped DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
+        self.taskman.lock().unwrap().cancel_all();
+        */
     }
 
     fn setup_periodic_tasks(&mut self) {
@@ -959,21 +996,19 @@ impl DHT {
         dht: Arc<Mutex<Self>>,
         nodes: Vec<NodeInfo>
     ) {
-        {
-            let mut locked = dht.lock().unwrap();
-            if !locked.is_running {
-                warn!("Bootstrap failed: DHT is not running.");
-                return;
-            }
-            locked.add_bootstrap_nodes(&nodes);
-            if locked.bootstrapping {
-                warn!("Bootstrap failed: DHT is already bootstrapping.");
-                return;
-            }
-
-            locked.last_bootstrap = SystemTime::UNIX_EPOCH;
-            // Todo: handle status.
+        if !dht.lock().unwrap().is_running {
+            warn!("Bootstrap failed: DHT is not running.");
+            return;
         }
+        dht.lock().unwrap().add_bootstrap_nodes(&nodes);
+        if dht.lock().unwrap().bootstrapping {
+            warn!("Bootstrap failed: DHT is already bootstrapping.");
+            return;
+        }
+
+        dht.lock().unwrap().last_bootstrap = SystemTime::UNIX_EPOCH;
+        // Todo: handle status.
+
         DHT::do_bootstrap(dht, nodes).await;
     }
 
@@ -997,12 +1032,14 @@ impl DHT {
         dht.lock().unwrap().bootstrapping = true;
         info!("DHT {}:{} bootstrapping ...", dht.lock().unwrap().network, dht.lock().unwrap().ni.id());
 
+        let mut futures = Vec::new();
+
+        //let mut futures = FuturesUnordered::new();
         let network = dht.lock().unwrap().network();
         let nodeid  = dht.lock().unwrap().id().clone();
-        let mut futures = FuturesUnordered::new();
 
         while let Some(node) = bootstrap_nodes.pop() {
-            let msg = Message::find_node_req(
+            let mut msg = Message::find_node_req(
                 Id::random(),
                 dht.lock().unwrap().network().is_ipv4(),
                 dht.lock().unwrap().network().is_ipv6(),
@@ -1027,12 +1064,14 @@ impl DHT {
                             return;
                         };
 
+                        /*
                         let rsp = rsp.clone();
-                        let nodes = match rsp.lock().unwrap().body() {
+                        match rsp.lock().unwrap().body() {
                             Some(Body::FindNodeRsp(body)) => body.nodes(network).map(|v| v.to_vec()),
                             _ => None,
-                        };
-                        nodes
+                        }
+                        */
+                        None
                     } else {
                         None
                     }.unwrap_or(Vec::new());
@@ -1040,15 +1079,22 @@ impl DHT {
                 }
             });
 
-            let _ = dht.lock().unwrap().server().lock().unwrap().send_call(call);
-            futures.push(async move {
-                let _ = future.clone().await;
+            /*
+            futures.push({
+                future.clone().await;
                 future.result()
             });
+            */
+            futures.push({
+                future.clone().await;
+                future.result()
+            });
+            dht.lock().unwrap().server().lock().unwrap().send_call(call);
         };
 
         let mut nodes = HashMap::<Id, NodeInfo>::new();
-        while let Some(result) = futures.next().await {
+        let mut into_iter = futures.into_iter();
+        while let Some(result) = into_iter.next() {
             if let Ok(items) = result {
                 for item in items {
                     nodes.insert(item.id().clone(), item.clone());
@@ -1083,19 +1129,19 @@ impl DHT {
         info!("DHT {}:{} bootstrapping finished", network, nodeid);
     }
 
-    fn add_bootstrap_nodes(&mut self, nodes: &[NodeInfo]) {
-        if nodes.is_empty() {
+    fn add_bootstrap_nodes(&mut self, new_nodes: &[NodeInfo]) {
+        if new_nodes.is_empty() {
             return;
         }
 
-        let capacity = self.bootstrap_nodes.len() + nodes.len();
+        let capacity = self.bootstrap_nodes.len() + new_nodes.len();
         let mut dedup = HashMap::<Id, NodeInfo>::with_capacity(capacity);
         while let Some(ni) = self.bootstrap_nodes.pop() {
             dedup.insert(ni.id().clone(), ni);
         };
 
         let self_id = self.id().clone();
-        for ni in nodes.iter() {
+        for ni in new_nodes.iter() {
             if !self.network.can_use_address(ni.socket_addr()) {
                 continue;
             }
@@ -1352,3 +1398,43 @@ impl DHT {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    use crate::{
+        signature,
+        dht::storage::sqlite_storage::SqliteStorage,
+    };
+
+    #[tokio::test]
+    async fn test_deploy_initializes_startup_state() {
+        let keypair = signature::KeyPair::random();
+        let identity = Arc::new(Mutex::new(CryptoIdentity::from_keypair(keypair)));
+        let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
+        let tokenman = Arc::new(Mutex::new(TokenManager::new()));
+
+        let dht = Arc::new(Mutex::new(
+            DHT::new(
+                identity,
+                Network::IPv4,
+                "127.0.0.1".to_string(),
+                0,
+                None,
+                Vec::new(),
+                storage,
+                tokenman,
+            ).unwrap()
+        ));
+        dht.lock().unwrap().set_cloned(dht.clone());
+
+        dht.lock().unwrap().deploy().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let locked_dht = dht.lock().unwrap();
+        assert!(locked_dht.is_running);
+        assert!(locked_dht.taskman.is_some());
+        assert_eq!(locked_dht.status, ConnectionStatus::Disconnected);
+    }
+}

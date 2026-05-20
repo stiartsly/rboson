@@ -87,17 +87,9 @@ bootstraps:
     - 198.51.100.8
     - 39001
 
-# Security: Throttles high-frequency requests from single peers to mitigate DoS.
-# Default: true
-enableSpamThrottling: true
-
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true
 enableSuspiciousNodeDetector: true
-
-# Monitoring: Enables a Prometheus-compatible metrics endpoint (typically on port 8080).
-# Default: false
-enableMetrics: false
 
 # Development: Allows participation in the DHT using local/private IPs (RFC1918).
 # WARNING: Setting this to 'true' in a public or production deployment may lead to routing issues.

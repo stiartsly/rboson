@@ -158,22 +158,22 @@ impl Node {
         }
         *self.status.lock().unwrap() = NodeStatus::Initializing;
 
-        let storage_path = format!("{}node.db", self.storage_path);
-        {
-            let mut storage = self.storage.lock().unwrap();
-            storage.open(&storage_path)?;
-            storage.initialize(
-                Duration::from_millis(120 * 60 * 1000),
-                Duration::from_millis(120 * 60 * 1000),
-            )?;
-        }
+        let db_path = format!("{}node.db", self.storage_path);
+        let mut storage = self.storage.lock().unwrap();
+        storage.open(&db_path)?;
+        storage.initialize(
+            Duration::from_millis(120 * 60 * 1000),
+            Duration::from_millis(120 * 60 * 1000),
+        )?;
 
+        let port = self.cfg.port();
+        let identity = self.identity.identity();
         if let Some(host4) = self.cfg.host4() {
             let dht = Arc::new(Mutex::new(DHT::new(
-                self.identity.identity(),
+                identity.clone(),
                 Network::IPv4,
-                host4.to_string(),
-                self.cfg.port(),
+                host4.into(),
+                port,
                 Some(format!("{}dht4.cache", self.storage_path)),
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
@@ -181,7 +181,7 @@ impl Node {
             )?));
 
             dht.lock().unwrap().set_cloned(dht.clone());
-            if let Err(err) = dht.lock().unwrap().deploy().await {
+            if let Err(err) = dht.lock().unwrap().start().await {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
             }
@@ -189,12 +189,11 @@ impl Node {
         }
 
         if let Some(host6) = self.cfg.host6() {
-            println!(">>>>>v6 line: {}", line!());
             let dht = Arc::new(Mutex::new(DHT::new(
-                self.identity.identity(),
+                identity.clone(),
                 Network::IPv6,
-                host6.to_string(),
-                self.cfg.port(),
+                host6.into(),
+                port,
                 Some(format!("{}dht6.cache", self.storage_path)),
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
@@ -202,7 +201,7 @@ impl Node {
             )?));
 
             dht.lock().unwrap().set_cloned(dht.clone());
-            if let Err(err) = dht.lock().unwrap().deploy().await {
+            if let Err(err) = dht.lock().unwrap().start().await {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
             }
@@ -214,136 +213,27 @@ impl Node {
         Ok(())
     }
 
-    /*
-    protected Future<Void> deploy() {
-		tokenManager = new TokenManager();
+    pub async fn stop(&self) -> Result<()> {
+        if *self.status.lock().unwrap() == NodeStatus::Stopped {
+            return Ok(());
+        }
+        *self.status.lock().unwrap() = NodeStatus::Stopped;
 
-		String storageURI = config.databaseUri();
-		// fix the sqlite database file location
-		if (storageURI.startsWith("jdbc:sqlite:")) {
-			Path dbFile = Path.of(storageURI.substring("jdbc:sqlite:".length()));
-			if (!dbFile.isAbsolute())
-				storageURI = "jdbc:sqlite:" + config.dataDir().resolve(dbFile).toAbsolutePath();
-		}
-		storage = DataStorage.create(storageURI, config.databasePoolSize(), config.databaseSchemaName());
+        let dht4 = self.dht4.lock().unwrap().take();
+        let dht6 = self.dht6.lock().unwrap().take();
 
-		// TODO: empty blacklist for now
-		blacklist = Blacklist.empty();
-
-		ConnectionStatusListener listener = new ConnectionStatusListener() {
-			@Override
-			public void statusChanged(Network network, ConnectionStatus newStatus, ConnectionStatus oldStatus) {
-				if (connectionStatusListener != null)
-					runOnContext(unused -> connectionStatusListener.statusChanged(network, newStatus, oldStatus));
-			}
-
-			@Override
-			public void connecting(Network network) {
-				if (connectionStatusListener != null)
-					runOnContext(unused -> connectionStatusListener.connecting(network));
-			}
-
-			@Override
-			public void connected(Network network) {
-				if (connectionStatusListener != null)
-					runOnContext(unused -> connectionStatusListener.connected(network));
-			}
-
-			@Override
-			public void disconnected(Network network) {
-				if (connectionStatusListener != null)
-					runOnContext(unused -> connectionStatusListener.disconnected(network));
-			}
-		};
-
-		return storage.initialize(vertx, MAX_VALUE_AGE, MAX_PEER_AGE).compose(unused -> {
-			ArrayList<Future<Void>> futures = new ArrayList<>(2);
-			if (config.host4() != null) {
-				dht4 = new DHT(identity, Network.IPv4, config.host4(), config.port(), config.bootstrapNodes(),
-						storage, config.dataDir().resolve("dht4.cache"),
-						tokenManager, blacklist, config.enableSuspiciousNodeDetector(),
-						config.enableSpamThrottling(), null, config.enableDeveloperMode());
-
-				dht4.setConnectionStatusListener(listener);
-
-				Future<Void> future = vertx.deployVerticle(dht4).andThen(ar -> {
-					if (ar.failed())
-						dht4 = null;
-				}).mapEmpty();
-
-				futures.add(future);
-			}
-
-			if (config.host6() != null) {
-				dht6 = new DHT(identity, Network.IPv6, config.host6(), config.port(), config.bootstrapNodes(),
-						storage, config.dataDir().resolve("dht6.cache"),
-						tokenManager, blacklist, config.enableSuspiciousNodeDetector(),
-						config.enableSpamThrottling(), null, config.enableDeveloperMode());
-
-				dht6.setConnectionStatusListener(listener);
-
-				Future<Void> future = vertx.deployVerticle(dht6).andThen(ar -> {
-					if (ar.failed())
-						dht6 = null;
-				}).mapEmpty();
-				futures.add(future);
-			}
-
-			return Future.all(futures);
-		}).andThen(ar -> {
-			if (ar.succeeded()) {
-				long timer = vertx.setPeriodic(30_000, STORAGE_EXPIRE_INTERVAL, unused -> storage.purge());
-				timers.add(timer);
-
-				timer = vertx.setPeriodic(60_000, RE_ANNOUNCE_INTERVAL, unused -> persistentAnnounce());
-				timers.add(timer);
-
-				timer = vertx.setPeriodic(TokenManager.TOKEN_TIMEOUT, TokenManager.TOKEN_TIMEOUT, unused ->
-						tokenManager.updateTokenTimestamps()
-				);
-				timers.add(timer);
-
-				running = true;
-				log.info("Kademlia node started.");
-			} else {
-				undeploy();
-				log.error("Failed to start Kademlia node.", ar.cause());
-			}
-		}).mapEmpty();
-	}
-     */
-/*
-    pub fn stop(&self) {
-        let status_ptr: *mut NodeStatus = &mut (*self.status.lock().unwrap());
-        unsafe {
-            if ptr::read_volatile(status_ptr)
-                == NodeStatus::Stopped {
-                return;
-            }
-            ptr::write_volatile(
-                status_ptr,
-                NodeStatus::Stopped
-            );
+        if let Some(dht) = dht4 {
+            dht.lock().unwrap().stop().await;
+        }
+        if let Some(dht) = dht6 {
+            dht.lock().unwrap().stop().await;
         }
 
-        info!("DHT node <{}> stopping...", self.nodeid);
+        self.storage.lock().unwrap().close()?;
 
-        // Check for abnormal termination in the spawned thread.
-        // If the thread is still running, then notify it to abort.
-        let mut quit = self.quit.lock().unwrap();
-        if !*quit {
-            *quit = true;
-        }
-        drop(quit);
-
-        self.thread.lock().unwrap().take().unwrap().join().expect("Join thread error");
-        *self.thread.lock().unwrap() = None;
-
-        info!("DHT node {} stopped", self.nodeid);
-        logger::teardown();
+        info!("Kademlia node stopped.");
+        Ok(())
     }
-
-    */
 
     pub fn id(&self) -> &Id {
         Identity::id(self)
@@ -378,11 +268,6 @@ impl Node {
         self.option.lock().unwrap().clone()
     }
 
-    pub async fn stop(&self) -> Result<()> {
-        //unimplemented!()
-        Ok(())
-    }
-
     pub fn is_running(&self) -> bool {
         let status_ptr: *const NodeStatus = &(*self.status.lock().unwrap());
         unsafe {
@@ -407,30 +292,23 @@ impl Node {
         }
         self.check_running()?;
 
-        let mut futs = FuturesUnordered::new();
-        futs.push({
-            let nodes = nodes.to_vec();
-            let dht4 = self.dht4.lock().unwrap().clone();
-            task::spawn_local(async move {
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+        let nodes4 = nodes.to_vec();
+        let nodes6 = nodes.to_vec();
+
+        tokio::join!(
+            async move {
                 if let Some(dht) = dht4 {
-                    DHT::bootstrap(dht, nodes).await;
+                    DHT::bootstrap(dht, nodes4).await;
                 }
-            })
-        });
-        futs.push({
-            let nodes = nodes.to_vec();
-            let dht6 = self.dht6.lock().unwrap().clone();
-            task::spawn_local(async move {
+            },
+            async move {
                 if let Some(dht) = dht6 {
-                    DHT::bootstrap(dht, nodes).await;
+                    DHT::bootstrap(dht, nodes6).await;
                 }
-            })
-        });
-        for handle in futs.iter_mut() {
-            handle.await.map_err(|e|
-                StateError::new(format!("Spawn bootstrap task error: {}", e))
-            )?;
-        }
+            }
+        );
         Ok(())
     }
 
@@ -442,35 +320,30 @@ impl Node {
         self.check_running()?;
 
         let option = lookup_option.unwrap_or(self.default_lookup_option());
-        let futures = FuturesUnordered::new();
-        futures.push({
-            let dht = self.dht4.lock().unwrap().clone();
-            let target = target.clone();
-            task::spawn_local(async move {
-                if let Some(dht) = dht {
-                    DHT::find_node(dht, &target, option).await
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+        let target4 = target.clone();
+        let target6 = target.clone();
+
+        let (rc4, rc6) = tokio::join!(
+            async move {
+                if let Some(dht) = dht4 {
+                    DHT::find_node(dht, &target4, option).await
                 } else {
                     Ok(None)
                 }
-            })
-        });
-        futures.push({
-            let dht = self.dht6.lock().unwrap().clone();
-            let target = target.clone();
-            task::spawn_local(async move {
-                if let Some(dht) = dht {
-                    DHT::find_node(dht, &target, option).await
+            },
+            async move {
+                if let Some(dht) = dht6 {
+                    DHT::find_node(dht, &target6, option).await
                 } else {
                     Ok(None)
                 }
-            })
-        });
+            }
+        );
 
         let mut jresult = JointResult::<NodeInfo>::new();
-        for handle in futures.into_iter() {
-            let result = handle.await.map_err(|e| {
-                StateError::new(format!("Spawn findNode task error: {}", e))
-            })?;
+        for result in [rc4, rc6] {
             if let Some(ni) = result? {
                 jresult.set_value(ni.network(), ni);
             }

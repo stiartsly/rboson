@@ -286,14 +286,24 @@ impl Node {
         self.bootstrap(&[node.clone()]).await
     }
 
+    fn dht4(&self) -> Option<Arc<Mutex<DHT>>> {
+        self.dht4.lock().unwrap().clone()
+    }
+    fn dht6(&self) -> Option<Arc<Mutex<DHT>>> {
+        self.dht6.lock().unwrap().clone()
+    }
+    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
+        option.unwrap_or_else(|| self.default_lookup_option())
+    }
+
     pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
         if nodes.is_empty() {
             return Err(ArgumentError::new("Bootstrap nodes cannot be empty".to_string()));
         }
         self.check_running()?;
 
-        let dht4 = self.dht4.lock().unwrap().clone();
-        let dht6 = self.dht6.lock().unwrap().clone();
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
         let nodes4 = nodes.to_vec();
         let nodes6 = nodes.to_vec();
 
@@ -319,23 +329,21 @@ impl Node {
     ) -> Result<JointResult<NodeInfo>> {
         self.check_running()?;
 
-        let option = lookup_option.unwrap_or(self.default_lookup_option());
+        let option = self.lookup_option(lookup_option);
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
-        let target4 = target.clone();
-        let target6 = target.clone();
-
+        let target = target.clone();
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::find_node(dht, &target4, option).await
+                    DHT::find_node(dht, &target, option).await
                 } else {
                     Ok(None)
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::find_node(dht, &target6, option).await
+                    DHT::find_node(dht, &target, option).await
                 } else {
                     Ok(None)
                 }
@@ -354,7 +362,7 @@ impl Node {
     pub async fn find_value(&self,
         value_id: &Id,
         expected_sequence_number: i32,
-        option: Option<LookupOption>
+        lookup_option: Option<LookupOption>
     ) -> Result<Option<Value>> {
         if expected_sequence_number < -1 {
             return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
@@ -363,53 +371,41 @@ impl Node {
         }
         self.check_running()?;
 
-        let option = option.unwrap_or(self.default_lookup_option());
-        let dht4 = self.dht4.lock().unwrap().clone();
-        let dht6 = self.dht6.lock().unwrap().clone();
-        let storage = self.storage.clone();
+        let option = self.lookup_option(lookup_option);
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
         let value_id = value_id.clone();
 
-        task::spawn_local(async move {
-            let mut eligible = EligibleValue::new(
-                value_id,
-                expected_sequence_number
-            );
-            let value = storage.lock().unwrap().get_value(&value_id)?;
-            if let Some(value) = value {
-                let is_mutable_val = value.is_mutable();
-                eligible.update(value, false);
-                if !is_mutable_val {
-                    return Ok(eligible)
-                }
-                if option != LookupOption::Conservative && !eligible.is_empty() {
-                    return Ok(eligible)
-                }
-            }
+        let mut ev = EligibleValue::new(
+            value_id.clone(),
+            expected_sequence_number
+        );
 
-            let result = Self::do_find_value(
-                value_id,
-                expected_sequence_number,
-                option,
-                dht4,
-                dht6
-            ).await?;
-            if let Some(v) = result {
-                eligible.update(v, true);
+        let value = self.storage.lock().unwrap().get_value(&value_id)?;
+        if let Some(v) = value {
+            let is_mutable = v.is_mutable();
+            ev.update(v, false);
+            if !is_mutable {
+                return Ok(ev.value());
             }
-            Ok(eligible)
+            if option != LookupOption::Conservative && !ev.is_empty() {
+                return Ok(ev.value());
+            }
+        }
 
-        }).await.map_err(|e|
-            StateError::new(format!("Spawn findValue task error: {}", e))
-        )?.and_then(|v| {
-            if !v.is_empty() && v.needs_update() {
-                let value = v.value().unwrap();
-                let storage = self.storage.clone();
-                task::spawn_local(async move {
-                    storage.lock().unwrap().put_value(value, None)
-                });
-            }
-            Ok(v.value())
-        })
+        let result = Self::do_find_value(
+            value_id, expected_sequence_number, option, dht4, dht6
+        ).await?;
+        if let Some(value) = result {
+            ev.update(value, true);
+        }
+
+        if !ev.is_empty() && ev.needs_update() {
+            let value = ev.value().unwrap();
+            let _ = self.storage.lock().unwrap().put_value(value, None);
+        }
+
+        Ok(ev.value())
     }
 
     async fn do_find_value(
@@ -420,39 +416,37 @@ impl Node {
         dht6: Option<Arc<Mutex<DHT>>>,
     ) -> Result<Option<Value>> {
 
-        let mut futs = FuturesUnordered::new();
-        futs.push(tokio::spawn(async move {
-            if let Some(dht) = dht4 {
-                DHT::find_value(dht, &value_id, expected_seq, option).await
-            } else {
-                Ok(None)
+        let (rc4, rc6) = tokio::join!(
+            async move {
+                if let Some(dht) = dht4 {
+                    DHT::find_value(dht, &value_id, expected_seq, option).await
+                } else {
+                    Ok(None)
+                }
+            },
+            async move {
+                if let Some(dht) = dht6 {
+                    DHT::find_value(dht, &value_id, expected_seq, option).await
+                } else {
+                    Ok(None)
+                }
             }
-        }));
-        futs.push(tokio::spawn(async move {
-            if let Some(dht) = dht6 {
-                DHT::find_value(dht, &value_id, expected_seq, option).await
-            } else {
-                Ok(None)
-            }
-        }));
+        );
 
-        let mut eligible = EligibleValue::new(value_id, expected_seq);
-        for handle in futs.iter_mut() {
-            let result = handle.await.map_err(|e| {
-                StateError::new(format!("Spawn findValue task error: {}", e))
-            })?;
+        let mut ev = EligibleValue::new(value_id, expected_seq);
+        for result in [rc4, rc6] {
             if let Some(value) = result? {
-                eligible.update(value, true);
+                ev.update(value, true);
             }
         }
-        Ok(eligible.value())
+        Ok(ev.value())
     }
 
     pub async fn find_peer(&self,
         peer_id: &Id,
         expected_sequence_number: i32,
         expected_count: usize,
-        option: Option<LookupOption>
+        lookup_option: Option<LookupOption>
     ) -> Result<Vec<PeerInfo>> {
         if expected_sequence_number < -1 {
             return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
@@ -461,59 +455,51 @@ impl Node {
         }
         self.check_running()?;
 
-        let option = option.unwrap_or(self.default_lookup_option());
-        let storage = self.storage.clone();
-        let dht4    = self.dht4.lock().unwrap().clone();
-        let dht6    = self.dht6.lock().unwrap().clone();
+        let option = self.lookup_option(lookup_option);
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
         let peer_id = peer_id.clone();
 
-        task::spawn_local(async move {
-            let peers = storage.lock().unwrap().get_peers_with_expected_seq(
-                &peer_id,
-                expected_sequence_number,
-                expected_count as i32
-            )?;
+        let mut eligible = EligiblePeers::new(
+            peer_id,
+            expected_sequence_number,
+            expected_count
+        );
 
-            let mut eligible = EligiblePeers::new(
-                peer_id.clone(),
-                expected_sequence_number,
-                expected_count
-            );
-            eligible.add(peers, false);
-            if !eligible.is_empty() {
-                if option == LookupOption::Local {
-                    return Ok(eligible)
-                }
-                if option  != LookupOption::Conservative && expected_sequence_number >= 0 &&
-                     eligible.reached_capacity() {
-                    return Ok(eligible)
-                }
+        let peers = self.storage.lock().unwrap().get_peers_with_expected_seq(
+            &peer_id,
+            expected_sequence_number,
+            expected_count as i32
+        )?;
+        eligible.add(peers, false);
+
+        if !eligible.is_empty() {
+            if option == LookupOption::Local {
+                return Ok(eligible.peers())
             }
-
-            let peers = Self::do_find_peer(
-                peer_id,
-                expected_sequence_number,
-                expected_count,
-                option,
-                dht4,
-                dht6
-            ).await?;
-
-            eligible.add(peers, true);
-            Ok(eligible)
-
-        }).await.map_err(|e|
-            StateError::new(format!("Spawn findPeer task error: {}", e))
-        )?.and_then(|v| {
-            if !v.is_empty() && v.needs_update() {
-                let storage = self.storage.clone();
-                let peers = v.peers();
-                task::spawn_local(async move {
-                    storage.lock().unwrap().put_peers(peers)
-                });
+            if option  != LookupOption::Conservative &&
+                expected_sequence_number >= 0 &&
+                eligible.reached_capacity() {
+                return Ok(eligible.peers())
             }
-            Ok(v.peers())
-        })
+        }
+
+        let peers = Self::do_find_peer(
+            peer_id,
+            expected_sequence_number,
+            expected_count,
+            option,
+            dht4,
+            dht6
+        ).await?;
+        eligible.add(peers, true);
+        eligible.prune();
+
+        if !eligible.is_empty() && eligible.needs_update() {
+            let peers = eligible.peers();
+            let _ = self.storage.lock().unwrap().put_peers(peers);
+        }
+        Ok(eligible.peers())
     }
 
     async fn do_find_peer(
@@ -525,40 +511,36 @@ impl Node {
         dht6: Option<Arc<Mutex<DHT>>>,
     ) -> Result<Vec<PeerInfo>> {
 
-        let mut futs = FuturesUnordered::new();
-        futs.push(task::spawn_local(async move {
-            if let Some(dht) = dht4 {
-                DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
-            } else {
-                Ok(Vec::new())
+        let (rc4, rc6) = tokio::join!(
+            async move {
+                if let Some(dht) = dht4 {
+                    DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+            async move {
+                if let Some(dht) = dht6 {
+                    DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
+                } else {
+                    Ok(Vec::new())
+                }
             }
-        }));
-        futs.push(task::spawn_local(async move {
-            if let Some(dht) = dht6 {
-                DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
-            } else {
-                Ok(Vec::new())
-            }
-        }));
+        );
 
         let mut eligible = EligiblePeers::new(
             peerid,
             expected_seq,
             expected_count
         );
-        for handle in futs.iter_mut() {
-            let result = handle.await.map_err(|e| {
-                StateError::new(format!("Spawn findPeer task error: {}", e))
-            })?;
+        for result in [rc4, rc6] {
             match result {
                 Ok(peers) => eligible.add(peers, true),
                 Err(e) => return Err(e),
             };
         }
-        Ok({
-            eligible.prune();
-            eligible.peers()
-        })
+        eligible.prune();
+        Ok(eligible.peers())
     }
 
     pub async fn store_value(&self,
@@ -575,35 +557,26 @@ impl Node {
         }
         self.check_running()?;
 
-        let storage = self.storage.clone();
-        let checked_value = value.clone();
-        task::spawn_local(async move {
-            Self::check_value(storage, &checked_value, expected_sequence_number)
-        }).await.map_err(|e| {
-            StateError::new(format!("Spawn check value task error: {}", e))
-        })??;
+        let new_value = value.clone();
+        let _ = Self::check_value(
+            self.storage.clone(),
+            &new_value,
+            expected_sequence_number
+        )?;
 
-        // store the value locally.
-        let storage = self.storage.clone();
-        let store_value = value.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().put_value(store_value, Some(persistent));
-        }).await.map_err(|e| {
-            StateError::new(format!("Spawn storage task error: {}", e))
-        })?;
+        // store the value in local node.
+        let _ = self.storage.lock().unwrap().put_value(new_value, Some(persistent))?;
 
-        Self::do_store_value(
+        // store the value to the network.
+        let _ = Self::do_store_value(
             value,
             expected_sequence_number,
-            self.dht4.lock().unwrap().clone(),
-            self.dht6.lock().unwrap().clone()
+            self.dht4(),
+            self.dht6()
         ).await?;
 
-        let storage = self.storage.clone();
         let value_id = value.id();
-        task::spawn_local(async move {
-            storage.lock().unwrap().update_value_announced_time(&value_id)
-        });
+        let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
         Ok(())
     }
 
@@ -646,37 +619,34 @@ impl Node {
         dht4: Option<Arc<Mutex<DHT>>>,
         dht6: Option<Arc<Mutex<DHT>>>,
     ) -> Result<()> {
-        let mut futures = FuturesUnordered::new();
-        futures.push({
-            let value = value.clone();
-            task::spawn_local(async move{
+
+        let value4 = value.clone();
+        let value6 = value.clone();
+        let (rc4, rc6) = tokio::join!(
+            async move {
                 if let Some(dht) = dht4 {
-                    DHT::store_value(dht, value, expected_seq).await
+                    DHT::store_value(dht, value4, expected_seq).await
                 } else {
                     Ok(())
                 }
-            })}
-        );
-        futures.push({
-            let value = value.clone();
-            task::spawn_local(async move{
+            },
+            async move {
                 if let Some(dht) = dht6 {
-                    DHT::store_value(dht, value, expected_seq).await
+                    DHT::store_value(dht, value6, expected_seq).await
                 } else {
                     Ok(())
                 }
-            })}
+            }
         );
-        for handle in futures.iter_mut() {
-            handle.await.map_err(|e|
-                NetworkError::new(format!("Spawn storeValue task error: {}", e))
-            )??;
+
+        for result in [rc4, rc6] {
+            let _ = result?;
         }
         Ok(())
     }
 
     pub async fn announce_peer(&self,
-        peer: PeerInfo,
+        peer: &PeerInfo,
         expected_sequence_number: i32,
         persistent: bool
     ) -> Result<()> {
@@ -690,40 +660,30 @@ impl Node {
         self.check_running()?;
 
         // check the peer validity.
-        let storage = self.storage.clone();
-        let check_peer = peer.clone();
-        task::spawn_local(async move {
-            Self::check_peer(storage, &check_peer, expected_sequence_number)
-        }).await.map_err(|e| {
-            StateError::new(format!("Spawn check peer task error: {}", e))
-        })??;
+        let new_peer = peer.clone();
+        let _ = Self::check_peer(
+            self.storage.clone(),
+            &new_peer,
+            expected_sequence_number
+        )?;
 
         // store the peer locally.
-        let storage = self.storage.clone();
-        let store_peer = peer.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().put_peer(store_peer, Some(persistent));
-        }).await.map_err(|e| {
-            StateError::new(format!("Spawn storage task error: {}", e))
-        })?;
+        let new_peer = peer.clone();
+        let _ = self.storage.lock().unwrap().put_peer(new_peer, Some(persistent));
 
         // announce the peer to the network.
-        Self::do_announce_peer(
-            peer.clone(),
+        let _ = Self::do_announce_peer(
+            peer,
             expected_sequence_number,
             self.dht4.lock().unwrap().clone(),
             self.dht6.lock().unwrap().clone()
         ).await?;
 
         // update the peer announced time.
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().update_peer_announced_time(
-                peer.id(),
-                peer.fingerprint()
-            )
-        });
-
+        let _ = self.storage.lock().unwrap().update_peer_announced_time(
+            peer.id(),
+            peer.fingerprint()
+        );
         Ok(())
     }
 
@@ -757,32 +717,33 @@ impl Node {
     }
 
     async fn do_announce_peer(
-        peer: PeerInfo,
+        peer: &PeerInfo,
         expected_seq: i32,
         dht4: Option<Arc<Mutex<DHT>>>,
         dht6: Option<Arc<Mutex<DHT>>>,
     ) -> Result<()> {
-        let mut futures = FuturesUnordered::new();
-        futures.push({
-            let peer = peer.clone();
-            tokio::task::spawn_local(async move {
+        let peer4 = peer.clone();
+        let peer6 = peer.clone();
+
+        let (rc4, rc6) = tokio::join!(
+            async move {
                 if let Some(dht) = dht4 {
-                    DHT::announce_peer(dht, peer, expected_seq).await;
+                    DHT::announce_peer(dht, peer4, expected_seq).await
+                } else {
+                    Ok(())
                 }
-            })
-        });
-        futures.push({
-            let peer = peer.clone();
-            task::spawn_local(async move {
+            },
+            async move {
                 if let Some(dht) = dht6 {
-                    DHT::announce_peer(dht, peer, expected_seq).await;
+                    DHT::announce_peer(dht, peer6, expected_seq).await
+                } else {
+                    Ok(())
                 }
-            })
-        });
-        for handle in futures.iter_mut() {
-            handle.await.map_err(|e|
-                StateError::new(format!("Spawn announcePeer task error: {}", e))
-            )?;
+            }
+        );
+
+        for result in [rc4, rc6] {
+            let _ = result?;
         }
         Ok(())
     }

@@ -7,15 +7,18 @@ use serde::{
     ser::{SerializeMap, Serializer}
 };
 
-use crate::{ NodeInfo, PeerInfo };
-use super::lookup_rsp::{
-    LookupResponse,
-    Data
+use crate::{
+    NodeInfo,
+    PeerInfo,
+    dht::msg::lookup_rsp::{
+        LookupResponse,
+        Data
+    }
 };
 
 pub(crate) struct FindPeerResponse {
-    pub(crate) data: Data,
-    pub(crate) peers: Option<Vec<PeerInfo>>,
+    data: Data,
+    peers: Option<Vec<PeerInfo>>,
 }
 
 impl FindPeerResponse {
@@ -114,8 +117,8 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
             }
         }
 
-        struct FieldVisiter;
-        impl<'de> Visitor<'de> for FieldVisiter {
+        struct FieldVisitor;
+        impl<'de> Visitor<'de> for FieldVisitor {
             type Value = FindPeerResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -126,15 +129,30 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
             where
                 V: MapAccess<'de>,
             {
-                let mut nodes4 = None;
-                let mut nodes6 = None;
-                let mut peers = None;
+                let mut nodes4: Option<Vec<NodeInfo>> = None;
+                let mut nodes6: Option<Vec<NodeInfo>> = None;
+                let mut peers: Option<Vec<PeerInfo>> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
-                        Field::Nodes4 => nodes4 = map.next_value()?,
-                        Field::Nodes6 => nodes6 = map.next_value()?,
-                        Field::Peers => peers = map.next_value()?,
+                        Field::Nodes4 => {
+                            if nodes4.is_some() {
+                                return Err(de::Error::duplicate_field("n4"));
+                            }
+                            nodes4 = Some(map.next_value()?);
+                        }
+                        Field::Nodes6 => {
+                            if nodes6.is_some() {
+                                return Err(de::Error::duplicate_field("n6"));
+                            }
+                            nodes6 = Some(map.next_value()?);
+                        }
+                        Field::Peers => {
+                            if peers.is_some() {
+                                return Err(de::Error::duplicate_field("p"));
+                            }
+                            peers = Some(map.next_value()?);
+                        }
                         Field::Token |
                         Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
                     }
@@ -144,6 +162,10 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"p\" must be present"));
                 }
 
+                if peers.is_some() && (nodes4.is_some() || nodes6.is_some()) {
+                    return Err(de::Error::custom("\"p\" cannot be combined with \"n4\" or \"n6\""));
+                }
+
                 if let Some(peers) = peers {
                     Ok(FindPeerResponse::from(peers))
                 } else {
@@ -151,50 +173,54 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
                 }
             }
         }
-        de.deserialize_map(FieldVisiter)
+        de.deserialize_map(FieldVisitor)
     }
 }
 
 impl fmt::Display for FindPeerResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut has_written_section = false;
+
         if let Some(nodes4) = self.nodes4() {
-            let mut first = true;
             if !nodes4.is_empty() {
                 write!(f, "n4:")?;
-                for item in nodes4.iter() {
-                    if !first {
-                        first = false;
+                for (index, item) in nodes4.iter().enumerate() {
+                    if index > 0 {
                         write!(f, ",")?;
                     }
                     write!(f, "[{}]", item)?;
                 }
+                has_written_section = true;
             }
         }
 
         if let Some(nodes6) = self.nodes6() {
-            let mut first = true;
             if !nodes6.is_empty() {
+                if has_written_section {
+                    write!(f, ",")?;
+                }
                 write!(f, "n6:")?;
-                for item in nodes6.iter() {
-                    if !first {
-                        first = false;
+                for (index, item) in nodes6.iter().enumerate() {
+                    if index > 0 {
                         write!(f, ",")?;
                     }
                     write!(f, "[{}]", item)?;
                 }
+                has_written_section = true;
             }
         }
 
-        let mut first = true;
         if let Some(peers) = self.peers.as_ref() {
             if peers.is_empty() {
                 return Ok(());
             }
 
+            if has_written_section {
+                write!(f, ",")?;
+            }
             write!(f, ",p:")?;
-            for item in peers.iter() {
-                if !first {
-                    first = false;
+            for (index, item) in peers.iter().enumerate() {
+                if index > 0 {
                     write!(f, ",")?;
                 }
                 write!(f, "[{}]", item)?;

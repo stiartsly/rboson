@@ -12,6 +12,10 @@ use super::lookup_req::{
     Data as LookupData
 };
 
+const WANT4_MASK: i32 = 0x01;
+const WANT6_MASK: i32 = 0x02;
+const WANT_TOKEN_MASK: i32 = 0x04;
+
 pub(crate) struct FindNodeRequest {
     data: LookupData,
 }
@@ -76,38 +80,50 @@ impl<'de> Deserialize<'de> for FindNodeRequest {
             }
         }
 
-        struct FieldVisiter;
-        impl<'de> Visitor<'de> for FieldVisiter {
+        struct FieldVisitor;
+        impl<'de> Visitor<'de> for FieldVisitor {
             type Value = FindNodeRequest;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a FindNodeRequest struct")
-                }
+            }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where
                 V: MapAccess<'de>,
             {
                 let mut target: Option<Id> = None;
-                let mut want: i32 = 0;
+                let mut want: Option<i32> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
-                        Field::Target   => target = Some(map.next_value::<Id>()?),
-                        Field::Want     => want = map.next_value()?,
-                        Field::Ignore   => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Target => {
+                            if target.is_some() {
+                                return Err(de::Error::duplicate_field("t"));
+                            }
+                            target = Some(map.next_value::<Id>()?);
+                        }
+                        Field::Want => {
+                            if want.is_some() {
+                                return Err(de::Error::duplicate_field("w"));
+                            }
+                            want = Some(map.next_value()?);
+                        }
+                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
                     }
                 }
 
+                let want = want.unwrap_or_default();
+
                 Ok(FindNodeRequest::new(
                     target.ok_or_else(|| de::Error::missing_field("t"))?,
-                    want & 0x01 != 0,
-                    want & 0x02 != 0,
-                    want & 0x04 != 0
+                    want & WANT4_MASK != 0,
+                    want & WANT6_MASK != 0,
+                    want & WANT_TOKEN_MASK != 0
                 ))
             }
         }
-        de.deserialize_map(FieldVisiter)
+        de.deserialize_map(FieldVisitor)
     }
 }
 

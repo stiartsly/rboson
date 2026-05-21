@@ -7,13 +7,15 @@ use serde::{
     ser::{Serializer, SerializeMap },
 };
 
-use crate::NodeInfo;
-use super::lookup_rsp::{
-    LookupResponse,
-    Data as LookupData
+use crate::{
+    NodeInfo,
+    dht::msg::lookup_rsp::{
+        LookupResponse,
+        Data as LookupData
+    }
 };
 pub(crate) struct FindNodeResponse {
-    data   : LookupData,
+    data: LookupData,
 }
 
 impl FindNodeResponse {
@@ -39,11 +41,11 @@ impl LookupResponse for FindNodeResponse {
 }
 
 impl Serialize for FindNodeResponse {
-    fn serialize<S>(&self, serializer: S) -> SResult<S::Ok, S::Error>
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
     where
         S: Serializer
     {
-        let mut s = serializer.serialize_map(None)?;
+        let mut s = se.serialize_map(None)?;
         if let Some(ns4) = self.nodes4() {
             let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
                     "Failed to convert nodes4 to CBOR Value"
@@ -62,11 +64,10 @@ impl Serialize for FindNodeResponse {
 }
 
 impl<'de> Deserialize<'de> for FindNodeResponse {
-    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Debug)]
         enum Field {
             Nodes4,         // "n4" - Vec<NodeInfo>
             Nodes6,         // "n6" - Vec<NodeInfo>
@@ -75,11 +76,11 @@ impl<'de> Deserialize<'de> for FindNodeResponse {
         }
 
         impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
+            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let key = String::deserialize(deserializer)?;
+                let key = String::deserialize(de)?;
                 match key.as_str() {
                     "n4"    => Ok(Field::Nodes4),
                     "n6"    => Ok(Field::Nodes6),
@@ -89,9 +90,9 @@ impl<'de> Deserialize<'de> for FindNodeResponse {
             }
         }
 
-        struct FieldVisiter;
+        struct FieldVisitor;
 
-        impl<'de> Visitor<'de> for FieldVisiter {
+        impl<'de> Visitor<'de> for FieldVisitor {
             type Value = FindNodeResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -104,56 +105,81 @@ impl<'de> Deserialize<'de> for FindNodeResponse {
             {
                 let mut nodes4: Option<Vec<NodeInfo>> = None;
                 let mut nodes6: Option<Vec<NodeInfo>> = None;
-                let mut token: i32 = 0;
+                let mut token: Option<i32> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
-                        Field::Nodes4   => nodes4 = Some(map.next_value()?),
-                        Field::Nodes6   => nodes6 = Some(map.next_value()?),
-                        Field::Token    => token = map.next_value()?,
-                        Field::Ignore   => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Nodes4 => {
+                            if nodes4.is_some() {
+                                return Err(serde::de::Error::duplicate_field("n4"));
+                            }
+                            nodes4 = Some(map.next_value()?);
+                        }
+                        Field::Nodes6 => {
+                            if nodes6.is_some() {
+                                return Err(serde::de::Error::duplicate_field("n6"));
+                            }
+                            nodes6 = Some(map.next_value()?);
+                        }
+                        Field::Token => {
+                            if token.is_some() {
+                                return Err(serde::de::Error::duplicate_field("tok"));
+                            }
+                            token = Some(map.next_value()?);
+                        }
+                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
                     }
                 }
 
-                Ok(FindNodeResponse::new(nodes4, nodes6, token))
+                Ok(FindNodeResponse::new(
+                    nodes4,
+                    nodes6,
+                    token.unwrap_or_default()
+                ))
             }
         }
-        deserializer.deserialize_map(FieldVisiter)
+        de.deserialize_map(FieldVisitor)
     }
 }
 
 impl fmt::Display for FindNodeResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut has_written_section = false;
+
         if let Some(nodes4) = self.nodes4() {
-            let mut first = true;
             if !nodes4.is_empty() {
                 write!(f, "n4:")?;
-                for item in nodes4.iter() {
-                    if !first {
-                        first = false;
+                for (index, item) in nodes4.iter().enumerate() {
+                    if index > 0 {
                         write!(f, ",")?;
                     }
                     write!(f, "[{}]", item)?;
                 }
+                has_written_section = true;
             }
         }
 
         if let Some(nodes6) = self.nodes6() {
-            let mut first = true;
             if !nodes6.is_empty() {
+                if has_written_section {
+                    write!(f, ",")?;
+                }
                 write!(f, "n6:")?;
-                for item in nodes6.iter() {
-                    if !first {
-                        first = false;
+                for (index, item) in nodes6.iter().enumerate() {
+                    if index > 0 {
                         write!(f, ",")?;
                     }
                     write!(f, "[{}]", item)?;
                 }
+                has_written_section = true;
             }
         }
 
         if self.token() != 0 {
-            write!(f, ",tok:{}", self.token())?;
+            if has_written_section {
+                write!(f, ",")?;
+            }
+            write!(f, "tok:{}", self.token())?;
         }
         Ok(())
     }

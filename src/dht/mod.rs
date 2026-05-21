@@ -82,6 +82,7 @@ pub use crate::dht::{
 
 #[cfg(test)]
 mod unitests {
+    mod test_addr;
     mod test_prefix;
     mod test_node_configuration;
     mod test_kclosest_nodes;
@@ -92,18 +93,16 @@ mod unitests {
     mod test_token_manager;
     mod test_dht;
 
-    /*
-    mod test_addr;
-   // mod test_sqlite_storage;
-    mod test_token_man;
+    //mod test_sqlite_storage;
+
     mod test_find_node_req;
     mod test_find_node_rsp;
+    mod test_announce_peer_req;
     mod test_find_peer_req;
     mod test_find_peer_rsp;
     mod test_find_value_req;
     mod test_find_value_rsp;
-   // mod test_node_runner;
-    */
+    mod test_store_value_req;
 
     use std::{fs, env};
 

@@ -11,17 +11,16 @@ use crate::{
     Id,
     NodeInfo,
     Value,
-    cryptobox::Nonce
-};
-
-use super::lookup_rsp::{
-    LookupResponse,
-    Data
+    cryptobox::Nonce,
+    dht::msg::lookup_rsp::{
+        LookupResponse,
+        Data
+    }
 };
 
 pub(crate) struct FindValueResponse {
-    pub(crate) data: Data,
-    pub(crate) value: Option<Value>,
+    data: Data,
+    value: Option<Value>,
 }
 
 impl FindValueResponse {
@@ -83,6 +82,7 @@ impl Serialize for FindValueResponse {
             if let Some(sig) = value.signature() {
                 s.serialize_entry("sig", sig)?;
             }
+            s.serialize_entry("v", value.data())?;
         } else {
             if let Some(ns4) = self.nodes4() {
                 let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
@@ -141,9 +141,9 @@ impl<'de> Deserialize<'de> for FindValueResponse {
             }
         }
 
-        struct FieldVisiter;
+        struct FieldVisitor;
 
-        impl<'de> Visitor<'de> for FieldVisiter {
+        impl<'de> Visitor<'de> for FieldVisitor {
             type Value = FindValueResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -154,25 +154,65 @@ impl<'de> Deserialize<'de> for FindValueResponse {
             where
                 V: MapAccess<'de>,
             {
-                let mut nodes4 = None;
-                let mut nodes6 = None;
+                let mut nodes4: Option<Vec<NodeInfo>> = None;
+                let mut nodes6: Option<Vec<NodeInfo>> = None;
                 let mut pk: Option<Id> = None;
                 let mut rec: Option<Id> = None;
                 let mut nonce: Option<Vec<u8>> = None;
                 let mut sig: Option<Vec<u8>> = None;
-                let mut seq: i32 = -1;
+                let mut seq: Option<i32> = None;
                 let mut data: Option<Vec<u8>> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
-                        Field::Nodes4 => nodes4 = Some(map.next_value()?),
-                        Field::Nodes6 => nodes6 = Some(map.next_value()?),
-                        Field::Key => pk = Some(map.next_value()?),
-                        Field::Recipient => rec = Some(map.next_value()?),
-                        Field::Nonce => nonce = Some(map.next_value()?),
-                        Field::Signature => sig = Some(map.next_value()?),
-                        Field::SequenceNumber => seq = map.next_value()?,
-                        Field::Data => data = map.next_value()?,
+                        Field::Nodes4 => {
+                            if nodes4.is_some() {
+                                return Err(de::Error::duplicate_field("n4"));
+                            }
+                            nodes4 = Some(map.next_value()?);
+                        }
+                        Field::Nodes6 => {
+                            if nodes6.is_some() {
+                                return Err(de::Error::duplicate_field("n6"));
+                            }
+                            nodes6 = Some(map.next_value()?);
+                        }
+                        Field::Key => {
+                            if pk.is_some() {
+                                return Err(de::Error::duplicate_field("k"));
+                            }
+                            pk = Some(map.next_value()?);
+                        }
+                        Field::Recipient => {
+                            if rec.is_some() {
+                                return Err(de::Error::duplicate_field("rec"));
+                            }
+                            rec = Some(map.next_value()?);
+                        }
+                        Field::Nonce => {
+                            if nonce.is_some() {
+                                return Err(de::Error::duplicate_field("n"));
+                            }
+                            nonce = Some(map.next_value()?);
+                        }
+                        Field::Signature => {
+                            if sig.is_some() {
+                                return Err(de::Error::duplicate_field("sig"));
+                            }
+                            sig = Some(map.next_value()?);
+                        }
+                        Field::SequenceNumber => {
+                            if seq.is_some() {
+                                return Err(de::Error::duplicate_field("seq"));
+                            }
+                            seq = Some(map.next_value()?);
+                        }
+                        Field::Data => {
+                            if data.is_some() {
+                                return Err(de::Error::duplicate_field("v"));
+                            }
+                            data = Some(map.next_value()?);
+                        }
                         Field::Token |
                         Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
                     }
@@ -182,10 +222,16 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"v\" must be present"));
                 }
 
+                if data.is_some() && (nodes4.is_some() || nodes6.is_some()) {
+                    return Err(de::Error::custom("\"v\" cannot be combined with \"n4\" or \"n6\""));
+                }
+
                 if let Some(data) = data {
-                    if data.len() == 0 {
+                    if data.is_empty() {
                         return Err(de::Error::custom("data field \"v\" cannot be empty"));
                     }
+
+                    let seq = seq.unwrap_or(-1);
 
                     let nonce = if let Some(nonce) = nonce.as_ref() {
                         Nonce::try_from(nonce.as_slice())
@@ -205,12 +251,49 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                 }
             }
         }
-        de.deserialize_map(FieldVisiter)
+        de.deserialize_map(FieldVisitor)
     }
 }
 
 impl fmt::Display for FindValueResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        unimplemented!()
+        let mut has_written_section = false;
+
+        if let Some(nodes4) = self.nodes4() {
+            if !nodes4.is_empty() {
+                write!(f, "n4:")?;
+                for (index, item) in nodes4.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "[{}]", item)?;
+                }
+                has_written_section = true;
+            }
+        }
+
+        if let Some(nodes6) = self.nodes6() {
+            if !nodes6.is_empty() {
+                if has_written_section {
+                    write!(f, ",")?;
+                }
+                write!(f, "n6:")?;
+                for (index, item) in nodes6.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "[{}]", item)?;
+                }
+                has_written_section = true;
+            }
+        }
+
+        if let Some(value) = self.value() {
+            if has_written_section {
+                write!(f, ",")?;
+            }
+            write!(f, "v:[{}]", value)?;
+        }
+        Ok(())
     }
 }

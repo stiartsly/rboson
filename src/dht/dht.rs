@@ -249,7 +249,7 @@ impl DHT {
             msg
         )));
         call.lock().unwrap().set_cloned(call.clone());
-        self.server().lock().unwrap().send_call(call);
+        let _ = self.server().lock().unwrap().send_call(call);
     }
 
     fn set_status(&mut self, status: ConnectionStatus) {
@@ -542,7 +542,7 @@ impl DHT {
     fn send_err(&mut self, method: Method, code: i32, str: &str) {
         // TODO:
         let msg = Message::error(method, 0, code, str.into());
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }
@@ -621,7 +621,7 @@ impl DHT {
         let mut msg = Message::ping_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
 
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }
@@ -670,7 +670,7 @@ impl DHT {
         let mut msg = Message::find_node_rsp(txid, nodes4, nodes6, token);
         msg.set_remote(remote_id, remote_addr);
 
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }
@@ -733,7 +733,7 @@ impl DHT {
             msg
         };
 
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }
@@ -863,7 +863,7 @@ impl DHT {
             msg
         };
 
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }
@@ -931,7 +931,7 @@ impl DHT {
         let mut msg = Message::announce_peer_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
 
-        self.server().lock().unwrap().send_msg(
+        let _ = self.server().lock().unwrap().send_msg(
             Arc::new(Mutex::new(msg))
         );
     }

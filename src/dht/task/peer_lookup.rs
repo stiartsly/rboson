@@ -6,12 +6,12 @@ use crate::dht::{
     dht::DHT,
     rpccall::RpcCall,
     node_entry::NodeEntry,
+    eligible_peers::EligiblePeers,
     routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
         kclosest_nodes::KClosestNodes,
     },
-    eligible_peers::EligiblePeers,
     msg::{
         msg::{Body, Message},
         lookup_rsp::LookupResponse
@@ -190,7 +190,7 @@ impl Task for PeerLookupTask {
                 Network::IPv6 => body.nodes6()
             };
 
-            let Some(nodes) = nodes.filter(|v|v.is_empty()) else {
+            let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",
                     self.name(),
                     self.id(),

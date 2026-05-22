@@ -1,16 +1,15 @@
 use std::sync::{Arc, Mutex};
 use log::{debug, warn, error};
 
-use crate::dht::node_entry::NodeEntry;
 use crate::{
     Id,
     Network,
     NodeInfo,
 };
-
 use crate::dht::{
     dht::DHT,
     rpccall::RpcCall,
+    node_entry::NodeEntry,
     routing::{
         kbucket::KBucket,
         kclosest_nodes::KClosestNodes,
@@ -20,11 +19,10 @@ use crate::dht::{
         msg::{Body, Message},
         lookup_rsp::LookupResponse,
     },
-};
-
-use super::{
-    task::{Task, TaskData, TaskResult},
-    lookup_task::{LookupTask, LookupTaskData},
+    task::{
+        task::{Task, TaskData, TaskResult},
+        lookup_task::{LookupTask, LookupTaskData},
+    }
 };
 
 pub(crate) struct NodeLookupTask {
@@ -198,7 +196,7 @@ impl Task for NodeLookupTask {
             Network::IPv6 => body.nodes6(),
         };
 
-        let Some(nodes) = nodes.filter(|v|v.is_empty()) else {
+        let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;
         };
 
@@ -245,4 +243,3 @@ impl Task for NodeLookupTask {
 
 unsafe impl Send for NodeLookupTask {}
 unsafe impl Sync for NodeLookupTask {}
-

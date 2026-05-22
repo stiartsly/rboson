@@ -1,12 +1,17 @@
 use std::sync::{Arc, Mutex};
 use moka::sync::Cache;
 
-use crate::{Id, Identity};
-use crate::core::{
-    Result,
-    crypto_identity::CryptoIdentity,
-    crypto_context::CryptoContext,
+use crate::{
+    Id,
+    Identity,
+    core::{
+        Result,
+        crypto_identity::CryptoIdentity,
+        crypto_context::CryptoContext,
+    }
 };
+
+const CONTEXT_CACHE_CAPACITY: u64 = 10;
 
 pub(crate) struct CachedIdentity {
     id: Id,
@@ -19,7 +24,7 @@ impl CachedIdentity {
         Self {
             id: identity.id().clone(),
             identity: Arc::new(Mutex::new(identity)),
-            cache: Mutex::new(Cache::<Id, Arc<Mutex<CryptoContext>>>::new(10)),
+            cache: Mutex::new(Cache::<Id, Arc<Mutex<CryptoContext>>>::new(CONTEXT_CACHE_CAPACITY)),
         }
     }
 
@@ -28,16 +33,12 @@ impl CachedIdentity {
     }
 
     pub(crate) fn context(&self, key: &Id) -> Arc<Mutex<CryptoContext>> {
-        if let Some(ctx) = self.cache.lock().unwrap().get(key) {
-            return ctx;
-        }
-
-        let ctx = Arc::new(Mutex::new(CryptoContext::from_private_key(
-            key.clone(),
-            self.identity.lock().unwrap().encryption_keypair().private_key()
-        )));
-        self.cache.lock().unwrap().insert(key.clone(), ctx.clone());
-        return ctx;
+        self.cache.lock().unwrap().get_with(key.clone(), || {
+            Arc::new(Mutex::new(CryptoContext::from_private_key(
+                key.clone(),
+                self.identity.lock().unwrap().encryption_keypair().private_key(),
+            )))
+        })
     }
 
     pub(crate) fn identity(&self) -> Arc<Mutex<CryptoIdentity>> {

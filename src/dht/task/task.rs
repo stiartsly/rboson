@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use log::{warn,debug, trace};
 
 use crate::{
-    addr_family,
     core::Result,
     NodeInfo,
     PeerInfo,
@@ -21,6 +20,16 @@ use crate::dht::{
     task::task_listener::TaskListener,
     task::closest_set::ClosestSet,
 };
+
+#[macro_export]
+macro_rules! addr_family {
+    ($val:expr) => {{
+        match $val.is_ipv4() {
+            true => "ipv4",
+            false => "ipv6"
+        }
+    }};
+}
 
 pub(crate) enum TaskResult {
     NodeInfo(NodeInfo),

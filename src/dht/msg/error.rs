@@ -36,9 +36,7 @@ impl Serialize for Error {
     {
         let mut s = se.serialize_map(None)?;
         s.serialize_entry("c", &self.code)?;
-        if !self.msg.is_empty() {
-            s.serialize_entry("m", &self.msg)?;
-        }
+        s.serialize_entry("m", &self.msg)?;
         s.end()
     }
 }
@@ -68,8 +66,8 @@ impl<'de> Deserialize<'de> for Error {
             }
         }
 
-        struct FieldVisiter;
-        impl<'de> Visitor<'de> for FieldVisiter {
+        struct FieldVisitor;
+        impl<'de> Visitor<'de> for FieldVisitor {
             type Value = Error;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -84,9 +82,19 @@ impl<'de> Deserialize<'de> for Error {
                 let mut msg: Option<String> = None;
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
-                        Field::Code    => code = Some(map.next_value()?),
-                        Field::Msg     => msg = Some(map.next_value()?),
-                        Field::Ignore  => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Code => {
+                            if code.is_some() {
+                                return Err(de::Error::duplicate_field("c"));
+                            }
+                            code = Some(map.next_value()?);
+                        }
+                        Field::Msg => {
+                            if msg.is_some() {
+                                return Err(de::Error::duplicate_field("m"));
+                            }
+                            msg = Some(map.next_value()?);
+                        }
+                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
                     }
                 }
 
@@ -96,12 +104,12 @@ impl<'de> Deserialize<'de> for Error {
                 ))
             }
         }
-        de.deserialize_map(FieldVisiter)
+        de.deserialize_map(FieldVisitor)
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,"c:{}.m:{}", self.code(),self.msg())
+        write!(f, "c:{},m:{}", self.code(), self.msg())
     }
 }

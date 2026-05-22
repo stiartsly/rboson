@@ -2,7 +2,7 @@ use std::net::{
     IpAddr,
     SocketAddr
 };
-use crate::dht::{
+use crate::dht::utils::{
     is_bogon,
     is_global_unicast,
     is_any_unicast

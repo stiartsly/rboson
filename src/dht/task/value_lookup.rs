@@ -19,7 +19,7 @@ use crate::dht::{
     task::{
         lookup_task::{LookupTask, LookupTaskData},
         task::{Task, TaskData, TaskResult},
-    },
+    }
 };
 
 pub(crate) struct ValueLookupTask {
@@ -173,7 +173,7 @@ impl Task for ValueLookupTask {
                 Network::IPv6 => body.nodes6()
             };
 
-            let Some(nodes) = nodes.filter(|v|v.is_empty()) else {
+            let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",
                     self.name(),
                     self.id(),

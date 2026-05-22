@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::collections::LinkedList;
-use log::error;
+use std::collections::VecDeque;
+use log::{debug, error, warn};
 
 use crate::PeerInfo;
 use crate::dht::{
@@ -18,17 +18,19 @@ use super::{
 pub(crate) struct PeerAnnounceTask {
     base_data: TaskData,
 
-    todo: Arc<Mutex<LinkedList<Arc<Mutex<CandidateNode>>>>>,
+    todo: Arc<Mutex<VecDeque<Arc<Mutex<CandidateNode>>>>>,
     peer: PeerInfo,
     expected_seq: i32,
 }
+
+const MAX_TODO_ENTRIES: usize = 24;
 
 impl PeerAnnounceTask {
     pub(crate) fn new(dht: Arc<Mutex<DHT>>, peer: PeerInfo, expected_seq: i32) -> Self {
         Self {
             base_data: TaskData::new(dht),
             peer,
-            todo: Arc::new(Mutex::new(LinkedList::new())),
+            todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             expected_seq,
         }
     }
@@ -37,8 +39,17 @@ impl PeerAnnounceTask {
         let mut locked = self.todo.lock().unwrap();
         let mut entries = closest.entries();
         while let Some(cn) = entries.pop() {
+            if locked.len() >= MAX_TODO_ENTRIES {
+                break;
+            }
             locked.push_back(cn);
         }
+        debug!(
+            "{}#{} added {} eligible nodes to announce queue",
+            self.name(),
+            self.id(),
+            locked.len()
+        );
         drop(locked);
         self
     }
@@ -80,11 +91,13 @@ impl Task for PeerAnnounceTask {
             })).map_err(|e| {
                error!("Error on sending 'announcePeer' message: {}", e);
             }).ok();
+
+            break;
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
+        self.todo.lock().unwrap().is_empty() && self.data().is_done()
     }
 }
 

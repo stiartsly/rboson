@@ -1,11 +1,11 @@
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use log::{error, debug};
+use log::{debug, error};
 
 use crate::dht::{
+    dht::DHT,
     node_entry::NodeEntry,
     rpccall::RpcCall,
-    dht::DHT,
     msg::msg::Message,
     task::task::{Task, TaskData},
     routing::{
@@ -17,26 +17,24 @@ use crate::dht::{
 pub(crate) struct PingRefreshTask {
     base_data: TaskData,
 
-    todo: Arc<Mutex<LinkedList<KBucketEntry>>>,
+    todo: Arc<Mutex<VecDeque<KBucketEntry>>>,
 
     // Whether to ping all nodes in the bucket, regardless of their ping status.
     check_all: bool,
 
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
-
-	// Whether to ping a replacement node from the bucket’s cache.
-    probe_replacement: bool,
 }
+
+const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
 impl PingRefreshTask {
     pub(crate) fn new(dht: Arc<Mutex<DHT>>) -> Self {
         Self {
             base_data: TaskData::new(dht),
-            todo: Arc::new(Mutex::new(LinkedList::new())),
+            todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
             check_all           : false,
-            probe_replacement   : false,
             remove_on_timeout   : false,
         }
     }
@@ -46,24 +44,22 @@ impl PingRefreshTask {
         self
     }
 
-    pub(crate) fn remove_on_timeout(&mut self, remove_on_timeout: bool) -> &mut Self {
+    pub(crate) fn with_remove_on_timeout(&mut self, remove_on_timeout: bool) -> &mut Self {
         self.remove_on_timeout = remove_on_timeout;
         self
     }
 
-    pub(crate) fn with_probe_replacement(&mut self, replacement: bool) -> &mut Self {
-        self.probe_replacement = replacement;
-        self
-    }
-
-    pub(crate) fn bucket(&mut self, bucket: Arc<Mutex<KBucket>>) -> &mut Self {
-        bucket.lock().unwrap().update_refresh_time();
+    pub(crate) fn with_bucket(&mut self, bucket: Arc<Mutex<KBucket>>) -> &mut Self {
+        let mut entries = {
+            let mut locked_bucket = bucket.lock().unwrap();
+            locked_bucket.update_refresh_time();
+            locked_bucket.entries()
+        };
 
         let mut todo = self.todo.lock().unwrap();
-        let mut entries = bucket.lock().unwrap().entries();
         while let Some(entry) = entries.pop() {
             if self.check_all || self.remove_on_timeout || entry.needs_ping() {
-                if todo.len() >= KBucket::MAX_ENTRIES*2 {
+                if todo.len() >= MAX_TODO_ENTRIES {
                     break;
                 }
                 todo.push_back(entry);
@@ -85,6 +81,12 @@ impl Task for PingRefreshTask {
 
     fn call_timeout(&mut self, call: &RpcCall) {
         if !self.remove_on_timeout {
+            debug!(
+                "{}#{} timeout for node {}, not removed (remove_on_timeout=false)",
+                self.name(),
+                self.id(),
+                call.target_id()
+            );
             return;
         }
 
@@ -111,6 +113,7 @@ impl Task for PingRefreshTask {
 
             if !self.check_all && !kentry.needs_ping() {
                 _ = self.todo.lock().unwrap().pop_front();
+                continue;
             }
 
             let msg = Arc::new(Mutex::new(Message::ping_req()));
@@ -120,7 +123,7 @@ impl Task for PingRefreshTask {
             self.send_call(ke, msg, Box::new(move|_| {
                 todo.lock().unwrap().pop_front();
             })).map_err(|e| {
-               error!("Error on sending 'pingRequest' message: {}", e);
+               error!("Error on sending 'PingRequest' message: {}", e);
             }).ok();
         }
     }

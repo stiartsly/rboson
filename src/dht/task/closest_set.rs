@@ -1,5 +1,8 @@
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::fmt;
 use std::sync::{Arc, Mutex};
+
+use indexmap::map::IndexMap;
 use log::debug;
 
 use crate::Id;
@@ -12,7 +15,7 @@ pub(crate) struct ClosestSet {
     target: Id,
     capacity: usize,
 
-    closest: HashMap<Id, Arc<Mutex<CandidateNode>>>,
+    closest: IndexMap<Id, Arc<Mutex<CandidateNode>>>,
 
     insert_attempt_since_tail_modification: usize,
     insert_attempt_since_head_modification: usize,
@@ -23,7 +26,7 @@ impl ClosestSet {
         Self {
             target,
             capacity,
-            closest: HashMap::new(),
+            closest: IndexMap::new(),
             insert_attempt_since_tail_modification: 0,
             insert_attempt_since_head_modification: 0,
         }
@@ -49,14 +52,28 @@ impl ClosestSet {
         self.closest.contains_key(id)
     }
 
+    fn candidate_order(
+        target: &Id,
+        left: &Arc<Mutex<CandidateNode>>,
+        right: &Arc<Mutex<CandidateNode>>,
+    ) -> Ordering {
+        let left_id = left.lock().unwrap().id().clone();
+        let right_id = right.lock().unwrap().id().clone();
+        target.three_way_compare(&left_id, &right_id)
+    }
+
     pub(crate) fn add(&mut self, cn: Arc<Mutex<CandidateNode>>) {
         let id = cn.lock().unwrap().id().clone();
-        self.closest.insert(id, cn);
+        self.closest.insert_sorted_by(id.clone(), cn, |_, left, _, right|
+            Self::candidate_order(&self.target, left, right)
+        );
+
+        debug!("Added candidate {} to ClosestSet, size now {}", id, self.closest.len());
 
         let exceeded = self.closest.len() > self.capacity;
         if exceeded {
-            let last_id = self.closest.iter().last().unwrap().0.clone();
-            _ = self.closest.remove(&last_id);
+            let last_id = self.closest.last().unwrap().0.clone();
+            _ = self.closest.shift_remove(&last_id);
 
             if last_id == id {
                 self.insert_attempt_since_tail_modification += 1;
@@ -69,9 +86,8 @@ impl ClosestSet {
             );
         }
 
-        if self.closest.len() > 0 {
-            let head = self.closest.iter().next().unwrap();
-            if head.0 == &id {
+        if let Some((head_id, _)) = self.closest.first() {
+            if head_id == &id {
                 self.insert_attempt_since_head_modification = 0;
             } else {
                 self.insert_attempt_since_head_modification += 1;
@@ -79,32 +95,54 @@ impl ClosestSet {
         }
     }
 
-    // pub(crate) fn remove(&mut self, candidate: &Id) {
-    //    _ = self.closest.remove(candidate)
-    // }
+    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+        self.closest.shift_remove(id)
+    }
 
     pub(crate) fn entries(&self) -> Vec<Arc<Mutex<CandidateNode>>> {
         self.closest.values().cloned().collect()
     }
 
-    pub(crate) fn tail(&self) -> Id {
-        match self.closest.is_empty() {
-            true => self.target.distance(&Id::MAX_ID),
-            false => self.closest.iter().last().unwrap().0.clone(),
+    pub(crate) fn head(&self) -> Id {
+        match self.closest.first() {
+            Some((id, _)) => id.clone(),
+            None => self.target.distance(&Id::MAX_ID),
         }
     }
 
-    /*
-    pub(crate) fn head(&self) -> Id {
-        match self.closest.is_empty() {
-            true => self.target.distance(&Id::MAX_ID),
-            false => self.closest.iter().next().unwrap().0.clone(),
+    pub(crate) fn tail(&self) -> Id {
+        match self.closest.last() {
+            Some((id, _)) => id.clone(),
+            None => self.target.distance(&Id::MAX_ID),
         }
     }
-    */
+
+    pub(crate) fn insert_attempts_since_tail_modification(&self) -> usize {
+        self.insert_attempt_since_tail_modification
+    }
+
+    pub(crate) fn insert_attempts_since_head_modification(&self) -> usize {
+        self.insert_attempt_since_head_modification
+    }
 
     pub(crate) fn is_eligible(&self) -> bool {
         self.reached_capacity() &&
             self.insert_attempt_since_tail_modification > self.capacity
+    }
+
+    pub(crate) fn is_head_stable(&self) -> bool {
+        self.insert_attempt_since_head_modification > self.capacity
+    }
+}
+
+impl fmt::Display for ClosestSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ClosestSet: size={} head={} tail={}",
+            self.closest.len(),
+            self.head(),
+            self.tail(),
+        )
     }
 }

@@ -1,4 +1,5 @@
-use std::net::SocketAddr;
+use std::fmt;
+use std::net::{IpAddr, SocketAddr};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use indexmap::map::IndexMap;
@@ -12,11 +13,17 @@ use crate::dht::{
     }
 };
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum DedupKey {
+    Ip(IpAddr),
+    Socket(SocketAddr),
+}
+
 pub(crate) struct ClosestCandidates {
     target: Id,
     capacity: usize,
     dedups_ids: HashSet<Id>,
-    dedups_addrs: HashSet<SocketAddr>,
+    dedups_addrs: HashSet<DedupKey>,
     closest: IndexMap<Id, Arc<Mutex<CandidateNode>>>,
 
     developer_mode: bool,
@@ -24,13 +31,17 @@ pub(crate) struct ClosestCandidates {
 
 impl ClosestCandidates {
     pub(crate) fn new(target: Id, capacity: usize) -> Self {
+        Self::with_developer_mode(target, capacity, false)
+    }
+
+    pub(crate) fn with_developer_mode(target: Id, capacity: usize, developer_mode: bool) -> Self {
         Self {
             target,
             capacity,
             dedups_ids      : HashSet::new(),
             dedups_addrs    : HashSet::new(),
             closest         : IndexMap::new(),
-            developer_mode  : false,
+            developer_mode,
         }
     }
 
@@ -50,30 +61,45 @@ impl ClosestCandidates {
         self.closest.get(id).cloned()
     }
 
-    pub(crate) fn add<T>(&mut self, mut entries: Vec<T>)
+    fn dedup_key(&self, addr: &SocketAddr) -> DedupKey {
+        if self.developer_mode {
+            DedupKey::Socket(*addr)
+        } else {
+            DedupKey::Ip(addr.ip())
+        }
+    }
+
+    fn remove_from_dedup(&mut self, id: &Id, candidate: &Arc<Mutex<CandidateNode>>) {
+        self.dedups_ids.remove(id);
+
+        let addr = *candidate.lock().unwrap().as_ref().socket_addr();
+        self.dedups_addrs.remove(&self.dedup_key(&addr));
+    }
+
+    pub(crate) fn add<T>(&mut self, entries: Vec<T>)
     where
         T: AsCandidateNode
     {
-        while let Some(ke) = entries.pop() {
-            if self.dedups_ids.contains(ke.id()) {
-                continue;
-            }
-            if self.dedups_addrs.contains(ke.socket_addr()) {
+        for ke in entries {
+            if !self.dedups_ids.insert(ke.id().clone()) {
                 continue;
             }
 
-            let addr = ke.socket_addr().clone();
+            let addr_key = self.dedup_key(ke.socket_addr());
+            if !self.dedups_addrs.insert(addr_key) {
+                self.dedups_ids.remove(ke.id());
+                continue;
+            }
+
             let id = ke.id().clone();
             let cn = Arc::new(Mutex::new(ke.into()));
 
-            self.dedups_ids.insert(id.clone());
-            self.dedups_addrs.insert(addr);
-            self.closest.insert_sorted_by(id, cn, |_, a,_,b|
+            self.closest.insert_sorted_by(id, cn, |_, a, _, b|
                 Self::candidate_order(&self.target, a, b)
             );
         }
 
-        self.closest.shrink_to_fit();
+        self.shrink_to_fit();
     }
 
     fn candidate_order(
@@ -96,29 +122,24 @@ impl ClosestCandidates {
     }
 
     fn shrink_to_fit(&mut self) {
-        if !self.reached_capacity() {
+        if self.closest.len() <= self.capacity {
             return;
         }
 
-        let mut keys = self.closest.keys().cloned().collect::<Vec<_>>();
-        keys.sort_by(|a,b| self.target.three_way_compare(a,b));
+        let mut opted = self.closest.values().filter(|cn|
+            !cn.lock().unwrap().is_inflight()
+        ).cloned().collect::<Vec<_>>();
+        opted.sort_by(|a, b| Self::candidate_order(&self.target, a, b));
 
-        let mut opted = Vec::new();
-        for id in keys {
-            let Some(cn) = self.closest.get(&id) else {
-                continue;
-            };
-            if !cn.lock().unwrap().is_inflight() {
-                opted.push(cn.clone());
-            }
-        }
-        opted.sort_by(|a,b| Self::candidate_order(&self.target, a, b));
-
-        while self.reached_capacity() {
+        while self.closest.len() > self.capacity {
             let Some(cn) = opted.pop() else {
                 break;
             };
-            self.closest.shift_remove(cn.lock().unwrap().id());
+
+            let id = cn.lock().unwrap().id().clone();
+            if let Some(removed) = self.closest.shift_remove(&id) {
+                self.remove_from_dedup(&id, &removed);
+            }
         }
     }
 
@@ -126,7 +147,13 @@ impl ClosestCandidates {
     where
         F: Fn(&Arc<Mutex<CandidateNode>>) -> bool
     {
-        _ = self.closest.pop_if(|_, cn| _filter(cn));
+        let ids = self.closest.iter().filter_map(|(id, cn)|
+            _filter(cn).then_some(id.clone())
+        ).collect::<Vec<_>>();
+
+        for id in ids {
+            _ = self.closest.shift_remove(&id);
+        }
     }
 
     pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
@@ -135,16 +162,11 @@ impl ClosestCandidates {
     }
 
     pub(crate) fn next(&self) -> Option<Arc<Mutex<CandidateNode>>> {
-        let mut todo = self.closest.values().filter(|cn|
+        self.closest.values().filter(|cn|
             cn.lock().unwrap().is_eligible()
-        ).cloned().collect::<Vec<_>>();
-
-        if todo.is_empty() {
-            return None;
-        }
-
-        todo.sort_by(|a,b| Self::candidate_order(&self.target, a, b));
-        todo.pop()
+        ).min_by(|left, right|
+            Self::candidate_order(&self.target, left, right)
+        ).cloned()
     }
 
     pub(crate) fn ids(&self) -> Vec<Id> {
@@ -167,5 +189,17 @@ impl ClosestCandidates {
             Some((id, _)) => id.clone(),
             None => self.target.distance(&Id::MAX_ID)
         }
+    }
+}
+
+impl fmt::Display for ClosestCandidates {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ClosestCandidates: size={} head={} tail={}",
+            self.closest.len(),
+            self.head(),
+            self.tail(),
+        )
     }
 }

@@ -85,9 +85,7 @@ impl KClosestNodes {
         let (idx, buckets) = {
             let locked_rt = self.rt.lock().unwrap();
             let (idx, _) = locked_rt.bucket_of(&self.target);
-            let buckets = locked_rt.buckets().iter()
-                .map(|(_, bucket)| bucket.clone())
-                .collect::<Vec<_>>();
+            let buckets = locked_rt.buckets();
             (idx, buckets)
         };
 

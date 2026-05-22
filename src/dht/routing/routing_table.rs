@@ -71,6 +71,10 @@ impl RoutingTable {
         self.buckets.iter().nth(index).map(|(_, v)| v.clone())
     }
 
+    pub(crate) fn buckets(&self) -> Vec<Arc<Mutex<KBucket>>> {
+        self.buckets.iter().map(|(_, v)| v.clone()).collect()
+    }
+
     fn bucket_take(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
         let key = self.buckets.iter()
             .find(|(k,_v)| k.is_prefix_of(target))
@@ -107,12 +111,8 @@ impl RoutingTable {
         self.buckets[keys[rand]].lock().unwrap().random_entry()
     }
 
-    pub(crate) fn buckets(&self) -> &RBTree<Prefix, Arc<Mutex<KBucket>>> {
-        &self.buckets
-    }
-
     pub(crate) fn bucket_of(&self, id: &Id) -> (usize, Arc<Mutex<KBucket>>) {
-        self.buckets()
+        self.buckets
             .iter()
             .enumerate()
             .find(|(_, (k, _))| k.is_prefix_of(id))

@@ -2,8 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    is_any_unicast,
-    is_bogon,
+    utils::{is_any_unicast, is_bogon},
     dht::DHT,
     node_entry::{Reachability, NodeEntry},
     rpccall::RpcCall,

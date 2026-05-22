@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
-use std::num::{NonZeroI8, NonZeroIsize};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{SystemTime};
+use std::future::Future;
 use futures::stream::{FuturesUnordered, StreamExt, Stream};
+use libc::RTAX_AUTHOR;
 use log::{debug, info, warn, error};
 
 use crate::{
@@ -22,8 +23,7 @@ use crate::{
 };
 
 use crate::dht::{
-    is_any_unicast,
-    is_bogon,
+    utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
    // suspicious_node_detector,
     rpccall::{self, RpcCall},
@@ -99,6 +99,8 @@ impl DHT {
     const ROUTING_TABLE_PERSIST_INTERVAL: u64 = 10 * 60 * 1000;     // 10 minutes
     const RANDOM_LOOKUP_INTERVAL: u64 = 10 * 60 * 1000;             // 10 minutes
     const RANDOM_PING_INTERVAL  : u64 = 10 * 1000;                  // 10 seconds
+
+    const BOOTSTRAP_IF_LESS_THAN_X_ENTRIES: usize = 30;
 
     pub(crate) fn new(
         identity: Arc<Mutex<CryptoIdentity>>,
@@ -180,32 +182,81 @@ impl DHT {
             .clone()
     }
 
-    fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) {
+    fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
+        let promise = Promise::<()>::new();
+        let future = promise.future();
+
         if nodes.is_empty() {
-            return;
-        }
-        if dht.lock().unwrap().rt().lock().unwrap().size() == 0 {
-            return;
+            promise.complete(Ok(()));
+            return future;
         }
 
-        let task = Arc::new(Mutex::new({
-            let mut task = Box::new(NodeLookupTask::new(
-                dht.clone(),
-                dht.lock().unwrap().id().clone(),
-                false,
-            ));
-            task.with_bootstrap(true);
-            task.with_inject_candidates(nodes);
-            task.set_name(format!("Bootstrap: filling home bucket."));
-            //TODO: task.add_listener(Box::new(move |_| { })
-            task as Box<dyn Task>
+        let mut task = Box::new(NodeLookupTask::new(
+            dht.clone(),
+            dht.lock().unwrap().id().clone(),
+            false,
+        ));
+        task.with_bootstrap(true);
+        task.with_inject_candidates(nodes);
+        task.set_name("Bootstrap: filling home bucket".into());
+        task.add_ended_fn(Box::new(move |_| {
+            promise.complete(Ok(()));
         }));
+
+        let task = Arc::new(Mutex::new(task as Box<dyn Task>));
         task.lock().unwrap().set_cloned(task.clone());
-        dht.lock().unwrap().taskman().lock().unwrap().add(task);
+
+        let taskman = dht.lock().unwrap().taskman().clone();
+        taskman.lock().unwrap().add(task);
+        return future;
     }
 
-    fn fill_buckets(_dht: Arc<Mutex<DHT>>) {
-        // TODO:
+    fn fill_buckets(dht: Arc<Mutex<DHT>>) -> impl Future<Output = Result<()>> {
+        let rt = dht.lock().unwrap().rt();
+        let number_of_entries = rt.lock().unwrap().number_of_entries();
+        let buckets = rt.lock().unwrap().buckets();
+
+        let mut futures_unordered = FuturesUnordered::new();
+        for bucket in buckets {
+            if bucket.lock().unwrap().is_full() &&
+                number_of_entries >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES {
+                continue;
+            }
+
+            let (lookup_target, bucket_prefix) = {
+                let mut locked = bucket.lock().unwrap();
+                locked.update_refresh_time();
+                (locked.prefix().random_id(), locked.prefix().clone())
+            };
+
+            let promise = Promise::<()>::new();
+            let future = promise.future();
+
+            let mut task = Box::new(NodeLookupTask::new(
+                dht.clone(),
+                lookup_target,
+                false,
+            ));
+            task.set_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
+            task.add_ended_fn(Box::new(move |_| {
+                promise.complete(Ok(()));
+            }));
+
+            let task = Arc::new(Mutex::new(task as Box<dyn Task>));
+            task.lock().unwrap().set_cloned(task.clone());
+
+            let taskman = dht.lock().unwrap().taskman().clone();
+            taskman.lock().unwrap().add(task);
+
+            futures_unordered.push(future);
+        }
+
+        return async move {
+            while let Some(result) = futures_unordered.next().await {
+                result?;
+            }
+            Ok(())
+        }
     }
 
     pub(crate) fn random_lookup(&mut self) {
@@ -1057,25 +1108,17 @@ impl DHT {
         }
 
         let rt = dht.lock().unwrap().rt();
-        let cloned_dht = dht.clone();
-        _ = tokio::spawn(async move {
-            if nodes.is_empty() || rt.lock().unwrap().is_empty() {
-                return;
-            }
-            DHT::fill_home_bucket(
-                cloned_dht,
+        if !nodes.is_empty() && !rt.lock().unwrap().is_empty() {
+            _ = DHT::fill_home_bucket(
+                dht.clone(),
                 nodes.into_values().collect()
-            );
-        }).await;
+            ).await;
+        };
 
         let rt = dht.lock().unwrap().rt();
-        let cloned_dht = dht.clone();
-        _ = tokio::spawn(async move {
-            if rt.lock().unwrap().size() <= 1 {
-                return;
-            }
-            DHT::fill_buckets(cloned_dht);
-        }).await;
+        if rt.lock().unwrap().size() > 1 {
+            _ = DHT::fill_buckets(dht.clone()).await;
+        }
 
         dht.lock().unwrap().bootstrapping = false;
         dht.lock().unwrap().last_bootstrap = SystemTime::now();

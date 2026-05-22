@@ -1,6 +1,6 @@
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use log::error;
+use log::{debug, error, warn};
 
 use crate::Value;
 use crate::dht::{
@@ -18,10 +18,12 @@ use super::{
 pub(crate) struct ValueAnnounceTask {
     base_data: TaskData,
 
-    todo: Arc<Mutex<LinkedList<Arc<Mutex<CandidateNode>>>>>,
+    todo: Arc<Mutex<VecDeque<Arc<Mutex<CandidateNode>>>>>,
     value: Value,
     expected_seq: i32,
 }
+
+const MAX_TODO_ENTRIES: usize = 24;
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
@@ -31,7 +33,7 @@ impl ValueAnnounceTask {
     ) -> Self {
         Self {
             base_data: TaskData::new(dht),
-            todo: Arc::new(Mutex::new(LinkedList::new())),
+            todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             value,
             expected_seq,
         }
@@ -41,8 +43,17 @@ impl ValueAnnounceTask {
         let mut todo = self.todo.lock().unwrap();
         let mut entries = closest.entries();
         while let Some(cn) = entries.pop() {
+            if todo.len() >= MAX_TODO_ENTRIES {
+                break;
+            }
             todo.push_back(cn);
         }
+        debug!(
+            "{}#{} added {} nodes to announce queue",
+            self.name(),
+            self.id(),
+            todo.len()
+        );
         drop(todo);
         self
     }
@@ -88,11 +99,13 @@ impl Task for ValueAnnounceTask {
             })).map_err(|e| {
                error!("Error on sending 'storeValue' message: {}", e);
             }).ok();
+
+            break;
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
+        self.todo.lock().unwrap().is_empty() && self.data().is_done()
     }
 }
 

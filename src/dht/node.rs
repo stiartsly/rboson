@@ -333,6 +333,7 @@ impl Node {
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
         let target = target.clone();
+
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
@@ -361,114 +362,92 @@ impl Node {
 
     pub async fn find_value(&self,
         value_id: &Id,
-        expected_sequence_number: i32,
+        expected_seq: i32,
         lookup_option: Option<LookupOption>
     ) -> Result<Option<Value>> {
-        if expected_sequence_number < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
-                expected_sequence_number
-            )));
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
-        let option = self.lookup_option(lookup_option);
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
-        let value_id = value_id.clone();
+        let target  = value_id.clone();
+        let option  = self.lookup_option(lookup_option);
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
 
-        let mut ev = EligibleValue::new(
-            value_id.clone(),
-            expected_sequence_number
+        let mut eligible = EligibleValue::new(
+            target,
+            expected_seq
         );
 
-        let value = self.storage.lock().unwrap().get_value(&value_id)?;
+        let value = self.storage.lock().unwrap().get_value(&target)?;
         if let Some(v) = value {
             let is_mutable = v.is_mutable();
-            ev.update(v, false);
+            eligible.update(v, false);
+
             if !is_mutable {
-                return Ok(ev.value());
+                return Ok(eligible.value());
             }
-            if option != LookupOption::Conservative && !ev.is_empty() {
-                return Ok(ev.value());
+            if option != LookupOption::Conservative && !eligible.is_empty() {
+                return Ok(eligible.value());
             }
         }
-
-        let result = Self::do_find_value(
-            value_id, expected_sequence_number, option, dht4, dht6
-        ).await?;
-        if let Some(value) = result {
-            ev.update(value, true);
-        }
-
-        if !ev.is_empty() && ev.needs_update() {
-            let value = ev.value().unwrap();
-            let _ = self.storage.lock().unwrap().put_value(value, None);
-        }
-
-        Ok(ev.value())
-    }
-
-    async fn do_find_value(
-        value_id: Id,
-        expected_seq: i32,
-        option: LookupOption,
-        dht4: Option<Arc<Mutex<DHT>>>,
-        dht6: Option<Arc<Mutex<DHT>>>,
-    ) -> Result<Option<Value>> {
 
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::find_value(dht, &value_id, expected_seq, option).await
+                    DHT::find_value(dht, &target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::find_value(dht, &value_id, expected_seq, option).await
+                    DHT::find_value(dht, &target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
             }
         );
-
-        let mut ev = EligibleValue::new(value_id, expected_seq);
         for result in [rc4, rc6] {
             if let Some(value) = result? {
-                ev.update(value, true);
+                eligible.update(value, true);
             }
         }
-        Ok(ev.value())
+
+        if !eligible.is_empty() && eligible.needs_update() {
+            let value = eligible.value().unwrap();
+            let _ = self.storage.lock().unwrap().put_value(value, None);
+        }
+
+        Ok(eligible.value())
     }
 
     pub async fn find_peer(&self,
         peer_id: &Id,
-        expected_sequence_number: i32,
+        expected_seq: i32,
         expected_count: usize,
         lookup_option: Option<LookupOption>
     ) -> Result<Vec<PeerInfo>> {
-        if expected_sequence_number < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
-                expected_sequence_number
-            )));
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
-        let option = self.lookup_option(lookup_option);
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
-        let peer_id = peer_id.clone();
+        let target  = peer_id.clone();
+        let option  = self.lookup_option(lookup_option);
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
 
         let mut eligible = EligiblePeers::new(
-            peer_id,
-            expected_sequence_number,
+            target,
+            expected_seq,
             expected_count
         );
 
         let peers = self.storage.lock().unwrap().get_peers_with_expected_seq(
-            &peer_id,
-            expected_sequence_number,
+            &target,
+            expected_seq,
             expected_count as i32
         )?;
         eligible.add(peers, false);
@@ -478,21 +457,30 @@ impl Node {
                 return Ok(eligible.peers())
             }
             if option  != LookupOption::Conservative &&
-                expected_sequence_number >= 0 &&
-                eligible.reached_capacity() {
+                expected_seq >= 0 && eligible.reached_capacity() {
                 return Ok(eligible.peers())
             }
         }
 
-        let peers = Self::do_find_peer(
-            peer_id,
-            expected_sequence_number,
-            expected_count,
-            option,
-            dht4,
-            dht6
-        ).await?;
-        eligible.add(peers, true);
+        let (rc4, rc6) = tokio::join!(
+            async move {
+                if let Some(dht) = dht4 {
+                    DHT::find_peer(dht, &target, expected_seq, expected_count, option).await
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+            async move {
+                if let Some(dht) = dht6 {
+                    DHT::find_peer(dht, &target, expected_seq, expected_count, option).await
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        );
+        for result in [rc4, rc6] {
+            eligible.add(result?, true);
+        }
         eligible.prune();
 
         if !eligible.is_empty() && eligible.needs_update() {
@@ -502,228 +490,94 @@ impl Node {
         Ok(eligible.peers())
     }
 
-    async fn do_find_peer(
-        peerid: Id,
-        expected_seq: i32,
-        expected_count: usize,
-        option: LookupOption,
-        dht4: Option<Arc<Mutex<DHT>>>,
-        dht6: Option<Arc<Mutex<DHT>>>,
-    ) -> Result<Vec<PeerInfo>> {
-
-        let (rc4, rc6) = tokio::join!(
-            async move {
-                if let Some(dht) = dht4 {
-                    DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
-                } else {
-                    Ok(Vec::new())
-                }
-            },
-            async move {
-                if let Some(dht) = dht6 {
-                    DHT::find_peer(dht, &peerid, expected_seq, expected_count, option).await
-                } else {
-                    Ok(Vec::new())
-                }
-            }
-        );
-
-        let mut eligible = EligiblePeers::new(
-            peerid,
-            expected_seq,
-            expected_count
-        );
-        for result in [rc4, rc6] {
-            match result {
-                Ok(peers) => eligible.add(peers, true),
-                Err(e) => return Err(e),
-            };
-        }
-        eligible.prune();
-        Ok(eligible.peers())
-    }
-
     pub async fn store_value(&self,
         value: &Value,
-        expected_sequence_number: i32,
+        expected_seq: i32,
         persistent: bool
     ) -> Result<()> {
         if !value.is_valid() {
             return Err(ArgumentError::new(format!("Invalid value")));
         }
-        if expected_sequence_number < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
-                expected_sequence_number)));
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
-        let new_value = value.clone();
-        let _ = Self::check_value(
-            self.storage.clone(),
-            &new_value,
-            expected_sequence_number
-        )?;
+        let result = self.storage.lock().unwrap().get_value(&value.id())?;
+        if let Some(ref existing) = result {
+            check_value(existing, value, expected_seq)?;
+        };
 
         // store the value in local node.
-        let _ = self.storage.lock().unwrap().put_value(new_value, Some(persistent))?;
+        let _ = self.storage.lock().unwrap().put_value(
+            value.clone(),
+            Some(persistent)
+        )?;
 
         // store the value to the network.
-        let _ = Self::do_store_value(
-            value,
-            expected_sequence_number,
-            self.dht4(),
-            self.dht6()
-        ).await?;
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
+        let val4 = value.clone();
+        let val6 = value.clone();
+
+        let (rc4, rc6) = tokio::join!(
+            async move {
+                if let Some(dht) = dht4 {
+                    DHT::store_value(dht, val4, expected_seq).await
+                } else {
+                    Ok(())
+                }
+            },
+            async move {
+                if let Some(dht) = dht6 {
+                    DHT::store_value(dht, val6, expected_seq).await
+                } else {
+                    Ok(())
+                }
+            }
+        );
+        for result in [rc4, rc6] {
+            let _ = result?;
+        }
 
         let value_id = value.id();
         let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
         Ok(())
     }
 
-    fn check_value(
-        storage: Arc<Mutex<Box<dyn DataStorage>>>,
-        value: &Value,
-        expected_seq: i32
-    ) -> Result<()> {
-        let result = storage.lock().unwrap().get_value(&value.id())?;
-        let Some(existing) = result else {
-            return Ok(());
-        };
-
-        let valueid = value.id();
-        if existing.is_mutable() != value.is_mutable() {
-            warn!("Rejecting value {} with mutability changed from {} to {}",
-                valueid, existing.is_mutable(), value.is_mutable());
-            return Err(ImmutableSubstitutionError::new());
-        }
-        if value.sequence_number() < existing.sequence_number() {
-            warn!("Rejecting value {} with old sequence number {} < {}",
-                valueid, value.sequence_number(), existing.sequence_number());
-            return Err(SeqNotMonotonic::new());
-        }
-        if expected_seq >= 0 && existing.sequence_number() > expected_seq {
-            warn!("Rejecting value {} with unexpected sequence number {} > {}",
-                valueid, existing.sequence_number(), expected_seq);
-            return Err(SeqNotExpected::new());
-        }
-        if existing.has_private_key() && !value.has_private_key() {
-            warn!("Rejecting value {} with private key lost", valueid);
-            return Err(NotOwnerError::new());
-        }
-        Ok(())
-    }
-
-    async fn do_store_value(
-        value: &Value,
-        expected_seq: i32,
-        dht4: Option<Arc<Mutex<DHT>>>,
-        dht6: Option<Arc<Mutex<DHT>>>,
-    ) -> Result<()> {
-
-        let value4 = value.clone();
-        let value6 = value.clone();
-        let (rc4, rc6) = tokio::join!(
-            async move {
-                if let Some(dht) = dht4 {
-                    DHT::store_value(dht, value4, expected_seq).await
-                } else {
-                    Ok(())
-                }
-            },
-            async move {
-                if let Some(dht) = dht6 {
-                    DHT::store_value(dht, value6, expected_seq).await
-                } else {
-                    Ok(())
-                }
-            }
-        );
-
-        for result in [rc4, rc6] {
-            let _ = result?;
-        }
-        Ok(())
-    }
-
     pub async fn announce_peer(&self,
         peer: &PeerInfo,
-        expected_sequence_number: i32,
+        expected_seq: i32,
         persistent: bool
     ) -> Result<()> {
         if !peer.is_valid() {
             return Err(ArgumentError::new(format!("Peer {} is invalid", peer.id())));
         }
-        if expected_sequence_number < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}",
-                expected_sequence_number)));
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}", expected_seq)));
         }
         self.check_running()?;
 
-        // check the peer validity.
-        let new_peer = peer.clone();
-        let _ = Self::check_peer(
-            self.storage.clone(),
-            &new_peer,
-            expected_sequence_number
-        )?;
-
-        // store the peer locally.
-        let new_peer = peer.clone();
-        let _ = self.storage.lock().unwrap().put_peer(new_peer, Some(persistent));
-
-        // announce the peer to the network.
-        let _ = Self::do_announce_peer(
-            peer,
-            expected_sequence_number,
-            self.dht4.lock().unwrap().clone(),
-            self.dht6.lock().unwrap().clone()
-        ).await?;
-
-        // update the peer announced time.
-        let _ = self.storage.lock().unwrap().update_peer_announced_time(
-            peer.id(),
-            peer.fingerprint()
-        );
-        Ok(())
-    }
-
-    fn check_peer(
-        storage: Arc<Mutex<Box<dyn DataStorage>>>,
-        peer: &PeerInfo,
-        expected_seq: i32
-    ) -> Result<()> {
-        let result = storage.lock().unwrap().get_peer(
+        let result = self.storage.lock().unwrap().get_peer(
             peer.id(), peer.fingerprint()
         )?;
 
-        let Some(existing) = result else {
-            return Ok(());
-        };
-        if peer.sequence_number() < existing.sequence_number() {
-            warn!("Rejecting peer {} with old sequence number {} < {}",
-                peer.id(), peer.sequence_number(), existing.sequence_number());
-            return Err(SeqNotMonotonic::new());
+        // check the peer validity.
+        if let Some(ref existing) = result {
+            check_peer(existing, peer, expected_seq)?;
         }
-        if expected_seq >= 0 && existing.sequence_number() > expected_seq {
-            warn!("Rejecting peer {} with unexpected sequence number {} > {}",
-                peer.id(), existing.sequence_number(), expected_seq);
-            return Err(SeqNotExpected::new());
-        }
-        if existing.has_private_key() && !peer.has_private_key() {
-            warn!("Rejecting peer {} with private key lost", peer.id());
-            return Err(NotOwnerError::new());
-        }
-        Ok(())
-    }
 
-    async fn do_announce_peer(
-        peer: &PeerInfo,
-        expected_seq: i32,
-        dht4: Option<Arc<Mutex<DHT>>>,
-        dht6: Option<Arc<Mutex<DHT>>>,
-    ) -> Result<()> {
+        // store the new peer locally.
+        let _ = self.storage.lock().unwrap().put_peer(
+            peer.clone(),
+            Some(persistent)
+        );
+
+        // announce the peer to the network.
         let peer4 = peer.clone();
         let peer6 = peer.clone();
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
 
         let (rc4, rc6) = tokio::join!(
             async move {
@@ -741,10 +595,15 @@ impl Node {
                 }
             }
         );
-
         for result in [rc4, rc6] {
             let _ = result?;
         }
+
+        // update the peer announced time.
+        let _ = self.storage.lock().unwrap().update_peer_announced_time(
+            peer.id(),
+            peer.fingerprint()
+        );
         Ok(())
     }
 
@@ -946,5 +805,47 @@ fn store_nodeid(path: &str, id: &Id) -> Result<()> {
     if let Err(e) = result {
         return Err(IOError::new(format!("Writing ID error: {}", e)));
     };
+    Ok(())
+}
+
+fn check_value(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {
+    let valueid = new.id();
+    if old.is_mutable() != new.is_mutable() {
+        warn!("Rejecting value {} with mutability changed from {} to {}",
+            valueid, old.is_mutable(), new.is_mutable());
+        return Err(ImmutableSubstitutionError::new());
+    }
+    if new.sequence_number() < old.sequence_number() {
+        warn!("Rejecting value {} with old sequence number {} < {}",
+            valueid, new.sequence_number(), old.sequence_number());
+        return Err(SeqNotMonotonic::new());
+    }
+    if expected_seq >= 0 && old.sequence_number() > expected_seq {
+        warn!("Rejecting value {} with unexpected sequence number {} > {}",
+            valueid, old.sequence_number(), expected_seq);
+        return Err(SeqNotExpected::new());
+    }
+    if old.has_private_key() && !new.has_private_key() {
+        warn!("Rejecting value {} with private key lost", valueid);
+        return Err(NotOwnerError::new());
+    }
+    Ok(())
+}
+
+fn check_peer(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Result<()> {
+    if new.sequence_number() < old.sequence_number() {
+        warn!("Rejecting peer {} with old sequence number {} < {}",
+            new.id(), new.sequence_number(), old.sequence_number());
+        return Err(SeqNotMonotonic::new());
+    }
+    if expected_seq >= 0 && old.sequence_number() > expected_seq {
+        warn!("Rejecting peer {} with unexpected sequence number {} > {}",
+            new.id(), old.sequence_number(), expected_seq);
+        return Err(SeqNotExpected::new());
+    }
+    if old.has_private_key() && !new.has_private_key() {
+        warn!("Rejecting peer {} with private key lost", new.id());
+        return Err(NotOwnerError::new());
+    }
     Ok(())
 }

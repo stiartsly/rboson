@@ -88,7 +88,6 @@ async fn test_encryption_into() {
 
     _ = node1.stop().await;
     _ = node2.stop().await;
-
     remove_working_path(&path1);
     remove_working_path(&path2);
 }
@@ -223,7 +222,6 @@ async fn test_find_node() {
     _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    println!(">>>>> kkk line: {}", line!());
     _ = node2.bootstrap_one(&ni).await;
     _ = node3.bootstrap_one(&ni).await;
 

@@ -13,8 +13,7 @@ use crate::{
         msg::msg::{Message, Method},
         node_entry::Reachability,
         routing::kbucket_entry::KBucketEntry,
-        rpccall::{RpcCall, State},
-        scheduler::Scheduler,
+        rpccall::{RpcCall, State}
     }
 };
 
@@ -179,11 +178,8 @@ mod tests {
     async fn test_scheduler_timeout_canceled() {
         let target = make_target("127.0.0.1:40006");
         let req = Arc::new(Mutex::new(Message::ping_req()));
-        let scheduler = Arc::new(Mutex::new(Scheduler::new()));
-
         let call = Arc::new(Mutex::new(RpcCall::with_node(target, req)));
         call.lock().unwrap().set_cloned(call.clone());
-        call.lock().unwrap().set_scheduler(scheduler.clone()).set_expected_rtt(20);
 
         let timed_out = Arc::new(Mutex::new(0usize));
         let timed_out_cb = timed_out.clone();
@@ -199,7 +195,5 @@ mod tests {
 
         assert_eq!(call.lock().unwrap().state(), State::Responded);
         assert_eq!(*timed_out.lock().unwrap(), 0);
-
-        scheduler.lock().unwrap().stop().await.unwrap();
     }
 }

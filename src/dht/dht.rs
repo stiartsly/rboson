@@ -1,10 +1,12 @@
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::time::{SystemTime};
-use std::future::Future;
-use futures::stream::{FuturesUnordered, StreamExt, Stream};
-use libc::RTAX_AUTHOR;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::SystemTime,
+    future::Future,
+    collections::HashMap,
+};
+use indexmap::map::IndexMap;
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
 use crate::{
@@ -16,18 +18,14 @@ use crate::{
     Value,
     core::version,
     crypto_identity::CryptoIdentity,
-    errors::{
-        Result,
-        StateError,
-    }
+    errors::{ Result, StateError}
 };
-
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
    // suspicious_node_detector,
     rpccall::{self, RpcCall},
-    server::RpcServer,
+    server::{self, RpcServer},
     promise::Promise,
     token_manager::TokenManager,
     lookup_option::LookupOption,
@@ -77,8 +75,8 @@ pub(crate) struct DHT {
     tokenman    : Arc<Mutex<TokenManager>>,
 
     taskman     : Option<Arc<Mutex<TaskManager>>>,
-    rt          : Arc<Mutex<RoutingTable>>,
-    server      : Arc<Mutex<RpcServer>>,
+    rt          : Option<Arc<Mutex<RoutingTable>>>,
+    server      : Option<Arc<Mutex<RpcServer>>>,
 
 
     persist_file    : Option<String>,
@@ -91,10 +89,11 @@ pub(crate) struct DHT {
 
     suspicious_detector: Option<Arc<Mutex<DefaultSuspiciousNodeDetector>>>,
 
-    self_cloned     : Option<Arc<Mutex<DHT>>>,
+    self_cloned     : Option<Arc<Mutex<DHT>>>
 }
 
 impl DHT {
+
     const BOOTSTRAP_MIN_INTERVAL: u64 = 4 * 60 * 1000;              // 4 minutes
     const ROUTING_TABLE_PERSIST_INTERVAL: u64 = 10 * 60 * 1000;     // 10 minutes
     const RANDOM_LOOKUP_INTERVAL: u64 = 10 * 60 * 1000;             // 10 minutes
@@ -109,28 +108,26 @@ impl DHT {
         port    : u16,
         persist_path    : Option<String>,
         bootstrap_nodes : Vec<NodeInfo>,
-        storage: Arc<Mutex<Box<dyn DataStorage>>>,
+        storage : Arc<Mutex<Box<dyn DataStorage>>>,
         tokenman: Arc<Mutex<TokenManager>>
     ) -> Result<Self> {
 
         let nodeid = identity.lock().unwrap().id().clone();
         let socket_addr = SocketAddr::new(host.parse()?, port);
-        let ni = NodeInfo::new(nodeid, socket_addr);
-        let rpcserver = RpcServer::new(&socket_addr, identity.clone(), None);
 
         Ok(Self {
             identity,
             network,
             host,
             port,
-            ni              : ni.clone(),
+            ni              : NodeInfo::new(nodeid, socket_addr),
             is_running      : false,
             status          : ConnectionStatus::Disconnected,
             storage,
             tokenman,
             taskman         : None,
-            server          : Arc::new(Mutex::new(rpcserver)),
-            rt              : Arc::new(Mutex::new(RoutingTable::new(ni.id().clone()))),
+            server          : None,
+            rt              : None,
             persist_file    : persist_path,
             last_saved      : SystemTime::UNIX_EPOCH,
             bootstrap_nodes,
@@ -163,7 +160,9 @@ impl DHT {
     }
 
     pub(crate) fn rt(&self) -> Arc<Mutex<RoutingTable>> {
-        self.rt.clone()
+        self.rt.as_ref()
+            .expect("RoutingTable not initialized")
+            .clone()
     }
 
     fn taskman(&self) -> Arc<Mutex<TaskManager>> {
@@ -173,7 +172,9 @@ impl DHT {
     }
 
     fn server(&self) -> Arc<Mutex<RpcServer>> {
-        self.server.clone()
+        self.server.as_ref()
+            .expect("RpcServer not initialized")
+            .clone()
     }
 
     fn dht(&self) -> Arc<Mutex<DHT>> {
@@ -324,26 +325,30 @@ impl DHT {
         }
         info!("Starting DHT/{}:{} on {} ...", self.network, self.id(), self.addr());
 
+        let rt = Arc::new(Mutex::new(RoutingTable::new(self.id().clone())));
         let taskman = Arc::new(Mutex::new(TaskManager::new()));
-        self.taskman = Some(taskman);
 
-        let dht = self.dht();
-        let server = self.server();
-        {
-            let mut locked = server.lock().unwrap();
-            locked.set_message_cb({
+        let server  = Arc::new(Mutex::new({
+
+            let addr = self.ni.socket_addr().clone();
+            let identity = self.identity.clone();
+
+            let mut server = RpcServer::new(addr, identity, None);
+
+            let dht = self.dht();
+            server.set_message_cb({
                 let dht = dht.clone();
                 move |msg| dht.lock().unwrap().on_message(msg)
             });
-            locked.set_call_sent_cb({
+            server.set_call_sent_cb({
                 let dht = dht.clone();
                 move |call| dht.lock().unwrap().on_send(call)
             });
-            locked.set_call_timeout_cb({
+            server.set_call_timeout_cb({
                 let dht = dht.clone();
                 move |call| dht.lock().unwrap().on_timeout(call)
             });
-            locked.set_reachable_cb({
+            server.set_reachable_cb({
                 let dht = dht.clone();
                 move |reachable| {
                     let mut locked_dht = dht.lock().unwrap();
@@ -355,12 +360,22 @@ impl DHT {
                     }
                 }
             });
-        }
+            server.start()?;
+            server
+        }));
 
-        RpcServer::start(server).await.map_err(|e| {
-            error!("Failed to start DHT {}:{} on {}:{}: {}", self.network, self.id(), self.host, self.port, e);
-            StateError::new(format!("Failed to start RPC server: {}", e))
-        })?;
+        let cloned_server = server.clone();
+        let _ =tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create Tokio runtime");
+            rt.block_on(server::run_loop(cloned_server));
+        });
+
+        self.taskman = Some(taskman);
+        self.server = Some(server);
+        self.rt = Some(rt);
 
         self.set_status(ConnectionStatus::Connecting);
 
@@ -368,6 +383,7 @@ impl DHT {
         let bootstrap_nodes = self.bootstrap_nodes.clone();
         let network = self.network;
         let nodeid = self.id().clone();
+
         tokio::spawn(async move {
             DHT::do_bootstrap(startup_dht.clone(), bootstrap_nodes).await;
 
@@ -407,8 +423,8 @@ impl DHT {
             let server = self.server();
             let mut locked = server.lock().unwrap();
             locked.set_reachable_cb(|_| {});
+            locked.stop();
         }
-        RpcServer::stop(self.server());
 
         info!("Stopped DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
     }
@@ -451,8 +467,7 @@ impl DHT {
         */
     }
 
-    fn received(&mut self, msg: Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
+    fn received(&mut self, locked_msg: &mut Message) {
         let from_addr  = locked_msg.remote_addr().clone();
 
         let bogon_addr = if cfg!(feature = "devp") {
@@ -598,16 +613,16 @@ impl DHT {
         );
     }
 
-    pub(crate) fn on_message(&mut self, msg: Arc<Mutex<Message>>) {
+    pub(crate) fn on_message(&mut self, msg: &mut Message) {
         if !self.is_running {
             return;
         }
         // ignore the messages from myself
-        if self.id() == msg.lock().unwrap().id() {
+        if self.id() == msg.id() {
             return;
         }
 
-        let kind = msg.lock().unwrap().kind();
+        let kind = msg.kind();
         match kind {
             Kind::Error    => self.on_error(&msg),
             Kind::Request  => self.on_request(&msg),
@@ -616,8 +631,8 @@ impl DHT {
         self.received(msg);
     }
 
-    fn on_request(&mut self, msg: &Arc<Mutex<Message>>) {
-        let method = msg.lock().unwrap().method();
+    fn on_request(&mut self, msg: &Message) {
+        let method = msg.method();
         match method {
             Method::Ping        => self.on_ping(msg),
             Method::FindNode    => self.on_find_node(msg),
@@ -629,45 +644,42 @@ impl DHT {
         }
     }
 
-    fn on_response(&mut self, _: &Arc<Mutex<Message>>) {}
-    fn on_error(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::Error(err)) = locked_msg.body() else {
+    fn on_response(&mut self, _: &Message) {}
+    fn on_error(&mut self, msg: &Message) {
+        let Some(Body::Error(err)) = msg.body() else {
             warn!("Panic: should be error message");
             return;
         };
 
         warn!("Error from {}/{} - {}:{}, txid {}",
-            locked_msg.remote_addr(),
-            version::format_version(locked_msg.ver()),
+            msg.remote_addr(),
+            version::format_version(msg.ver()),
             err.code(),
             err.msg(),
-            locked_msg.txid()
+            msg.txid()
         );
     }
 
-    fn on_unknown_req(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let method = locked_msg.method();
+    fn on_unknown_req(&mut self, msg: &Message) {
+        let method = msg.method();
 
         warn!("Unknown method {} from {}, txid {}",
             method,
-            locked_msg.remote_addr(),
-            locked_msg.txid()
+            msg.remote_addr(),
+            msg.txid()
         );
         self.send_err(method, 203, "unknown method");
     }
 
-    fn on_ping(&mut self, req: &Arc<Mutex<Message>>) {
-        let locked_msg = req.lock().unwrap();
-        if locked_msg.body().is_some() {
+    fn on_ping(&mut self, req: &Message) {
+        if req.body().is_some() {
             error!("Panic: ping request should not have body");
             return;
         }
 
-        let txid = locked_msg.txid();
-        let remote_id   = locked_msg.remote_id().clone();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let txid = req.txid();
+        let remote_id   = req.remote_id().clone();
+        let remote_addr = req.remote_addr().clone();
 
         let mut msg = Message::ping_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
@@ -677,9 +689,8 @@ impl DHT {
         );
     }
 
-    fn on_find_node(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::FindNodeReq(body)) = locked_msg.body() else {
+    fn on_find_node(&mut self, msg: &Message) {
+        let Some(Body::FindNodeReq(body)) = msg.body() else {
             error!("Panic: should be find node request");
             return;
         };
@@ -708,15 +719,15 @@ impl DHT {
         }
         if body.want_token() {
             token = self.tokenman.lock().unwrap().generate_token(
-                locked_msg.id(),
-                locked_msg.remote_addr(),
+                msg.id(),
+                msg.remote_addr(),
                 body.target()
             );
         }
 
-        let txid = locked_msg.txid();
-        let remote_id = locked_msg.remote_id().clone();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let txid = msg.txid();
+        let remote_id = msg.remote_id().clone();
+        let remote_addr = msg.remote_addr().clone();
 
         let mut msg = Message::find_node_rsp(txid, nodes4, nodes6, token);
         msg.set_remote(remote_id, remote_addr);
@@ -726,9 +737,8 @@ impl DHT {
         );
     }
 
-    fn on_find_value(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::FindValueReq(body)) = locked_msg.body() else {
+    fn on_find_value(&mut self, msg: &Message) {
+        let Some(Body::FindValueReq(body)) = msg.body() else {
             error!("Panic: should be find value request");
             return;
         };
@@ -750,9 +760,9 @@ impl DHT {
             }
         }
 
-        let txid = locked_msg.txid();
-        let remote_id = locked_msg.remote_id().clone();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let txid = msg.txid();
+        let remote_id = msg.remote_id().clone();
+        let remote_addr = msg.remote_addr().clone();
 
         let msg = if value.is_some() {
             let mut msg = Message::find_value_rsp(txid, value.unwrap());
@@ -789,19 +799,18 @@ impl DHT {
         );
     }
 
-    fn on_store_value(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::StoreValueReq(body)) = locked_msg.body() else {
+    fn on_store_value(&mut self, msg: &Message) {
+        let Some(Body::StoreValueReq(body)) = msg.body() else {
             error!("Panic: should be store value request");
             return;
         };
 
         let value = body.value();
         let value_id = value.id();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let remote_addr = msg.remote_addr().clone();
         let is_valid = self.tokenman.lock().unwrap().verify_token(
             body.token(),
-            locked_msg.id(),
+            msg.id(),
             &remote_addr,
             &value_id
         );
@@ -850,8 +859,8 @@ impl DHT {
 
         _ = self.storage.lock().unwrap().put_value(value.clone(), None);
 
-        let txid = locked_msg.txid();
-        let remote_id = locked_msg.remote_id().clone();
+        let txid = msg.txid();
+        let remote_id = msg.remote_id().clone();
         let mut msg = Message::store_value_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
 
@@ -860,9 +869,8 @@ impl DHT {
         );
     }
 
-    fn on_find_peer(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::FindPeerReq(body)) = locked_msg.body() else {
+    fn on_find_peer(&mut self, msg: &Message) {
+        let Some(Body::FindPeerReq(body)) = msg.body() else {
             error!("Panic: should be find peer request");
             return;
         };
@@ -880,9 +888,9 @@ impl DHT {
             }
         };
 
-        let txid = locked_msg.txid();
-        let remote_id = locked_msg.remote_id().clone();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let txid = msg.txid();
+        let remote_id = msg.remote_id().clone();
+        let remote_addr = msg.remote_addr().clone();
 
         let msg = if !peers.is_empty() {
             let mut msg = Message::find_peer_rsp(txid, peers);
@@ -919,18 +927,17 @@ impl DHT {
         );
     }
 
-    fn on_announce_peer(&mut self, msg: &Arc<Mutex<Message>>) {
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::AnnouncePeerReq(body)) = locked_msg.body() else {
+    fn on_announce_peer(&mut self, msg: &Message) {
+        let Some(Body::AnnouncePeerReq(body)) = msg.body() else {
             error!("Panic: should be announce peer request");
             return;
         };
 
         let peer = body.peer();
-        let remote_addr = locked_msg.remote_addr().clone();
+        let remote_addr = msg.remote_addr().clone();
         let is_valid = self.tokenman.lock().unwrap().verify_token(
             body.token(),
-            locked_msg.id(),
+            msg.id(),
             &remote_addr,
             peer.id()
         );
@@ -977,8 +984,8 @@ impl DHT {
         }
         _ = self.storage.lock().unwrap().put_peer(peer.clone(), None);
 
-        let txid = locked_msg.txid();
-        let remote_id = locked_msg.remote_id().clone();
+        let txid = msg.txid();
+        let remote_id = msg.remote_id().clone();
         let mut msg = Message::announce_peer_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
 
@@ -1016,6 +1023,12 @@ impl DHT {
                 warn!("Bootstrap failed: DHT is not running.");
                 return;
             }
+
+            if nodes.is_empty() {
+                warn!("Bootstrap failed: no bootstrap nodes provided.");
+                return;
+            }
+
             locked.add_bootstrap_nodes(&nodes);
             if locked.bootstrapping {
                 warn!("Bootstrap failed: DHT is already bootstrapping.");
@@ -1055,46 +1068,49 @@ impl DHT {
         while let Some(node) = bootstrap_nodes.pop() {
             let msg = Message::find_node_req(
                 Id::random(),
-                dht.lock().unwrap().network().is_ipv4(),
-                dht.lock().unwrap().network().is_ipv6(),
+                network.is_ipv4(),
+                network.is_ipv6(),
                 true
             );
 
             let call = Arc::new(Mutex::new(RpcCall::with_node(
-                node.clone(),
+                node,
                 Arc::new(Mutex::new(msg)),
             )));
 
 
+            let server  = dht.lock().unwrap().server();
             let promise = Promise::<Vec<NodeInfo>>::new();
             let future  = promise.future();
 
             call.lock().unwrap().set_cloned(call.clone());
             call.lock().unwrap().set_state_changed_cb(move |_call, _, cur| {
                 if cur.is_final() {
-                    let nodes = if cur == rpccall::State::Responded {
+                    let mut nodes = None;
+
+                    if cur == rpccall::State::Responded {
                         let Some(rsp) = _call.rsp() else {
-                            promise.complete(Ok(Vec::new()));
+                            promise.complete(Ok([].to_vec()));
                             return;
                         };
 
-                        let rsp = rsp.clone();
-                        let nodes = match rsp.lock().unwrap().body() {
-                            Some(Body::FindNodeRsp(body)) => body.nodes(network).map(|v| v.to_vec()),
-                            _ => None,
+                        if let Some(Body::FindNodeRsp(body)) = rsp.lock().unwrap().body() {
+                            nodes = body.nodes(network).map(|v| v.to_vec());
                         };
-                        nodes
-                    } else {
-                        None
-                    }.unwrap_or(Vec::new());
-                    promise.complete(Ok(nodes));
+                    }
+
+                    promise.complete(Ok(
+                        nodes.unwrap_or_else(|| [].to_vec())
+                    ));
                 }
             });
 
-            let _ = dht.lock().unwrap().server().lock().unwrap().send_call(call);
+            let _ = server.lock().unwrap().send_call(call);
             futures.push(async move {
-                let _ = future.clone().await;
-                future.result()
+                match future.clone().await {
+                    Ok(_) => future.result(),
+                    Err(e) => Err(e),
+                }
             });
         };
 
@@ -1108,14 +1124,12 @@ impl DHT {
         }
 
         let rt = dht.lock().unwrap().rt();
+        let nodes: Vec<NodeInfo> = nodes.into_values().collect();
+
         if !nodes.is_empty() && !rt.lock().unwrap().is_empty() {
-            _ = DHT::fill_home_bucket(
-                dht.clone(),
-                nodes.into_values().collect()
-            ).await;
+            _ = DHT::fill_home_bucket(dht.clone(), nodes).await;
         };
 
-        let rt = dht.lock().unwrap().rt();
         if rt.lock().unwrap().size() > 1 {
             _ = DHT::fill_buckets(dht.clone()).await;
         }
@@ -1127,12 +1141,9 @@ impl DHT {
     }
 
     fn add_bootstrap_nodes(&mut self, nodes: &[NodeInfo]) {
-        if nodes.is_empty() {
-            return;
-        }
-
         let capacity = self.bootstrap_nodes.len() + nodes.len();
-        let mut dedup = HashMap::<Id, NodeInfo>::with_capacity(capacity);
+        let mut dedup = IndexMap::<Id, NodeInfo>::with_capacity(capacity);
+
         while let Some(ni) = self.bootstrap_nodes.pop() {
             dedup.insert(ni.id().clone(), ni);
         };
@@ -1155,24 +1166,25 @@ impl DHT {
     pub(crate) async fn find_node(
         dht: Arc<Mutex<Self>>,
         target: &Id,
-        lookup_option: LookupOption
+        option: LookupOption
     ) -> Result<Option<NodeInfo>> {
 
-        let rt = dht.lock().unwrap().rt();
-        let found = rt.lock().unwrap().bucket_entry(target).map(|v| v.into());
-        if lookup_option == LookupOption::Local {
-            return Ok(found);
+        let rt  = dht.lock().unwrap().rt();
+        let node = rt.lock().unwrap().bucket_entry(target).map(|v| v.into());
+        let taskman = dht.lock().unwrap().taskman();
+
+        if option == LookupOption::Local {
+            return Ok(node);
         }
-        if lookup_option == LookupOption::Conservative && found.is_some() {
-            return Ok(found);
+        if option == LookupOption::Conservative && node.is_some() {
+            return Ok(node);
         }
 
         let promise = Promise::<Option<NodeInfo>>::new();
         let future  = promise.future();
+
         let mut task = NodeLookupTask::new(
-            dht.clone(),
-            target.clone(),
-            lookup_option != LookupOption::Conservative
+            dht, target.clone(), option != LookupOption::Conservative
         );
         task.set_name(format!("Lookup node: {}", target));
         task.with_want_target(true);
@@ -1186,7 +1198,6 @@ impl DHT {
             promise.complete(Ok(result));
         }));
 
-        let taskman = dht.lock().unwrap().taskman();
         taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
         );
@@ -1201,17 +1212,15 @@ impl DHT {
         dht: Arc<Mutex<Self>>,
         value_id: &Id,
         expected_seq: i32,
-        lookup_option: LookupOption
+        option: LookupOption
     ) -> Result<Option<Value>> {
+
+        let taskman = dht.lock().unwrap().taskman();
         let promise = Promise::<Option<Value>>::new();
         let future  = promise.future();
 
-        let taskman = dht.lock().unwrap().taskman();
         let mut task = ValueLookupTask::new(
-            dht,
-            value_id.clone(),
-            expected_seq,
-            lookup_option != LookupOption::Conservative
+            dht, value_id.clone(), expected_seq, option != LookupOption::Conservative
         );
         task.set_name(format!("Lookup value: {}", value_id));
         task.add_ended_fn(Box::new(move |t: &dyn Task| {
@@ -1239,14 +1248,14 @@ impl DHT {
         value: Value,
         expected_seq: i32
     ) -> Result<()> {
+
+        let taskman = dht.lock().unwrap().taskman();
         let promise = Promise::<()>::new();
         let future  = promise.future();
 
         let announce_task = {
             let mut task = ValueAnnounceTask::new(
-                dht.clone(),
-                value.clone(),
-                expected_seq
+                dht.clone(), value.clone(), expected_seq
             );
             task.set_name(format!("Store value:{}", &value.id()));
             task.add_ended_fn(Box::new(move |_: &dyn Task| {
@@ -1258,15 +1267,11 @@ impl DHT {
         };
 
         let mut task = NodeLookupTask::new(
-            dht.clone(),
-            value.id().clone(),
-            false
+            dht.clone(), value.id(), false
         );
-        task.set_name(format!("StoreValue: lookup closest node to {}", value.id()));
+        task.set_name(format!("Store value: lookup closest node to {}", value.id()));
         task.with_want_token(true);
         task.set_nested(announce_task.clone());
-
-        let taskman = dht.lock().unwrap().taskman();
         task.add_ended_fn(Box::new(move |t: &dyn Task| {
             if t.state() != State::Completed {
                 return;
@@ -1284,8 +1289,9 @@ impl DHT {
                 return;
             }
 
+            let announce_task = announce_task.clone();
             announce_task.lock().unwrap().with_closest(closest.clone());
-            taskman.lock().unwrap().add(announce_task.clone());
+            taskman.lock().unwrap().add(announce_task);
         }));
 
         let taskman = dht.lock().unwrap().taskman();
@@ -1306,8 +1312,11 @@ impl DHT {
         expected_count: usize,
         option: LookupOption
     ) -> Result<Vec<PeerInfo>> {
+
+        let taskman = dht.lock().unwrap().taskman();
         let promise = Promise::<Vec<PeerInfo>>::new();
         let future  = promise.future();
+
         let mut task = PeerLookupTask::new(
             dht.clone(),
             peerid.clone(),
@@ -1324,7 +1333,6 @@ impl DHT {
             promise.complete(Ok(result));
         }));
 
-        let taskman = dht.lock().unwrap().taskman();
         taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
         );
@@ -1340,8 +1348,10 @@ impl DHT {
         peer: PeerInfo,
         expected_seq: i32
     ) -> Result<()>{
+        let taskman = dht.lock().unwrap().taskman();
         let promise = Promise::<()>::new();
         let future  = promise.future();
+
         let announce_task = {
             let mut task = PeerAnnounceTask::new(
                 dht.clone(),
@@ -1363,8 +1373,6 @@ impl DHT {
         task.with_want_token(true);
         task.set_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
         task.set_nested(announce_task.clone());
-
-        let taskman = dht.lock().unwrap().taskman();
         task.add_ended_fn(Box::new(move |t: &dyn Task| {
             if t.state() != State::Completed {
                 return;
@@ -1379,8 +1387,10 @@ impl DHT {
                 warn!("!!! Announce peer task not started because the node lookup task got the empty closest nodes.");
                 return;
             }
+
+            let announce_task = announce_task.clone();
             announce_task.lock().unwrap().with_closest(closest.clone());
-            taskman.lock().unwrap().add(announce_task.clone());
+            taskman.lock().unwrap().add(announce_task);
         }));
 
         let taskman = dht.lock().unwrap().taskman();
@@ -1394,4 +1404,3 @@ impl DHT {
         }
     }
 }
-

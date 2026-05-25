@@ -1,9 +1,12 @@
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
-use std::future::Future;
+use std::{
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll, Waker},
+    future::Future,
+    marker::Copy,
+};
 
-use crate::core::Result;
+use crate::core::errors::Result;
 
 pub(crate) struct Data<T> {
     result: Option<Result<T>>,
@@ -42,16 +45,28 @@ impl<T> Data<T> {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct MyFuture<T>(Arc<Mutex<Data<T>>>);
+pub(crate) struct PromiseFuture<T>(Arc<Mutex<Data<T>>>);
 
-impl<T> MyFuture<T> {
+impl<T> PromiseFuture<T> {
     pub(crate) fn result(&self) -> Result<T> {
         self.0.lock().unwrap().result()
     }
 }
 
-impl<T> Future for MyFuture<T> {
+impl<T> Unpin for PromiseFuture<T> {}
+impl<T> Clone for PromiseFuture<T> {
+    fn clone(&self) -> PromiseFuture<T> {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> From<&Promise<T>> for PromiseFuture<T> {
+    fn from(promise: &Promise<T>) -> Self {
+        PromiseFuture(promise.result.clone())
+    }
+}
+
+impl<T> Future for PromiseFuture<T> {
     type Output = Result<T>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -63,8 +78,6 @@ impl<T> Future for MyFuture<T> {
         Poll::Pending
     }
 }
-
-impl Unpin for MyFuture<()> {}
 
 pub(crate) struct Promise<T> {
     result: Arc<Mutex<Data<T>>>,
@@ -81,17 +94,12 @@ impl<T> Promise<T> {
         self.result.lock().unwrap().complete(result);
     }
 
+    #[allow(unused)]
     pub(crate) fn is_completed(&self) -> bool {
         self.result.lock().unwrap().is_completed()
     }
 
-    pub(crate) fn future(&self) -> MyFuture<T> {
-        MyFuture(self.result.clone())
-    }
-}
-
-impl<T> From<&Promise<T>> for MyFuture<T> {
-    fn from(promise: &Promise<T>) -> Self {
-        MyFuture(promise.result.clone())
+    pub(crate) fn future(&self) -> PromiseFuture<T> {
+        PromiseFuture(self.result.clone())
     }
 }

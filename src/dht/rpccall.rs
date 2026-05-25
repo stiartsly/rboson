@@ -10,7 +10,7 @@ use crate::{
 use super::{
     node_entry::NodeEntry,
     node_entry::Reachability,
-    scheduler::{Scheduler, TaskHandle},
+    timer::TaskHandle,
     msg::msg::{self, Body, Message},
     task::candidate_node::CandidateNode,
     routing::kbucket_entry::KBucketEntry,
@@ -55,7 +55,6 @@ pub(crate) struct RpcCall {
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
-    scheduler: Option<Arc<Mutex<Scheduler>>>,
     timeout_task: Option<TaskHandle>,
     cloned: Option<Arc<Mutex<RpcCall>>>,
 
@@ -85,7 +84,6 @@ impl RpcCall {
             stalled_fn: Box::new(|_| {}),
             timeout_fn: Box::new(|_| {}),
             cause: None,
-            scheduler: None,
             timeout_task: None,
             cloned: None,
             expected_rtt: 0,
@@ -151,11 +149,6 @@ impl RpcCall {
         self.cloned = Some(cloned);
     }
 
-    pub(crate) fn set_scheduler(&mut self, scheduler: Arc<Mutex<Scheduler>>) -> &mut Self {
-        self.scheduler = Some(scheduler);
-        self
-    }
-
     pub(crate) fn set_expected_rtt(&mut self, expected_rtt: u64) -> &mut Self {
         self.expected_rtt = expected_rtt;
         self
@@ -181,14 +174,6 @@ impl RpcCall {
             .map(|v| v.clone())
             .expect("panic: self cloned not set, this should never happen")
     }
-
-    fn scheduler(&self) -> Arc<Mutex<Scheduler>> {
-        self.scheduler.as_ref()
-            .map(|v| v.clone())
-            .expect("panic: scheduler not set, this should never happen")
-    }
-
-
 
     pub(crate) fn req(&self) -> Arc<Mutex<Message>> {
         self.req.clone()
@@ -293,7 +278,7 @@ impl RpcCall {
     fn set_timeout(&mut self, timeout: u64) {
         self.timeout_task = None;
 
-        let Some(scheduler) = self.scheduler.as_ref().cloned() else {
+        /* let Some(scheduler) = self.scheduler.as_ref().cloned() else {
             return;
         };
 
@@ -308,6 +293,7 @@ impl RpcCall {
                 })
             },
         ).ok();
+        */
     }
 
     fn cancel_timeout(&mut self) {
@@ -380,7 +366,7 @@ impl RpcCall {
 
     // Handles a response with an incorrect method, treating it as a protocol error.
     pub(crate) fn respond_wrong_method(&mut self, msg: Arc<Mutex<Message>>) {
-        self.rsp = Some(msg.clone());
+       // self.rsp = Some(msg.clone());
         self.cause = Some(ProtocolError::new(format!("Got response with wrong method")));
         self.update_state(State::Err);
     }

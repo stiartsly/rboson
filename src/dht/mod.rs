@@ -50,8 +50,7 @@ mod cached_identity;
 mod dht;
 mod server;
 mod rpccall;
-mod scheduler;
-mod scheduler_error;
+mod timer;
 mod token_manager;
 mod node_entry;
 mod node_status;
@@ -154,7 +153,6 @@ mod unitests {
     mod test_routing_table;
     mod test_kbucket_entry;
 
-    mod test_scheduler;
     mod test_rpccall;
     mod test_token_manager;
     mod test_dht;

@@ -70,10 +70,9 @@ impl ClosestCandidates {
     }
 
     fn remove_from_dedup(&mut self, id: &Id, candidate: &Arc<Mutex<CandidateNode>>) {
-        self.dedups_ids.remove(id);
-
         let addr = *candidate.lock().unwrap().as_ref().socket_addr();
         self.dedups_addrs.remove(&self.dedup_key(&addr));
+        self.dedups_ids.remove(id);
     }
 
     pub(crate) fn add<T>(&mut self, entries: Vec<T>)

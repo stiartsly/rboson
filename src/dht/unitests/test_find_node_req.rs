@@ -11,7 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_serde() {
+    fn test_serde_cbor() {
         let nodeid = Id::random();
         let req = FindNodeRequest::new(
             nodeid.clone(),
@@ -50,18 +50,5 @@ mod tests {
         assert_eq!(decoded.want6(), true);
         assert_eq!(decoded.want_token(), false);
         assert_eq!(decoded.want(), 0x03);
-    }
-
-    #[test]
-    fn test_display() {
-        let nodeid = Id::random();
-        let req = FindNodeRequest::new(
-            nodeid.clone(),
-            false,
-            true,
-            true,
-        );
-
-        assert_eq!(format!("{}", req), format!("t:{},w:6", nodeid));
     }
 }

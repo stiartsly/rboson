@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use crate::{
     Identity,
     core::crypto_identity::CryptoIdentity,
@@ -12,7 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_check_identity() {
+    fn test_identity() {
         let identity = CryptoIdentity::new();
         let expected_id = identity.id().clone();
         let cached = CachedIdentity::new(identity);
@@ -25,7 +24,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_context_for_same_key() {
+    fn test_context_with_same_key() {
         let cached = CachedIdentity::new(CryptoIdentity::new());
         let peer_id = CryptoIdentity::new().id().clone();
 
@@ -37,7 +36,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_clear_cache() {
+    fn test_clear_cache() {
         let cached = CachedIdentity::new(CryptoIdentity::new());
         let peer_id = CryptoIdentity::new().id().clone();
 

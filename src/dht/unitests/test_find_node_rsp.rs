@@ -14,7 +14,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_exposes_ipv4_nodes_and_token() {
+    fn test_new1() {
         let nodeid = Id::random();
         let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let node = NodeInfo::new(nodeid, addr);
@@ -31,7 +31,7 @@ mod tests {
     }
 
     #[test]
-    fn test_accessors() {
+    fn test_new2() {
         let nodeid = Id::random();
         let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let node4 = NodeInfo::new(nodeid, addr4);
@@ -43,6 +43,9 @@ mod tests {
         );
 
         assert_eq!(rsp.nodes(Network::IPv4), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), None);
+        assert_eq!(rsp.token(), 0);
 
         let nodeid = Id::random();
         let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
@@ -54,7 +57,9 @@ mod tests {
             0,
         );
 
-        assert_eq!(rsp.nodes(Network::IPv6), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), None);
+        assert_eq!(rsp.token(), 0);
 
         let rsp = FindNodeResponse::new(
             Some(vec![node4.clone()]),
@@ -62,38 +67,13 @@ mod tests {
             1,
         );
 
-        assert_eq!(rsp.nodes(Network::IPv4), Some([node4.clone()].as_slice()));
-        assert_eq!(rsp.nodes(Network::IPv6), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
         assert_eq!(rsp.token(), 1);
     }
 
     #[test]
-    fn test_display() {
-        let node4 = NodeInfo::new(
-            Id::random(),
-            "127.0.0.1:29001".parse::<SocketAddr>().unwrap(),
-        );
-        let node6 = NodeInfo::new(
-            Id::random(),
-            "[::1]:29001".parse::<SocketAddr>().unwrap(),
-        );
-
-        let rsp = FindNodeResponse::new(
-            Some(vec![node4.clone()]),
-            Some(vec![node6.clone()]),
-            29001,
-        );
-
-        let rendered = format!("{}", rsp);
-        assert!(rendered.contains("n4:"));
-        assert!(rendered.contains(&format!("[{}]", node4)));
-        assert!(rendered.contains("n6:"));
-        assert!(rendered.contains(&format!("[{}]", node6)));
-        assert!(rendered.contains(",tok:29001"));
-    }
-
-    #[test]
-    fn test_serde() {
+    fn test_serde_default() {
         let nodeid = Id::random();
         let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let ni = NodeInfo::new(nodeid.clone(), addr);

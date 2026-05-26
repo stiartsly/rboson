@@ -39,10 +39,6 @@ impl FindPeerResponse {
         }
     }
 
-    pub(crate) fn has_peers(&self) -> bool {
-        self.peers.as_ref().map_or(false, |p| !p.is_empty())
-    }
-
     pub(crate) fn peers(&self) -> Option<&[PeerInfo]> {
         self.peers.as_deref()
     }
@@ -52,16 +48,11 @@ impl LookupResponse for FindPeerResponse {
     fn data(&self) -> &Data {
         &self.data
     }
-
-    fn data_mut(&mut self) -> &mut Data {
-        &mut self.data
-    }
 }
 
 impl Serialize for FindPeerResponse {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+    where S: Serializer,
     {
         let mut s = se.serialize_map(None)?;
         if let Some(peers) = self.peers.as_ref() {
@@ -89,8 +80,7 @@ impl Serialize for FindPeerResponse {
 
 impl<'de> Deserialize<'de> for FindPeerResponse {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>,
     {
         #[derive(Debug)]
         enum Field {
@@ -103,8 +93,7 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -122,7 +111,7 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
             type Value = FindPeerResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("FindPeerResponse")
+                formatter.write_str("a FindPeerResponse struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
@@ -138,30 +127,34 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
                         Field::Nodes4 => {
                             if nodes4.is_some() {
                                 return Err(de::Error::duplicate_field("n4"));
+                            } else {
+                                nodes4 = Some(map.next_value()?);
                             }
-                            nodes4 = Some(map.next_value()?);
                         }
                         Field::Nodes6 => {
                             if nodes6.is_some() {
                                 return Err(de::Error::duplicate_field("n6"));
+                            } else {
+                                nodes6 = Some(map.next_value()?);
                             }
-                            nodes6 = Some(map.next_value()?);
                         }
                         Field::Peers => {
                             if peers.is_some() {
                                 return Err(de::Error::duplicate_field("p"));
+                            } else {
+                                peers = Some(map.next_value()?);
                             }
-                            peers = Some(map.next_value()?);
                         }
                         Field::Token |
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 
                 if nodes4.is_none() && nodes6.is_none() && peers.is_none() {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"p\" must be present"));
                 }
-
                 if peers.is_some() && (nodes4.is_some() || nodes6.is_some()) {
                     return Err(de::Error::custom("\"p\" cannot be combined with \"n4\" or \"n6\""));
                 }
@@ -218,7 +211,7 @@ impl fmt::Display for FindPeerResponse {
             if has_written_section {
                 write!(f, ",")?;
             }
-            write!(f, ",p:")?;
+            write!(f, "p:")?;
             for (index, item) in peers.iter().enumerate() {
                 if index > 0 {
                     write!(f, ",")?;

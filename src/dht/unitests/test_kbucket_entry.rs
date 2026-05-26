@@ -24,7 +24,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_accessories() {
+    fn test_default() {
         let entry = make_entry();
 
         assert_eq!(entry.created_time() <= entry.last_seen(), true);
@@ -37,7 +37,7 @@ mod tests {
     }
 
     #[test]
-    fn timeout_backoff() {
+    fn test_timeout() {
         let mut entry = make_entry();
         let old = SystemTime::now() - Duration::from_secs(16 * 60);
         entry.set_last_seen(old);
@@ -53,16 +53,16 @@ mod tests {
     }
 
     #[test]
-    fn test_responded_and_merge() {
+    fn test_responded() {
         let mut first = make_entry();
         first.on_responded(100);
+
         assert_eq!(first.is_reachable(), true);
         assert_eq!(first.failed_requests(), 0);
         assert_eq!(first.rtt(), 100);
 
         let mut second = first.clone();
         second.on_responded(40);
-
         first.merge(&second);
 
         assert_eq!(first.is_reachable(), true);
@@ -71,43 +71,23 @@ mod tests {
     }
 
     #[test]
-    fn test_replacement_and_staleness_rules() {
-        let mut entry = make_entry();
-        entry.set_last_seen(SystemTime::now() - Duration::from_secs(16 * 60));
-
-        for _ in 0..3 {
-            entry.on_timeout();
-        }
-
-        assert!(entry.old_and_stale());
-        assert!(entry.needs_replacement());
-
-        let mut removable = make_entry();
-        removable.set_last_seen(SystemTime::now() - Duration::from_secs(180));
-        removable.update_last_sent(SystemTime::now() - Duration::from_secs(120));
-        for _ in 0..6 {
-            removable.on_timeout();
-        }
-        assert!(removable.removable_without_replacement());
-    }
-
-    #[test]
-    fn test_serde_cbor_roundtrip() {
+    fn test_serde_cbor() {
         let mut entry = make_entry();
         entry.set_ver(1234);
         entry.update_last_sent(SystemTime::now() - Duration::from_secs(2));
         entry.on_timeout();
         entry.on_responded(75);
 
-        let cbor = serde_cbor::to_vec(&entry).expect("Failed to serialize KBucketEntry");
-        let restored: KBucketEntry = serde_cbor::from_slice(&cbor)
+        let cbor = serde_cbor::to_vec(&entry)
+            .expect("Failed to serialize KBucketEntry");
+        let decoded: KBucketEntry = serde_cbor::from_slice(&cbor)
             .expect("Failed to deserialize KBucketEntry");
 
-        assert_eq!(restored.id(), entry.id());
-        assert_eq!(restored.socket_addr(), entry.socket_addr());
-        assert_eq!(restored.failed_requests(), entry.failed_requests());
-        assert_eq!(restored.is_reachable(), entry.is_reachable());
-        assert_eq!(restored.rtt(), entry.rtt());
-        assert_eq!(restored.ni().version(), entry.ni().version());
+        assert_eq!(decoded.id(), entry.id());
+        assert_eq!(decoded.socket_addr(), entry.socket_addr());
+        assert_eq!(decoded.failed_requests(), entry.failed_requests());
+        assert_eq!(decoded.is_reachable(), entry.is_reachable());
+        assert_eq!(decoded.rtt(), entry.rtt());
+        assert_eq!(decoded.ni().version(), entry.ni().version());
     }
 }

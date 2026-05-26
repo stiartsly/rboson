@@ -10,17 +10,21 @@ use crate::{Id, PeerInfo};
 
 pub(crate) struct AnnouncePeerRequest {
     token:  i32,
-    expected_seq: i32, // -1 means unset
     peer:   PeerInfo,
+    expected_seq: i32, // None means unset
 }
 
 impl AnnouncePeerRequest {
     pub(crate) fn new(
         peer: PeerInfo,
         token: i32,
-        expected_seq: i32
+        expected_seq: Option<i32>
     ) -> Self {
-        Self { token, expected_seq, peer }
+        Self {
+            token,
+            peer,
+            expected_seq: expected_seq.unwrap_or(-1),
+        }
     }
 
     pub(crate) fn token(&self) -> i32 {
@@ -73,11 +77,9 @@ impl Serialize for AnnouncePeerRequest {
 }
 
 impl<'de> Deserialize<'de> for AnnouncePeerRequest {
-    fn deserialize<D>(de: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where D: Deserializer<'de>,
     {
-        #[derive(Debug)]
         enum Field {
             Token,          // "tok"
             Cas,            // "cas"
@@ -95,8 +97,7 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -121,95 +122,106 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
             type Value = AnnouncePeerRequest;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("AnnouncePeerRequest")
+                formatter.write_str("An AnnouncePeerRequest struct")
             }
 
-            #[allow(unused)]
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
+            where V: MapAccess<'de>,
             {
-                let mut token: Option<i32> = None;
-                let mut expected_seq: Option<i32> = None;
-                let mut peer_id: Option<Id> = None;
-                let mut nonce: Option<Vec<u8>> = None;
-                let mut seq: Option<i32> = None;
-                let mut node_id: Option<Id> = None;
-                let mut node_sig: Option<Vec<u8>> = None;
-                let mut sig: Option<Vec<u8>> = None;
-                let mut fingerprint: Option<u64> = None;
-                let mut endpoint: Option<String> = None;
-                let mut extra: Option<Vec<u8>> = None;
+                let mut token: Option<i32>          = None;
+                let mut expected_seq: Option<i32>   = None;
+                let mut peer_id: Option<Id>         = None;
+                let mut nonce: Option<Vec<u8>>      = None;
+                let mut seq: Option<i32>            = None;
+                let mut node_id: Option<Id>         = None;
+                let mut node_sig: Option<Vec<u8>>   = None;
+                let mut sig: Option<Vec<u8>>        = None;
+                let mut fingerprint: Option<u64>    = None;
+                let mut endpoint: Option<String>    = None;
+                let mut extra: Option<Vec<u8>>      = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
                         Field::Token => {
                             if token.is_some() {
                                 return Err(de::Error::duplicate_field("tok"));
+                            } else {
+                                token = Some(map.next_value()?);
                             }
-                            token = Some(map.next_value()?);
                         }
                         Field::Cas => {
                             if expected_seq.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
+                            } else {
+                                expected_seq = Some(map.next_value()?);
                             }
-                            expected_seq = Some(map.next_value()?);
                         }
                         Field::PeerId => {
                             if peer_id.is_some() {
                                 return Err(de::Error::duplicate_field("k"));
+                            } else {
+                                peer_id = Some(map.next_value()?);
                             }
-                            peer_id = Some(map.next_value()?);
                         }
                         Field::Nonce => {
                             if nonce.is_some() {
                                 return Err(de::Error::duplicate_field("n"));
+                            } else {
+                                nonce = Some(map.next_value()?);
                             }
-                            nonce = Some(map.next_value()?);
                         }
                         Field::Seq => {
                             if seq.is_some() {
                                 return Err(de::Error::duplicate_field("seq"));
+                            } else {
+                                seq = Some(map.next_value()?);
                             }
-                            seq = Some(map.next_value()?);
                         }
                         Field::NodeId => {
                             if node_id.is_some() {
                                 return Err(de::Error::duplicate_field("o"));
+                            } else {
+                                node_id = Some(map.next_value()?);
                             }
-                            node_id = Some(map.next_value()?);
                         }
                         Field::NodeSig => {
                             if node_sig.is_some() {
                                 return Err(de::Error::duplicate_field("os"));
+                            } else {
+                                node_sig = Some(map.next_value()?);
                             }
-                            node_sig = Some(map.next_value()?);
                         }
                         Field::Signature => {
                             if sig.is_some() {
                                 return Err(de::Error::duplicate_field("sig"));
+                            } else {
+                                sig = Some(map.next_value()?);
                             }
-                            sig = Some(map.next_value()?);
                         }
                         Field::Fingerprint => {
                             if fingerprint.is_some() {
                                 return Err(de::Error::duplicate_field("f"));
+                            } else {
+                                fingerprint = Some(map.next_value()?);
                             }
-                            fingerprint = Some(map.next_value()?);
                         }
                         Field::Endpoint => {
                             if endpoint.is_some() {
                                 return Err(de::Error::duplicate_field("e"));
+                            } else {
+                                endpoint = Some(map.next_value()?);
                             }
-                            endpoint = Some(map.next_value()?);
                         }
                         Field::Extra => {
                             if extra.is_some() {
                                 return Err(de::Error::duplicate_field("ex"));
+                            } else {
+                                extra = Some(map.next_value()?);
                             }
-                            extra = Some(map.next_value()?);
                         }
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 
@@ -217,9 +229,10 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
-
                 let seq = seq.unwrap_or_default();
-                let fingerprint = fingerprint.ok_or_else(|| de::Error::missing_field("f"))?;
+                if seq < 0 {
+                    return Err(de::Error::custom("seq must be non-negative"));
+                }
 
                 let peer = PeerInfo::packed(
                     peer_id.ok_or_else(|| de::Error::missing_field("k"))?,
@@ -228,7 +241,7 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
                     node_id,
                     node_sig,
                     sig.ok_or_else(|| de::Error::missing_field("sig"))?,
-                    fingerprint,
+                    fingerprint.ok_or_else(|| de::Error::missing_field("f"))?,
                     endpoint.ok_or_else(|| de::Error::missing_field("e"))?,
                     extra,
                 );
@@ -236,7 +249,7 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
                 Ok(AnnouncePeerRequest::new(
                     peer,
                     token.ok_or_else(|| de::Error::missing_field("tok"))?,
-                    expected_seq,
+                    Some(expected_seq)
                 ))
             }
         }

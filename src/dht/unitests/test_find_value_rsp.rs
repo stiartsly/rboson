@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-
 use crate::{
     Id,
     NodeInfo,
@@ -27,7 +26,6 @@ mod tests {
 
         assert_eq!(rsp.nodes4(), Some([node.clone()].as_slice()));
         assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.has_value(), false);
         assert_eq!(rsp.value(), None);
     }
 
@@ -38,7 +36,6 @@ mod tests {
 
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.has_value(), true);
         assert_eq!(rsp.value(), Some(&value));
     }
 
@@ -122,8 +119,6 @@ mod tests {
         assert_eq!(rsp.nodes4().is_none(), true);
         assert_eq!(rsp.nodes6().is_none(), true);
         assert_eq!(rsp.token(), 0);
-
-        assert_eq!(rsp.has_value(), true);
         assert_eq!(rsp.value().is_some(), true);
         assert_eq!(rsp.value().unwrap(), &value);
 
@@ -135,8 +130,6 @@ mod tests {
         assert_eq!(decoded.nodes4().is_none(), true);
         assert_eq!(decoded.nodes6().is_none(), true);
         assert_eq!(decoded.token(), 0);
-
-        assert_eq!(decoded.has_value(), true);
         assert_eq!(decoded.value().is_some(), true);
         assert_eq!(decoded.value().unwrap(), &value);
     }

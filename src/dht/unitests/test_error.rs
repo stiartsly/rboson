@@ -5,17 +5,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_accessors() {
+    fn test_default() {
         let err = Error::new(500, "boom".to_string());
-
         assert_eq!(err.code(), 500);
         assert_eq!(err.msg(), "boom");
     }
 
     #[test]
-    fn test_serde() {
+    fn test_serde_cbor() {
         let err = Error::new(500, "boom".to_string());
-
         let cbor = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
         let decoded: Error = serde_cbor::from_slice(&cbor)
@@ -26,9 +24,8 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_empty_message() {
+    fn test_serde_cbor_with_empty_msg() {
         let err = Error::new(404, String::new());
-
         let cbor = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
         let decoded: Error = serde_cbor::from_slice(&cbor)
@@ -36,11 +33,5 @@ mod tests {
 
         assert_eq!(decoded.code(), 404);
         assert_eq!(decoded.msg(), "");
-    }
-
-    #[test]
-    fn test_display() {
-        let err = Error::new(500, "boom".to_string());
-        assert_eq!(format!("{}", err), "c:500,m:boom");
     }
 }

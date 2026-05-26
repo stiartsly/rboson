@@ -10,13 +10,13 @@ use crate::{
 
 use crate::dht::{
     dht::DHT,
+    token_manager::TokenManager,
     task::{
-        candidate_node::CandidateNode,
-        closest_set::ClosestSet,
         task::Task,
+        closest_set::ClosestSet,
+        candidate_node::CandidateNode,
         value_announce::ValueAnnounceTask,
     },
-    token_manager::TokenManager,
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,

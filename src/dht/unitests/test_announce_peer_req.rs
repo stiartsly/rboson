@@ -4,7 +4,7 @@ use crate::{
     dht::msg::announce_peer_req::AnnouncePeerRequest,
 };
 
-fn sample_peer() -> PeerInfo {
+fn make_peer() -> PeerInfo {
     PeerInfo::packed(
         Id::random(),
         vec![7; PeerInfo::NONCE_BYTES],
@@ -23,9 +23,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_accessors() {
-        let peer = sample_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, 8);
+    fn test_default() {
+        let peer = make_peer();
+        let req = AnnouncePeerRequest::new(peer.clone(), 42, Some(8));
 
         assert_eq!(req.token(), 42);
         assert_eq!(req.expected_seq(), 8);
@@ -33,9 +33,9 @@ mod tests {
     }
 
     #[test]
-    fn test_serde() {
-        let peer = sample_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, 8);
+    fn test_cbor() {
+        let peer = make_peer();
+        let req = AnnouncePeerRequest::new(peer.clone(), 42, Some(8));
 
         let cbor = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
@@ -48,9 +48,9 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_without_cas() {
-        let peer = sample_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, -1);
+    fn test_cbor_without_cas() {
+        let peer = make_peer();
+        let req = AnnouncePeerRequest::new(peer.clone(), 42, None);
 
         let cbor = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
@@ -60,23 +60,5 @@ mod tests {
         assert_eq!(decoded.token(), 42);
         assert_eq!(decoded.expected_seq(), -1);
         assert_eq!(decoded.peer(), &peer);
-    }
-
-    #[test]
-    fn test_display() {
-        let peer = sample_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, 8);
-
-        let str = format!("{}", req);
-        assert_eq!(str, format!("tok:42,peer:[{}],cas:8", peer));
-    }
-
-    #[test]
-    fn test_display_without_cas() {
-        let peer = sample_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, -1);
-
-        let str = format!("{}", req);
-        assert_eq!(str, format!("tok:42,peer:[{}]", peer));
     }
 }

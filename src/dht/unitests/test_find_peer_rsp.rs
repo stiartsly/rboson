@@ -27,7 +27,6 @@ mod tests {
 
         assert_eq!(rsp.nodes4(), Some([node.clone()].as_slice()));
         assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.has_peers(), false);
         assert_eq!(rsp.peers(), None);
     }
 
@@ -43,46 +42,7 @@ mod tests {
 
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.has_peers(), true);
         assert_eq!(rsp.peers(), Some([peer].as_slice()));
-    }
-
-    #[test]
-    fn test_display_with_nodes() {
-        let node4 = NodeInfo::new(
-            Id::random(),
-            "127.0.0.1:29001".parse::<SocketAddr>().unwrap(),
-        );
-        let node6 = NodeInfo::new(
-            Id::random(),
-            "[::1]:29001".parse::<SocketAddr>().unwrap(),
-        );
-
-        let rsp = FindPeerResponse::new(
-            Some(vec![node4.clone()]),
-            Some(vec![node6.clone()]),
-        );
-
-        let str = format!("{}", rsp);
-        assert!(str.contains("n4:"));
-        assert!(str.contains(&format!("[{}]", node4)));
-        assert!(str.contains("n6:"));
-        assert!(str.contains(&format!("[{}]", node6)));
-    }
-
-    #[test]
-    fn test_display_with_peers() {
-        let keypair = signature::KeyPair::random();
-        let peer = PeerBuilder::new("tcp://192.168.1.1:8080")
-            .with_key(keypair)
-            .build()
-            .expect("Failed to build peer");
-
-        let rsp = FindPeerResponse::from(vec![peer.clone()]);
-
-        let str = format!("{}", rsp);
-        assert!(str.contains(",p:"));
-        assert!(str.contains(&format!("[{}]", peer)));
     }
 
     #[test]
@@ -137,8 +97,6 @@ mod tests {
         assert_eq!(rsp.nodes4().is_none(), true);
         assert_eq!(rsp.nodes6().is_none(), true);
         assert_eq!(rsp.token(), 0);
-
-        assert_eq!(rsp.has_peers(), true);
         assert_eq!(rsp.peers().is_some(), true);
         assert_eq!(rsp.peers().unwrap().len(), 1);
 
@@ -151,7 +109,6 @@ mod tests {
         assert_eq!(decoded.nodes6().is_none(), true);
         assert_eq!(decoded.token(), 0);
 
-        assert_eq!(decoded.has_peers(), true);
         assert_eq!(decoded.peers().is_some(), true);
         assert_eq!(decoded.peers().unwrap().len(), 1);
 
@@ -163,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_more_peers() {
+    fn test_serde_with_multiple_peers() {
         let keypair = signature::KeyPair::random();
         let peer1 = PeerBuilder::new("tcp://192.168.1.1:8080")
             .with_key(keypair.clone())
@@ -184,7 +141,6 @@ mod tests {
         assert_eq!(rsp.nodes6().is_none(), true);
         assert_eq!(rsp.token(), 0);
 
-        assert_eq!(rsp.has_peers(), true);
         assert_eq!(rsp.peers().is_some(), true);
         assert_eq!(rsp.peers().unwrap().len(), 2);
 

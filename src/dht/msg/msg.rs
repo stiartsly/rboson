@@ -458,7 +458,7 @@ impl Message {
         expected_seq: i32,
     ) -> Self {
         let req = AnnouncePeerRequest::new(
-            peer, token, expected_seq
+            peer, token, Some(expected_seq)
         );
         Self::new(
             Kind::Request,

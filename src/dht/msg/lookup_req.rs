@@ -20,7 +20,7 @@ impl Data {
 
 pub(crate) trait LookupRequest {
     fn data(&self) -> &Data;
-    fn data_mut(&mut self) -> &mut Data;
+    //fn data_mut(&mut self) -> &mut Data;
 
     fn target(&self) -> &Id {
         &self.data().target

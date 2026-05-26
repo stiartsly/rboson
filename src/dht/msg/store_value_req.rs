@@ -46,8 +46,7 @@ impl StoreValueRequest {
 
 impl Serialize for StoreValueRequest {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+    where S: Serializer,
     {
         let value = &self.value;
         let mut map = se.serialize_map(None)?;
@@ -77,9 +76,8 @@ impl Serialize for StoreValueRequest {
 }
 
 impl<'de> Deserialize<'de> for StoreValueRequest {
-    fn deserialize<D>(de: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where D: Deserializer<'de>,
     {
         enum Field {
             Token,          // "tok"
@@ -95,8 +93,7 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -118,12 +115,11 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
             type Value = StoreValueRequest;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("StoreValueRequest")
+                formatter.write_str("a StoreValueRequest struct")
             }
 
-            fn visit_map<V>(self, mut map: V) -> std::result::Result<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
+            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
+            where V: MapAccess<'de>,
             {
                 let mut token: Option<i32> = None;
                 let mut expected_seq: Option<i32> = None;
@@ -139,52 +135,62 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                         Field::Token => {
                             if token.is_some() {
                                 return Err(de::Error::duplicate_field("tok"));
+                            } else {
+                                token = Some(map.next_value()?);
                             }
-                            token = Some(map.next_value()?);
                         }
                         Field::Cas => {
                             if expected_seq.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
+                            } else {
+                                expected_seq = Some(map.next_value()?);
                             }
-                            expected_seq = Some(map.next_value()?);
                         }
                         Field::PublicKey => {
                             if pk.is_some() {
                                 return Err(de::Error::duplicate_field("k"));
+                            } else {
+                                pk = Some(map.next_value()?);
                             }
-                            pk = Some(map.next_value()?);
                         }
                         Field::Recipient => {
                             if rec.is_some() {
                                 return Err(de::Error::duplicate_field("rec"));
+                            } else {
+                                rec = Some(map.next_value()?);
                             }
-                            rec = Some(map.next_value()?);
                         }
                         Field::Nonce => {
                             if nonce.is_some() {
                                 return Err(de::Error::duplicate_field("n"));
+                            } else {
+                                nonce = Some(map.next_value()?);
                             }
-                            nonce = Some(map.next_value()?);
                         }
                         Field::Seq => {
                             if seq.is_some() {
                                 return Err(de::Error::duplicate_field("seq"));
+                            } else {
+                                seq = Some(map.next_value()?);
                             }
-                            seq = Some(map.next_value()?);
                         }
                         Field::Signature => {
                             if sig.is_some() {
                                 return Err(de::Error::duplicate_field("sig"));
+                            } else {
+                                sig = Some(map.next_value()?);
                             }
-                            sig = Some(map.next_value()?);
                         }
                         Field::Data => {
                             if data.is_some() {
                                 return Err(de::Error::duplicate_field("v"));
+                            } else {
+                                data = Some(map.next_value()?);
                             }
-                            data = Some(map.next_value()?);
                         }
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 
@@ -192,15 +198,17 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
+                let seq = seq.unwrap_or_default();
+                if seq < 0 {
+                    return Err(de::Error::custom("sequence number must be larger than or equal to 0"));
+                }
 
                 let Some(data) = data else {
                     return Err(de::Error::missing_field("v"));
                 };
-
                 if data.is_empty() {
                     return Err(de::Error::custom("data field \"v\" cannot be empty"));
                 }
-
 
                 let nonce = if let Some(nonce) = nonce.as_ref() {
                     Nonce::try_from(nonce.as_slice())
@@ -210,7 +218,7 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                     None
                 };
 
-                let value = Value::packed(pk, rec, nonce, sig, data, seq.unwrap_or_default());
+                let value = Value::packed(pk, rec, nonce, sig, data, seq);
                 Ok(StoreValueRequest::new(
                     value,
                     token.ok_or_else(|| de::Error::missing_field("tok"))?,

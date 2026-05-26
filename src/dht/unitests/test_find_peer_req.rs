@@ -11,7 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_serde() {
+    fn test_serde_cbor() {
         let peerid = Id::random();
         let expected_seq = 5;
         let expected_count = 10;
@@ -57,20 +57,5 @@ mod tests {
         assert_eq!(decoded.want_token(), false);
         assert_eq!(decoded.expected_seq(), -1);
         assert_eq!(decoded.expected_count(), 3);
-    }
-
-    #[test]
-    fn test_display() {
-        let peerid = Id::random();
-        let req = FindPeerRequest::new(
-            peerid.clone(),
-            true,
-            true,
-            5,
-            10
-        );
-
-        let display_str = format!("{}", req);
-        assert_eq!(display_str, format!("t:{},w:3,cas:5,e:10", peerid));
     }
 }

@@ -1,12 +1,14 @@
 use std::sync::{Arc, Mutex};
-
-use crate::{Id, NodeInfo};
-use crate::dht::task::{
-    candidate_node::CandidateNode,
-    closest_set::ClosestSet,
+use crate::{
+    Id,
+    NodeInfo,
+    dht::task::{
+        candidate_node::CandidateNode,
+        closest_set::ClosestSet,
+    }
 };
 
-fn make_candidate_node(distance: usize) -> Arc<Mutex<CandidateNode>> {
+fn make_candidate(distance: usize) -> Arc<Mutex<CandidateNode>> {
     let id = Id::try_from_bit_at(Id::BITS - distance).unwrap();
     let node = NodeInfo::new(
         id,
@@ -24,11 +26,11 @@ mod tests {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
 
-        closest.add(make_candidate_node(4));
-        closest.add(make_candidate_node(2));
-        closest.add(make_candidate_node(1));
-        closest.add(make_candidate_node(3));
-        closest.add(make_candidate_node(6));
+        closest.add(make_candidate(4));
+        closest.add(make_candidate(2));
+        closest.add(make_candidate(1));
+        closest.add(make_candidate(3));
+        closest.add(make_candidate(6));
 
         let ids = closest
             .entries()
@@ -37,7 +39,7 @@ mod tests {
             .collect::<Vec<_>>();
         let expected = [1, 2, 3, 4]
             .into_iter()
-            .map(|distance| make_candidate_node(distance).lock().unwrap().id().clone())
+            .map(|distance| make_candidate(distance).lock().unwrap().id().clone())
             .collect::<Vec<_>>();
 
         assert_eq!(closest.size(), 4);
@@ -48,10 +50,10 @@ mod tests {
     }
 
     #[test]
-    fn test_contains_and_remove() {
+    fn test_contains() {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
-        let candidate = make_candidate_node(2);
+        let candidate = make_candidate(2);
         let id = candidate.lock().unwrap().id().clone();
 
         assert_eq!(closest.is_empty(), true);
@@ -86,12 +88,12 @@ mod tests {
         let mut closest = ClosestSet::new(target, 4);
 
         for distance in 1..=4 {
-            closest.add(make_candidate_node(distance));
+            closest.add(make_candidate(distance));
         }
         assert_eq!(closest.is_eligible(), false);
 
         for distance in 5..=9 {
-            closest.add(make_candidate_node(distance));
+            closest.add(make_candidate(distance));
         }
 
         assert_eq!(closest.insert_attempts_since_tail_modification(), 5);
@@ -104,12 +106,12 @@ mod tests {
         let mut closest = ClosestSet::new(target, 4);
 
         for distance in (1..=4).rev() {
-            closest.add(make_candidate_node(distance));
+            closest.add(make_candidate(distance));
         }
         assert_eq!(closest.is_head_stable(), false);
 
         for distance in 5..=9 {
-            closest.add(make_candidate_node(distance));
+            closest.add(make_candidate(distance));
         }
 
         assert_eq!(closest.insert_attempts_since_head_modification(), 5);

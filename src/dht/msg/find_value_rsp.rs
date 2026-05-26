@@ -41,10 +41,6 @@ impl FindValueResponse {
         }
     }
 
-    pub(crate) fn has_value(&self) -> bool {
-        self.value.is_some()
-    }
-
     pub(crate) fn value(&self) -> Option<&Value> {
         self.value.as_ref()
     }
@@ -54,16 +50,11 @@ impl LookupResponse for FindValueResponse {
     fn data(&self) -> &Data {
         &self.data
     }
-
-    fn data_mut(&mut self) -> &mut Data {
-        &mut self.data
-    }
 }
 
 impl Serialize for FindValueResponse {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+    where S: Serializer,
     {
         let mut s = se.serialize_map(None)?;
         if let Some(value) = self.value.as_ref() {
@@ -103,8 +94,7 @@ impl Serialize for FindValueResponse {
 
 impl<'de> Deserialize<'de> for FindValueResponse {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>,
     {
         #[derive(Debug)]
         enum Field {
@@ -122,8 +112,7 @@ impl<'de> Deserialize<'de> for FindValueResponse {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -142,17 +131,15 @@ impl<'de> Deserialize<'de> for FindValueResponse {
         }
 
         struct FieldVisitor;
-
         impl<'de> Visitor<'de> for FieldVisitor {
             type Value = FindValueResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("FindValueResponse")
+                formatter.write_str("a FindValueResponse struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
+            where V: MapAccess<'de>,
             {
                 let mut nodes4: Option<Vec<NodeInfo>> = None;
                 let mut nodes6: Option<Vec<NodeInfo>> = None;
@@ -168,50 +155,58 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                         Field::Nodes4 => {
                             if nodes4.is_some() {
                                 return Err(de::Error::duplicate_field("n4"));
+                            } else {
+                                nodes4 = Some(map.next_value()?);
                             }
-                            nodes4 = Some(map.next_value()?);
                         }
                         Field::Nodes6 => {
                             if nodes6.is_some() {
                                 return Err(de::Error::duplicate_field("n6"));
+                            } else {
+                                nodes6 = Some(map.next_value()?);
                             }
-                            nodes6 = Some(map.next_value()?);
                         }
                         Field::Key => {
                             if pk.is_some() {
                                 return Err(de::Error::duplicate_field("k"));
+                            } else {
+                                pk = Some(map.next_value()?);
                             }
-                            pk = Some(map.next_value()?);
                         }
                         Field::Recipient => {
                             if rec.is_some() {
                                 return Err(de::Error::duplicate_field("rec"));
+                            } else {
+                                rec = Some(map.next_value()?);
                             }
-                            rec = Some(map.next_value()?);
                         }
                         Field::Nonce => {
                             if nonce.is_some() {
                                 return Err(de::Error::duplicate_field("n"));
+                            } else {
+                                nonce = Some(map.next_value()?);
                             }
-                            nonce = Some(map.next_value()?);
                         }
                         Field::Signature => {
                             if sig.is_some() {
                                 return Err(de::Error::duplicate_field("sig"));
+                            } else {
+                                sig = Some(map.next_value()?);
                             }
-                            sig = Some(map.next_value()?);
                         }
                         Field::SequenceNumber => {
                             if seq.is_some() {
                                 return Err(de::Error::duplicate_field("seq"));
+                            } else {
+                                seq = Some(map.next_value()?);
                             }
-                            seq = Some(map.next_value()?);
                         }
                         Field::Data => {
                             if data.is_some() {
                                 return Err(de::Error::duplicate_field("v"));
+                            } else {
+                                data = Some(map.next_value()?);
                             }
-                            data = Some(map.next_value()?);
                         }
                         Field::Token |
                         Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
@@ -221,7 +216,6 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                 if nodes4.is_none() && nodes6.is_none() && data.is_none() {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"v\" must be present"));
                 }
-
                 if data.is_some() && (nodes4.is_some() || nodes6.is_some()) {
                     return Err(de::Error::custom("\"v\" cannot be combined with \"n4\" or \"n6\""));
                 }
@@ -232,7 +226,6 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                     }
 
                     let seq = seq.unwrap_or(-1);
-
                     let nonce = if let Some(nonce) = nonce.as_ref() {
                         Nonce::try_from(nonce.as_slice())
                             .map_err(|_| de::Error::custom("invalid nonce length"))?
@@ -243,7 +236,7 @@ impl<'de> Deserialize<'de> for FindValueResponse {
 
                     let value = Value::packed(pk, rec, nonce, sig, data, seq);
                     if !value.is_valid() {
-                        return Err(de::Error::custom("invalid value in FindValueResponse"));
+                        return Err(de::Error::custom("invalid value"));
                     }
                     Ok(FindValueResponse::from(value))
                 } else {
@@ -271,7 +264,6 @@ impl fmt::Display for FindValueResponse {
                 has_written_section = true;
             }
         }
-
         if let Some(nodes6) = self.nodes6() {
             if !nodes6.is_empty() {
                 if has_written_section {

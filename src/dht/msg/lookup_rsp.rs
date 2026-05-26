@@ -21,7 +21,7 @@ impl Data {
 
 pub(crate) trait LookupResponse {
     fn data(&self) -> &Data;
-    fn data_mut(&mut self) -> &mut Data;
+    //fn data_mut(&mut self) -> &mut Data;
 
     fn nodes4(&self) -> Option<&[NodeInfo]> {
         self.data().nodes4.as_deref()

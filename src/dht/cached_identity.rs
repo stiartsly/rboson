@@ -46,12 +46,6 @@ impl CachedIdentity {
     }
 }
 
-impl Drop for CachedIdentity {
-    fn drop(&mut self) {
-        self.clear_cache();
-    }
-}
-
 impl Identity for CachedIdentity {
     fn id(&self) -> &Id {
         &self.id
@@ -75,5 +69,11 @@ impl Identity for CachedIdentity {
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         Ok(self.context(id).lock().unwrap().clone())
+    }
+}
+
+impl Drop for CachedIdentity {
+    fn drop(&mut self) {
+        self.clear_cache();
     }
 }

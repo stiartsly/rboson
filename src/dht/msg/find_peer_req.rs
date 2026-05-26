@@ -51,16 +51,11 @@ impl LookupRequest for FindPeerRequest {
     fn data(&self) -> &LookupData {
         &self.data
     }
-
-    fn data_mut(&mut self) -> &mut LookupData {
-        &mut self.data
-    }
 }
 
 impl Serialize for FindPeerRequest {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer
+    where S: Serializer
     {
         let mut s = se.serialize_map(None)?;
         s.serialize_entry("t", self.target())?;
@@ -77,8 +72,7 @@ impl Serialize for FindPeerRequest {
 
 impl<'de> Deserialize<'de> for FindPeerRequest {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>,
     {
         enum Field {
             Want,           // "w"
@@ -90,8 +84,7 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -113,8 +106,7 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
+            where V: MapAccess<'de>,
             {
                 let mut target: Option<Id> = None;
                 let mut want: Option<i32> = None;
@@ -126,38 +118,43 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
                         Field::Target => {
                             if target.is_some() {
                                 return Err(de::Error::duplicate_field("t"));
+                            } else {
+                                target = Some(map.next_value::<Id>()?);
                             }
-                            target = Some(map.next_value::<Id>()?);
                         }
                         Field::Want => {
                             if want.is_some() {
                                 return Err(de::Error::duplicate_field("w"));
+                            } else {
+                                want = Some(map.next_value()?);
                             }
-                            want = Some(map.next_value()?);
                         }
                         Field::ExpectedSeq => {
                             if expected_seq.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
+                            } else {
+                                expected_seq = Some(map.next_value()?);
                             }
-                            expected_seq = Some(map.next_value()?);
                         }
                         Field::ExpectedCount => {
                             if expected_count.is_some() {
                                 return Err(de::Error::duplicate_field("e"));
+                            } else {
+                                expected_count = Some(map.next_value()?);
                             }
-                            expected_count = Some(map.next_value()?);
                         }
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 
                 let want = want.unwrap_or_default();
                 let expected_seq = expected_seq.unwrap_or(-1);
-                let expected_count = expected_count.unwrap_or_default();
-
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
+                let expected_count = expected_count.unwrap_or_default();
                 if expected_count <= 0 {
                     return Err(de::Error::custom("expected_count must be at least larger than 0"));
                 }

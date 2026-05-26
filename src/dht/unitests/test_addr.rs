@@ -46,11 +46,9 @@ mod tests {
     fn test_is_bogon() {
         assert_eq!(is_bogon(&"47.101.142.224:1234".parse::<SocketAddr>().unwrap()), false);
         assert_eq!(is_bogon(&"151.101.2.132:1234".parse::<SocketAddr>().unwrap()), false);
-
         assert_eq!(is_bogon(&"192.168.1.1:1234".parse::<SocketAddr>().unwrap()), true);
         assert_eq!(is_bogon(&"10.0.0.1:1234".parse::<SocketAddr>().unwrap()), true);
         assert_eq!(is_bogon(&"127.0.0.1:1234".parse::<SocketAddr>().unwrap()), true);
-
         assert_eq!(is_bogon(&"192.168.0.8:0".parse::<SocketAddr>().unwrap()), true);
     }
 }

@@ -606,11 +606,9 @@ impl DHT {
     }
 
     fn send_err(&mut self, method: Method, code: i32, str: &str) {
-        // TODO:
-        let msg = Message::error(method, 0, code, str.into());
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
-        );
+        let mut msg = Message::error(method, 0, code, str.into());
+        // TODO: set remote id and addr
+        let _ = self.server().lock().unwrap().send_msg(&mut msg);
     }
 
     pub(crate) fn on_message(&mut self, msg: &mut Message) {
@@ -673,7 +671,7 @@ impl DHT {
 
     fn on_ping(&mut self, req: &Message) {
         if req.body().is_some() {
-            error!("Panic: ping request should not have body");
+            error!("Error: ping request should not have body");
             return;
         }
 
@@ -684,14 +682,12 @@ impl DHT {
         let mut msg = Message::ping_rsp(txid);
         msg.set_remote(remote_id, remote_addr);
 
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
-        );
+        let _ = self.server().lock().unwrap().send_msg(&mut msg);
     }
 
-    fn on_find_node(&mut self, msg: &Message) {
-        let Some(Body::FindNodeReq(body)) = msg.body() else {
-            error!("Panic: should be find node request");
+    fn on_find_node(&mut self, req: &Message) {
+        let Some(Body::FindNodeReq(body)) = req.body() else {
+            error!("Error: should be find node request");
             return;
         };
 
@@ -701,10 +697,11 @@ impl DHT {
 
         let use_ipv4 = self.network().is_ipv4();
         let use_ipv6 = self.network().is_ipv6();
+        let target = body.target().clone();
 
         if body.want4() && use_ipv4 {
             let mut kns = KClosestNodes::new(
-                self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                self.rt(), target, KBucket::MAX_ENTRIES,
             );
             kns.fill();
             nodes4 = Some(kns.into())
@@ -712,34 +709,32 @@ impl DHT {
 
         if body.want6() && use_ipv6 {
             let mut kns = KClosestNodes::new(
-                self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                self.rt(), target, KBucket::MAX_ENTRIES,
             );
             kns.fill();
             nodes6 = Some(kns.into())
         }
         if body.want_token() {
             token = self.tokenman.lock().unwrap().generate_token(
-                msg.id(),
-                msg.remote_addr(),
-                body.target()
+                req.id(),
+                req.remote_addr(),
+                &target
             );
         }
 
-        let txid = msg.txid();
-        let remote_id = msg.remote_id().clone();
-        let remote_addr = msg.remote_addr().clone();
-
-        let mut msg = Message::find_node_rsp(txid, nodes4, nodes6, token);
-        msg.set_remote(remote_id, remote_addr);
-
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
+        let txid = req.txid();
+        let mut rsp = Message::find_node_rsp(txid, nodes4, nodes6, token);
+        rsp.set_remote(
+            req.remote_id().clone(),
+            req.remote_addr().clone()
         );
+
+        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
     }
 
-    fn on_find_value(&mut self, msg: &Message) {
-        let Some(Body::FindValueReq(body)) = msg.body() else {
-            error!("Panic: should be find value request");
+    fn on_find_value(&mut self, req: &Message) {
+        let Some(Body::FindValueReq(body)) = req.body() else {
+            error!("Error: should be find value request");
             return;
         };
 
@@ -760,15 +755,10 @@ impl DHT {
             }
         }
 
-        let txid = msg.txid();
-        let remote_id = msg.remote_id().clone();
-        let remote_addr = msg.remote_addr().clone();
+        let txid = req.txid();
+        let target = body.target().clone();
 
-        let msg = if value.is_some() {
-            let mut msg = Message::find_value_rsp(txid, value.unwrap());
-            msg.set_remote(remote_id, remote_addr);
-            msg
-        } else {
+        let mut rsp = if value.is_none() {
             let use_ipv4 = self.network().is_ipv4();
             let use_ipv6 = self.network().is_ipv6();
             let mut nodes4 = None;
@@ -776,7 +766,7 @@ impl DHT {
 
             if body.want4() && use_ipv4 {
                 let mut kns = KClosestNodes::new(
-                    self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                    self.rt(), target, KBucket::MAX_ENTRIES,
                 );
                 kns.fill();
                 nodes4 = Some(kns.into());
@@ -784,33 +774,36 @@ impl DHT {
 
             if body.want6() && use_ipv6 {
                 let mut kns = KClosestNodes::new(
-                    self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                    self.rt(), target, KBucket::MAX_ENTRIES,
                 );
                 kns.fill();
                 nodes6 = Some(kns.into());
             }
-            let mut msg = Message::find_value_rsp_trivial(txid, nodes4, nodes6);
-            msg.set_remote(remote_id, remote_addr);
-            msg
+            Message::find_value_rsp_with_nodes(txid, nodes4, nodes6)
+        } else {
+            Message::find_value_rsp(txid, value.unwrap())
         };
-
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
+        rsp.set_remote(
+            req.remote_id().clone(),
+            req.remote_addr().clone()
         );
+
+        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
     }
 
-    fn on_store_value(&mut self, msg: &Message) {
-        let Some(Body::StoreValueReq(body)) = msg.body() else {
-            error!("Panic: should be store value request");
+    fn on_store_value(&mut self, req: &Message) {
+        let Some(Body::StoreValueReq(body)) = req.body() else {
+            error!("Error: should be store value request");
             return;
         };
 
         let value = body.value();
         let value_id = value.id();
-        let remote_addr = msg.remote_addr().clone();
+        let remote_addr = req.remote_addr().clone();
+
         let is_valid = self.tokenman.lock().unwrap().verify_token(
             body.token(),
-            msg.id(),
+            req.id(),
             &remote_addr,
             &value_id
         );
@@ -825,7 +818,7 @@ impl DHT {
         }
 
         let result = self.storage.lock().unwrap().get_value(&value_id);
-        let existing = match result {
+        let local_value = match result {
             Ok(v) => v,
             Err(e) => {
                 warn!("Retrieve existing value {} error: {}", value_id, e);
@@ -833,7 +826,7 @@ impl DHT {
             }
         };
 
-        if let Some(existing) = existing {
+        if let Some(existing) = local_value {
             if existing.is_mutable() != value.is_mutable() {
                 warn!("Rejecting value {}: cannot replace mismatched mutable/immutable", value_id);
                 _ = self.send_err(Method::StoreValue, 300, "Cannot replace mismatched mutable/immutable value");
@@ -859,18 +852,18 @@ impl DHT {
 
         _ = self.storage.lock().unwrap().put_value(value.clone(), None);
 
-        let txid = msg.txid();
-        let remote_id = msg.remote_id().clone();
+        let txid = req.txid();
         let mut msg = Message::store_value_rsp(txid);
-        msg.set_remote(remote_id, remote_addr);
-
-        _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
+        msg.set_remote(
+            req.remote_id().clone(),
+            remote_addr
         );
+
+        let _ = self.server().lock().unwrap().send_msg(&mut msg);
     }
 
-    fn on_find_peer(&mut self, msg: &Message) {
-        let Some(Body::FindPeerReq(body)) = msg.body() else {
+    fn on_find_peer(&mut self, req: &Message) {
+        let Some(Body::FindPeerReq(body)) = req.body() else {
             error!("Panic: should be find peer request");
             return;
         };
@@ -888,16 +881,10 @@ impl DHT {
             }
         };
 
-        let txid = msg.txid();
-        let remote_id = msg.remote_id().clone();
-        let remote_addr = msg.remote_addr().clone();
+        let txid = req.txid();
+        let target = body.target().clone();
 
-        let msg = if !peers.is_empty() {
-            let mut msg = Message::find_peer_rsp(txid, peers);
-            msg.set_remote(remote_id, remote_addr);
-            msg
-
-        } else {
+        let mut rsp = if peers.is_empty() {
             let use_ipv4 = self.network().is_ipv4();
             let use_ipv6 = self.network().is_ipv6();
             let mut nodes4 = None;
@@ -905,39 +892,41 @@ impl DHT {
 
             if body.want4() && use_ipv4 {
                 let mut kns = KClosestNodes::new(
-                    self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                    self.rt(), target, KBucket::MAX_ENTRIES,
                 );
                 kns.fill();
                 nodes4 = Some(kns.into());
             }
             if body.want6() && use_ipv6 {
                 let mut kns = KClosestNodes::new(
-                    self.rt(), body.target().clone(), KBucket::MAX_ENTRIES,
+                    self.rt(), target, KBucket::MAX_ENTRIES,
                 );
                 kns.fill();
                 nodes6 = Some(kns.into());
             }
-            let mut msg = Message::find_peer_rsp_trivial(txid, nodes4, nodes6);
-            msg.set_remote(remote_id, remote_addr);
-            msg
+            Message::find_peer_rsp_with_nodes(txid, nodes4, nodes6)
+        } else {
+            Message::find_peer_rsp(txid, peers)
         };
 
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
+        rsp.set_remote(
+            req.remote_id().clone(),
+            req.remote_addr().clone()
         );
+        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
     }
 
-    fn on_announce_peer(&mut self, msg: &Message) {
-        let Some(Body::AnnouncePeerReq(body)) = msg.body() else {
+    fn on_announce_peer(&mut self, req: &Message) {
+        let Some(Body::AnnouncePeerReq(body)) = req.body() else {
             error!("Panic: should be announce peer request");
             return;
         };
 
         let peer = body.peer();
-        let remote_addr = msg.remote_addr().clone();
+        let remote_addr = req.remote_addr().clone();
         let is_valid = self.tokenman.lock().unwrap().verify_token(
             body.token(),
-            msg.id(),
+            req.id(),
             &remote_addr,
             peer.id()
         );
@@ -954,7 +943,7 @@ impl DHT {
         let result = self.storage.lock().unwrap().get_peer(
             peer.id(), peer.fingerprint()
         );
-        let existing = match result {
+        let local_peers = match result {
             Ok(v) => v,
             Err(e) => {
                 warn!("Retrieve existing peer {} error: {}", peer.id(), e);
@@ -962,7 +951,7 @@ impl DHT {
             }
         };
 
-        if let Some(existing) = existing {
+        if let Some(existing) = local_peers {
             if peer.sequence_number() < existing.sequence_number() {
                 warn!("Rejecting peer {}: sequence number {} is less than existing {}", peer.id(), peer.sequence_number(), existing.sequence_number());
                 self.send_err(Method::AnnouncePeer, 300, "Sequence number is less than existing value");
@@ -984,14 +973,14 @@ impl DHT {
         }
         _ = self.storage.lock().unwrap().put_peer(peer.clone(), None);
 
-        let txid = msg.txid();
-        let remote_id = msg.remote_id().clone();
+        let txid = req.txid();
         let mut msg = Message::announce_peer_rsp(txid);
-        msg.set_remote(remote_id, remote_addr);
-
-        let _ = self.server().lock().unwrap().send_msg(
-            Arc::new(Mutex::new(msg))
+        msg.set_remote(
+            req.remote_id().clone(),
+            remote_addr
         );
+
+        let _ = self.server().lock().unwrap().send_msg(&mut msg);
     }
 
     pub(crate) fn on_timeout(&mut self, call: Arc<Mutex<RpcCall>>) {

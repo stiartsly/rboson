@@ -19,7 +19,7 @@ mod tests {
         let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let node = NodeInfo::new(nodeid, addr);
 
-        let rsp = FindValueResponse::new(
+        let rsp = FindValueResponse::with_nodes(
             Some(vec![node.clone()]),
             None,
         );
@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn test_rsp_with_value() {
         let value = Value::packed(None, None, None, None, vec![1, 2, 3], 0);
-        let rsp = FindValueResponse::from(value.clone());
+        let rsp = FindValueResponse::with_value(value.clone());
 
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.nodes6(), None);
@@ -50,7 +50,7 @@ mod tests {
             "[::1]:29001".parse::<SocketAddr>().unwrap(),
         );
 
-        let rsp = FindValueResponse::new(
+        let rsp = FindValueResponse::with_nodes(
             Some(vec![node4.clone()]),
             Some(vec![node6.clone()]),
         );
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn test_display_with_value() {
         let value = Value::packed(None, None, None, None, vec![1, 2, 3], 0);
-        let rsp = FindValueResponse::from(value.clone());
+        let rsp = FindValueResponse::with_value(value.clone());
 
         let str = format!("{}", rsp);
         assert_eq!(str, format!("v:[{}]", value));
@@ -81,7 +81,7 @@ mod tests {
         let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
         let ni6 = NodeInfo::new(nodeid.clone(), addr);
 
-        let rsp = FindValueResponse::new(
+        let rsp = FindValueResponse::with_nodes(
             Some(vec![ni4.clone()]),
             Some(vec![ni6.clone()])
         );
@@ -114,7 +114,7 @@ mod tests {
         let data = vec![1, 2, 3, 4, 5];
         let value = Value::packed(None, None, None, None, data.clone(), 0);
 
-        let rsp = FindValueResponse::from(value.clone());
+        let rsp = FindValueResponse::with_value(value.clone());
 
         assert_eq!(rsp.nodes4().is_none(), true);
         assert_eq!(rsp.nodes6().is_none(), true);

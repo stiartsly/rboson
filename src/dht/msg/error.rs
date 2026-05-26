@@ -1,5 +1,8 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
+
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
@@ -31,8 +34,7 @@ impl Error {
 
 impl Serialize for Error {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer
+    where S: Serializer
     {
         let mut s = se.serialize_map(None)?;
         s.serialize_entry("c", &self.code)?;
@@ -43,8 +45,7 @@ impl Serialize for Error {
 
 impl<'de> Deserialize<'de> for Error {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>,
     {
         enum Field {
             Code,           // "c"  - i32
@@ -54,8 +55,7 @@ impl<'de> Deserialize<'de> for Error {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -71,30 +71,34 @@ impl<'de> Deserialize<'de> for Error {
             type Value = Error;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("Error")
+                formatter.write_str("a ErrorBody struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
+            where V: MapAccess<'de>,
             {
                 let mut code: Option<i32> = None;
                 let mut msg: Option<String> = None;
+
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
                         Field::Code => {
                             if code.is_some() {
                                 return Err(de::Error::duplicate_field("c"));
+                            } else {
+                                code = Some(map.next_value()?);
                             }
-                            code = Some(map.next_value()?);
                         }
                         Field::Msg => {
                             if msg.is_some() {
                                 return Err(de::Error::duplicate_field("m"));
+                            } else {
+                                msg = Some(map.next_value()?);
                             }
-                            msg = Some(map.next_value()?);
                         }
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 

@@ -22,7 +22,7 @@ pub(crate) struct FindPeerResponse {
 }
 
 impl FindPeerResponse {
-    pub(crate) fn new(
+    pub(crate) fn with_nodes(
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>
     ) -> Self {
@@ -32,7 +32,7 @@ impl FindPeerResponse {
         }
     }
 
-    pub(crate) fn from(peers: Vec<PeerInfo>) -> Self {
+    pub(crate) fn with_peers(peers: Vec<PeerInfo>) -> Self {
         Self {
             data: Data::new(None, None, 0),
             peers: Some(peers),
@@ -160,9 +160,9 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
                 }
 
                 if let Some(peers) = peers {
-                    Ok(FindPeerResponse::from(peers))
+                    Ok(FindPeerResponse::with_peers(peers))
                 } else {
-                    Ok(FindPeerResponse::new(nodes4, nodes6))
+                    Ok(FindPeerResponse::with_nodes(nodes4, nodes6))
                 }
             }
         }

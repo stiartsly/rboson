@@ -24,7 +24,7 @@ pub(crate) struct FindValueResponse {
 }
 
 impl FindValueResponse {
-    pub(crate) fn new(
+    pub(crate) fn with_nodes(
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>
     ) -> Self {
@@ -34,7 +34,7 @@ impl FindValueResponse {
         }
     }
 
-    pub(crate) fn from(value: Value) -> Self {
+    pub(crate) fn with_value(value: Value) -> Self {
         Self {
             data: Data::new(None, None, 0),
             value: Some(value),
@@ -238,9 +238,9 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                     if !value.is_valid() {
                         return Err(de::Error::custom("invalid value"));
                     }
-                    Ok(FindValueResponse::from(value))
+                    Ok(FindValueResponse::with_value(value))
                 } else {
-                    Ok(FindValueResponse::new(nodes4, nodes6))
+                    Ok(FindValueResponse::with_nodes(nodes4, nodes6))
                 }
             }
         }

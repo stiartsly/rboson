@@ -20,7 +20,7 @@ mod tests {
         let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let node = NodeInfo::new(nodeid, addr);
 
-        let rsp = FindPeerResponse::new(
+        let rsp = FindPeerResponse::with_nodes(
             Some(vec![node.clone()]),
             None,
         );
@@ -38,7 +38,7 @@ mod tests {
             .build()
             .expect("Failed to build peer");
 
-        let rsp = FindPeerResponse::from(vec![peer.clone()]);
+        let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
 
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.nodes6(), None);
@@ -55,7 +55,7 @@ mod tests {
         let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
         let ni6 = NodeInfo::new(nodeid.clone(), addr);
 
-        let rsp = FindPeerResponse::new(
+        let rsp = FindPeerResponse::with_nodes(
             Some(vec![ni4.clone()]),
             Some(vec![ni6.clone()])
         );
@@ -92,7 +92,7 @@ mod tests {
             .build()
             .expect("Failed to build peer");
 
-        let rsp = FindPeerResponse::from(vec![peer.clone()]);
+        let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
 
         assert_eq!(rsp.nodes4().is_none(), true);
         assert_eq!(rsp.nodes6().is_none(), true);
@@ -133,7 +133,7 @@ mod tests {
             .build()
             .expect("Failed to build peer2");
 
-        let rsp = FindPeerResponse::from(
+        let rsp = FindPeerResponse::with_peers(
             vec![peer1.clone(), peer2.clone()]
         );
 

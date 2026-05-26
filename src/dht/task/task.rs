@@ -1,35 +1,25 @@
-use std::fmt;
-use std::sync::{Arc, Mutex};
-use std::any::Any;
-use std::time::{SystemTime, Duration};
-use std::collections::HashMap;
-use log::{warn,debug, trace};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+    sync::atomic::{Ordering, AtomicI32},
+    collections::HashMap,
+    time::{SystemTime, Duration}
+};
+use log::warn;
 
 use crate::{
     core::Result,
     NodeInfo,
     PeerInfo,
     Value,
+    dht::{
+        rpccall::RpcCall,
+        node_entry::NodeEntry,
+        dht::DHT,
+        msg::msg::Message,
+        task::closest_set::ClosestSet,
+    }
 };
-
-use crate::dht::{
-    rpccall::{RpcCall, State as CallState},
-    node_entry::NodeEntry,
-    dht::DHT,
-    msg::msg::Message,
-    task::task_listener::TaskListener,
-    task::closest_set::ClosestSet,
-};
-
-#[macro_export]
-macro_rules! addr_family {
-    ($val:expr) => {{
-        match $val.is_ipv4() {
-            true => "ipv4",
-            false => "ipv6"
-        }
-    }};
-}
 
 pub(crate) enum TaskResult {
     NodeInfo(NodeInfo),
@@ -60,15 +50,14 @@ impl fmt::Display for State {
 }
 
 pub(crate) type TaskId = i32;
-static mut NEXT_TASKID: TaskId= 0;
+static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
 
 fn next_taskid() -> TaskId {
-    unsafe {
-        NEXT_TASKID += 1;
-        if NEXT_TASKID == 0 {
-            NEXT_TASKID += 1;
-        }
-        NEXT_TASKID
+    let id = NEXT_TASKID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    if id == 0 {
+        NEXT_TASKID.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    } else {
+        id
     }
 }
 
@@ -84,7 +73,6 @@ pub(crate) struct TaskData {
     inflights: HashMap<TaskId, Arc<Mutex<RpcCall>>>,
     //listeners: Vec<Box<dyn TaskListener>>,
 
-   // ended_fn: Box<dyn Fn(Box<dyn Task>)>,
     ended_fn: Option<Box<dyn Fn(&dyn Task)>>,
 
     nested: Option<Arc<Mutex<Box<dyn Task>>>>,
@@ -105,10 +93,8 @@ impl TaskData {
             end_time        : SystemTime::UNIX_EPOCH,
 
             inflights: HashMap::new(),
-            //listeners: Vec::new(),
 
             ended_fn: None,
-
             nested: None,
             cloned: None,
             dht,
@@ -124,7 +110,7 @@ impl TaskData {
     }
 }
 
-pub(crate) trait Task: Any + Send {
+pub(crate) trait Task: Send {
     fn data(&self) -> &TaskData;
     fn data_mut(&mut self) -> &mut TaskData;
 
@@ -454,13 +440,18 @@ pub(crate) trait Task: Any + Send {
 
 impl fmt::Display for dyn Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let addr = self.data().dht.lock().unwrap().addr().clone();
+        let addr_family = match addr.is_ipv4() {
+            true => "ipv4",
+            false => "ipv6"
+        };
+
         write!(f,
             "#{}[{}] DHT:{}, state:{}",
             self.id(),
             self.name(),
-            addr_family!(self.data().dht().lock().unwrap().addr()),
+            addr_family,
             self.state()
-        )?;
-        Ok(())
+        )
     }
 }

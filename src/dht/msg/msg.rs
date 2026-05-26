@@ -352,19 +352,19 @@ impl Message {
         )
     }
 
-    pub(crate) fn find_peer_rsp_trivial(
+    pub(crate) fn find_peer_rsp_with_nodes(
         txid: i32,
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>
     ) -> Self {
-        let rsp = FindPeerResponse::new(
-            nodes4, nodes6
+        let body = Body::FindPeerRsp(
+            FindPeerResponse::with_nodes(nodes4, nodes6)
         );
         Self::new(
             Kind::Response,
             Method::FindPeer,
             txid,
-            Some(Body::FindPeerRsp(rsp))
+            Some(body)
         )
     }
 
@@ -372,12 +372,14 @@ impl Message {
         txid: i32,
         peers: Vec<PeerInfo>
     ) -> Self {
-        let rsp = FindPeerResponse::from(peers);
+        let body = Body::FindPeerRsp(
+            FindPeerResponse::with_peers(peers)
+        );
         Self::new(
             Kind::Response,
             Method::FindPeer,
             txid,
-            Some(Body::FindPeerRsp(rsp))
+            Some(body)
         )
     }
 
@@ -398,19 +400,19 @@ impl Message {
         )
     }
 
-    pub(crate) fn find_value_rsp_trivial(
+    pub(crate) fn find_value_rsp_with_nodes(
         txid: i32,
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>
     ) -> Self {
-        let rsp = FindValueResponse::new(
-            nodes4, nodes6
+        let body = Body::FindValueRsp(
+            FindValueResponse::with_nodes(nodes4, nodes6)
         );
         Self::new(
             Kind::Response,
             Method::FindValue,
             txid,
-            Some(Body::FindValueRsp(rsp))
+            Some(body)
         )
     }
 
@@ -418,12 +420,14 @@ impl Message {
         txid: i32,
         value: Value
     ) -> Self {
-        let rsp = FindValueResponse::from(value);
+        let body = Body::FindValueRsp(
+            FindValueResponse::with_value(value)
+        );
         Self::new(
             Kind::Response,
             Method::FindValue,
             txid,
-            Some(Body::FindValueRsp(rsp))
+            Some(body)
         )
     }
 

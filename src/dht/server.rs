@@ -255,7 +255,8 @@ impl RpcServer {
         self.pending_calls.insert(txid, call.clone());
 
         let msg  = call.lock().unwrap().req();
-        match self.send_msg(msg).await {
+        let mut msg = msg.lock().unwrap();
+        match self.send_msg(&mut msg).await {
             Ok(_) => {
                 call.lock().unwrap().sent();
                 if let Some(cb) = self.call_sent_cb.as_ref() {
@@ -269,32 +270,30 @@ impl RpcServer {
         }
     }
 
-    pub(crate) async fn send_msg(&mut self, msg: Arc<Mutex<Message>>) -> Result<usize> {
+    pub(crate) async fn send_msg(&mut self, msg: &mut Message) -> Result<usize> {
         let id = self.identity.lock().unwrap().id().clone();
-        msg.lock().unwrap().set_id(id);
+        msg.set_id(id);
 
-        let locked_msg = msg.lock().unwrap();
-        let plain = serde_cbor::to_vec(&*locked_msg).map_err(|e| {
-            ProtocolError::new(format!("Internal ERROR: failed to serialize message: {e}").into())
+        let plain = serde_cbor::to_vec(&msg).map_err(|e| {
+            ProtocolError::new(format!("Error: failed to serialize message: {e}").into())
         })?;
 
         let encrypted = self.identity().lock().unwrap().encrypt_into(
-            locked_msg.remote_id(),
+            msg.remote_id(),
             &plain
         ).map_err(|e| {
-            CryptoError::new(format!("Internal ERROR: failed to encrypt message: {e}").into())
+            CryptoError::new(format!("Error: failed to encrypt message: {e}").into())
         })?;
 
         let mut data = Vec::with_capacity(encrypted.len() + Id::BYTES);
-        data.extend_from_slice(locked_msg.id());
+        data.extend_from_slice(msg.id());
         data.extend_from_slice(&encrypted);
 
         let socket = self.tx_socket.as_ref().expect("socket should be initialized");
         let len = socket.send_to(
-            &data,
-            locked_msg.remote_addr()
+            &data, msg.remote_addr()
         ).await.map_err(|e| {
-            NetworkError::new(format!("Internal ERROR: failed to send message: {}", e))
+            NetworkError::new(format!("Error: failed to send message: {}", e))
         })?;
 
         Ok(len)

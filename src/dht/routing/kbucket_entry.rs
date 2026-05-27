@@ -20,7 +20,7 @@ use crate::{
     NodeInfo,
     core::version,
 };
-use crate::dht::{
+use crate::dht::rpc::{
     node_entry::Reachability,
     server::RpcServer,
 };

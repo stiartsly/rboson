@@ -1,29 +1,33 @@
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::{
+    cmp::Ordering,
+    collections::HashMap,
+};
 
 use crate::{Id, PeerInfo};
-
-#[derive(Clone, Default)]
 pub(crate) struct EligiblePeers {
     target: Id,
-    expected_sequence_number: i32,
+    expected_seq: i32,
     expected_count: usize,
     peers: HashMap<(Id, u64), PeerInfo>,
 }
 
 impl EligiblePeers {
-    pub(crate) fn new(target: Id, expected_sequence_number: i32, expected_count: usize) -> Self {
+    pub(crate) fn new(target: Id, expected_seq: i32, expected_count: usize) -> Self {
         Self {
             target,
-            expected_sequence_number,
+            expected_seq,
             expected_count,
             peers: HashMap::new(),
         }
     }
 
-    pub(crate) fn size(&self) -> usize {
-        self.peers.len()
+    pub(crate) fn expected_seq(&self) -> i32 {
+        self.expected_seq
+    }
+
+    pub(crate) fn expected_count(&self) -> usize {
+        self.expected_count
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -79,8 +83,8 @@ impl EligiblePeers {
 
     fn is_peer_eligible(&self, peer: &PeerInfo) -> bool {
         peer.id() == &self.target
-            && (self.expected_sequence_number < 0
-                || peer.sequence_number() >= self.expected_sequence_number)
+            && (self.expected_seq < 0
+                || peer.sequence_number() >= self.expected_seq)
             && peer.is_valid()
     }
 

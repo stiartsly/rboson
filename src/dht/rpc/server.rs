@@ -24,7 +24,6 @@ use tokio::{
 
 use crate::{
     Id,
-    Network,
     CryptoBox,
     CryptoIdentity,
     errors::{
@@ -36,9 +35,9 @@ use crate::{
 };
 
 use crate::dht::{
-    rpccall::RpcCall,
     msg::msg::Message,
     timer::{self, Job, Command},
+    rpc::rpccall::RpcCall,
     suspicious_node_detector::{
         SuspiciousNodeDetector,
         DefaultSuspiciousNodeDetector

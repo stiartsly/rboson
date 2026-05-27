@@ -1,86 +1,123 @@
-use std::collections::LinkedList;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    sync::atomic::{AtomicBool, Ordering},
+    collections::{VecDeque, HashMap},
+};
+use tokio::task;
+use log::{debug, error};
 
-use super::task::{Task, State};
-
-const MAX_ACTIVE_TASKS: usize = 16;
+use crate::dht::{
+    consumer::Consumer,
+    task::task::{Task, TaskId, State},
+};
 
 pub(crate) struct TaskManager {
-    queued:     LinkedList<Arc<Mutex<dyn Task>>>,
-    running:    LinkedList<Arc<Mutex<dyn Task>>>,
-    canceling: bool,
+    queued  : VecDeque<Arc<Mutex<Box<dyn Task>>>>,
+    running : Arc<Mutex<HashMap<TaskId, Arc<Mutex<Box<dyn Task>>>>>>,
+
+    canceling: AtomicBool,
 }
+
+/** Maximum number of active tasks. */
+const MAX_ACTIVE_TASKS: usize = 8;
 
 impl TaskManager {
     pub(crate) fn new() -> Self {
         Self {
-            queued : LinkedList::new(),
-            running: LinkedList::new(),
-            canceling: false,
+            queued  : VecDeque::new(),
+            running : Arc::new(Mutex::new(HashMap::new())),
+            canceling: AtomicBool::new(false),
         }
     }
 
-    pub(crate) fn add(&mut self, task: Arc<Mutex<Box<dyn Task>>>) {
-        //self.add_prior(task, false)
+    pub(crate) async fn add(&mut self, task: Arc<Mutex<Box<dyn Task>>>) {
+        self.add_prior(task, false).await
     }
 
-    pub(crate) fn add_prior(&mut self,
-        task: Arc<Mutex<dyn Task>>,
-        prior: bool) {
-        if self.canceling {
+    pub(crate) async fn add_prior(
+        &mut self,
+        task: Arc<Mutex<Box<dyn Task>>>,
+        prior: bool
+    ) {
+        if self.canceling.load(Ordering::SeqCst) {
             return;
         }
+        if task.lock().unwrap().is_ended() {
+            return;
+        }
+
+        let cloned_task = task.clone();
+        let running = self.running.clone();
+        task.lock().unwrap().with_end_handler({
+            Consumer::new(move || {
+                let taskid = cloned_task.lock().unwrap().task_id();
+                running.lock().unwrap().remove(&taskid);
+            })
+        });
 
         if task.lock().unwrap().state() == State::Running {
-            self.running.push_back(task);
+            let taskid = task.lock().unwrap().task_id();
+            self.running.lock().unwrap().insert(taskid, task);
             return;
         }
 
-        let expected = vec![State::Initial];
-       // if !task.lock().unwrap().set_state(&expected, State::Queued) {
-       //     return;
-       // }
+        if !task.lock().unwrap().set_state_if(&State::Initialized, State::Queued) {
+            error!("!!!INTERNAL ERROR: task is not in INITIAL state: {}", task.lock().unwrap());
+			//task.endHandler(null);
+			return;
+        }
 
-       // task.lock().unwrap().set_cloned(task.clone());
         match prior {
             true => self.queued.push_front(task),
             false => self.queued.push_back(task),
-        }
+        };
+
+        self.dequeue().await;
     }
 
-    // Check whether it's able to dequeue a runnable job from queue.
-    #[inline(always)]
-    fn can_dequeue(&self) -> bool {
-        !(self.canceling ||
-            self.running.len() >= MAX_ACTIVE_TASKS ||
-            self.queued.is_empty())
+    fn is_ready(&self) -> bool {
+        !self.canceling.load(Ordering::SeqCst) &&
+            self.running.lock().unwrap().len() < MAX_ACTIVE_TASKS
     }
 
-    pub(crate) fn dequeue(&mut self) {
-        while self.can_dequeue() {
-            let task = self.queued.pop_front().unwrap();
-            if task.lock().unwrap().is_complete() {
-                continue;
-            }
-            if task.lock().unwrap().is_canceled() {
+    pub(crate) async fn dequeue(&mut self) {
+        while self.is_ready() {
+            let Some(task) = self.queued.pop_front() else {
+                debug!("Queue drained.");
+                break;
+            };
+
+            if task.lock().unwrap().is_ended() {
                 continue;
             }
 
-            task.lock().unwrap().start();
-            if !task.lock().unwrap().is_complete() { // TODO: how can we tackle the jobs on running queue.
-                self.running.push_back(task);
-            }
+            debug!("Start task: {}", task.lock().unwrap());
+
+            let taskid = task.lock().unwrap().task_id();
+            self.running.lock().unwrap().insert(taskid, task.clone());
+
+            let _ = task::spawn({
+                let task = task.clone();
+                async move {
+                    task.lock().unwrap().start();
+                }
+            }).await.unwrap();
         }
     }
 
     pub(crate) fn cancel_all(&mut self) {
-        self.canceling = true;
-        while let Some(t) = self.running.pop_front() {
+        self.canceling.store(true, Ordering::SeqCst);
+
+        for (_, t) in self.running.lock().unwrap().drain() {
             t.lock().unwrap().cancel();
         }
-        while let Some(t) = self.queued.pop_front() {
+        for t in self.queued.drain(..) {
             t.lock().unwrap().cancel();
         }
-        self.canceling = false;
+
+        self.running.lock().unwrap().clear();
+        self.queued.clear();
+
+        self.canceling.store(false, Ordering::SeqCst);
     }
 }

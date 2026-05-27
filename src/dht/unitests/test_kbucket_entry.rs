@@ -3,13 +3,13 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{
-    Id,
-    dht::{
+use crate::Id;
+use crate::dht::{
+    rpc::{
         node_entry::Reachability,
-        routing::kbucket_entry::KBucketEntry,
         server::RpcServer,
     },
+    routing::kbucket_entry::KBucketEntry,
 };
 
 fn make_entry() -> KBucketEntry {

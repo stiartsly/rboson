@@ -1,13 +1,18 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    collections::VecDeque,
+};
 use log::{debug, error};
 
 use crate::dht::{
     dht::DHT,
-    node_entry::NodeEntry,
-    rpccall::RpcCall,
+    consumer::Consumer,
     msg::msg::Message,
     task::task::{Task, TaskData},
+    rpc::{
+        rpccall::RpcCall,
+        node_entry::NodeEntry,
+    },
     routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
@@ -24,6 +29,8 @@ pub(crate) struct PingRefreshTask {
 
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
+
+    dht: Arc<Mutex<DHT>>,
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
@@ -31,11 +38,13 @@ const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 impl PingRefreshTask {
     pub(crate) fn new(dht: Arc<Mutex<DHT>>) -> Self {
         Self {
-            base_data: TaskData::new(dht),
+            base_data: TaskData::new(),
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
             check_all           : false,
             remove_on_timeout   : false,
+
+            dht,
         }
     }
 
@@ -79,12 +88,20 @@ impl Task for PingRefreshTask {
         &mut self.base_data
     }
 
+    fn as_task(&self) -> &dyn Task {
+        self
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        self.dht.clone()
+    }
+
     fn call_timeout(&mut self, call: &RpcCall) {
         if !self.remove_on_timeout {
             debug!(
                 "{}#{} timeout for node {}, not removed (remove_on_timeout=false)",
-                self.name(),
-                self.id(),
+                self.task_name(),
+                self.task_id(),
                 call.target_id()
             );
             return;
@@ -95,12 +112,12 @@ impl Task for PingRefreshTask {
         // Should not use the original bucket object,
         // because the routing table is dynamic, maybe already changed.
         debug!("{}#{} removing timeout entry {} from routing table",
-            self.name(),
-            self.id(),
+            self.task_name(),
+            self.task_id(),
             target_id
         );
 
-        let rt = self.base_data.dht().lock().unwrap().rt();
+        let rt = Task::dht(self).lock().unwrap().rt();
         rt.lock().unwrap().remove(&target_id);
     }
 
@@ -120,16 +137,17 @@ impl Task for PingRefreshTask {
             let todo = self.todo.clone();
             let ke = NodeEntry::from_kentry(kentry);
 
-            self.send_call(ke, msg, Box::new(move|_| {
+            let handler = Consumer::new(move || {
                 todo.lock().unwrap().pop_front();
-            })).map_err(|e| {
+            });
+            self.send_call(ke, msg, Some(handler)).map_err(|e| {
                error!("Error on sending 'PingRequest' message: {}", e);
             }).ok();
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() && Task::is_done(self)
+        self.todo.lock().unwrap().is_empty() && self.data().is_done()
     }
 }
 

@@ -1,18 +1,21 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use log::{debug, error, warn};
+use std::{
+    sync::{Arc, Mutex},
+    collections::VecDeque,
+};
+
+use log::{debug, error};
 
 use crate::Value;
 use crate::dht::{
     dht::DHT,
+    consumer::Consumer,
     msg::msg::Message,
-    node_entry::NodeEntry,
-};
-
-use super::{
-    task::{Task, TaskData, TaskResult},
-    closest_set::ClosestSet,
-    candidate_node::CandidateNode,
+    rpc::node_entry::NodeEntry,
+    task::{
+        task::{Task, TaskData},
+        closest_set::ClosestSet,
+        candidate_node::CandidateNode,
+    }
 };
 
 pub(crate) struct ValueAnnounceTask {
@@ -21,6 +24,8 @@ pub(crate) struct ValueAnnounceTask {
     todo: Arc<Mutex<VecDeque<Arc<Mutex<CandidateNode>>>>>,
     value: Value,
     expected_seq: i32,
+
+    dht: Arc<Mutex<DHT>>,
 }
 
 const MAX_TODO_ENTRIES: usize = 24;
@@ -32,16 +37,18 @@ impl ValueAnnounceTask {
         expected_seq: i32,
     ) -> Self {
         Self {
-            base_data: TaskData::new(dht),
+            base_data: TaskData::new(),
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             value,
             expected_seq,
+            dht,
         }
     }
 
     pub(crate) fn with_closest(&mut self, closest: ClosestSet) -> &mut Self {
         let mut todo = self.todo.lock().unwrap();
         let mut entries = closest.entries();
+
         while let Some(cn) = entries.pop() {
             if todo.len() >= MAX_TODO_ENTRIES {
                 break;
@@ -50,8 +57,8 @@ impl ValueAnnounceTask {
         }
         debug!(
             "{}#{} added {} nodes to announce queue",
-            self.name(),
-            self.id(),
+            self.task_name(),
+            self.task_id(),
             todo.len()
         );
         drop(todo);
@@ -68,8 +75,12 @@ impl Task for ValueAnnounceTask {
         &mut self.base_data
     }
 
-    fn result(&self) -> Option<TaskResult> {
-        None
+    fn as_task(&self) -> &dyn Task {
+        self
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        self.dht.clone()
     }
 
     fn iterate(&mut self) {
@@ -84,23 +95,21 @@ impl Task for ValueAnnounceTask {
                 self.todo.lock().unwrap().pop_front();
                 continue;
             }
-
-            let msg = Arc::new(Mutex::new(Message::store_value_req(
+            let msg = Message::store_value_req(
                 self.value.clone(),
                 token,
                 self.expected_seq,
-            )));
+            );
 
             let todo = self.todo.clone();
             let entry = NodeEntry::from_candidate(cn);
-
-            self.send_call(entry, msg, Box::new(move|_| {
+            let msg = Arc::new(Mutex::new(msg));
+            let handler = Consumer::new(move || {
                 todo.lock().unwrap().pop_front();
-            })).map_err(|e| {
-               error!("Error on sending 'storeValue' message: {}", e);
-            }).ok();
-
-            break;
+            });
+             let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+                error!("Sending 'storeValue' request error: {}", e);
+             });
         }
     }
 

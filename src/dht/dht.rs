@@ -24,12 +24,15 @@ use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
    // suspicious_node_detector,
-    rpccall::{self, RpcCall},
-    server::{self, RpcServer},
+
     promise::Promise,
     token_manager::TokenManager,
     lookup_option::LookupOption,
-    node_entry::Reachability,
+    rpc::{
+        rpccall::{self, RpcCall},
+        server::{self, RpcServer},
+        node_entry::Reachability,
+    },
     msg::{
         msg::{Kind, Method, Body, Message},
         lookup_req::LookupRequest,
@@ -49,6 +52,7 @@ use crate::dht::{
     task::{
         task::{State, Task, TaskResult},
         task_manager::TaskManager,
+        task_listener::TaskListener,
         ping_refresh::PingRefreshTask,
         lookup_task::LookupTask,
         node_lookup::NodeLookupTask,
@@ -165,15 +169,15 @@ impl DHT {
             .clone()
     }
 
-    fn taskman(&self) -> Arc<Mutex<TaskManager>> {
-        self.taskman.as_ref()
-            .expect("TaskManager not initialized")
+    pub(crate) fn server(&self) -> Arc<Mutex<RpcServer>> {
+        self.server.as_ref()
+            .expect("RpcServer not initialized")
             .clone()
     }
 
-    fn server(&self) -> Arc<Mutex<RpcServer>> {
-        self.server.as_ref()
-            .expect("RpcServer not initialized")
+    fn taskman(&self) -> Arc<Mutex<TaskManager>> {
+        self.taskman.as_ref()
+            .expect("TaskManager not initialized")
             .clone()
     }
 
@@ -197,16 +201,18 @@ impl DHT {
             dht.lock().unwrap().id().clone(),
             false,
         ));
+        task.with_name("Bootstrap: filling home bucket".into());
         task.with_bootstrap(true);
         task.with_inject_candidates(nodes);
-        task.set_name("Bootstrap: filling home bucket".into());
-        task.add_ended_fn(Box::new(move |_| {
-            promise.complete(Ok(()));
-        }));
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |_| {
+                promise.complete(Ok(()))
+            }));
+            l
+        });
 
         let task = Arc::new(Mutex::new(task as Box<dyn Task>));
-        task.lock().unwrap().set_cloned(task.clone());
-
         let taskman = dht.lock().unwrap().taskman().clone();
         taskman.lock().unwrap().add(task);
         return future;
@@ -238,13 +244,17 @@ impl DHT {
                 lookup_target,
                 false,
             ));
-            task.set_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
-            task.add_ended_fn(Box::new(move |_| {
-                promise.complete(Ok(()));
-            }));
+            task.with_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
+            task.with_listener({
+                let mut l = TaskListener::new();
+                l.with_ended_fn(Box::new(move |_| {
+                    promise.complete(Ok(()))
+                }));
+                l
+            });
 
             let task = Arc::new(Mutex::new(task as Box<dyn Task>));
-            task.lock().unwrap().set_cloned(task.clone());
+            //task.lock().unwrap().set_cloned(task.clone());
 
             let taskman = dht.lock().unwrap().taskman().clone();
             taskman.lock().unwrap().add(task);
@@ -272,11 +282,11 @@ impl DHT {
                 Id::random(),
                 false,
             ));
-            task.set_name(format!("Periodic: random node lookup"));
+            task.with_name(format!("Periodic: random node lookup"));
             task as Box<dyn Task>
         }));
 
-        task.lock().unwrap().set_cloned(task.clone());
+        //task.lock().unwrap().set_cloned(task.clone());
         self.taskman().lock().unwrap().add(task);
     }
 
@@ -365,7 +375,7 @@ impl DHT {
         }));
 
         let cloned_server = server.clone();
-        let _ =tokio::task::spawn_blocking(move || {
+        let _ = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -1173,19 +1183,25 @@ impl DHT {
         let future  = promise.future();
 
         let mut task = NodeLookupTask::new(
-            dht, target.clone(), option != LookupOption::Conservative
+            dht.clone(),
+            target.clone(),
+            option != LookupOption::Conservative
         );
-        task.set_name(format!("Lookup node: {}", target));
+        task.with_name(format!("Lookup node: {}", target));
         task.with_want_target(true);
-        task.add_ended_fn(Box::new(move |t: &dyn Task| {
-            let result = t.result().map(|r|
-                match r {
-                    TaskResult::NodeInfo(v) => Some(v),
-                    _ => None
-                }
-            ).flatten();
-            promise.complete(Ok(result));
-        }));
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |t: &dyn Task| {
+                let result = t.result().map(|r|
+                    match r {
+                        TaskResult::NodeInfo(v) => Some(v),
+                        _ => None
+                    }
+                ).flatten();
+                promise.complete(Ok(result));
+            }));
+            l
+        });
 
         taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
@@ -1209,18 +1225,25 @@ impl DHT {
         let future  = promise.future();
 
         let mut task = ValueLookupTask::new(
-            dht, value_id.clone(), expected_seq, option != LookupOption::Conservative
+            dht.clone(),
+            value_id.clone(),
+            expected_seq,
+            option != LookupOption::Conservative
         );
-        task.set_name(format!("Lookup value: {}", value_id));
-        task.add_ended_fn(Box::new(move |t: &dyn Task| {
-            let result = t.result().map(|r|
-                match r {
-                    TaskResult::Value(v) => Some(v),
-                    _ => None
-                }
-            ).unwrap_or(None);
-            promise.complete(Ok(result));
-        }));
+        task.with_name(format!("Lookup value: {}", value_id));
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |t: &dyn Task| {
+                let result = t.result().map(|r|
+                    match r {
+                        TaskResult::Value(v) => Some(v),
+                        _ => None
+                    }
+                ).flatten();
+                promise.complete(Ok(result));
+            }));
+            l
+        });
 
         taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
@@ -1246,42 +1269,50 @@ impl DHT {
             let mut task = ValueAnnounceTask::new(
                 dht.clone(), value.clone(), expected_seq
             );
-            task.set_name(format!("Store value:{}", &value.id()));
-            task.add_ended_fn(Box::new(move |_: &dyn Task| {
-                promise.complete(Ok(()));
-            }));
+            task.with_name(format!("Store value:{}", &value.id()));
+            task.with_listener({
+                let mut l = TaskListener::new();
+                l.with_ended_fn(Box::new(move |_: &dyn Task| {
+                    promise.complete(Ok(()));
+                }));
+                l
+            });
             Arc::new(Mutex::new(
                 Box::new(task) as Box<dyn Task>)
             )
         };
 
         let mut task = NodeLookupTask::new(
-            dht.clone(), value.id(), false
+            dht.clone(),value.id(), false
         );
-        task.set_name(format!("Store value: lookup closest node to {}", value.id()));
+        task.with_name(format!("Store value: lookup closest node to {}", value.id()));
         task.with_want_token(true);
         task.set_nested(announce_task.clone());
-        task.add_ended_fn(Box::new(move |t: &dyn Task| {
-            if t.state() != State::Completed {
-                return;
-            }
-            let Some(closest) = t.closest() else {
-                // This should never happen
-                warn!("!!! Store value task not started because the node lookup task got no closest nodes.");
-                announce_task.lock().unwrap().cancel();
-                return;
-            };
-            if closest.size() == 0 {
-                // This should never happen
-                warn!("!!! Store value task not started because the node lookup task got the empty closest nodes.");
-                announce_task.lock().unwrap().cancel();
-                return;
-            }
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |t: &dyn Task| {
+                    if t.state() != State::Completed {
+                        return;
+                    }
+                    let Some(closest) = t.closest() else {
+                        // This should never happen
+                    warn!("!!! Store value task not started because the node lookup task got no closest nodes.");
+                    announce_task.lock().unwrap().cancel();
+                    return;
+                };
+                if closest.size() == 0 {
+                    // This should never happen
+                    warn!("!!! Store value task not started because the node lookup task got the empty closest nodes.");
+                    announce_task.lock().unwrap().cancel();
+                    return;
+                }
 
-            let announce_task = announce_task.clone();
-            announce_task.lock().unwrap().with_closest(closest.clone());
-            taskman.lock().unwrap().add(announce_task);
-        }));
+                let announce_task = announce_task.clone();
+                announce_task.lock().unwrap().with_closest(closest.clone());
+                taskman.lock().unwrap().add(announce_task);
+            }));
+            l
+        });
 
         let taskman = dht.lock().unwrap().taskman();
         taskman.lock().unwrap().add(
@@ -1313,14 +1344,18 @@ impl DHT {
             expected_count,
             option != LookupOption::Conservative
         );
-        task.set_name(format!("Lookup peer: {}", peerid));
-        task.add_ended_fn(Box::new(move |t: &dyn Task| {
-            let result = match t.result() {
-                Some(TaskResult::PeerInfo(v)) => v,
-                _ => Vec::new()
-            };
-            promise.complete(Ok(result));
-        }));
+        task.with_name(format!("Lookup peer: {}", peerid));
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |t: &dyn Task| {
+                let result = match t.result() {
+                    Some(TaskResult::PeerInfo(v)) => v,
+                    _ => Vec::new()
+                };
+                promise.complete(Ok(result));
+            }));
+            l
+        });
 
         taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
@@ -1347,10 +1382,14 @@ impl DHT {
                 peer.clone(),
                 expected_seq
             );
-            task.set_name(format!("Announce peer: {}", peer.id()));
-            task.add_ended_fn(Box::new(move |_: &dyn Task| {
-                promise.complete(Ok(()));
-            }));
+            task.with_name(format!("Announce peer: {}", peer.id()));
+            task.with_listener({
+                let mut l = TaskListener::new();
+                l.with_ended_fn(Box::new(move |_: &dyn Task| {
+                    promise.complete(Ok(()));
+                }));
+                l
+            });
 
             Arc::new(Mutex::new(
                 Box::new(task) as Box<dyn Task>
@@ -1360,27 +1399,31 @@ impl DHT {
             dht.clone(), peer.id().clone(), false
         );
         task.with_want_token(true);
-        task.set_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
+        task.with_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
         task.set_nested(announce_task.clone());
-        task.add_ended_fn(Box::new(move |t: &dyn Task| {
-            if t.state() != State::Completed {
-                return;
-            }
-            let Some(closest) = t.closest() else {
-                // This should never happen
-                warn!("!!! Announce peer task not started because the node lookup task got no closest nodes.");
-                return;
-            };
-            if closest.size() == 0 {
-                // This should never happen
-                warn!("!!! Announce peer task not started because the node lookup task got the empty closest nodes.");
-                return;
-            }
+        task.with_listener({
+            let mut l = TaskListener::new();
+            l.with_ended_fn(Box::new(move |t: &dyn Task| {
+                if t.state() != State::Completed {
+                    return;
+                }
+                let Some(closest) = t.closest() else {
+                    // This should never happen
+                    warn!("!!! Announce peer task not started because the node lookup task got no closest nodes.");
+                    return;
+                };
+                if closest.size() == 0 {
+                    // This should never happen
+                    warn!("!!! Announce peer task not started because the node lookup task got the empty closest nodes.");
+                    return;
+                }
 
-            let announce_task = announce_task.clone();
-            announce_task.lock().unwrap().with_closest(closest.clone());
-            taskman.lock().unwrap().add(announce_task);
-        }));
+                let announce_task = announce_task.clone();
+                announce_task.lock().unwrap().with_closest(closest.clone());
+                taskman.lock().unwrap().add(announce_task);
+            }));
+            l
+        });
 
         let taskman = dht.lock().unwrap().taskman();
         taskman.lock().unwrap().add(

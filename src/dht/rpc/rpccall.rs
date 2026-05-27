@@ -7,14 +7,16 @@ use crate::{
     NodeInfo,
     errors::ProtocolError,
 };
-use super::{
-    node_entry::NodeEntry,
-    node_entry::Reachability,
+use crate::dht::{
     timer::TaskHandle,
     msg::msg::{self, Body, Message},
     task::candidate_node::CandidateNode,
     routing::kbucket_entry::KBucketEntry,
-    server::RpcServer,
+    rpc::{
+        node_entry::{NodeEntry, Reachability},
+        listener::Listener as CallListener,
+        server::RpcServer,
+    },
 };
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
@@ -48,10 +50,7 @@ pub(crate) struct RpcCall {
 
     state       : State,
 
-    state_changed_fn: Box<dyn for<'a> Fn(&'a RpcCall, State, State) + Send>,
-    responsed_fn: Box<dyn for<'a> Fn(&'a RpcCall, Arc<Mutex<Message>>) + Send>,
-    stalled_fn: Box<dyn for<'a> Fn(&'a RpcCall) + Send>,
-    timeout_fn: Box<dyn for<'a> Fn(&'a RpcCall) + Send>,
+    listener    : Option<CallListener>,
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
@@ -62,7 +61,10 @@ pub(crate) struct RpcCall {
 }
 
 impl RpcCall {
-    fn new(target: NodeEntry, req: Arc<Mutex<Message>>) -> Self
+    pub(crate) fn new(
+        target: NodeEntry,
+        req: Arc<Mutex<Message>>
+    ) -> Self
     {
         req.lock().unwrap().set_remote(
             target.id(),
@@ -79,10 +81,7 @@ impl RpcCall {
             sent_time: None,
             resp_time: None,
             state: State::Unsent,
-            state_changed_fn: Box::new(|_, _, _| {}),
-            responsed_fn: Box::new(|_, _| {}),
-            stalled_fn: Box::new(|_| {}),
-            timeout_fn: Box::new(|_| {}),
+            listener: None,
             cause: None,
             timeout_task: None,
             cloned: None,
@@ -129,7 +128,7 @@ impl RpcCall {
         self
     }
 
-    pub(crate) fn is_reachable_at_creation_time(&self) -> bool {
+    pub(crate) fn is_reachable_at_creation(&self) -> bool {
         self.target_reachable
     }
 
@@ -183,6 +182,10 @@ impl RpcCall {
         self.rsp.as_ref().cloned()
     }
 
+    pub(crate) fn rsp_ref(&self) -> Option<&Message> {
+        unimplemented!()
+    }
+
     pub(crate) fn state(&self) -> State {
         self.state
     }
@@ -232,47 +235,35 @@ impl RpcCall {
         self.cause.as_deref()
     }
 
-    pub(crate) fn set_state_changed_cb<F>(&mut self, f: F)
-    where F: for<'a> Fn(&'a RpcCall, State, State) + Send + 'static {
-        self.state_changed_fn = Box::new(f);
+    pub(crate) fn set_listener(&mut self, listener: CallListener) {
+        if self.state != State::Unsent {
+            return;
+        }
+        self.listener = Some(listener);
     }
 
-    pub(crate) fn set_responsed_cb(
-        &mut self,
-        f: Box<dyn for<'a> Fn(&'a RpcCall, Arc<Mutex<Message>>) + Send>,
-    ) {
-        self.responsed_fn = f;
-    }
-
-    pub(crate) fn set_stalled_cb(
-        &mut self,
-        f: Box<dyn for<'a> Fn(&'a RpcCall) + Send>,
-    ) {
-        self.stalled_fn = f;
-    }
-
-    pub(crate) fn set_timeout_cb(
-        &mut self,
-        f: Box<dyn for<'a> Fn(&'a RpcCall) + Send>,
-    ) {
-        self.timeout_fn = f;
+    pub(crate) fn set_state_changed_cb<F>(&mut self, f: F) -> &mut Self
+    where F: Fn(&RpcCall, State, State) + Send + 'static {
+        self.set_listener(CallListener::new(f));
+        self
     }
 
     pub(crate) fn update_state(&mut self, new_state: State) {
         let prev = self.state;
         self.state = new_state;
 
-        (self.state_changed_fn)(self, prev, new_state);
+        let Some(l) = self.listener.take() else {
+            return;
+        };
+
+        l.on_state_change(self, prev, new_state);
         match new_state {
-            State::Responded => {
-                if let Some(rsp) = self.rsp() {
-                    (self.responsed_fn)(self, rsp);
-                }
-            }
-            State::Stalled => (self.stalled_fn)(self),
-            State::Timeout => (self.timeout_fn)(self),
+            State::Responded => l.on_response(self),
+            State::Stalled => l.on_stall(self),
+            State::Timeout => l.on_timeout(self),
             _ => {}
         }
+        self.listener = Some(l);
     }
 
     fn set_timeout(&mut self, timeout: u64) {
@@ -381,6 +372,7 @@ impl RpcCall {
         self.update_state(State::Err);
     }
 
+    #[allow(unused)]
     pub(crate) fn cancel(&mut self) {
         if self.state.is_final() {
             return;

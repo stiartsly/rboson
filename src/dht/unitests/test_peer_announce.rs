@@ -14,7 +14,7 @@ use crate::dht::{
         candidate_node::CandidateNode,
         closest_set::ClosestSet,
         peer_announce::PeerAnnounceTask,
-        task::Task,
+        task::{Task, State},
     },
     token_manager::TokenManager,
     storage::{
@@ -96,17 +96,64 @@ mod tests {
     }
 
     #[test]
-    fn test_iterate() {
+    fn test_cancel() {
+        println!(">>>> test_cancel line:{}", line!());
         let peer = make_peer();
         let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        assert!(task.is_unstarted());
+        assert!(task.is_done());
 
-        assert!(task.data().is_done());
+        println!(">>>> test_cancel line:{}", line!());
+        task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
+        assert!(!task.is_done());
+
+        println!(">>>> test_cancel line:{}", line!());
+        task.set_state_if(&State::Initialized, State::Running);
+        task.iterate();
+        assert!(task.is_done());
+        assert!(task.is_running());
+
+        println!(">>>> test_cancel line:{}", line!());
+        task.cancel();
+        assert!(task.is_done());
+        assert!(task.is_canceled());
+    }
+
+    #[test]
+    fn test_complete() {
+        let peer = make_peer();
+        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        assert!(task.is_unstarted());
         assert!(task.is_done());
 
         task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
         assert!(!task.is_done());
 
+        task.set_state_if(&State::Initialized, State::Running);
         task.iterate();
         assert!(task.is_done());
+        assert!(task.is_running());
+
+        task.complete();
+        assert!(task.is_done());
+        assert!(task.is_completed());
+    }
+
+    #[test]
+    fn test_start() {
+        let peer = make_peer();
+        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        assert!(task.is_unstarted());
+        assert!(task.is_done());
+
+        task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
+        assert!(!task.is_done());
+
+        task.start();
+        assert!(task.is_done());
+        assert!(task.is_completed());
     }
 }

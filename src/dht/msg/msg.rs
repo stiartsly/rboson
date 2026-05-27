@@ -20,7 +20,7 @@ use crate::{
     PeerInfo,
     Value,
     core::version,
-    dht::rpccall::RpcCall
+    dht::rpc::rpccall::RpcCall
 };
 use crate::dht::msg::{
     error::Error,

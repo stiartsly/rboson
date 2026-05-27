@@ -2,10 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    utils::{is_any_unicast, is_bogon},
     dht::DHT,
-    node_entry::{Reachability, NodeEntry},
-    rpccall::RpcCall,
+    utils::{is_any_unicast, is_bogon},
+    rpc::{
+        node_entry::{Reachability, NodeEntry},
+        rpccall::RpcCall,
+    },
     routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
@@ -18,9 +20,11 @@ use crate::dht::{
         closest_set::ClosestSet,
         closest_candidates::ClosestCandidates,
         candidate_node::CandidateNode,
-        task::TaskData,
+        task::{Task, TaskData},
     }
 };
+
+const MAX_ITERATIONS: usize = 3*KBucket::MAX_ENTRIES;
 
 pub(crate) struct LookupTaskData {
     target: Id,
@@ -34,8 +38,6 @@ pub(crate) struct LookupTaskData {
 }
 
 impl LookupTaskData {
-    const MAX_ITERATIONS: usize = 3*KBucket::MAX_ENTRIES;
-
     pub(crate) fn new(target: Id, done_on_eligible_result: bool) -> Self {
         Self {
             closest: ClosestSet::new(
@@ -154,7 +156,7 @@ pub(crate) trait LookupTask {
         if data.lookup_done {
             return true;
         }
-        if data.iteration_count >= LookupTaskData::MAX_ITERATIONS {
+        if data.iteration_count >= MAX_ITERATIONS {
             return true;
         }
         if !self.base_data().is_done() {
@@ -169,13 +171,8 @@ pub(crate) trait LookupTask {
     }
 
     fn call_error(&mut self, call: &RpcCall) {
-        let target = call.target();
-        let id = target.id();
-
-        match target {
-            NodeEntry::CandidateNode(_) => self.remove_candidate(&id),
-            _ => self.remove_candidate(&id)
-        };
+        let id = call.target().id();
+        let _  = self.remove_candidate(&id);
     }
 
     fn call_timeout(&mut self, call: &RpcCall) {
@@ -184,34 +181,40 @@ pub(crate) trait LookupTask {
 
         match target {
             NodeEntry::CandidateNode(cn) => {
-                let reachable = cn.lock().unwrap().is_reachable();
-                if reachable {
+                let unreachable = cn.lock().unwrap().is_unreachable();
+                if unreachable {
                     self.remove_candidate(&id);
                 } else {
                     cn.lock().unwrap().clear_sent();
                 }
             },
-            _ => {self.remove_candidate(&id);}
+            _ => {
+                let _ = self.remove_candidate(&id);
+            }
         }
     }
 
-    fn call_responsed(&mut self, call: &RpcCall) {
-        if let Some(cn) = self.remove_candidate(&call.target_id()) {
-            cn.lock().unwrap().set_replied();
+    fn call_responded(&mut self, call: &RpcCall) {
+        let target_id = call.target_id();
+        let Some(cn) = self.remove_candidate(&target_id) else {
+            return;
+        };
+        cn.lock().unwrap().set_replied();
 
-            let Some(rsp) = call.rsp() else {
-                return;
-            };
-
-            let token = match rsp.lock().unwrap().body() {
-                Some(Body::FindNodeRsp(body)) => body.token(),
-                Some(Body::FindPeerRsp(body)) => body.token(),
-                Some(Body::FindValueRsp(body)) => body.token(),
-                _ => return,
-            };
-            cn.lock().unwrap().set_token(token);
-            self.add_closest(cn);
-        }
+        let Some(rsp) = call.rsp_ref() else {
+            return;
+        };
+        let Some(body) = rsp.body() else {
+            return;
+        };
+        let token = match body {
+            Body::FindNodeRsp(body) => body.token(),
+            Body::FindPeerRsp(body) => body.token(),
+            Body::FindValueRsp(body) => body.token(),
+            _ => return,
+        };
+        cn.lock().unwrap().set_token(token);
+        self.add_closest(cn);
     }
 
     fn done_on_eligible_result(&self) -> bool {

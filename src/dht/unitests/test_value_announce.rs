@@ -12,7 +12,7 @@ use crate::dht::{
     dht::DHT,
     token_manager::TokenManager,
     task::{
-        task::Task,
+        task::{Task, State},
         closest_set::ClosestSet,
         candidate_node::CandidateNode,
         value_announce::ValueAnnounceTask,
@@ -93,13 +93,60 @@ mod tests {
     }
 
     #[test]
-    fn test_iterate() {
+    fn test_cancel() {
         let value = make_value();
         let mut task = ValueAnnounceTask::new(make_dht(), value, -1);
+        assert!(task.is_unstarted());
+        assert!(task.is_done());
+
         task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
         assert!(!task.is_done());
 
+        task.set_state_if(&State::Initialized, State::Running);
         task.iterate();
         assert!(task.is_done());
+        assert!(task.is_running());
+
+        task.cancel();
+        assert!(task.is_done());
+        assert!(task.is_canceled());
+    }
+
+    #[test]
+    fn test_complete() {
+        let value = make_value();
+        let mut task = ValueAnnounceTask::new(make_dht(), value, -1);
+        assert!(task.is_unstarted());
+        assert!(task.is_done());
+
+        task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
+        assert!(!task.is_done());
+
+        task.set_state_if(&State::Initialized, State::Running);
+        task.iterate();
+        assert!(task.is_done());
+        assert!(task.is_running());
+
+        task.complete();
+        assert!(task.is_done());
+        assert!(task.is_completed());
+    }
+
+    #[test]
+    fn test_start() {
+        let value = make_value();
+        let mut task = ValueAnnounceTask::new(make_dht(), value, -1);
+        assert!(task.is_unstarted());
+        assert!(task.is_done());
+
+        task.with_closest(make_closestset(0));
+        assert!(task.is_unstarted());
+        assert!(!task.is_done());
+
+        task.start();
+        assert!(task.is_done());
+        assert!(task.is_completed());
     }
 }

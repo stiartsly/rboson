@@ -1,7 +1,6 @@
 
 use crate::{Id, Value};
 
-#[derive(Clone, Default)]
 pub(crate) struct EligibleValue {
     target: Id,
     expected_seq: i32,
@@ -17,6 +16,10 @@ impl EligibleValue {
             value: None,
             need_update: false,
         }
+    }
+
+    pub(crate) fn expected_seq(&self) -> i32 {
+        self.expected_seq
     }
 
     pub(crate) fn is_empty(&self) -> bool {

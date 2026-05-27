@@ -4,9 +4,12 @@ use log::{debug, error, warn};
 use crate::{Id, Network};
 use crate::dht::{
     dht::DHT,
-    rpccall::RpcCall,
-    node_entry::NodeEntry,
     eligible_value::EligibleValue,
+    consumer::Consumer,
+    rpc::{
+        rpccall::RpcCall,
+        node_entry::NodeEntry,
+    },
     msg::{
         lookup_rsp::LookupResponse,
         msg::{Body, Message},
@@ -25,9 +28,10 @@ use crate::dht::{
 pub(crate) struct ValueLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
-    expected_seq: i32,
 
-    result: EligibleValue
+    result: EligibleValue,
+
+    dht: Arc<Mutex<DHT>>,
 }
 
 impl ValueLookupTask {
@@ -38,10 +42,10 @@ impl ValueLookupTask {
         done_on_eligible_result: bool
     ) -> Self {
         Self {
-            base_data: TaskData::new(dht),
-            lookup_data: LookupTaskData::new(target.clone(), done_on_eligible_result),
-            expected_seq,
+            base_data: TaskData::new(),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
             result: EligibleValue::new(target, expected_seq),
+            dht,
         }
     }
 }
@@ -52,7 +56,7 @@ impl LookupTask for ValueLookupTask {
     }
 
     fn dht(&self) -> Arc<Mutex<DHT>> {
-        Task::data(self).dht()
+        Task::dht(self)
     }
 
     fn data(&self) -> &LookupTaskData {
@@ -73,6 +77,14 @@ impl Task for ValueLookupTask {
         &mut self.base_data
     }
 
+    fn as_task(&self) -> &dyn Task {
+        self
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        self.dht.clone()
+    }
+
     fn result(&self) -> Option<TaskResult> {
         self.result.value().as_ref().map(|v| TaskResult::Value(v.clone()))
     }
@@ -80,7 +92,7 @@ impl Task for ValueLookupTask {
     fn prepare(&mut self) {
         let entries:Vec<KBucketEntry> = {
             let mut kns = KClosestNodes::new(
-                self.dht().lock().unwrap().rt(),
+                Task::dht(self).lock().unwrap().rt(),
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -90,8 +102,8 @@ impl Task for ValueLookupTask {
         };
 
         debug!("{}#{} initialized {} candidates for target {}",
-            self.name(),
-            self.id(),
+            self.task_name(),
+            self.task_id(),
             entries.len(),
             self.target()
         );
@@ -108,37 +120,34 @@ impl Task for ValueLookupTask {
             };
 
             let entry = NodeEntry::from_candidate(next.clone());
-            let network = self.dht().lock().unwrap().network();
-            let msg = Arc::new(Mutex::new(Message::find_value_req(
+            let network = Task::dht(self).lock().unwrap().network();
+            let msg = Message::find_value_req(
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
-                self.expected_seq,
-            )));
+                self.result.expected_seq(),
+            );
 
-            _ = self.send_call(entry, msg, Box::new(move |_| {
+            let msg = Arc::new(Mutex::new(msg));
+            let handler = Consumer::new(move || {
                 next.lock().unwrap().set_sent();
-            })).map_err(|e| {
-                error!("Error on sending 'find_value' request: {}", e);
+            });
+            let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+                error!("Sending 'find_value' request error: {}", e);
             });
         }
     }
 
-    fn call_responsed(&mut self, call: &RpcCall) {
-        LookupTask::call_responsed(self, call);
+    fn call_responded(&mut self, call: &RpcCall) {
+        LookupTask::call_responded(self, call);
 
         if call.id_mismatched() {
             return;
         }
-
-        let msg = call.rsp().unwrap();
-        let locked_msg = msg.lock().unwrap();
-        let Some(Body::FindValueRsp(body)) = locked_msg.body() else {
-            warn!("{}#{} ignoring non LookupValue response from {}",
-                self.name(),
-                self.id(),
-                call.target_id()
-            );
+        let Some(msg) = call.rsp_ref() else {
+            return;
+        };
+        let Some(Body::FindValueRsp(body)) = msg.body() else {
             return;
         };
 
@@ -146,8 +155,8 @@ impl Task for ValueLookupTask {
             if !self.result.update(value.clone(), true) {
                 warn!(
                     "{}#{} dropping value response from {} due to ineligible value data",
-                    self.name(),
-                    self.id(),
+                    self.task_name(),
+                    self.task_id(),
                     call.target_id()
                 );
                 return;
@@ -155,19 +164,19 @@ impl Task for ValueLookupTask {
             if !self.result.is_empty() {
                 if LookupTask::done_on_eligible_result(self) {
                     debug!("{}#{} value is eligible, mark lookup done",
-                        self.name(),
-                        self.id()
+                        self.task_name(),
+                        self.task_id()
                     );
                     LookupTask::mark_lookup_done(self);
                 } else {
                     debug!("{}#{} value is ineligible, continue iteration for more precise results",
-                        self.name(),
-                        self.id()
+                        self.task_name(),
+                        self.task_id()
                     );
                 }
             }
         } else {
-            let network = self.dht().lock().unwrap().network();
+            let network = Task::dht(self).lock().unwrap().network();
             let nodes = match network {
                 Network::IPv4 => body.nodes4(),
                 Network::IPv6 => body.nodes6()
@@ -175,8 +184,8 @@ impl Task for ValueLookupTask {
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",
-                    self.name(),
-                    self.id(),
+                    self.task_name(),
+                    self.task_id(),
                     call.target_id()
                 );
                 return;
@@ -184,12 +193,11 @@ impl Task for ValueLookupTask {
 
             self.add_candidates_with_nodes(nodes.to_vec());
 
-            debug!("{}#{} added {} additional candidates from {} for target {}",
-                self.name(),
-                self.id(),
+            debug!("{}#{} added {} additional candidates from response by target {}",
+                self.task_name(),
+                self.task_id(),
                 nodes.len(),
-                call.target_id(),
-                self.target()
+                call.target_id()
             );
         }
     }

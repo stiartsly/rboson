@@ -1,29 +1,63 @@
 use super::task::Task;
 
-pub(crate) trait TaskListener {
-    fn started(&self, _task: &impl Task) {}
-    fn completed(&self, _task: &impl Task) {}
-    fn cancelled(&self, _task: &impl Task) {}
-    fn ended(&self, _task: &impl Task);
+pub(crate) struct TaskListener {
+    started_fn:    Option<Box<dyn Fn(&dyn Task)>>,
+    completed_fn:  Option<Box<dyn Fn(&dyn Task)>>,
+    canceled_fn:   Option<Box<dyn Fn(&dyn Task)>>,
+    ended_fn:      Option<Box<dyn Fn(&dyn Task)>>,
 }
 
-pub(crate) struct DefListener {
-    ended_fn: Box<dyn Fn(&dyn Task) + Send + Sync>,
-}
-
-impl DefListener {
-    pub(crate) fn new<F>(ended_fn: F) -> Self
-    where
-        F: Fn(&dyn Task) + Send + Sync + 'static
-    {
+impl TaskListener {
+    pub(crate) fn new() -> Self {
         Self {
-            ended_fn: Box::new(ended_fn)
+            started_fn: None,
+            completed_fn: None,
+            canceled_fn: None,
+            ended_fn: None,
         }
     }
-}
 
-impl TaskListener for DefListener {
-    fn ended(&self, _task: &impl Task) {
-         (self.ended_fn)(_task);
+    pub(crate) fn with_started_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+        self.started_fn = Some(f);
+        self
+    }
+
+    pub(crate) fn with_completed_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+        self.completed_fn  = Some(f);
+        self
+    }
+
+    pub(crate) fn with_canceled_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+        self.canceled_fn = Some(f);
+        self
+    }
+
+    pub(crate) fn with_ended_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+        self.ended_fn = Some(f);
+        self
+    }
+
+    pub(crate) fn started(&self, task: &dyn Task) {
+        if let Some(f) = &self.started_fn {
+            f(task);
+        }
+    }
+
+    pub(crate) fn completed(&self, task: &dyn Task) {
+        if let Some(f) = &self.completed_fn {
+            f(task);
+        }
+    }
+
+    pub(crate) fn canceled(&self, task: &dyn Task) {
+        if let Some(f) = &self.canceled_fn {
+            f(task);
+        }
+    }
+
+    pub(crate) fn ended(&self, task: &dyn Task) {
+        if let Some(f) = &self.ended_fn {
+            f(task);
+        }
     }
 }

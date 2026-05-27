@@ -27,7 +27,7 @@ mod task {
 
     pub(crate) mod task_manager;
     pub(crate) mod task;
-    //pub(crate) mod task_listener;
+    pub(crate) mod task_listener;
     pub(crate) mod lookup_task;
 
     pub(crate) mod ping_refresh;
@@ -46,15 +46,20 @@ mod routing {
     pub(crate) mod routing_table;
 }
 
+mod rpc {
+    pub(crate) mod listener;
+    pub(crate) mod rpccall;
+    pub(crate) mod server;
+    pub(crate) mod node_entry;
+}
+
 mod cached_identity;
 mod dht;
-mod server;
-mod rpccall;
 mod timer;
 mod token_manager;
-mod node_entry;
 mod node_status;
 
+mod consumer;
 mod promise;
 mod eligible_peers;
 mod eligible_value;

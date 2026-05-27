@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Id,
     dht::{
-    node_entry::Reachability,
+    rpc::node_entry::Reachability,
     routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,

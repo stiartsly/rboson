@@ -25,7 +25,6 @@ use crate::{
         StateError,
         IOError,
         DBError,
-        NetworkError,
         ArgumentError
     }
 };

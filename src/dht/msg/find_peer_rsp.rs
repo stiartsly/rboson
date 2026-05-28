@@ -1,12 +1,13 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde_cbor::value::to_value;
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{SerializeMap, Serializer}
+    ser::{self, SerializeMap, Serializer}
 };
-
 use crate::{
     NodeInfo,
     PeerInfo,
@@ -56,23 +57,23 @@ impl Serialize for FindPeerResponse {
     {
         let mut s = se.serialize_map(None)?;
         if let Some(peers) = self.peers.as_ref() {
-            let value = to_value(&peers).map_err(|_| serde::ser::Error::custom(
-                "Failed to convert peers to CBOR Value"
+            let value = to_value(&peers).map_err(|e| ser::Error::custom(
+                format!("Convert peers to CBOR error: {}", e)
             ))?;
             s.serialize_entry("p", &value)?;
-        } else {
-            if let Some(ns4) = self.nodes4() {
-                let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
-                    "Failed to convert nodes4 to CBOR Value"
-                ))?;
-                s.serialize_entry("n4", &value)?;
-            }
-            if let Some(ns6) = self.nodes6() {
-                let value = to_value(&ns6).map_err(|_| serde::ser::Error::custom(
-                    "Failed to convert nodes6 to CBOR Value"
-                ))?;
-                s.serialize_entry("n6", &value)?;
-            }
+        }
+
+        if let Some(ns) = self.nodes4() {
+            let value = to_value(&ns).map_err(|e| ser::Error::custom(
+                format!("Convert nodes4 to CBOR error: {}", e)
+            ))?;
+            s.serialize_entry("n4", &value)?;
+        }
+        if let Some(ns) = self.nodes6() {
+            let value = to_value(&ns).map_err(|e| ser::Error::custom(
+                format!("Convert nodes6 to CBOR error: {}", e)
+            ))?;
+            s.serialize_entry("n6", &value)?;
         }
         s.end()
     }
@@ -82,7 +83,6 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
     where D: Deserializer<'de>,
     {
-        #[derive(Debug)]
         enum Field {
             Nodes4,         // "n4"
             Nodes6,         // "n6"
@@ -120,7 +120,7 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
             {
                 let mut nodes4: Option<Vec<NodeInfo>> = None;
                 let mut nodes6: Option<Vec<NodeInfo>> = None;
-                let mut peers: Option<Vec<PeerInfo>> = None;
+                let mut peers : Option<Vec<PeerInfo>> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -152,18 +152,22 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
                     }
                 }
 
-                if nodes4.is_none() && nodes6.is_none() && peers.is_none() {
+                if peers.is_none() &&
+                    nodes4.is_none() &&
+                    nodes6.is_none() {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"p\" must be present"));
                 }
-                if peers.is_some() && (nodes4.is_some() || nodes6.is_some()) {
+                if peers.is_some() && (
+                    nodes4.is_some() ||
+                    nodes6.is_some()
+                ) {
                     return Err(de::Error::custom("\"p\" cannot be combined with \"n4\" or \"n6\""));
                 }
 
-                if let Some(peers) = peers {
-                    Ok(FindPeerResponse::with_peers(peers))
-                } else {
-                    Ok(FindPeerResponse::with_nodes(nodes4, nodes6))
-                }
+                Ok(match peers {
+                    Some(peers) => FindPeerResponse::with_peers(peers),
+                    None => FindPeerResponse::with_nodes(nodes4, nodes6)
+                })
             }
         }
         de.deserialize_map(FieldVisitor)

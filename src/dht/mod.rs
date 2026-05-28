@@ -49,8 +49,8 @@ mod routing {
 mod rpc {
     pub(crate) mod listener;
     pub(crate) mod rpccall;
-    pub(crate) mod server;
-    pub(crate) mod node_entry;
+    pub(crate) mod rpc_server;
+    pub(crate) mod rpc_target;
 }
 
 mod cached_identity;

@@ -18,25 +18,19 @@ fn make_value() -> Value {
 
 #[cfg(test)]
 mod tests {
-        use super::*;
+    use super::*;
+
     #[test]
-    fn test_default() {
+    fn test_serde() {
         let value = make_value();
         let req = StoreValueRequest::new(value.clone(), 42, 11);
-
         assert_eq!(req.token(), 42);
         assert_eq!(req.expected_seq(), 11);
         assert_eq!(req.value(), &value);
-    }
 
-    #[test]
-    fn test_serde_cbor() {
-        let value = make_value();
-        let req = StoreValueRequest::new(value.clone(), 42, 11);
-
-        let cbor = serde_cbor::to_vec(&req)
+        let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
-        let decoded: StoreValueRequest = serde_cbor::from_slice(&cbor)
+        let decoded: StoreValueRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
@@ -45,13 +39,17 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_cbor_without_cas() {
+    fn test_serde_no_expected_seq() {
         let value = make_value();
         let req = StoreValueRequest::new(value.clone(), 42, -1);
 
-        let cbor = serde_cbor::to_vec(&req)
+        assert_eq!(req.token(), 42);
+        assert_eq!(req.expected_seq(), -1);
+        assert_eq!(req.value(), &value);
+
+        let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
-        let decoded: StoreValueRequest = serde_cbor::from_slice(&cbor)
+        let decoded: StoreValueRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);

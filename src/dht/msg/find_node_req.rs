@@ -1,11 +1,12 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
     ser::{SerializeMap, Serializer}
 };
-
 use crate::{
     Id,
     dht::msg::lookup_req::{
@@ -23,8 +24,7 @@ pub(crate) struct FindNodeRequest {
 }
 
 impl FindNodeRequest {
-    pub(crate) fn new(
-        target: Id,
+    pub(crate) fn new(target: Id,
         want4: bool,
         want6: bool,
         want_token: bool
@@ -86,8 +86,8 @@ impl<'de> Deserialize<'de> for FindNodeRequest {
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut target: Option<Id> = None;
-                let mut want: Option<i32> = None;
+                let mut target: Option<Id>  = None;
+                let mut want  : Option<i32> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -111,7 +111,7 @@ impl<'de> Deserialize<'de> for FindNodeRequest {
                     }
                 }
 
-                let want = want.unwrap_or_default();
+                let want = want.unwrap_or(0);
                 Ok(FindNodeRequest::new(
                     target.ok_or_else(|| de::Error::missing_field("t"))?,
                     want & WANT4_MASK != 0,

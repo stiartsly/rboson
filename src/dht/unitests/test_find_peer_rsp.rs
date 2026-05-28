@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use crate::{
     Id,
+    Network,
     NodeInfo,
     PeerBuilder,
     signature,
@@ -15,34 +16,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_rsp_with_nodes() {
+    fn test_with_nodes() {
         let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node = NodeInfo::new(nodeid, addr);
+        let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
+        let node4 = NodeInfo::new(nodeid, addr4);
+
+        let nodeid = Id::random();
+        let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
+        let node6 = NodeInfo::new(nodeid, addr6);
 
         let rsp = FindPeerResponse::with_nodes(
-            Some(vec![node.clone()]),
-            None,
+            Some(vec![node4.clone()]),
+            Some(vec![node6.clone()])
         );
 
-        assert_eq!(rsp.nodes4(), Some([node.clone()].as_slice()));
-        assert_eq!(rsp.nodes6(), None);
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.peers().is_none());
+
         assert_eq!(rsp.peers(), None);
+        assert_eq!(rsp.nodes4().unwrap().len(), 1);
+        assert_eq!(rsp.nodes6().unwrap().len(), 1);
+
+        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), rsp.nodes(Network::IPv4));
+        assert_eq!(rsp.nodes6(), rsp.nodes(Network::IPv6));
     }
 
     #[test]
-    fn test_rsp_with_peers() {
+    fn test_with_peers() {
         let keypair = signature::KeyPair::random();
-        let peer = PeerBuilder::new("tcp://192.168.1.1:8080")
-            .with_key(keypair)
+        let peer1 = PeerBuilder::new("tcp://192.168.1.1:8080")
+            .with_key(keypair.clone())
+            .with_fingerprint(1)
             .build()
             .expect("Failed to build peer");
 
-        let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
+        let peer2 = PeerBuilder::new("tcp://192.168.1.1:8081")
+            .with_key(keypair.clone())
+            .with_fingerprint(2)
+            .build()
+            .expect("Failed to build peer");
 
-        assert_eq!(rsp.nodes4(), None);
-        assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.peers(), Some([peer].as_slice()));
+        let peers = vec![peer1.clone(), peer2.clone()];
+        let rsp = FindPeerResponse::with_peers(peers.clone());
+
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.peers().is_some());
+
+        assert_eq!(rsp.peers().unwrap().len(), peers.len());
+        assert_eq!(rsp.peers(), Some(peers.as_slice()));
+        assert_eq!(rsp.token(), 0);
+
     }
 
     #[test]
@@ -60,19 +87,22 @@ mod tests {
             Some(vec![ni6.clone()])
         );
 
-        assert_eq!(rsp.nodes4().is_some(), true);
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.peers().is_none());
+
         assert_eq!(rsp.nodes4().unwrap().len(), 1);
-        assert_eq!(rsp.nodes6().is_some(), true);
         assert_eq!(rsp.nodes6().unwrap().len(), 1);
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindPeerResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 0);
-        assert_eq!(decoded.nodes4().is_some(), true);
-        assert_eq!(decoded.nodes6().is_some(), true);
+        assert!(decoded.nodes4().is_some());
+        assert!(decoded.nodes6().is_some());
+        assert!(decoded.peers().is_none());
 
         let nodes4 = decoded.nodes4().unwrap();
         assert_eq!(nodes4.len(), 1);
@@ -84,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_peer() {
+    fn test_serde_with_apeer() {
         let keypair = signature::KeyPair::random();
         let endpoint = "tcp://192.168.1.1:8080";
         let peer = PeerBuilder::new(endpoint)
@@ -94,22 +124,24 @@ mod tests {
 
         let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
 
-        assert_eq!(rsp.nodes4().is_none(), true);
-        assert_eq!(rsp.nodes6().is_none(), true);
-        assert_eq!(rsp.token(), 0);
-        assert_eq!(rsp.peers().is_some(), true);
-        assert_eq!(rsp.peers().unwrap().len(), 1);
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.peers().is_some());
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        assert_eq!(rsp.token(), 0);
+        assert_eq!(rsp.peers().unwrap().len(), 1);
+        assert_eq!(rsp.peers().unwrap()[0], peer.clone());
+
+        let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindPeerResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
-        assert_eq!(decoded.nodes4().is_none(), true);
-        assert_eq!(decoded.nodes6().is_none(), true);
-        assert_eq!(decoded.token(), 0);
+        assert!(decoded.nodes4().is_none());
+        assert!(decoded.nodes6().is_none());
+        assert!(decoded.peers().is_some());
 
-        assert_eq!(decoded.peers().is_some(), true);
+        assert_eq!(decoded.token(), 0);
         assert_eq!(decoded.peers().unwrap().len(), 1);
 
         let decoded_peer = &decoded.peers().unwrap()[0];
@@ -120,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_multiple_peers() {
+    fn test_serde_with_peers() {
         let keypair = signature::KeyPair::random();
         let peer1 = PeerBuilder::new("tcp://192.168.1.1:8080")
             .with_key(keypair.clone())
@@ -137,18 +169,23 @@ mod tests {
             vec![peer1.clone(), peer2.clone()]
         );
 
-        assert_eq!(rsp.nodes4().is_none(), true);
-        assert_eq!(rsp.nodes6().is_none(), true);
-        assert_eq!(rsp.token(), 0);
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.peers().is_some());
 
-        assert_eq!(rsp.peers().is_some(), true);
+        assert_eq!(rsp.token(), 0);
         assert_eq!(rsp.peers().unwrap().len(), 2);
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindPeerResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
+        assert!(decoded.nodes4().is_none());
+        assert!(decoded.nodes6().is_none());
+        assert!(decoded.peers().is_some());
+
+        assert_eq!(decoded.token(), 0);
         assert_eq!(decoded.peers().unwrap().len(), 2);
 
         let decoded_peer1 = &decoded.peers().unwrap()[0];

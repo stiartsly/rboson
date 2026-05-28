@@ -1,14 +1,17 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    any::Any,
+    sync::{Arc, Mutex}
+};
 use log::{debug, error, warn};
 
-use crate::{Id, Network};
+use crate::{Id, PeerInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     eligible_peers::EligiblePeers,
     rpc::{
         rpccall::RpcCall,
-        node_entry::NodeEntry,
+        rpc_target::Target,
     },
     routing::{
         kbucket::KBucket,
@@ -20,7 +23,7 @@ use crate::dht::{
         lookup_rsp::LookupResponse
     },
     task::{
-        task::{Task, TaskData, TaskResult},
+        task::{Task, TaskData},
         lookup_task::{LookupTask, LookupTaskData},
     },
 };
@@ -30,8 +33,7 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-
-    dht: Arc<Mutex<DHT>>,
+    dht: Arc<Mutex<DHT>>
 }
 
 impl PeerLookupTask {
@@ -49,15 +51,19 @@ impl PeerLookupTask {
             dht,
         }
     }
+
+    pub(crate) fn result(&self) -> Vec<PeerInfo> {
+        self.result.peers().to_vec()
+    }
 }
 
 impl LookupTask for PeerLookupTask {
     fn base_data(&self) -> &TaskData {
-        &Task::data(self)
+        &self.base_data
     }
 
     fn dht(&self) -> Arc<Mutex<DHT>> {
-        Task::dht(self)
+        self.dht.clone()
     }
 
     fn data(&self) -> &LookupTaskData {
@@ -82,18 +88,23 @@ impl Task for PeerLookupTask {
         self
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
-    fn result(&self) -> Option<TaskResult> {
-        Some(TaskResult::PeerInfo(self.result.peers().to_vec()))
-    }
-
     fn prepare(&mut self) {
+        let rt = self.dht.lock().unwrap().rt();
         let entries:Vec<KBucketEntry> = {
             let mut kns = KClosestNodes::new(
-                Task::dht(self).lock().unwrap().rt(),
+                rt,
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -120,8 +131,8 @@ impl Task for PeerLookupTask {
                 None => break,
             };
 
-            let entry = NodeEntry::from_candidate(next.clone());
-            let network = Task::dht(self).lock().unwrap().network();
+            let target = Target::from_candidate(next.clone());
+            let network = self.dht.lock().unwrap().network();
             let msg = Message::find_peer_req(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -130,11 +141,10 @@ impl Task for PeerLookupTask {
                 self.result.expected_count() as i32,
             );
 
-            let msg = Arc::new(Mutex::new(msg));
             let handler = Consumer::new(move || {
                 next.lock().unwrap().set_sent();
             });
-             let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
                 error!("Sending 'findPeer' request error: {}", e);
              });
         }
@@ -146,10 +156,8 @@ impl Task for PeerLookupTask {
         if call.id_mismatched() {
             return;
         }
-        let Some(msg) = call.rsp_ref() else {
-            return;
-        };
-        let Some(Body::FindPeerRsp(body)) = msg.body() else {
+        let msg = call.rsp().expect("panic: no response set");
+        let Body::FindPeerRsp(body) = msg.body().expect("no message body") else {
             return;
         };
 
@@ -163,7 +171,7 @@ impl Task for PeerLookupTask {
                 return;
             }
 
-            if self.result.add(peers.to_vec(), true) {
+            if !self.result.add(peers.to_vec(), false) {
                 warn!(
                     "{}#{} dropping peer response from {} due to ineligible peer data",
                     self.task_name(),
@@ -181,17 +189,14 @@ impl Task for PeerLookupTask {
             );
 
             if self.result.reached_capacity() {
-                if LookupTask::done_on_eligible_result(self) {
-                    LookupTask::mark_lookup_done(self);
+                if LookupTask::data(self).done_on_eligible_result() {
+                    LookupTask::data_mut(self).mark_lookup_done();
                 }
-                self.result.prune();
+                self.result.prune();;
             }
         } else {
-            let network = Task::dht(self).lock().unwrap().network();
-            let nodes = match network {
-                Network::IPv4 => body.nodes4(),
-                Network::IPv6 => body.nodes6()
-            };
+            let network = self.dht.lock().unwrap().network();
+            let nodes = body.nodes(network);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

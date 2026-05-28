@@ -1,5 +1,7 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
@@ -25,9 +27,7 @@ pub(crate) struct FindPeerRequest {
 
 impl FindPeerRequest {
     pub(crate) fn new(
-        target: Id,
-        want4: bool,
-        want6: bool,
+        target: Id, want4: bool,  want6: bool,
         expected_seq: i32,
         expected_count: i32,
     ) -> Self {
@@ -108,10 +108,10 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut target: Option<Id> = None;
-                let mut want: Option<i32> = None;
-                let mut expected_seq: Option<i32> = None;
-                let mut expected_count: Option<i32> = None;
+                let mut target  : Option<Id>  = None;
+                let mut want    : Option<i32> = None;
+                let mut seq     : Option<i32> = None;
+                let mut count   : Option<i32> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -130,17 +130,17 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
                             }
                         }
                         Field::ExpectedSeq => {
-                            if expected_seq.is_some() {
+                            if seq.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
                             } else {
-                                expected_seq = Some(map.next_value()?);
+                                seq = Some(map.next_value()?);
                             }
                         }
                         Field::ExpectedCount => {
-                            if expected_count.is_some() {
+                            if count.is_some() {
                                 return Err(de::Error::duplicate_field("e"));
                             } else {
-                                expected_count = Some(map.next_value()?);
+                                count = Some(map.next_value()?);
                             }
                         }
                         Field::Ignore => {
@@ -149,12 +149,12 @@ impl<'de> Deserialize<'de> for FindPeerRequest {
                     }
                 }
 
-                let want = want.unwrap_or_default();
-                let expected_seq = expected_seq.unwrap_or(-1);
+                let want = want.unwrap_or(0);
+                let expected_seq = seq.unwrap_or(-1);
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
-                let expected_count = expected_count.unwrap_or_default();
+                let expected_count = count.unwrap_or_default();
                 if expected_count <= 0 {
                     return Err(de::Error::custom("expected_count must be at least larger than 0"));
                 }

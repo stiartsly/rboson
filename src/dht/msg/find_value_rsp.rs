@@ -1,5 +1,7 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde_cbor::value::to_value;
 use serde::{
     Deserialize, Serialize,
@@ -9,8 +11,8 @@ use serde::{
 
 use crate::{
     Id,
-    NodeInfo,
     Value,
+    NodeInfo,
     cryptobox::Nonce,
     dht::msg::lookup_rsp::{
         LookupResponse,
@@ -141,14 +143,14 @@ impl<'de> Deserialize<'de> for FindValueResponse {
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut nodes4: Option<Vec<NodeInfo>> = None;
-                let mut nodes6: Option<Vec<NodeInfo>> = None;
-                let mut pk: Option<Id> = None;
-                let mut rec: Option<Id> = None;
-                let mut nonce: Option<Vec<u8>> = None;
-                let mut sig: Option<Vec<u8>> = None;
-                let mut seq: Option<i32> = None;
-                let mut data: Option<Vec<u8>> = None;
+                let mut nodes4  : Option<Vec<NodeInfo>> = None;
+                let mut nodes6  : Option<Vec<NodeInfo>> = None;
+                let mut pk      : Option<Id> = None;
+                let mut rec     : Option<Id> = None;
+                let mut nonce   : Option<Vec<u8>> = None;
+                let mut sig     : Option<Vec<u8>> = None;
+                let mut seq     : Option<i32> = None;
+                let mut data    : Option<Vec<u8>> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -209,14 +211,21 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                             }
                         }
                         Field::Token |
-                        Field::Ignore => _ = map.next_value::<IgnoredAny>()?,
+                        Field::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
 
-                if nodes4.is_none() && nodes6.is_none() && data.is_none() {
+                if data.is_none() &&
+                    nodes4.is_none() &&
+                    nodes6.is_none() {
                     return Err(de::Error::custom("either \"n4\", \"n6\" or \"v\" must be present"));
                 }
-                if data.is_some() && (nodes4.is_some() || nodes6.is_some()) {
+                if data.is_some() && (
+                    nodes4.is_some() ||
+                    nodes6.is_some()
+                ) {
                     return Err(de::Error::custom("\"v\" cannot be combined with \"n4\" or \"n6\""));
                 }
 
@@ -225,16 +234,17 @@ impl<'de> Deserialize<'de> for FindValueResponse {
                         return Err(de::Error::custom("data field \"v\" cannot be empty"));
                     }
 
-                    let seq = seq.unwrap_or(-1);
-                    let nonce = if let Some(nonce) = nonce.as_ref() {
-                        Nonce::try_from(nonce.as_slice())
-                            .map_err(|_| de::Error::custom("invalid nonce length"))?
-                        .into()
-                    } else {
-                        None
-                    };
+                    let expected_seq = seq.unwrap_or(-1);
+                    if expected_seq < -1 {
+                        return Err(de::Error::custom("sequence number must be larger than or equal to -1"));
+                    }
 
-                    let value = Value::packed(pk, rec, nonce, sig, data, seq);
+                    let nonce = nonce.map(|v| {
+                        Nonce::try_from(v.as_slice())
+                            .map_err(|_| de::Error::custom("invalid nonce length"))
+                    }).transpose()?;
+
+                    let value = Value::packed(pk, rec, nonce, sig, data, expected_seq);
                     if !value.is_valid() {
                         return Err(de::Error::custom("invalid value"));
                     }

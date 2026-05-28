@@ -11,7 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_serde_cbor() {
+    fn test_serde() {
         let value_id = Id::random();
         let expected_seq = 7;
         let msg = FindValueRequest::new(
@@ -21,20 +21,29 @@ mod tests {
             expected_seq
         );
 
-        let cbor = serde_cbor::to_vec(&msg)
+        assert_eq!(msg.target(), &value_id);
+        assert_eq!(msg.expected_seq(), expected_seq);
+
+        assert!(msg.want4());
+        assert!(!msg.want6());
+        assert!(!msg.want_token());
+
+        let encoded = serde_cbor::to_vec(&msg)
             .expect("Serialization failed");
-        let decoded: FindValueRequest = serde_cbor::from_slice(&cbor)
+        let decoded: FindValueRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.target(), &value_id);
-        assert_eq!(decoded.want4(), true);
-        assert_eq!(decoded.want6(), false);
-        assert_eq!(decoded.want_token(), false);
         assert_eq!(decoded.expected_seq(), expected_seq);
+
+        assert!(decoded.want4());
+        assert!(!decoded.want6());
+        assert!(!decoded.want_token());
+
     }
 
     #[test]
-    fn test_serde_without_cas() {
+    fn test_serde_no_expected_seq() {
         let value_id = Id::random();
 
         let msg = FindValueRequest::new(
@@ -44,15 +53,24 @@ mod tests {
             -1,
         );
 
-        let cbor = serde_cbor::to_vec(&msg)
+        assert_eq!(msg.target(), &value_id);
+        assert_eq!(msg.expected_seq(), -1);
+
+        assert!(!msg.want4());
+        assert!(msg.want6());
+        assert!(!msg.want_token());
+
+        let encoded = serde_cbor::to_vec(&msg)
             .expect("Serialization failed");
-        let decoded: FindValueRequest = serde_cbor::from_slice(&cbor)
+        let decoded: FindValueRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.target(), &value_id);
-        assert_eq!(decoded.want4(), false);
-        assert_eq!(decoded.want6(), true);
-        assert_eq!(decoded.want_token(), false);
         assert_eq!(decoded.expected_seq(), -1);
+
+        assert!(!decoded.want4());
+        assert!(decoded.want6());
+        assert!(!decoded.want_token());
+
     }
 }

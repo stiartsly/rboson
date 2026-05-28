@@ -5,18 +5,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default() {
+    fn test_serde() {
         let err = Error::new(500, "boom".to_string());
         assert_eq!(err.code(), 500);
         assert_eq!(err.msg(), "boom");
-    }
 
-    #[test]
-    fn test_serde_cbor() {
-        let err = Error::new(500, "boom".to_string());
-        let cbor = serde_cbor::to_vec(&err)
+        let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
-        let decoded: Error = serde_cbor::from_slice(&cbor)
+        let decoded: Error = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 500);
@@ -24,11 +20,14 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_cbor_with_empty_msg() {
+    fn test_serde_with_empty_msg() {
         let err = Error::new(404, String::new());
-        let cbor = serde_cbor::to_vec(&err)
+        assert_eq!(err.code(), 404);
+        assert_eq!(err.msg(), "");
+
+        let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
-        let decoded: Error = serde_cbor::from_slice(&cbor)
+        let decoded: Error = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 404);

@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use crate::{
     Id,
+    Network,
     NodeInfo,
     Value,
     dht::msg::{
@@ -14,61 +15,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_rsp_with_nodes() {
+    fn test_with_nodes() {
         let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node = NodeInfo::new(nodeid, addr);
+        let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
+        let node4 = NodeInfo::new(nodeid, addr4);
 
-        let rsp = FindValueResponse::with_nodes(
-            Some(vec![node.clone()]),
-            None,
-        );
-
-        assert_eq!(rsp.nodes4(), Some([node.clone()].as_slice()));
-        assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.value(), None);
-    }
-
-    #[test]
-    fn test_rsp_with_value() {
-        let value = Value::packed(None, None, None, None, vec![1, 2, 3], 0);
-        let rsp = FindValueResponse::with_value(value.clone());
-
-        assert_eq!(rsp.nodes4(), None);
-        assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.value(), Some(&value));
-    }
-
-    #[test]
-    fn test_display_with_nodes() {
-        let node4 = NodeInfo::new(
-            Id::random(),
-            "127.0.0.1:29001".parse::<SocketAddr>().unwrap(),
-        );
-        let node6 = NodeInfo::new(
-            Id::random(),
-            "[::1]:29001".parse::<SocketAddr>().unwrap(),
-        );
+        let nodeid = Id::random();
+        let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
+        let node6 = NodeInfo::new(nodeid, addr6);
 
         let rsp = FindValueResponse::with_nodes(
             Some(vec![node4.clone()]),
-            Some(vec![node6.clone()]),
+            Some(vec![node6.clone()])
         );
 
-        let str = format!("{}", rsp);
-        assert!(str.contains("n4:"));
-        assert!(str.contains(&format!("[{}]", node4)));
-        assert!(str.contains("n6:"));
-        assert!(str.contains(&format!("[{}]", node6)));
+        //println!("FindValueResponse with nodes:\n\t{}", rsp);
+
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.value().is_none());
+
+        assert_eq!(rsp.value(), None);
+        assert_eq!(rsp.nodes4().unwrap().len(), 1);
+        assert_eq!(rsp.nodes6().unwrap().len(), 1);
+
+        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), rsp.nodes(Network::IPv4));
+        assert_eq!(rsp.nodes6(), rsp.nodes(Network::IPv6));
     }
 
     #[test]
-    fn test_display_with_value() {
+    fn test_with_value() {
         let value = Value::packed(None, None, None, None, vec![1, 2, 3], 0);
         let rsp = FindValueResponse::with_value(value.clone());
 
-        let str = format!("{}", rsp);
-        assert_eq!(str, format!("v:[{}]", value));
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.value().is_some());
+
+        assert_eq!(rsp.value(), Some(&value));
     }
 
     #[test]
@@ -86,19 +72,24 @@ mod tests {
             Some(vec![ni6.clone()])
         );
 
-        assert_eq!(rsp.nodes4().is_some(), true);
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.value().is_none());
+
         assert_eq!(rsp.nodes4().unwrap().len(), 1);
-        assert_eq!(rsp.nodes6().is_some(), true);
         assert_eq!(rsp.nodes6().unwrap().len(), 1);
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindValueResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
+        // println!("Encoded FindValueResponse:\n\t{:?}", encoded);
+
         assert_eq!(decoded.token(), 0);
-        assert_eq!(decoded.nodes4().is_some(), true);
-        assert_eq!(decoded.nodes6().is_some(), true);
+        assert!(decoded.nodes4().is_some());
+        assert!(decoded.nodes6().is_some());
+        assert!(decoded.value().is_none());
 
         let nodes4 = decoded.nodes4().unwrap();
         assert_eq!(nodes4.len(), 1);
@@ -116,21 +107,23 @@ mod tests {
 
         let rsp = FindValueResponse::with_value(value.clone());
 
-        assert_eq!(rsp.nodes4().is_none(), true);
-        assert_eq!(rsp.nodes6().is_none(), true);
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.value().is_some());
+
         assert_eq!(rsp.token(), 0);
-        assert_eq!(rsp.value().is_some(), true);
         assert_eq!(rsp.value().unwrap(), &value);
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindValueResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
-        assert_eq!(decoded.nodes4().is_none(), true);
-        assert_eq!(decoded.nodes6().is_none(), true);
+        assert!(decoded.nodes4().is_none());
+        assert!(decoded.nodes6().is_none());
+        assert!(decoded.value().is_some());
+
         assert_eq!(decoded.token(), 0);
-        assert_eq!(decoded.value().is_some(), true);
         assert_eq!(decoded.value().unwrap(), &value);
     }
 }

@@ -5,7 +5,7 @@ use crate::dht::{
     dht::DHT,
     utils::{is_any_unicast, is_bogon},
     rpc::{
-        node_entry::{Reachability, NodeEntry},
+        rpc_target::{Reachability, Target},
         rpccall::RpcCall,
     },
     routing::{
@@ -34,7 +34,7 @@ pub(crate) struct LookupTaskData {
     iteration_count: usize,
 
     done_on_eligible_result: bool,
-    lookup_done: bool,
+    done_on_lookup: bool,
 }
 
 impl LookupTaskData {
@@ -52,8 +52,16 @@ impl LookupTaskData {
             target,
             iteration_count: 0,
             done_on_eligible_result,
-            lookup_done: false,
+            done_on_lookup: false,
         }
+    }
+
+    pub(crate) fn done_on_eligible_result(&self) -> bool {
+        self.done_on_eligible_result
+    }
+
+    pub(crate) fn mark_lookup_done(&mut self) {
+        self.done_on_lookup = true;
     }
 }
 
@@ -153,7 +161,7 @@ pub(crate) trait LookupTask {
 
     fn is_done(&self) -> bool {
         let data = self.data();
-        if data.lookup_done {
+        if data.done_on_lookup {
             return true;
         }
         if data.iteration_count >= MAX_ITERATIONS {
@@ -180,7 +188,7 @@ pub(crate) trait LookupTask {
         let id = target.id();
 
         match target {
-            NodeEntry::CandidateNode(cn) => {
+            Target::Candidate(cn) => {
                 let unreachable = cn.lock().unwrap().is_unreachable();
                 if unreachable {
                     self.remove_candidate(&id);
@@ -201,7 +209,7 @@ pub(crate) trait LookupTask {
         };
         cn.lock().unwrap().set_replied();
 
-        let Some(rsp) = call.rsp_ref() else {
+        let Some(rsp) = call.rsp() else {
             return;
         };
         let Some(body) = rsp.body() else {
@@ -215,13 +223,5 @@ pub(crate) trait LookupTask {
         };
         cn.lock().unwrap().set_token(token);
         self.add_closest(cn);
-    }
-
-    fn done_on_eligible_result(&self) -> bool {
-        self.data().done_on_eligible_result
-    }
-
-    fn mark_lookup_done(&mut self) {
-        self.data_mut().lookup_done = true;
     }
 }

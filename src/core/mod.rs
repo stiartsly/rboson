@@ -1,5 +1,4 @@
 pub(crate) mod logger;
-pub(crate) mod cbor;
 pub(crate) mod version;
 
 pub mod errors;
@@ -9,19 +8,15 @@ pub mod network;
 pub mod identity;
 pub mod crypto_identity;
 pub mod crypto_context;
-
 pub mod signature;
 pub mod cryptobox;
-
 pub mod node_info;
 pub mod peer_info;
 pub mod value;
 
 pub use crate::core::{
-    id::{
-        Id,
-        DID_PREFIX,
-    },
+    id::{Id, DID_PREFIX},
+    errors::{Error, Result},
 
     identity::Identity,
     crypto_identity::CryptoIdentity,
@@ -30,18 +25,11 @@ pub use crate::core::{
     signature::Signature,
     cryptobox::CryptoBox,
 
-    errors::{Error, Result},
-
     joint_result::JointResult,
     network::Network,
     node_info::NodeInfo,
     peer_info::{PeerInfo, PeerBuilder},
-    value::{
-        Value,
-        ValueBuilder,
-        SignedBuilder,
-        EncryptedBuilder
-    },
+    value::{Value, ValueBuilder, SignedBuilder, EncryptedBuilder},
 };
 
 #[cfg(test)]
@@ -54,9 +42,6 @@ mod unitests {
     mod test_peer_info;
     mod test_crypto_identity;
     mod test_crypto_context;
-
-    #[allow(non_upper_case_globals)]
-    static create_random_bytes: fn(usize) -> Vec<u8> = crate::random_bytes;
 }
 
 #[macro_export]

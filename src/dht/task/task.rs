@@ -1,5 +1,6 @@
 use std::{
     fmt,
+    any::Any,
     sync::{Arc, Mutex},
     sync::atomic::{Ordering, AtomicI32},
     collections::HashMap,
@@ -7,30 +8,17 @@ use std::{
 };
 use log::{warn, debug};
 
-use crate::{
-    core::Result,
-    NodeInfo,
-    PeerInfo,
-    Value,
-    dht::{
-        consumer::Consumer,
-        rpc::{
-            node_entry::NodeEntry,
-            rpccall::{RpcCall, State as CallState},
-        },
-        dht::DHT,
-        msg::msg::Message,
-        task::closest_set::ClosestSet,
-        task::task_listener::TaskListener
+use crate::core::Result;
+use crate::dht::{
+    dht::DHT,
+    consumer::Consumer,
+    msg::msg::Message,
+    task::task_listener::TaskListener,
+    rpc::{
+        rpc_target::Target,
+        rpccall::{RpcCall, State as CallState},
     }
 };
-
-pub(crate) enum TaskResult {
-    NodeInfo(NodeInfo),
-    PeerInfo(Vec<PeerInfo>),
-    Value(Value),
-    None,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -121,7 +109,8 @@ pub(crate) trait Task: Send + Sync {
     fn data_mut(&mut self) -> &mut TaskData;
 
     fn as_task(&self) -> &dyn Task;
-    fn result(&self) -> Option<TaskResult> { None }
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     fn task_id(&self) -> i32 {
         self.data().taskid
@@ -351,8 +340,8 @@ pub(crate) trait Task: Send + Sync {
     fn call_timeout(&mut self, _: &RpcCall) {}
 
     fn send_call(&mut self,
-        ni: NodeEntry,
-        msg: Arc<Mutex<Message>>,
+        target: Target,
+        msg: Message,
         consumer: Option<Consumer<>>)
         -> Result<()> {
 
@@ -360,7 +349,7 @@ pub(crate) trait Task: Send + Sync {
             return Ok(())
         }
 
-        let mut call = RpcCall::new(ni, msg);
+        let mut call = RpcCall::new(target, msg);
         let task = self.cloned();
         call.set_state_changed_cb(move |c, _, state| {
             if task.lock().unwrap().is_ended() {
@@ -371,31 +360,32 @@ pub(crate) trait Task: Send + Sync {
                 return;
             }
 
+            let mut locked = task.lock().unwrap();
             match state {
-                CallState::Sent => task.lock().unwrap().call_sent(c),
+                CallState::Sent => locked.call_sent(c),
                 CallState::Responded => {
-                    task.lock().unwrap().data_mut().inflights.remove(&c.txid());
-                    if !task.lock().unwrap().is_ended() && c.rsp_ref().is_some() {
-                        task.lock().unwrap().call_responded(c);
+                    locked.data_mut().inflights.remove(&c.txid());
+                    if !locked.is_ended() && c.rsp().is_some() {
+                        locked.call_responded(c);
                     }
                 },
                 CallState::Err => {
-                    task.lock().unwrap().data_mut().inflights.remove(&c.txid());
-                    if !task.lock().unwrap().is_ended() {
-                        task.lock().unwrap().call_error(c);
+                    locked.data_mut().inflights.remove(&c.txid());
+                    if !locked.is_ended() {
+                        locked.call_error(c);
                     }
                 },
                 CallState::Timeout => {
-                    task.lock().unwrap().data_mut().inflights.remove(&c.txid());
-                    if !task.lock().unwrap().is_ended() {
-                        task.lock().unwrap().call_timeout(c);
+                    locked.data_mut().inflights.remove(&c.txid());
+                    if !locked.is_ended() {
+                        locked.call_timeout(c);
                     }
                 },
                 _ => {},
             }
 
             if state >= CallState::Stalled {
-                task.lock().unwrap().try_iterate().ok();
+                locked.try_iterate().ok();
             }
         });
 
@@ -410,14 +400,6 @@ pub(crate) trait Task: Send + Sync {
         let server = self.dht().lock().unwrap().server().clone();
         let _ = server.lock().unwrap().send_call(call);
         Ok(())
-    }
-
-    fn closest(&self) -> Option<&ClosestSet> {
-        unimplemented!()
-    }
-
-    fn with_closest(&mut self, _closest: ClosestSet) {
-        unimplemented!()
     }
 }
 

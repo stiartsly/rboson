@@ -2,14 +2,12 @@ use std::{
     fmt,
     result::Result as SResult
 };
-
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
     ser::{SerializeMap, Serializer}
 };
 
-#[derive(Debug)]
 pub(crate) struct Error {
     code: i32,
     msg: String,
@@ -17,10 +15,7 @@ pub(crate) struct Error {
 
 impl Error {
     pub(crate) fn new(code: i32, msg: String) -> Self {
-        Self {
-            code,
-            msg
-        }
+        Self { code, msg }
     }
 
     pub(crate) fn code(&self) -> i32 {
@@ -78,7 +73,7 @@ impl<'de> Deserialize<'de> for Error {
             where V: MapAccess<'de>,
             {
                 let mut code: Option<i32> = None;
-                let mut msg: Option<String> = None;
+                let mut msg : Option<String> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {

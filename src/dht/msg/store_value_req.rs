@@ -1,5 +1,8 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
+use hex;
 use serde::{
     Serialize, Deserialize, Serializer, Deserializer,
     de::{self, Visitor, MapAccess, IgnoredAny},
@@ -20,15 +23,9 @@ pub(crate) struct StoreValueRequest {
 
 impl StoreValueRequest {
     pub(crate) fn new(
-        value: Value,
-        token: i32,
-        expected_seq: i32
+        value: Value, token: i32, expected_seq: i32
     ) -> Self {
-        Self {
-            token,
-            expected_seq,
-            value
-        }
+        Self { token, expected_seq, value }
     }
 
     pub(crate) fn token(&self) -> i32 {
@@ -55,7 +52,7 @@ impl Serialize for StoreValueRequest {
         if self.expected_seq >= 0 {
             map.serialize_entry("cas", &self.expected_seq)?;
         }
-        if value.sequence_number() >= 0 {
+        if value.sequence_number() > 0 {
             map.serialize_entry("seq", &value.sequence_number())?;
         }
         if let Some(pk) = value.public_key() {
@@ -121,14 +118,14 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut token: Option<i32> = None;
-                let mut expected_seq: Option<i32> = None;
-                let mut pk: Option<Id> = None;
-                let mut rec: Option<Id> = None;
+                let mut token: Option<i32>  = None;
+                let mut cas  : Option<i32>  = None;
+                let mut pk   : Option<Id>   = None;
+                let mut rec  : Option<Id>   = None;
                 let mut nonce: Option<Vec<u8>> = None;
-                let mut seq: Option<i32> = None;
-                let mut sig: Option<Vec<u8>> = None;
-                let mut data: Option<Vec<u8>> = None;
+                let mut seq  : Option<i32>  = None;
+                let mut sig  : Option<Vec<u8>> = None;
+                let mut data : Option<Vec<u8>> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -140,10 +137,10 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                             }
                         }
                         Field::Cas => {
-                            if expected_seq.is_some() {
+                            if cas.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
                             } else {
-                                expected_seq = Some(map.next_value()?);
+                                cas = Some(map.next_value()?);
                             }
                         }
                         Field::PublicKey => {
@@ -194,11 +191,11 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                     }
                 }
 
-                let expected_seq = expected_seq.unwrap_or(-1);
+                let expected_seq = cas.unwrap_or(-1);
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
-                let seq = seq.unwrap_or_default();
+                let seq = seq.unwrap_or(0);
                 if seq < 0 {
                     return Err(de::Error::custom("sequence number must be larger than or equal to 0"));
                 }
@@ -210,13 +207,10 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
                     return Err(de::Error::custom("data field \"v\" cannot be empty"));
                 }
 
-                let nonce = if let Some(nonce) = nonce.as_ref() {
-                    Nonce::try_from(nonce.as_slice())
-                        .map_err(|_| de::Error::custom("invalid nonce length"))?
-                    .into()
-                } else {
-                    None
-                };
+                let nonce = nonce.map(|v| {
+                    Nonce::try_from(v.as_slice())
+                        .map_err(|_| de::Error::custom("invalid nonce length"))
+                }).transpose()?;
 
                 let value = Value::packed(pk, rec, nonce, sig, data, seq);
                 Ok(StoreValueRequest::new(
@@ -233,10 +227,27 @@ impl<'de> Deserialize<'de> for StoreValueRequest {
 
 impl fmt::Display for StoreValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "tok:{},v:[{}]", self.token, self.value)?;
+        let value = &self.value;
+        write!(f, "tok:{}", self.token)?;
         if self.expected_seq >= 0 {
             write!(f, ",cas:{}", self.expected_seq)?;
         }
+        if value.sequence_number() > 0 {
+            write!(f, ",seq:{}", value.sequence_number())?;
+        }
+        if let Some(pk) = value.public_key() {
+            write!(f, ",k:{}", pk)?;
+        }
+        if let Some(rec) = value.recipient() {
+            write!(f, ",rec:{}", rec)?;
+        }
+        if let Some(nonce) = value.nonce() {
+            write!(f, ",n:{}", hex::encode(nonce.as_bytes()))?;
+        }
+        if let Some(sig) = value.signature() {
+            write!(f, ",sig:{}", hex::encode(sig))?;
+        }
+        write!(f, ",v:{}", hex::encode(value.data()))?;
         Ok(())
     }
 }

@@ -10,7 +10,7 @@ use crate::{
 };
 
 use crate::dht::{
-    rpc::node_entry::Reachability,
+    rpc::rpc_target::Reachability,
     routing::{
         kbucket_entry::KBucketEntry,
         prefix::Prefix,

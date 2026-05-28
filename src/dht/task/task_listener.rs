@@ -17,22 +17,22 @@ impl TaskListener {
         }
     }
 
-    pub(crate) fn with_started_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+    pub(crate) fn started_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
         self.started_fn = Some(f);
         self
     }
 
-    pub(crate) fn with_completed_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+    pub(crate) fn completed_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
         self.completed_fn  = Some(f);
         self
     }
 
-    pub(crate) fn with_canceled_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+    pub(crate) fn canceled_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
         self.canceled_fn = Some(f);
         self
     }
 
-    pub(crate) fn with_ended_fn(&mut self, f: Box<dyn Fn(&dyn Task)>) -> &mut Self {
+    pub(crate) fn ended_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
         self.ended_fn = Some(f);
         self
     }

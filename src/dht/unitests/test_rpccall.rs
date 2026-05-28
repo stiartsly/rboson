@@ -1,9 +1,7 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
-use tokio::time::sleep;
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
@@ -11,7 +9,7 @@ use crate::dht::{
     routing::kbucket_entry::KBucketEntry,
     rpc::{
         rpccall::{RpcCall, State},
-        node_entry::Reachability,
+        rpc_target::Reachability,
     },
 };
 
@@ -30,11 +28,11 @@ fn make_kentry(addr: &str) -> KBucketEntry {
     )
 }
 
-fn make_matching_response(call: &RpcCall) -> Arc<Mutex<Message>> {
+fn make_matching_response(call: &RpcCall) -> Message {
     let mut rsp = Message::ping_rsp(call.txid());
     rsp.set_id(call.target_id());
     rsp.set_remote(call.target_id(), call.target().socket_addr());
-    Arc::new(Mutex::new(rsp))
+    rsp
 }
 
 #[cfg(test)]
@@ -43,17 +41,18 @@ mod tests {
     #[test]
     fn test_expected_rtt() {
         let target = make_target("127.0.0.1:40001");
-        let req = Arc::new(Mutex::new(Message::ping_req()));
-        let mut call = RpcCall::with_node(target.clone(), req.clone());
+        let req = Message::ping_req();
+        let expected_txid = req.txid();
+        let mut call = RpcCall::with_node(target.clone(), req);
 
-        let local_id = Id::random();
-        call.set_localid(local_id.clone())
-            .set_expected_rtt_if_absent(40);
+        let expected_id = Id::random();
+        call.set_localid(expected_id);
+        call.set_expected_rtt_if_absent(40);
 
-        assert_eq!(call.req().lock().unwrap().id(), &local_id);
-        assert_eq!(call.txid(), req.lock().unwrap().txid());
-        assert_eq!(call.target_id(), *target.id());
-        assert_eq!(call.target().socket_addr(), *target.socket_addr());
+        assert_eq!(call.req().id(), &expected_id);
+        assert_eq!(call.txid(), expected_txid);
+        assert_eq!(call.target_id(), target.id().clone());
+        assert_eq!(call.target().socket_addr(), target.socket_addr().clone());
         assert_eq!(call.is_reachable_at_creation(), false);
         assert_eq!(call.is_expected_rtt_set(), true);
         assert_eq!(call.expected_rtt(), 40);
@@ -70,7 +69,7 @@ mod tests {
         let mut entry = make_kentry("127.0.0.1:40002");
         entry.set_reachable(true);
 
-        let req = Arc::new(Mutex::new(Message::ping_req()));
+        let req = Message::ping_req();
         let call = Arc::new(Mutex::new(RpcCall::with_kentry(entry, req)));
         call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(50);
@@ -95,24 +94,22 @@ mod tests {
         assert_eq!(locked.is_reachable_at_creation(), true);
         assert_eq!(locked.state(), State::Responded);
         assert_eq!(locked.rsp().is_some(), true);
-        assert_eq!(locked.id_matched(), true);
         assert_eq!(locked.id_mismatched(), false);
         assert_eq!(locked.addr_mismatched(), false);
-        assert_eq!(locked.resp_time().is_some(), true);
         assert_eq!(locked.rtt().is_some(), true);
         assert_eq!(*responded.lock().unwrap(), 1);
         assert_eq!(*state_changes.lock().unwrap(), vec![State::Sent, State::Responded]);
         drop(locked);
 
         let target = make_target("127.0.0.1:40003");
-        let req = Arc::new(Mutex::new(Message::ping_req()));
+        let req = Message::ping_req();
         let error_call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
         error_call.lock().unwrap().set_cloned(error_call.clone());
 
         let mut err = Message::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
         err.set_id(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
-        error_call.lock().unwrap().respond(Arc::new(Mutex::new(err)));
+        error_call.lock().unwrap().respond(err);
 
         let locked = error_call.lock().unwrap();
         assert_eq!(locked.state(), State::Err);

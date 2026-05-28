@@ -253,14 +253,14 @@ impl RpcServer {
         let txid = call.lock().unwrap().txid();
         self.pending_calls.insert(txid, call.clone());
 
-        let msg  = call.lock().unwrap().req();
-        let mut msg = msg.lock().unwrap();
+        let mut locked = call.lock().unwrap();
+        let mut msg = locked.req_mut();
         match self.send_msg(&mut msg).await {
             Ok(_) => {
-                call.lock().unwrap().sent();
-                if let Some(cb) = self.call_sent_cb.as_ref() {
-                    cb(call);
-                }
+                locked.sent();
+                //TODO: if let Some(cb) = self.call_sent_cb.as_ref() {
+                //    cb(call);
+                //}
             },
             Err(e) => {
                 self.pending_calls.remove(&txid);
@@ -455,16 +455,15 @@ async fn handle_packet(
         return;
     };
 
-    let req = call.lock().unwrap().req();
-    if req.lock().unwrap().remote_addr() == from {
+    let locked = call.lock().unwrap();
+    let req = locked.req();
+    if req.remote_addr() == from {
 
-        if msg.method() != req.lock().unwrap().method() {
+        if msg.method() != req.method() {
             warn!("Got response with wrong method {} from {}@{} for {}",
-                msg.method(), fromid, from, req.lock().unwrap().method());
+                msg.method(), fromid, from, req.method());
 
-            call.lock().unwrap().respond_wrong_method(
-                Arc::new(Mutex::new(msg))
-            );
+            call.lock().unwrap().respond_wrong_method(msg);
             // TODO: suspicious node handling
             return;
         }
@@ -484,9 +483,7 @@ async fn handle_packet(
             drop(server);
         }
 
-        call.lock().unwrap().respond(
-            Arc::new(Mutex::new(msg))
-        );
+        call.lock().unwrap().respond(msg);
         return;
     }
 
@@ -501,7 +498,5 @@ async fn handle_packet(
 
     // TODO: handle suspicious stuff.
 
-    call.lock().unwrap().respond_inconsistent_socket(
-        Arc::new(Mutex::new(msg))
-    );
+    call.lock().unwrap().respond_inconsistent_socket(msg);
 }

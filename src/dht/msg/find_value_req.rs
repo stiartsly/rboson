@@ -1,5 +1,7 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
@@ -25,8 +27,7 @@ pub(crate) struct FindValueRequest {
 impl FindValueRequest {
     pub(crate) fn new(
         target: Id,
-        want4: bool,
-        want6: bool,
+        want4: bool, want6: bool,
         expected_seq: i32,
     ) -> Self {
         Self {
@@ -96,9 +97,9 @@ impl<'de> Deserialize<'de> for FindValueRequest {
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut target: Option<Id> = None;
-                let mut want: Option<i32> = None;
-                    let mut expected_seq: Option<i32> = None;
+                let mut target : Option<Id>  = None;
+                let mut want   : Option<i32> = None;
+                let mut seq    : Option<i32> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -117,10 +118,10 @@ impl<'de> Deserialize<'de> for FindValueRequest {
                             }
                         }
                         Field::ExpectedSeq => {
-                            if expected_seq.is_some() {
+                            if seq.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
                             } else {
-                                expected_seq = Some(map.next_value()?);
+                                seq = Some(map.next_value()?);
                             }
                         }
                         Field::Ignore => {
@@ -129,8 +130,8 @@ impl<'de> Deserialize<'de> for FindValueRequest {
                     }
                 }
 
-                let want = want.unwrap_or_default();
-                let expected_seq = expected_seq.unwrap_or(-1);
+                let want = want.unwrap_or(0);
+                let expected_seq = seq.unwrap_or(-1);
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }

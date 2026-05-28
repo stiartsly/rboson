@@ -1,8 +1,8 @@
 use std::{
+    any::Any,
     sync::{Arc, Mutex},
     collections::VecDeque,
 };
-
 use log::{debug, error};
 
 use crate::Value;
@@ -10,13 +10,15 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     msg::msg::Message,
-    rpc::node_entry::NodeEntry,
+    rpc::rpc_target::Target,
     task::{
         task::{Task, TaskData},
         closest_set::ClosestSet,
         candidate_node::CandidateNode,
     }
 };
+
+const MAX_TODO_ENTRIES: usize = 24;
 
 pub(crate) struct ValueAnnounceTask {
     base_data: TaskData,
@@ -25,10 +27,8 @@ pub(crate) struct ValueAnnounceTask {
     value: Value,
     expected_seq: i32,
 
-    dht: Arc<Mutex<DHT>>,
+    dht: Arc<Mutex<DHT>>
 }
-
-const MAX_TODO_ENTRIES: usize = 24;
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
@@ -79,6 +79,14 @@ impl Task for ValueAnnounceTask {
         self
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
@@ -102,12 +110,11 @@ impl Task for ValueAnnounceTask {
             );
 
             let todo = self.todo.clone();
-            let entry = NodeEntry::from_candidate(cn);
-            let msg = Arc::new(Mutex::new(msg));
+            let target = Target::from_candidate(cn);
             let handler = Consumer::new(move || {
                 todo.lock().unwrap().pop_front();
             });
-             let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
                 error!("Sending 'storeValue' request error: {}", e);
              });
         }

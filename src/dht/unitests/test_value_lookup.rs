@@ -9,7 +9,6 @@ use crate::dht::{
     dht::DHT,
     token_manager::TokenManager,
     task::{
-        task::Task,
         lookup_task::LookupTask,
         value_lookup::ValueLookupTask,
     },
@@ -51,6 +50,6 @@ mod tests {
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);
-        assert_eq!(Task::result(&task).is_none(), true);
+        assert_eq!(task.result().is_none(), true);
     }
 }

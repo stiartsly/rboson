@@ -46,45 +46,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_task() {
+    fn test_task() {
         let target = Id::random();
-        let task = NodeLookupTask::new(make_dht(), target.clone(), true);
+        let dht = make_dht();
+        let task = NodeLookupTask::new(dht.clone(), target.clone(), true);
 
         assert_eq!(task.target(), &target);
-        assert_eq!(task.is_bootstrap(), false);
-        assert_eq!(task.want_token(), false);
-        assert_eq!(task.want_target(), false);
         assert_eq!(task.candidate_size(), 0);
-    }
 
-    #[test]
-    fn test_task_with_configuration() {
+        assert!(!task.is_bootstrap());
+        assert!(!task.want_token());
+        assert!(!task.want_target());
+
         let target = Id::random();
-        let mut task = NodeLookupTask::new(make_dht(), target, false);
+        let mut task = NodeLookupTask::new(dht.clone(), target, false);
 
-        task.with_bootstrap(true)
-            .with_want_token(true)
-            .with_want_target(true);
+        task.with_bootstrap(true);
+        task.with_want_token(true);
+        task.with_want_target(true);
 
-        assert_eq!(task.is_bootstrap(), true);
-        assert_eq!(task.want_token(), true);
-        assert_eq!(task.want_target(), true);
-    }
+        assert_eq!(task.target(), &target);
+        assert_eq!(task.candidate_size(), 0);
 
-    #[test]
-    fn test_task_with_inject_candidates() {
-        let target = Id::random();
-        let mut task = NodeLookupTask::new(make_dht(), target, false);
+        assert!(task.is_bootstrap());
+        assert!(task.want_token());
+        assert!(task.want_target());
+
         let candidate = NodeInfo::new(
             Id::random(),
             "1.1.1.1:39001".parse().unwrap(),
         );
-
         task.with_inject_candidates(vec![candidate.clone()]);
-
         assert_eq!(task.candidate_size(), 1);
 
         let next = task.next_candidate().expect("candidate should be present");
-        assert_eq!(next.lock().unwrap().id(), candidate.id());
+        let locked_next = next.lock().unwrap();
+        assert_eq!(locked_next.id(), candidate.id());
+        assert_eq!(locked_next.as_ref(), &candidate);
     }
 }

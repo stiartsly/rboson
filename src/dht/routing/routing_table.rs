@@ -15,7 +15,7 @@ use serde::{
 use crate::{Id};
 
 use crate::dht::{
-    rpc::node_entry::Reachability,
+    rpc::rpc_target::Reachability,
     routing:: {
         kclosest_nodes::KClosestNodes,
         prefix::Prefix,

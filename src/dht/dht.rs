@@ -18,7 +18,7 @@ use crate::{
     Value,
     core::version,
     crypto_identity::CryptoIdentity,
-    errors::{ Result, StateError}
+    errors::Result
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -30,8 +30,8 @@ use crate::dht::{
     lookup_option::LookupOption,
     rpc::{
         rpccall::{self, RpcCall},
-        server::{self, RpcServer},
-        node_entry::Reachability,
+        rpc_server::{self, RpcServer},
+        rpc_target::Reachability,
     },
     msg::{
         msg::{Kind, Method, Body, Message},
@@ -50,10 +50,9 @@ use crate::dht::{
         kbucket::KBucket,
     },
     task::{
-        task::{State, Task, TaskResult},
+        task::{State, Task},
         task_manager::TaskManager,
         task_listener::TaskListener,
-        ping_refresh::PingRefreshTask,
         lookup_task::LookupTask,
         node_lookup::NodeLookupTask,
         peer_lookup::PeerLookupTask,
@@ -204,17 +203,15 @@ impl DHT {
         task.with_name("Bootstrap: filling home bucket".into());
         task.with_bootstrap(true);
         task.with_inject_candidates(nodes);
-        task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |_| {
-                promise.complete(Ok(()))
-            }));
-            l
-        });
+        task.with_listener(
+            TaskListener::new().ended_fn(
+                Box::new(move |_| promise.complete(Ok(())))
+            )
+        );
 
         let task = Arc::new(Mutex::new(task as Box<dyn Task>));
         let taskman = dht.lock().unwrap().taskman().clone();
-        taskman.lock().unwrap().add(task);
+        let _ = taskman.lock().unwrap().add(task);
         return future;
     }
 
@@ -245,19 +242,17 @@ impl DHT {
                 false,
             ));
             task.with_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
-            task.with_listener({
-                let mut l = TaskListener::new();
-                l.with_ended_fn(Box::new(move |_| {
-                    promise.complete(Ok(()))
-                }));
-                l
-            });
+            task.with_listener(
+                TaskListener::new().ended_fn(
+                    Box::new(move |_| promise.complete(Ok(())))
+                )
+            );
 
             let task = Arc::new(Mutex::new(task as Box<dyn Task>));
             //task.lock().unwrap().set_cloned(task.clone());
 
             let taskman = dht.lock().unwrap().taskman().clone();
-            taskman.lock().unwrap().add(task);
+            let _ = taskman.lock().unwrap().add(task);
 
             futures_unordered.push(future);
         }
@@ -287,7 +282,7 @@ impl DHT {
         }));
 
         //task.lock().unwrap().set_cloned(task.clone());
-        self.taskman().lock().unwrap().add(task);
+        let _ = self.taskman().lock().unwrap().add(task);
     }
 
     pub(crate) fn random_ping(&mut self) {
@@ -305,7 +300,7 @@ impl DHT {
         };
 
         info!("Periodic: random ping ...");
-        let msg = Arc::new(Mutex::new(Message::ping_req()));
+        let msg = Message::ping_req();
         let call = Arc::new(Mutex::new(RpcCall::with_kentry(
             entry,
             msg
@@ -380,7 +375,7 @@ impl DHT {
                 .enable_all()
                 .build()
                 .expect("Failed to create Tokio runtime");
-            rt.block_on(server::run_loop(cloned_server));
+            rt.block_on(rpc_server::run_loop(cloned_server));
         });
 
         self.taskman = Some(taskman);
@@ -607,11 +602,11 @@ impl DHT {
             let msg = Message::ping_req();
             let call = Arc::new(Mutex::new(RpcCall::with_kentry(
                 entry,
-                Arc::new(Mutex::new(msg))
+                msg
             )));
 
             call.lock().unwrap().set_cloned(call.clone());
-            self.server().lock().unwrap().send_call(call);
+            let _ = self.server().lock().unwrap().send_call(call);
         }
     }
 
@@ -1074,7 +1069,7 @@ impl DHT {
 
             let call = Arc::new(Mutex::new(RpcCall::with_node(
                 node,
-                Arc::new(Mutex::new(msg)),
+                msg
             )));
 
 
@@ -1093,7 +1088,7 @@ impl DHT {
                             return;
                         };
 
-                        if let Some(Body::FindNodeRsp(body)) = rsp.lock().unwrap().body() {
+                        if let Some(Body::FindNodeRsp(body)) = rsp.body() {
                             nodes = body.nodes(network).map(|v| v.to_vec());
                         };
                     }
@@ -1189,21 +1184,15 @@ impl DHT {
         );
         task.with_name(format!("Lookup node: {}", target));
         task.with_want_target(true);
-        task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |t: &dyn Task| {
-                let result = t.result().map(|r|
-                    match r {
-                        TaskResult::NodeInfo(v) => Some(v),
-                        _ => None
-                    }
-                ).flatten();
-                promise.complete(Ok(result));
-            }));
-            l
-        });
+        task.with_listener(
+            TaskListener::new().ended_fn(
+                Box::new(move |t: &dyn Task| {
+                    let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
+                    promise.complete(Ok(task.result()));
+            }))
+        );
 
-        taskman.lock().unwrap().add(
+        let _ = taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
         );
 
@@ -1231,21 +1220,16 @@ impl DHT {
             option != LookupOption::Conservative
         );
         task.with_name(format!("Lookup value: {}", value_id));
-        task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |t: &dyn Task| {
-                let result = t.result().map(|r|
-                    match r {
-                        TaskResult::Value(v) => Some(v),
-                        _ => None
-                    }
-                ).flatten();
-                promise.complete(Ok(result));
-            }));
-            l
-        });
+        task.with_listener(
+            TaskListener::new().ended_fn(
+                Box::new(move |t: &dyn Task| {
+                    let task = t.as_any().downcast_ref::<ValueLookupTask>().unwrap();
+                    promise.complete(Ok(task.result()));
+            }))
 
-        taskman.lock().unwrap().add(
+        );
+
+        let _ = taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
         );
 
@@ -1270,13 +1254,11 @@ impl DHT {
                 dht.clone(), value.clone(), expected_seq
             );
             task.with_name(format!("Store value:{}", &value.id()));
-            task.with_listener({
-                let mut l = TaskListener::new();
-                l.with_ended_fn(Box::new(move |_: &dyn Task| {
-                    promise.complete(Ok(()));
-                }));
-                l
-            });
+            task.with_listener(
+                TaskListener::new().ended_fn(
+                    Box::new(move |_| promise.complete(Ok(())))
+                )
+            );
             Arc::new(Mutex::new(
                 Box::new(task) as Box<dyn Task>)
             )
@@ -1289,33 +1271,33 @@ impl DHT {
         task.with_want_token(true);
         task.set_nested(announce_task.clone());
         task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |t: &dyn Task| {
-                    if t.state() != State::Completed {
+            TaskListener::new().ended_fn(
+                Box::new(move |t: &dyn Task| {
+                    let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
+                    if task.state() != State::Completed {
                         return;
                     }
-                    let Some(closest) = t.closest() else {
-                        // This should never happen
-                    warn!("!!! Store value task not started because the node lookup task got no closest nodes.");
-                    announce_task.lock().unwrap().cancel();
-                    return;
-                };
-                if closest.size() == 0 {
-                    // This should never happen
-                    warn!("!!! Store value task not started because the node lookup task got the empty closest nodes.");
-                    announce_task.lock().unwrap().cancel();
-                    return;
-                }
 
-                let announce_task = announce_task.clone();
-                announce_task.lock().unwrap().with_closest(closest.clone());
-                taskman.lock().unwrap().add(announce_task);
-            }));
-            l
+                    let announce_task = announce_task.clone();
+                    let mut locked = announce_task.lock().unwrap();
+                    let closest = task.closest();
+                    if closest.is_empty() {
+                        // This should never happen
+                        warn!("!!! Store value task not started because the node lookup task got the empty closest nodes.");
+                        locked.cancel();
+                        return;
+                    }
+
+                    let task = locked.as_any_mut().downcast_mut::<ValueAnnounceTask>().unwrap();
+                    task.with_closest(closest.clone());
+                    drop(locked);
+
+                    let _ = taskman.lock().unwrap().add(announce_task);
+            }))
         });
 
         let taskman = dht.lock().unwrap().taskman();
-        taskman.lock().unwrap().add(
+        let _ = taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task) as Box<dyn Task>))
         );
 
@@ -1346,18 +1328,14 @@ impl DHT {
         );
         task.with_name(format!("Lookup peer: {}", peerid));
         task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |t: &dyn Task| {
-                let result = match t.result() {
-                    Some(TaskResult::PeerInfo(v)) => v,
-                    _ => Vec::new()
-                };
-                promise.complete(Ok(result));
-            }));
-            l
+            TaskListener::new().ended_fn(
+                Box::new(move |t: &dyn Task| {
+                    let task = t.as_any().downcast_ref::<PeerLookupTask>().unwrap();
+                    promise.complete(Ok(task.result()));
+            }))
         });
 
-        taskman.lock().unwrap().add(
+        let _ = taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task)))
         );
 
@@ -1383,13 +1361,11 @@ impl DHT {
                 expected_seq
             );
             task.with_name(format!("Announce peer: {}", peer.id()));
-            task.with_listener({
-                let mut l = TaskListener::new();
-                l.with_ended_fn(Box::new(move |_: &dyn Task| {
-                    promise.complete(Ok(()));
-                }));
-                l
-            });
+            task.with_listener(
+                TaskListener::new().ended_fn(
+                    Box::new(move |_| promise.complete(Ok(())))
+                )
+            );
 
             Arc::new(Mutex::new(
                 Box::new(task) as Box<dyn Task>
@@ -1401,32 +1377,34 @@ impl DHT {
         task.with_want_token(true);
         task.with_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
         task.set_nested(announce_task.clone());
-        task.with_listener({
-            let mut l = TaskListener::new();
-            l.with_ended_fn(Box::new(move |t: &dyn Task| {
-                if t.state() != State::Completed {
-                    return;
-                }
-                let Some(closest) = t.closest() else {
-                    // This should never happen
-                    warn!("!!! Announce peer task not started because the node lookup task got no closest nodes.");
-                    return;
-                };
-                if closest.size() == 0 {
-                    // This should never happen
-                    warn!("!!! Announce peer task not started because the node lookup task got the empty closest nodes.");
-                    return;
-                }
+        task.with_listener(
+            TaskListener::new().ended_fn(
+                Box::new(move |t: &dyn Task| {
+                    let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
+                    if t.state() != State::Completed {
+                        return;
+                    }
 
-                let announce_task = announce_task.clone();
-                announce_task.lock().unwrap().with_closest(closest.clone());
-                taskman.lock().unwrap().add(announce_task);
-            }));
-            l
-        });
+                    let announce_task = announce_task.clone();
+                    let mut locked = announce_task.lock().unwrap();
+                    let closest = task.closest();
+                    if closest.is_empty() {
+                        // This should never happen
+                        warn!("!!! Peer announce task not started because the node lookup task got the empty closest nodes.");
+                        locked.cancel();
+                        return;
+                    }
+
+                    let task = locked.as_any_mut().downcast_mut::<PeerAnnounceTask>().unwrap();
+                    task.with_closest(closest.clone());
+                    drop(locked);
+
+                    let _ = taskman.lock().unwrap().add(announce_task);
+            }))
+        );
 
         let taskman = dht.lock().unwrap().taskman();
-        taskman.lock().unwrap().add(
+        let _ =  taskman.lock().unwrap().add(
             Arc::new(Mutex::new(Box::new(task) as Box<dyn Task>))
         );
 

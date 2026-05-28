@@ -1,16 +1,16 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    any::Any,
+    sync::{Arc, Mutex}
+};
 use log::{debug, error};
 
-use crate::{
-    Id,
-    NodeInfo,
-};
+use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     rpc::{
         rpccall::RpcCall,
-        node_entry::NodeEntry,
+        rpc_target::Target,
     },
     routing::{
         kbucket::KBucket,
@@ -22,7 +22,7 @@ use crate::dht::{
         lookup_rsp::LookupResponse,
     },
     task::{
-        task::{Task, TaskData, TaskResult},
+        task::{Task, TaskData},
         lookup_task::{LookupTask, LookupTaskData},
     }
 };
@@ -40,7 +40,6 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result: Option<NodeInfo>,
-
     dht: Arc<Mutex<DHT>>,
 }
 
@@ -62,24 +61,24 @@ impl NodeLookupTask {
         }
     }
 
-    pub(crate) fn with_bootstrap(&mut self, bootstrap: bool) -> &mut Self {
+    pub(crate) fn with_bootstrap(&mut self, bootstrap: bool) {
         self.bootstrap = bootstrap;
-        self
     }
 
-    pub(crate) fn with_want_token(&mut self, token: bool) -> &mut Self {
+    pub(crate) fn with_want_token(&mut self, token: bool) {
         self.want_token = token;
-        self
     }
 
-    pub(crate) fn with_want_target(&mut self, want_target: bool) -> &mut Self {
+    pub(crate) fn with_want_target(&mut self, want_target: bool) {
         self.want_target = want_target;
-        self
     }
 
-    pub(crate) fn with_inject_candidates(&mut self, nodes: Vec<NodeInfo>) -> &mut Self {
+    pub(crate) fn with_inject_candidates(&mut self, nodes: Vec<NodeInfo>) {
         self.add_candidates_with_nodes(nodes);
-        self
+    }
+
+    pub(crate) fn result(&self) -> Option<NodeInfo> {
+        self.result.clone()
     }
 
     #[cfg(test)]
@@ -127,12 +126,16 @@ impl Task for NodeLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
-        self.dht.clone()
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
-    fn result(&self) -> Option<TaskResult> {
-        self.result.as_ref().map(|v| TaskResult::NodeInfo(v.clone()))
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn dht(&self) -> Arc<Mutex<DHT>> {
+        self.dht.clone()
     }
 
     fn prepare(&mut self) {
@@ -142,10 +145,7 @@ impl Task for NodeLookupTask {
         };
 
         let kes:Vec<KBucketEntry> = {
-            let dht = Task::dht(self);
-            let locked_dht = dht.lock().unwrap();
-            let rt = locked_dht.rt();
-
+            let rt = self.dht.lock().unwrap().rt();
             let mut kns = KClosestNodes::new(
                 rt,
                 target,
@@ -174,8 +174,8 @@ impl Task for NodeLookupTask {
                 None => break
             };
 
-            let ne = NodeEntry::from_candidate(next.clone());
-            let network = Task::dht(self).lock().unwrap().network();
+            let target = Target::from_candidate(next.clone());
+            let network = self.dht.lock().unwrap().network();
             let msg = Message::find_node_req(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -183,11 +183,10 @@ impl Task for NodeLookupTask {
                 self.want_token
             );
 
-            let msg = Arc::new(Mutex::new(msg));
             let handler = Consumer::new(move || {
                 next.lock().unwrap().set_sent();
             });
-            let _ = self.send_call(ne, msg, Some(handler)).map_err(|e| {
+            let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
                 error!("Sending 'findNode' request error: {}", e);
             });
         }
@@ -202,14 +201,12 @@ impl Task for NodeLookupTask {
             return;
         }
 
-        let Some(msg) = call.rsp_ref() else {
-            return;
-        };
-        let Some(Body::FindNodeRsp(body)) = msg.body() else {
+        let msg = call.rsp().expect("no response set");
+        let Body::FindNodeRsp(body) = msg.body().expect("no message body") else {
             return;
         };
 
-        let network = Task::dht(self).lock().unwrap().network();
+        let network = self.dht.lock().unwrap().network();
         let nodes = body.nodes(network);
         let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;
@@ -234,10 +231,14 @@ impl Task for NodeLookupTask {
                 break;
             }
         }
-        if self.result.is_some() {
-            if LookupTask::done_on_eligible_result(self) {
-                LookupTask::mark_lookup_done(self);
-            }
+
+        if self.result.is_none() {
+            return;
+        }
+
+        // If the target node is found, consider the lookup done immediately.
+        if LookupTask::data(self).done_on_eligible_result() {
+            LookupTask::data_mut(self).mark_lookup_done();
         }
     }
 

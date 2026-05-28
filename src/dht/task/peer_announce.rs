@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     sync::{Arc, Mutex},
     collections::VecDeque,
 };
@@ -9,7 +10,7 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     msg::msg::Message,
-    rpc::node_entry::NodeEntry,
+    rpc::rpc_target::Target,
     task::{
         closest_set::ClosestSet,
         candidate_node::CandidateNode,
@@ -24,7 +25,7 @@ pub(crate) struct PeerAnnounceTask {
     peer: PeerInfo,
     expected_seq: i32,
 
-    dht: Arc<Mutex<DHT>>,
+    dht: Arc<Mutex<DHT>>
 }
 
 const MAX_TODO_ENTRIES: usize = 24;
@@ -36,11 +37,11 @@ impl PeerAnnounceTask {
         expected_seq: i32
     ) -> Self {
         Self {
+            dht,
             base_data: TaskData::new(),
             peer,
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
-            expected_seq,
-            dht,
+            expected_seq
         }
     }
 
@@ -78,14 +79,20 @@ impl Task for PeerAnnounceTask {
         self
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
     fn iterate(&mut self) {
-        println!("can_dorequest: {}", self.can_dorequest());
         while self.can_dorequest() {
-            println!("Iterating PeerAnnounceTask: todo.len()={}", self.todo.lock().unwrap().len());
             let cn = match self.todo.lock().unwrap().front() {
                 Some(cn) => cn.clone(),
                 None => break,
@@ -104,12 +111,11 @@ impl Task for PeerAnnounceTask {
             );
 
             let todo = self.todo.clone();
-            let entry= NodeEntry::from_candidate(cn);
-            let msg  = Arc::new(Mutex::new(msg));
+            let target = Target::from_candidate(cn);
             let handler = Consumer::new(move || {
                 todo.lock().unwrap().pop_front();
             });
-             let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
                 error!("Sending 'announcePeer' request error: {}", e);
              });
         }

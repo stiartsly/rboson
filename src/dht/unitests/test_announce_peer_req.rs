@@ -23,23 +23,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default() {
-        let peer = make_peer();
-        let req = AnnouncePeerRequest::new(peer.clone(), 42, Some(8));
-
-        assert_eq!(req.token(), 42);
-        assert_eq!(req.expected_seq(), 8);
-        assert_eq!(req.peer(), &peer);
-    }
-
-    #[test]
     fn test_cbor() {
         let peer = make_peer();
         let req = AnnouncePeerRequest::new(peer.clone(), 42, Some(8));
+        assert_eq!(req.token(), 42);
+        assert_eq!(req.expected_seq(), 8);
+        assert_eq!(req.peer(), &peer);
 
-        let cbor = serde_cbor::to_vec(&req)
+        let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
-        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&cbor)
+        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
@@ -48,13 +41,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cbor_without_cas() {
+    fn test_cbor_no_expected_seq() {
         let peer = make_peer();
         let req = AnnouncePeerRequest::new(peer.clone(), 42, None);
 
-        let cbor = serde_cbor::to_vec(&req)
+        assert_eq!(req.token(), 42);
+        assert_eq!(req.expected_seq(), -1);
+        assert_eq!(req.peer(), &peer);
+
+        let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
-        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&cbor)
+        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);

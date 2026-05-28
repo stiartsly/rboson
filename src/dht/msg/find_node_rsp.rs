@@ -1,12 +1,13 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
 use serde_cbor::value::to_value;
 use serde::{
     Deserialize, Serialize,
     de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{Serializer, SerializeMap },
+    ser::{self, Serializer, SerializeMap},
 };
-
 use crate::{
     NodeInfo,
     dht::msg::lookup_rsp::{
@@ -42,14 +43,14 @@ impl Serialize for FindNodeResponse {
     {
         let mut s = se.serialize_map(None)?;
         if let Some(ns4) = self.nodes4() {
-            let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
-                "Failed to convert nodes4 to CBOR Value"
+            let value = to_value(&ns4).map_err(|e| ser::Error::custom(
+                format!("Convert nodes4 to CBOR Value error: {}", e)
             ))?;
             s.serialize_entry("n4", &value)?;
         }
         if let Some(ns6) = self.nodes6() {
-            let value = to_value(&ns6).map_err(|_| serde::ser::Error::custom(
-                "Failed to convert nodes6 to CBOR Value"
+            let value = to_value(&ns6).map_err(|e| ser::Error::custom(
+                format!("Convert nodes6 to CBOR Value error: {}", e)
             ))?;
             s.serialize_entry("n6", &value)?;
         }
@@ -88,7 +89,7 @@ impl<'de> Deserialize<'de> for FindNodeResponse {
             type Value = FindNodeResponse;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("A FindNodeResponse struct")
+                formatter.write_str("a FindNodeResponse struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
@@ -102,21 +103,21 @@ impl<'de> Deserialize<'de> for FindNodeResponse {
                     match key {
                         Field::Nodes4 => {
                             if nodes4.is_some() {
-                                return Err(serde::de::Error::duplicate_field("n4"));
+                                return Err(de::Error::duplicate_field("n4"));
                             } else {
                                 nodes4 = Some(map.next_value()?);
                             }
                         }
                         Field::Nodes6 => {
                             if nodes6.is_some() {
-                                return Err(serde::de::Error::duplicate_field("n6"));
+                                return Err(de::Error::duplicate_field("n6"));
                             } else {
                                 nodes6 = Some(map.next_value()?);
                             }
                         }
                         Field::Token => {
                             if token.is_some() {
-                                return Err(serde::de::Error::duplicate_field("tok"));
+                                return Err(de::Error::duplicate_field("tok"));
                             } else {
                                 token = Some(map.next_value()?);
                             }

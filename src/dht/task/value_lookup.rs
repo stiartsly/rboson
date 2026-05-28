@@ -1,14 +1,17 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    any::Any,
+    sync::{Arc, Mutex}
+};
 use log::{debug, error, warn};
 
-use crate::{Id, Network};
+use crate::{Id, Value};
 use crate::dht::{
     dht::DHT,
     eligible_value::EligibleValue,
     consumer::Consumer,
     rpc::{
         rpccall::RpcCall,
-        node_entry::NodeEntry,
+        rpc_target::Target,
     },
     msg::{
         lookup_rsp::LookupResponse,
@@ -21,7 +24,7 @@ use crate::dht::{
     },
     task::{
         lookup_task::{LookupTask, LookupTaskData},
-        task::{Task, TaskData, TaskResult},
+        task::{Task, TaskData},
     }
 };
 
@@ -30,7 +33,6 @@ pub(crate) struct ValueLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligibleValue,
-
     dht: Arc<Mutex<DHT>>,
 }
 
@@ -47,6 +49,10 @@ impl ValueLookupTask {
             result: EligibleValue::new(target, expected_seq),
             dht,
         }
+    }
+
+    pub(crate) fn result(&self) -> Option<Value> {
+        self.result.value()
     }
 }
 
@@ -81,18 +87,23 @@ impl Task for ValueLookupTask {
         self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
-    fn result(&self) -> Option<TaskResult> {
-        self.result.value().as_ref().map(|v| TaskResult::Value(v.clone()))
-    }
-
     fn prepare(&mut self) {
+        let rt = self.dht.lock().unwrap().rt();
         let entries:Vec<KBucketEntry> = {
             let mut kns = KClosestNodes::new(
-                Task::dht(self).lock().unwrap().rt(),
+                rt,
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -119,8 +130,8 @@ impl Task for ValueLookupTask {
                 None => break,
             };
 
-            let entry = NodeEntry::from_candidate(next.clone());
-            let network = Task::dht(self).lock().unwrap().network();
+            let target = Target::from_candidate(next.clone());
+            let network = self.dht.lock().unwrap().network();
             let msg = Message::find_value_req(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -128,11 +139,10 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let msg = Arc::new(Mutex::new(msg));
             let handler = Consumer::new(move || {
                 next.lock().unwrap().set_sent();
             });
-            let _ = self.send_call(entry, msg, Some(handler)).map_err(|e| {
+            let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
                 error!("Sending 'find_value' request error: {}", e);
             });
         }
@@ -144,15 +154,13 @@ impl Task for ValueLookupTask {
         if call.id_mismatched() {
             return;
         }
-        let Some(msg) = call.rsp_ref() else {
-            return;
-        };
-        let Some(Body::FindValueRsp(body)) = msg.body() else {
+        let rsp = call.rsp().expect("no response set");
+        let Body::FindValueRsp(body) = rsp.body().expect("no message body") else {
             return;
         };
 
         if let Some(value) = body.value() {
-            if !self.result.update(value.clone(), true) {
+            if !self.result.update(value.clone(), false) {
                 warn!(
                     "{}#{} dropping value response from {} due to ineligible value data",
                     self.task_name(),
@@ -162,25 +170,13 @@ impl Task for ValueLookupTask {
                 return;
             }
             if !self.result.is_empty() {
-                if LookupTask::done_on_eligible_result(self) {
-                    debug!("{}#{} value is eligible, mark lookup done",
-                        self.task_name(),
-                        self.task_id()
-                    );
-                    LookupTask::mark_lookup_done(self);
-                } else {
-                    debug!("{}#{} value is ineligible, continue iteration for more precise results",
-                        self.task_name(),
-                        self.task_id()
-                    );
+                if LookupTask::data(self).done_on_eligible_result() {
+                    LookupTask::data_mut(self).mark_lookup_done();
                 }
             }
         } else {
-            let network = Task::dht(self).lock().unwrap().network();
-            let nodes = match network {
-                Network::IPv4 => body.nodes4(),
-                Network::IPv6 => body.nodes6()
-            };
+            let network = self.dht.lock().unwrap().network();
+            let nodes = body.nodes(network);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

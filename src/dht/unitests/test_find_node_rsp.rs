@@ -14,24 +14,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new1() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node = NodeInfo::new(nodeid, addr);
-
-        let rsp = FindNodeResponse::new(
-            Some(vec![node.clone()]),
-            None,
-            29001,
-        );
-
-        assert_eq!(rsp.nodes4(), Some([node].as_slice()));
-        assert_eq!(rsp.nodes6(), None);
-        assert_eq!(rsp.token(), 29001);
-    }
-
-    #[test]
-    fn test_new2() {
+    fn test_with_nodes() {
         let nodeid = Id::random();
         let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
         let node4 = NodeInfo::new(nodeid, addr4);
@@ -42,8 +25,9 @@ mod tests {
             0,
         );
 
-        assert_eq!(rsp.nodes(Network::IPv4), Some([node4.clone()].as_slice()));
-        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        let nodes4 = vec![node4.clone()];
+        assert_eq!(rsp.nodes(Network::IPv4), Some(nodes4.as_slice()));
+        assert_eq!(rsp.nodes4(), Some(nodes4.as_slice()));
         assert_eq!(rsp.nodes6(), None);
         assert_eq!(rsp.token(), 0);
 
@@ -57,7 +41,8 @@ mod tests {
             0,
         );
 
-        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        let nodes6 = vec![node6.clone()];
+        assert_eq!(rsp.nodes6(), Some(nodes6.as_slice()));
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.token(), 0);
 
@@ -67,58 +52,33 @@ mod tests {
             1,
         );
 
-        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
-        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        let nodes4 = [node4.clone()];
+        let nodes6 = [node6.clone()];
+        assert_eq!(rsp.nodes4(), Some(nodes4.as_slice()));
+        assert_eq!(rsp.nodes6(), Some(nodes6.as_slice()));
         assert_eq!(rsp.token(), 1);
     }
 
     #[test]
-    fn test_serde_default() {
+    fn test_serde() {
         let nodeid = Id::random();
         let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let ni = NodeInfo::new(nodeid.clone(), addr);
-        let token = 29001;
-
-        let rsp = FindNodeResponse::new(
-            Some(vec![ni.clone()]),
-            None,
-            token
-        );
-
-        let cbor = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
-        let decoded: FindNodeResponse = serde_cbor::from_slice(cbor.as_slice())
-            .expect("Deserialization failed");
-
-        assert_eq!(decoded.token(), token);
-        assert_eq!(decoded.nodes4().is_some(), true);
-        assert_eq!(decoded.nodes6().is_some(), false);
-
-        let nodes4 = decoded.nodes4().unwrap();
-        assert_eq!(nodes4.len(), 1);
-        assert_eq!(nodes4[0], ni);
-    }
-
-    #[test]
-    fn test_serde_with_ipv6() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let ni4 = NodeInfo::new(nodeid.clone(), addr);
+        let node4 = NodeInfo::new(nodeid.clone(), addr);
 
         let nodeid = Id::random();
         let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let ni6 = NodeInfo::new(nodeid.clone(), addr);
-        let token = 29001;
+        let node6 = NodeInfo::new(nodeid.clone(), addr);
+        let token = 12345;
 
         let rsp = FindNodeResponse::new(
-            Some(vec![ni4.clone()]),
-            Some(vec![ni6.clone()]),
+            Some(vec![node4.clone()]),
+            Some(vec![node6.clone()]),
             token
         );
 
-        let cbor = serde_cbor::to_vec(&rsp)
+        let necoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
-        let decoded: FindNodeResponse = serde_cbor::from_slice(cbor.as_slice())
+        let decoded = serde_cbor::from_slice::<FindNodeResponse>(&necoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.token(), token);
@@ -127,10 +87,42 @@ mod tests {
 
         let nodes4 = decoded.nodes4().unwrap();
         assert_eq!(nodes4.len(), 1);
-        assert_eq!(nodes4[0], ni4);
+        assert_eq!(nodes4[0], node4);
 
         let nodes6 = decoded.nodes6().unwrap();
         assert_eq!(nodes6.len(), 1);
-        assert_eq!(nodes6[0], ni6);
+        assert_eq!(nodes6[0], node6);
+    }
+
+    #[test]
+    fn test_serde_nodes4() {
+        let nodeid = Id::random();
+        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
+        let node1 = NodeInfo::new(nodeid.clone(), addr);
+
+        let nodeid = Id::random();
+        let addr = "127.0.0.1:29002".parse::<SocketAddr>().unwrap();
+        let node2 = NodeInfo::new(nodeid.clone(), addr);
+        let token = 12345;
+
+        let rsp = FindNodeResponse::new(
+            Some(vec![node1.clone(), node2.clone()]),
+            None,
+            token
+        );
+
+        let necoded = serde_cbor::to_vec(&rsp)
+            .expect("Serialization failed");
+        let decoded = serde_cbor::from_slice::<FindNodeResponse>(&necoded)
+            .expect("Deserialization failed");
+
+        assert_eq!(decoded.token(), token);
+        assert_eq!(decoded.nodes4().is_some(), true);
+        assert_eq!(decoded.nodes6().is_some(), false);
+
+        let nodes4 = decoded.nodes4().unwrap();
+        assert_eq!(nodes4.len(), 2);
+        assert_eq!(nodes4[0], node1);
+        assert_eq!(nodes4[1], node2);
     }
 }

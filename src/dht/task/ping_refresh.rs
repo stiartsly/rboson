@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     sync::{Arc, Mutex},
     collections::VecDeque,
 };
@@ -11,7 +12,7 @@ use crate::dht::{
     task::task::{Task, TaskData},
     rpc::{
         rpccall::RpcCall,
-        node_entry::NodeEntry,
+        rpc_target::Target,
     },
     routing::{
         kbucket::KBucket,
@@ -23,10 +24,8 @@ pub(crate) struct PingRefreshTask {
     base_data: TaskData,
 
     todo: Arc<Mutex<VecDeque<KBucketEntry>>>,
-
     // Whether to ping all nodes in the bucket, regardless of their ping status.
     check_all: bool,
-
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
@@ -43,7 +42,6 @@ impl PingRefreshTask {
 
             check_all           : false,
             remove_on_timeout   : false,
-
             dht,
         }
     }
@@ -92,6 +90,14 @@ impl Task for PingRefreshTask {
         self
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
@@ -133,14 +139,14 @@ impl Task for PingRefreshTask {
                 continue;
             }
 
-            let msg = Arc::new(Mutex::new(Message::ping_req()));
+            let msg = Message::ping_req();
             let todo = self.todo.clone();
-            let ke = NodeEntry::from_kentry(kentry);
+            let target = Target::from_entry(kentry);
 
             let handler = Consumer::new(move || {
                 todo.lock().unwrap().pop_front();
             });
-            self.send_call(ke, msg, Some(handler)).map_err(|e| {
+            self.send_call(target, msg, Some(handler)).map_err(|e| {
                error!("Error on sending 'PingRequest' message: {}", e);
             }).ok();
         }

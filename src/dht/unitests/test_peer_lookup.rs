@@ -11,7 +11,7 @@ use crate::dht::{
     task::{
         lookup_task::LookupTask,
         peer_lookup::PeerLookupTask,
-        task::{Task, TaskResult},
+        task::Task
     },
     token_manager::TokenManager,
     storage::{
@@ -52,10 +52,6 @@ mod tests {
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);
-
-        let Some(TaskResult::PeerInfo(peers)) = Task::result(&task) else {
-            panic!("expected peer result");
-        };
-        assert!(peers.is_empty());
+        assert_eq!(task.result().is_empty(), true);
     }
 }

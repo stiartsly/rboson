@@ -1,5 +1,8 @@
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    result::Result as SResult
+};
+use hex;
 use serde::{
     Serialize, Deserialize, Serializer, Deserializer,
     de::{self, Visitor, MapAccess, IgnoredAny},
@@ -42,8 +45,7 @@ impl AnnouncePeerRequest {
 
 impl Serialize for AnnouncePeerRequest {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+    where S: Serializer,
     {
         let peer = &self.peer;
         let mut map = se.serialize_map(None)?;
@@ -52,7 +54,6 @@ impl Serialize for AnnouncePeerRequest {
         if self.expected_seq >= 0 {
             map.serialize_entry("cas", &self.expected_seq)?;
         }
-
         map.serialize_entry("k", peer.id())?;
         map.serialize_entry("n", peer.nonce())?;
         if peer.sequence_number() > 0 {
@@ -122,23 +123,23 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
             type Value = AnnouncePeerRequest;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("An AnnouncePeerRequest struct")
+                formatter.write_str("an AnnouncePeerRequest struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
             where V: MapAccess<'de>,
             {
-                let mut token: Option<i32>          = None;
-                let mut expected_seq: Option<i32>   = None;
-                let mut peer_id: Option<Id>         = None;
-                let mut nonce: Option<Vec<u8>>      = None;
-                let mut seq: Option<i32>            = None;
-                let mut node_id: Option<Id>         = None;
+                let mut token   : Option<i32>       = None;
+                let mut cas     : Option<i32>       = None;
+                let mut peer_id : Option<Id>        = None;
+                let mut seq     : Option<i32>       = None;
+                let mut node_id : Option<Id>        = None;
+                let mut nonce   : Option<Vec<u8>>   = None;
                 let mut node_sig: Option<Vec<u8>>   = None;
-                let mut sig: Option<Vec<u8>>        = None;
+                let mut sig     : Option<Vec<u8>>   = None;
                 let mut fingerprint: Option<u64>    = None;
                 let mut endpoint: Option<String>    = None;
-                let mut extra: Option<Vec<u8>>      = None;
+                let mut extra   : Option<Vec<u8>>   = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -150,10 +151,10 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
                             }
                         }
                         Field::Cas => {
-                            if expected_seq.is_some() {
+                            if cas.is_some() {
                                 return Err(de::Error::duplicate_field("cas"));
                             } else {
-                                expected_seq = Some(map.next_value()?);
+                                cas = Some(map.next_value()?);
                             }
                         }
                         Field::PeerId => {
@@ -225,11 +226,11 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
                     }
                 }
 
-                let expected_seq = expected_seq.unwrap_or(-1);
+                let expected_seq = cas.unwrap_or(-1);
                 if expected_seq < -1 {
                     return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
                 }
-                let seq = seq.unwrap_or_default();
+                let seq = seq.unwrap_or(0);
                 if seq < 0 {
                     return Err(de::Error::custom("seq must be non-negative"));
                 }
@@ -260,9 +261,25 @@ impl<'de> Deserialize<'de> for AnnouncePeerRequest {
 
 impl fmt::Display for AnnouncePeerRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "tok:{},peer:[{}]", self.token, self.peer)?;
+        let peer = &self.peer;
+        write!(f, "tok:{}", self.token)?;
         if self.expected_seq >= 0 {
             write!(f, ",cas:{}", self.expected_seq)?;
+        }
+        write!(f, ",k:{}", peer.id())?;
+        write!(f, ",n:{}", hex::encode(peer.nonce()))?;
+        if peer.sequence_number() > 0 {
+            write!(f, ",seq:{}", peer.sequence_number())?;
+        }
+        if peer.is_authenticated() {
+            write!(f, ",o:{}", peer.nodeid().unwrap())?;
+            write!(f, ",os:{}", hex::encode(peer.node_signature().unwrap()))?;
+        }
+        write!(f, ",sig:{}", hex::encode(peer.signature()))?;
+        write!(f, ",f:{}", peer.fingerprint())?;
+        write!(f, ",e:{}", peer.endpoint())?;
+        if let Some(extra) = peer.extra_data() {
+            write!(f, ",ex:{}", hex::encode(extra))?;
         }
         Ok(())
     }

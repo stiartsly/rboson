@@ -21,8 +21,8 @@ use crate::{
     core::version,
 };
 use crate::dht::rpc::{
-    node_entry::Reachability,
-    server::RpcServer,
+    rpc_target::Reachability,
+    rpc_server::RpcServer,
 };
 
 /**

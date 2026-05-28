@@ -6,8 +6,8 @@ use std::{
 use crate::Id;
 use crate::dht::{
     rpc::{
-        node_entry::Reachability,
-        server::RpcServer,
+        rpc_target::Reachability,
+        rpc_server::RpcServer,
     },
     routing::kbucket_entry::KBucketEntry,
 };

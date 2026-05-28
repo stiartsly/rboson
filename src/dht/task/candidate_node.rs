@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::node_entry::Reachability,
+    rpc::rpc_target::Reachability,
     routing::kbucket_entry::KBucketEntry
 };
 

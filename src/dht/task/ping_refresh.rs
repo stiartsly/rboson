@@ -8,16 +8,10 @@ use log::{debug, error};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    msg::msg::Message,
-    task::task::{Task, TaskData},
-    rpc::{
-        rpccall::RpcCall,
-        rpc_target::Target,
-    },
-    routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-    }
+    msg::Message,
+    task::{Task, TaskData},
+    rpc::{RpcCall, Target},
+    routing::{KBucket, KBucketEntry}
 };
 
 pub(crate) struct PingRefreshTask {
@@ -143,7 +137,7 @@ impl Task for PingRefreshTask {
             let todo = self.todo.clone();
             let target = Target::from_entry(kentry);
 
-            let handler = Consumer::new(move || {
+            let handler = Consumer::new(move |_| {
                 todo.lock().unwrap().pop_front();
             });
             self.send_call(target, msg, Some(handler)).map_err(|e| {

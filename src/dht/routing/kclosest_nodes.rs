@@ -3,9 +3,9 @@ use std::cmp::Ordering;
 
 use crate::{Id, NodeInfo};
 use crate::dht::routing::{
-    kbucket::KBucket,
-    kbucket_entry::KBucketEntry,
-    routing_table::RoutingTable
+    KBucket,
+    KBucketEntry,
+    RoutingTable
 };
 pub(crate) struct KClosestNodes {
     rt      : Arc<Mutex<RoutingTable>>,

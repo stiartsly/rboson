@@ -9,22 +9,16 @@ use crate::dht::{
     dht::DHT,
     eligible_value::EligibleValue,
     consumer::Consumer,
-    rpc::{
-        rpccall::RpcCall,
-        rpc_target::Target,
-    },
-    msg::{
-        lookup_rsp::LookupResponse,
-        msg::{Body, Message},
-    },
+    rpc::{RpcCall, Target},
+    msg::{LookupResponse, Body, Message},
     routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-        kclosest_nodes::KClosestNodes,
+        KBucket,
+        KBucketEntry,
+        KClosestNodes
     },
     task::{
-        lookup_task::{LookupTask, LookupTaskData},
-        task::{Task, TaskData},
+        LookupTask, LookupTaskData,
+        Task, TaskData,
     }
 };
 
@@ -139,7 +133,7 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let handler = Consumer::new(move || {
+            let handler = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {

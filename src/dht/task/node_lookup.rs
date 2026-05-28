@@ -8,23 +8,17 @@ use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    rpc::{
-        rpccall::RpcCall,
-        rpc_target::Target,
-    },
+    rpc::{RpcCall, Target},
+    msg::{Message, Body, LookupResponse},
     routing::{
-        kbucket::KBucket,
-        kclosest_nodes::KClosestNodes,
-        kbucket_entry::KBucketEntry,
-    },
-    msg::{
-        msg::{Body, Message},
-        lookup_rsp::LookupResponse,
+        KBucket,
+        KBucketEntry,
+        KClosestNodes,
     },
     task::{
-        task::{Task, TaskData},
-        lookup_task::{LookupTask, LookupTaskData},
-    }
+        Task, TaskData,
+        LookupTask, LookupTaskData
+    },
 };
 
 pub(crate) struct NodeLookupTask {
@@ -183,7 +177,7 @@ impl Task for NodeLookupTask {
                 self.want_token
             );
 
-            let handler = Consumer::new(move || {
+            let handler = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {

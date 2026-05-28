@@ -1,6 +1,4 @@
-use crate::dht::{
-    node_status::NodeStatus,
-};
+use crate::NodeStatus;
 
 pub trait NodeStatusListener {
     fn status_changed(&self,

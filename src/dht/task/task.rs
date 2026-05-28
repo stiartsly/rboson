@@ -75,7 +75,7 @@ pub(crate) struct TaskData {
 
     inflights   : HashMap<TaskId, Arc<Mutex<RpcCall>>>,
     listener    : Option<TaskListener>,
-    end_handler : Option<Consumer<>>,
+    end_handler : Option<Consumer<()>>,
 
     nested      : Option<Arc<Mutex<Box<dyn Task>>>>
 }
@@ -176,7 +176,7 @@ pub(crate) trait Task: Send + Sync {
         self.data().inflights.len()
     }
 
-    fn with_end_handler(&mut self, handler: Consumer<>) {
+    fn with_end_handler(&mut self, handler: Consumer<()>) {
         self.data_mut().end_handler = Some(handler);
     }
 
@@ -243,7 +243,7 @@ pub(crate) trait Task: Send + Sync {
 
         let consumer = self.data_mut().end_handler.take();
         if let Some(handler) = consumer {
-            handler.accept();
+            handler.accept(());
             self.data_mut().end_handler = Some(handler);
         }
 
@@ -268,7 +268,7 @@ pub(crate) trait Task: Send + Sync {
 
         let consumer = self.data_mut().end_handler.take();
         if let Some(handler) = consumer {
-            handler.accept();
+            handler.accept(());
             self.data_mut().end_handler = Some(handler);
         }
 
@@ -342,7 +342,7 @@ pub(crate) trait Task: Send + Sync {
     fn send_call(&mut self,
         target: Target,
         msg: Message,
-        consumer: Option<Consumer<>>)
+        consumer: Option<Consumer<()>>)
         -> Result<()> {
 
         if !self.can_dorequest() {
@@ -390,7 +390,7 @@ pub(crate) trait Task: Send + Sync {
         });
 
         if let Some(handler) = consumer {
-            handler.accept();
+            handler.accept(());
         };
 
         let txid = call.txid();

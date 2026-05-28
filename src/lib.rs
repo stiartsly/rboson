@@ -1,7 +1,6 @@
 pub mod core;
 pub mod did;
 pub mod dht;
-//pub mod appdata_store;
 //pub mod activeproxy;
 //pub mod messaging;
 
@@ -47,9 +46,10 @@ pub use crate::did::{
     card_builder,
 };
 
-//pub use crate::dht::{
-//    node::{self, Node}
-//};
+pub use crate::dht::{
+    node::{self, Node},
+    node_status::{self, NodeStatus}
+};
 
 /*
 pub use crate::activeproxy::{
@@ -92,13 +92,6 @@ macro_rules! unwrap_mut {
     }};
 }
 
-#[macro_export]
-macro_rules! lock {
-    ($ua:expr) => {{
-        $ua.lock().unwrap()
-    }};
-}
-
 use std::net::IpAddr;
 use crate::errors::NetworkError;
 use crate::errors::IOError;
@@ -130,25 +123,15 @@ fn create_dirs(input: &str) -> crate::core::Result<()> {
     )
 }
 
-#[cfg(test)]
-fn remove_working_path(input: &str) {
-    if std::fs::metadata(&input).is_ok() {
-        match std::fs::remove_dir_all(&input) {
-            Ok(_) => {}
-            Err(e) => {
-                panic!("Failed to remove directory: {}", e);
-            }
-        }
-    }
-}
-
-fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
+fn random_array<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
     unsafe {
         libsodium_sys::randombytes_buf(
-            array.as_mut_ptr() as *mut libc::c_void,
+            bytes.as_mut_ptr() as *mut libc::c_void,
             N
         );
-    }
+    };
+    bytes
 }
 
 fn random_bytes(len: usize) -> Vec<u8> {
@@ -309,6 +292,7 @@ mod serde_bytes_base64 {
     }
 }
 
+/*
 mod serde_option_bytes_as_cbor {
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};
@@ -331,3 +315,4 @@ mod serde_option_bytes_as_cbor {
         Ok(Some(Vec::<u8>::from(s)))
     }
 }
+*/

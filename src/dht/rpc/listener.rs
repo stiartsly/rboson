@@ -22,20 +22,23 @@ impl Listener {
     }
 
     #[allow(unused)]
-    pub(crate) fn response_fn(&mut self, f: Box<dyn Fn(&RpcCall) + Send>) -> &mut Self {
-        self.response_fn  = Some(f);
+    pub(crate) fn response_fn<F>(&mut self, f: F) -> &mut Self
+    where F: Fn(&RpcCall) + Send + 'static {
+        self.response_fn  = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
-    pub(crate) fn stall_fn(&mut self, f: Box<dyn Fn(&RpcCall) + Send>) -> &mut Self {
-        self.stall_fn = Some(f);
+    pub(crate) fn stall_fn<F>(&mut self, f: F) -> &mut Self
+    where F: Fn(&RpcCall) + Send + 'static {
+        self.stall_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
-    pub(crate) fn timeout_fn(&mut self, f: Box<dyn Fn(&RpcCall) + Send>) -> &mut Self {
-        self.timeout_fn = Some(f);
+    pub(crate) fn timeout_fn<F>(&mut self, f: F) -> &mut Self
+    where F: Fn(&RpcCall) + Send + 'static {
+        self.timeout_fn = Some(Box::new(f));
         self
     }
 

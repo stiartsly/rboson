@@ -1,13 +1,11 @@
-use std::mem;
-use std::net::{IpAddr, SocketAddr};
-use std::cell::RefCell;
-use std::time::SystemTime;
-use sha2::{Digest, Sha256};
-
-use crate::{
-    randomize_bytes,
-    Id,
+use std::{
+    mem,
+    net::{IpAddr, SocketAddr},
+    cell::RefCell,
+    time::SystemTime
 };
+use sha2::{Digest, Sha256};
+use crate::Id;
 
 const TOKEN_TIMEOUT: u128 = 5 * 60 * 1000; // 5 minutes
 
@@ -19,11 +17,10 @@ pub(crate) struct TokenManager {
 
 impl TokenManager {
     pub(crate) fn new() -> Self {
-        let mut seed = [0u8; 32];
-        randomize_bytes(&mut seed);
+        let session_secret = crate::random_array::<32>();
 
-        TokenManager {
-            session_secret: seed,
+        Self {
+            session_secret,
             timestamp: RefCell::new(SystemTime::now()),
             previous_timestamp: RefCell::new(SystemTime::now()),
         }

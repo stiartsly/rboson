@@ -12,13 +12,13 @@ use crate::{
 };
 use crate::dht::{
     timer::TaskHandle,
-    msg::msg::{Body, Message, Kind},
-    task::candidate_node::CandidateNode,
-    routing::kbucket_entry::KBucketEntry,
+    msg::{Body, Message, msg::Kind},
+    task::CandidateNode,
+    routing::KBucketEntry,
     rpc::{
         rpc_server::RpcServer,
-        rpc_target::{Target, Reachability},
-        listener::Listener as CallListener,
+        Target, Reachability,
+        Listener as CallListener,
     },
 };
 
@@ -61,64 +61,55 @@ pub(crate) struct RpcCall {
     cloned      : Option<Arc<Mutex<RpcCall>>>,
 }
 
+const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
+
 impl RpcCall {
     pub(crate) fn new(
         target: Target,
         mut req: Message,
     ) -> Self
     {
-        req.set_remote(target.id(), target.socket_addr());
-
-        let target_reachable = target.is_reachable();
-
+        req.set_remote(
+            target.id(),
+            target.socket_addr()
+        );
         Self {
+            target_reachable: target.is_reachable(),
             target,
-            target_reachable,
             req,
-            rsp: None,
-            sent_time: SystemTime::UNIX_EPOCH,
-            resp_time: SystemTime::UNIX_EPOCH,
-            state: State::Unsent,
-            listener: None,
-            cause: None,
+            rsp         : None,
+            sent_time   : SystemTime::UNIX_EPOCH,
+            resp_time   : SystemTime::UNIX_EPOCH,
+            state       : State::Unsent,
+            listener    : None,
+            cause       : None,
             timeout_task: None,
             expected_rtt: 0,
-            cloned: None,
+            cloned      : None,
         }
     }
 
     pub(crate) fn with_node(target: NodeInfo, msg: Message) -> Self {
-        Self::new(
-            Target::NodeInfo(target),
-            msg
-        )
+        Self::new( Target::NodeInfo(target), msg)
     }
 
-    pub(crate) fn with_kentry(
-        target: KBucketEntry,
-        msg: Message
-    ) -> Self {
-        Self::new(
-            Target::KBucketEntry(target),
-            msg
-        )
+    pub(crate) fn with_entry(target: KBucketEntry, msg: Message) -> Self {
+        Self::new(Target::KBucketEntry(target), msg)
     }
 
+    #[allow(unused)]
     pub(crate) fn with_candidate(
         target: Arc<Mutex<CandidateNode>>,
         msg: Message
     ) -> Self {
-        Self::new(
-            Target::Candidate(target),
-            msg,
-        )
+        Self::new(Target::Candidate(target), msg)
     }
 
     pub(crate) fn txid(&self) -> i32 {
         self.req.txid()
     }
 
-    pub(crate) fn set_localid(&mut self, id: Id) {
+    pub(crate) fn set_local_nodeid(&mut self, id: Id) {
         self.req.set_id(id);
     }
 
@@ -156,12 +147,6 @@ impl RpcCall {
 
     pub(crate) fn expected_rtt(&self) -> u64 {
         self.expected_rtt
-    }
-
-    fn cloned1(&self) -> Arc<Mutex<RpcCall>> {
-        self.cloned.as_ref()
-            .map(|v| v.clone())
-            .expect("panic: self cloned not set, this should never happen")
     }
 
     pub(crate) fn req(&self) -> &Message {
@@ -260,7 +245,7 @@ impl RpcCall {
         }
 
         let elapsed = crate::as_ms!(self.sent_time) as u64;
-        let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
+        let remaining = RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
         if remaining > 0 {
             self.update_state(State::Stalled);
             self.set_timeout_timer(remaining);

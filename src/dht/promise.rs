@@ -2,8 +2,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
-    future::Future,
-    marker::Copy,
+    future::Future
 };
 
 use crate::core::errors::Result;
@@ -92,11 +91,6 @@ impl<T> Promise<T> {
 
     pub(crate) fn complete(&self, result: Result<T>) {
         self.result.lock().unwrap().complete(result);
-    }
-
-    #[allow(unused)]
-    pub(crate) fn is_completed(&self) -> bool {
-        self.result.lock().unwrap().is_completed()
     }
 
     pub(crate) fn future(&self) -> PromiseFuture<T> {

@@ -18,6 +18,11 @@ mod msg {
     pub(crate) mod find_value_rsp;
     pub(crate) mod announce_peer_req;
     pub(crate) mod store_value_req;
+
+    pub(crate) use {
+        msg::{Message, Body},
+        lookup_rsp::LookupResponse
+    };
 }
 
 mod task {
@@ -36,6 +41,14 @@ mod task {
     pub(crate) mod peer_announce;
     pub(crate) mod value_lookup;
     pub(crate) mod value_announce;
+
+    pub(crate) use {
+        task::{Task, TaskData},
+        lookup_task::{LookupTask, LookupTaskData},
+        closest_candidates::ClosestCandidates,
+        closest_set::ClosestSet,
+        candidate_node::CandidateNode,
+    };
 }
 
 mod routing {
@@ -44,6 +57,14 @@ mod routing {
     pub(crate) mod kbucket_entry;
     pub(crate) mod kclosest_nodes;
     pub(crate) mod routing_table;
+
+    pub(crate) use {
+        prefix::Prefix,
+        kbucket::KBucket,
+        kbucket_entry::KBucketEntry,
+        kclosest_nodes::KClosestNodes,
+        routing_table::RoutingTable,
+    };
 }
 
 mod rpc {
@@ -51,13 +72,18 @@ mod rpc {
     pub(crate) mod rpccall;
     pub(crate) mod rpc_server;
     pub(crate) mod rpc_target;
+
+    pub(crate) use {
+        rpccall::RpcCall,
+        rpc_target::{Reachability, Target},
+        listener::Listener,
+    };
 }
 
 mod cached_identity;
 mod dht;
 mod timer;
 mod token_manager;
-mod node_status;
 
 mod consumer;
 mod promise;
@@ -67,6 +93,7 @@ mod suspicious_node_detector;
 
 pub mod connection_status_listener;
 pub mod connection_status;
+pub mod node_status;
 pub mod node_status_listener;
 pub mod lookup_option;
 pub mod node;

@@ -11,13 +11,21 @@ use serde::{
 };
 
 use crate::{
-    randomize_bytes,
     cryptobox,
     signature,
     Error,
     Result,
     errors::ArgumentError,
 };
+
+fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
+    unsafe {
+        libsodium_sys::randombytes_buf(
+            array.as_mut_ptr() as *mut libc::c_void,
+            N
+        );
+    }
+}
 
 pub const DID_PREFIX: &str = "did:boson:";
 
@@ -34,9 +42,7 @@ impl Id {
     pub const MIN_ID: Id = Id::min();
 
     pub fn random() -> Self {
-        let mut bytes = [0u8; Id::BYTES];
-        randomize_bytes(&mut bytes);
-        Id(bytes)
+        Id(crate::random_array::<{ Self::BYTES }>())
     }
 
     pub fn from_bytes(input: [u8; Id::BYTES]) -> Self {

@@ -13,14 +13,13 @@ use serde::{
 };
 
 use crate::{Id};
-
 use crate::dht::{
-    rpc::rpc_target::Reachability,
+    rpc::Reachability,
     routing:: {
-        kclosest_nodes::KClosestNodes,
-        prefix::Prefix,
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
+        KClosestNodes,
+        Prefix,
+        KBucket,
+        KBucketEntry,
     },
 };
 pub(crate) struct RoutingTable {

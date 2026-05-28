@@ -1,7 +1,7 @@
 use std::fmt;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum NodeStatus {
+pub enum NodeStatus {
     Stopped,
     Initializing,
     Running,

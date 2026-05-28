@@ -1,9 +1,7 @@
 use std::ptr;
-use std::io::Read;
 use std::time::Duration;
-use std::{fs, fs::File, io::Write};
+use std::{fs::File, io::Write};
 use std::sync::{Arc, Mutex};
-use futures::stream::{FuturesUnordered};
 use tokio::task;
 use log::{warn, error, info};
 
@@ -151,6 +149,29 @@ impl Node {
         Ok(())
     }
 
+    #[inline(always)]
+    fn dht4(&self) -> Option<Arc<Mutex<DHT>>> {
+        self.dht4.lock().unwrap().clone()
+    }
+
+    #[inline(always)]
+    fn dht6(&self) -> Option<Arc<Mutex<DHT>>> {
+        self.dht6.lock().unwrap().clone()
+    }
+
+    #[inline(always)]
+    fn option(&self, option: Option<LookupOption>) -> LookupOption {
+        option.unwrap_or_else(|| self.default_lookup_option())
+    }
+
+    #[inline(always)]
+    fn check_running(&self) -> Result<()> {
+        match self.is_running() {
+            true => Ok(()),
+            false => Err(StateError::new("Node is not running".to_string()))
+        }
+    }
+
     pub async fn start(&self) -> Result<()> {
         if *self.status.lock().unwrap() != NodeStatus::Stopped {
             return Ok(());
@@ -240,13 +261,13 @@ impl Node {
 
     pub fn node_info(&self) -> JointResult<NodeInfo> {
         let mut result = JointResult::new();
-        if let Some(dht) = self.dht4.lock().unwrap().as_ref() {
+        if let Some(dht) = self.dht4() {
             result.set_value(
                 Network::IPv4,
                 dht.lock().unwrap().ni().clone()
             );
         }
-        if let Some(dht) = self.dht6.lock().unwrap().as_ref() {
+        if let Some(dht) = self.dht6() {
             result.set_value(
                 Network::IPv6,
                 dht.lock().unwrap().ni().clone()
@@ -274,25 +295,8 @@ impl Node {
         }
     }
 
-    fn check_running(&self) -> Result<()> {
-        match self.is_running() {
-            true => Ok(()),
-            false => Err(StateError::new("Node is not running".to_string()))
-        }
-    }
-
     pub async fn bootstrap_one(&self,  node: &NodeInfo) -> Result<()> {
         self.bootstrap(&[node.clone()]).await
-    }
-
-    fn dht4(&self) -> Option<Arc<Mutex<DHT>>> {
-        self.dht4.lock().unwrap().clone()
-    }
-    fn dht6(&self) -> Option<Arc<Mutex<DHT>>> {
-        self.dht6.lock().unwrap().clone()
-    }
-    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
-        option.unwrap_or_else(|| self.default_lookup_option())
     }
 
     pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
@@ -328,10 +332,10 @@ impl Node {
     ) -> Result<JointResult<NodeInfo>> {
         self.check_running()?;
 
-        let option = self.lookup_option(lookup_option);
-        let dht4 = self.dht4.lock().unwrap().clone();
-        let dht6 = self.dht6.lock().unwrap().clone();
+        let option = self.option(lookup_option);
         let target = target.clone();
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
 
         let (rc4, rc6) = tokio::join!(
             async move {
@@ -369,8 +373,8 @@ impl Node {
         }
         self.check_running()?;
 
+        let option  = self.option(lookup_option);
         let target  = value_id.clone();
-        let option  = self.lookup_option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
@@ -414,7 +418,7 @@ impl Node {
             }
         }
 
-        if !eligible.is_empty() && eligible.needs_update() {
+        if !eligible.is_empty() && eligible.is_latest() {
             let value = eligible.value().unwrap();
             let _ = self.storage.lock().unwrap().put_value(value, None);
         }
@@ -434,7 +438,7 @@ impl Node {
         self.check_running()?;
 
         let target  = peer_id.clone();
-        let option  = self.lookup_option(lookup_option);
+        let option  = self.option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
@@ -450,6 +454,7 @@ impl Node {
             expected_count as i32
         )?;
         eligible.add(peers, false);
+        eligible.prune();
 
         if !eligible.is_empty() {
             if option == LookupOption::Local {
@@ -482,7 +487,7 @@ impl Node {
         }
         eligible.prune();
 
-        if !eligible.is_empty() && eligible.needs_update() {
+        if !eligible.is_empty() && eligible.is_latest() {
             let peers = eligible.peers();
             let _ = self.storage.lock().unwrap().put_peers(peers);
         }
@@ -701,6 +706,7 @@ impl Node {
     }
 }
 
+/*
 fn get_keypair(path: &str) -> Result<signature::KeyPair> {
     create_dirs(path).map_err(|e| {
         return StateError::new(format!("Checking persistence error: {}", e));
@@ -730,6 +736,7 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
 
     Ok(keypair)
 }
+*/
 
 impl Identity for Node {
     fn id(&self) -> &Id {
@@ -756,7 +763,7 @@ impl Identity for Node {
         Identity::create_crypto_context(&self.identity, id)
     }
 }
-
+/*
 use std::str;
 fn load_key(path: &str) -> Result<signature::KeyPair> {
     let mut fp = match File::open(path) {
@@ -791,7 +798,7 @@ fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
         return Err(IOError::new(format!("Writing key error: {}", e)));
     }
     Ok(())
-}
+}*/
 
 fn store_nodeid(path: &str, id: &Id) -> Result<()> {
     let mut fp = match File::create(path) {

@@ -1,4 +1,3 @@
-
 use std::{
     cmp::Ordering,
     collections::HashMap,
@@ -10,6 +9,8 @@ pub(crate) struct EligiblePeers {
     expected_seq: i32,
     expected_count: usize,
     peers: HashMap<(Id, u64), PeerInfo>,
+
+    latest: bool,
 }
 
 impl EligiblePeers {
@@ -19,6 +20,7 @@ impl EligiblePeers {
             expected_seq,
             expected_count,
             peers: HashMap::new(),
+            latest: false,
         }
     }
 
@@ -35,31 +37,34 @@ impl EligiblePeers {
     }
 
     pub(crate) fn reached_capacity(&self) -> bool {
-        self.expected_count > 0 && self.peers.len() >= self.expected_count
+        self.expected_count > 0 &&
+            self.peers.len() >= self.expected_count
     }
 
-    pub(crate) fn add(&mut self, peers: Vec<PeerInfo>, need_update: bool) -> bool {
-        if peers.iter().any(|peer| !self.is_peer_eligible(peer)) {
-            return false;
+    pub(crate) fn add(&mut self, mut peers: Vec<PeerInfo>, latest: bool) -> bool {
+        for peer in &peers {
+            if !self.is_peer_eligible(peer) {
+                return false;
+            }
         }
 
-        for peer in peers {
+        while let Some(peer) = peers.pop() {
             let key = (peer.id().clone(), peer.fingerprint());
-            self.peers
-                .entry(key)
-                .and_modify(|current| {
-                    if current.sequence_number() < peer.sequence_number() {
-                        *current = peer.clone();
-                    }
-                })
-                .or_insert_with(|| peer.clone());
+            if let Some(existing) = self.peers.get_mut(&key) {
+                if existing.sequence_number() < peer.sequence_number() {
+                    *existing = peer;
+                    self.latest = latest;
+                }
+            } else {
+                self.latest = latest;
+                self.peers.insert(key, peer);
+            }
         }
-
         true
     }
 
-    pub(crate) fn needs_update(&self) -> bool {
-        false
+    pub(crate) fn is_latest(&self) -> bool {
+        self.latest
     }
 
     pub(crate) fn prune(&mut self) {
@@ -67,31 +72,30 @@ impl EligiblePeers {
             return;
         }
 
-        let mut peers = self.peers();
-        let mut to_remove = peers.split_off(self.expected_count as usize);
+        let mut all: Vec<PeerInfo> = self.peers.values().cloned().collect();
+        all.sort_by(|l, r| self.peer_order(l, r));
 
-        for peer in to_remove.drain(..) {
+        for peer in all.into_iter().skip(self.expected_count) {
             self.peers.remove(&(peer.id().clone(), peer.fingerprint()));
         }
     }
 
     pub(crate) fn peers(&self) -> Vec<PeerInfo> {
-        let mut peers: Vec<_> = self.peers.values().cloned().collect();
-        peers.sort_by(|left, right| self.peer_order(left, right));
-        peers
+        self.peers.values().cloned().collect()
     }
 
     fn is_peer_eligible(&self, peer: &PeerInfo) -> bool {
         peer.id() == &self.target
+            && peer.is_valid()
             && (self.expected_seq < 0
                 || peer.sequence_number() >= self.expected_seq)
-            && peer.is_valid()
+
     }
 
     fn peer_order(&self, left: &PeerInfo, right: &PeerInfo) -> Ordering {
-        let by_sequence = right.sequence_number().cmp(&left.sequence_number());
-        if by_sequence != Ordering::Equal {
-            return by_sequence;
+        let by_seq = right.sequence_number().cmp(&left.sequence_number());
+        if by_seq != Ordering::Equal {
+            return by_seq ;
         }
 
         let by_auth = right.is_authenticated().cmp(&left.is_authenticated());
@@ -100,7 +104,7 @@ impl EligiblePeers {
         }
 
         match (left.nodeid(), right.nodeid()) {
-            (Some(left_node), Some(right_node)) => self.target.three_way_compare(left_node, right_node),
+            (Some(l), Some(r)) => self.target.three_way_compare(l, r),
             _ => Ordering::Equal,
         }
     }

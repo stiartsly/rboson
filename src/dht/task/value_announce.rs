@@ -9,12 +9,12 @@ use crate::Value;
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    msg::msg::Message,
-    rpc::rpc_target::Target,
+    msg::Message,
+    rpc::Target,
     task::{
-        task::{Task, TaskData},
-        closest_set::ClosestSet,
-        candidate_node::CandidateNode,
+        Task, TaskData,
+        ClosestSet,
+        CandidateNode,
     }
 };
 
@@ -111,7 +111,7 @@ impl Task for ValueAnnounceTask {
 
             let todo = self.todo.clone();
             let target = Target::from_candidate(cn);
-            let handler = Consumer::new(move || {
+            let handler = Consumer::new(move |_| {
                 todo.lock().unwrap().pop_front();
             });
              let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {

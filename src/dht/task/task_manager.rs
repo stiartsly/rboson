@@ -49,7 +49,7 @@ impl TaskManager {
         let cloned_task = task.clone();
         let running = self.running.clone();
         task.lock().unwrap().with_end_handler({
-            Consumer::new(move || {
+            Consumer::new(move |_| {
                 let taskid = cloned_task.lock().unwrap().task_id();
                 running.lock().unwrap().remove(&taskid);
             })

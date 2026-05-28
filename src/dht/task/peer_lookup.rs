@@ -9,22 +9,12 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     eligible_peers::EligiblePeers,
-    rpc::{
-        rpccall::RpcCall,
-        rpc_target::Target,
-    },
-    routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-        kclosest_nodes::KClosestNodes,
-    },
-    msg::{
-        msg::{Body, Message},
-        lookup_rsp::LookupResponse
-    },
+    rpc::{RpcCall,Target},
+    routing::{KBucket, KBucketEntry, KClosestNodes},
+    msg::{Body, Message, LookupResponse},
     task::{
-        task::{Task, TaskData},
-        lookup_task::{LookupTask, LookupTaskData},
+        Task, TaskData,
+        LookupTask, LookupTaskData,
     },
 };
 
@@ -141,7 +131,7 @@ impl Task for PeerLookupTask {
                 self.result.expected_count() as i32,
             );
 
-            let handler = Consumer::new(move || {
+            let handler = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
              let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
@@ -192,7 +182,7 @@ impl Task for PeerLookupTask {
                 if LookupTask::data(self).done_on_eligible_result() {
                     LookupTask::data_mut(self).mark_lookup_done();
                 }
-                self.result.prune();;
+                self.result.prune();
             }
         } else {
             let network = self.dht.lock().unwrap().network();

@@ -23,7 +23,6 @@ use libsodium_sys::{
 use crate::{
     as_uchar_ptr,
     as_uchar_ptr_mut,
-    randomize_bytes,
 };
 
 use super::{
@@ -68,7 +67,7 @@ impl TryFrom<&[u8]> for PrivateKey {
                 Self::BYTES
             )));
         }
-        Ok(PrivateKey(bytes.try_into().unwrap()))
+        Ok(Self(bytes.try_into().unwrap()))
     }
 }
 
@@ -88,7 +87,7 @@ impl TryFrom<&signature::PrivateKey> for PrivateKey {
                 "converts Ed25519 key to x25519 key failed."
             )))
         }
-        Ok(PrivateKey(bytes))
+        Ok(Self(bytes))
     }
 }
 
@@ -141,7 +140,7 @@ impl TryFrom<&[u8]> for PublicKey {
                 Self::BYTES
             )));
         }
-        Ok(PublicKey(bytes.try_into().unwrap()))
+        Ok(Self(bytes.try_into().unwrap()))
     }
 }
 
@@ -161,7 +160,7 @@ impl TryFrom<&signature::PublicKey> for PublicKey {
                 "converts Ed25519 key to x25519 key failed."
             )))
         }
-        Ok(PublicKey(bytes))
+        Ok(Self(bytes))
     }
 }
 
@@ -191,9 +190,7 @@ impl Nonce {
     pub const BYTES: usize = 24;
 
     pub fn random() -> Self {
-        let mut bytes = [0u8; Self::BYTES];
-        randomize_bytes(&mut bytes);
-        Nonce(bytes)
+        Nonce(crate::random_array::<{ Self::BYTES }>())
     }
 
     pub fn increment(&mut self) -> &Self {
@@ -229,7 +226,7 @@ impl TryFrom<&[u8]> for Nonce {
                 Self::BYTES
             )));
         }
-        Ok(Nonce(bytes.try_into().unwrap()))
+        Ok(Self(bytes.try_into().unwrap()))
     }
 }
 
@@ -269,12 +266,11 @@ impl KeyPair {
             );
         }
 
-        KeyPair(PrivateKey(sk), PublicKey(pk))
+        Self(PrivateKey(sk), PublicKey(pk))
     }
 
     pub fn random() -> Self {
-        let mut seed = [0u8; KeyPair::SEED_BYTES];
-        randomize_bytes(&mut seed);
+        let seed = crate::random_array::<{ Self::SEED_BYTES }>();
 
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
@@ -287,7 +283,7 @@ impl KeyPair {
             );
         }
 
-        KeyPair(PrivateKey(sk), PublicKey(pk))
+        Self(PrivateKey(sk), PublicKey(pk))
     }
 
     pub fn try_from_seed(seed: &[u8]) -> Result<Self> {
@@ -309,7 +305,7 @@ impl KeyPair {
             );
         }
 
-        Ok(KeyPair(PrivateKey(sk), PublicKey(pk)))
+        Ok(Self(PrivateKey(sk), PublicKey(pk)))
     }
 
     pub const fn private_key(&self) -> &PrivateKey {
@@ -353,7 +349,7 @@ impl TryFrom<&[u8]> for KeyPair {
             );
         }
 
-        Ok(KeyPair(
+        Ok(Self(
             PrivateKey::try_from(sk).unwrap(),
             PublicKey(pk)
         ))

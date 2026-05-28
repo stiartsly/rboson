@@ -4,23 +4,14 @@ use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
     utils::{is_any_unicast, is_bogon},
-    rpc::{
-        rpc_target::{Reachability, Target},
-        rpccall::RpcCall,
-    },
-    routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-    },
-    msg::{
-        msg::Body,
-        lookup_rsp::LookupResponse
-    },
+    rpc::{Target, Reachability, RpcCall},
+    msg::{ Body,LookupResponse},
+    routing::{ KBucket, KBucketEntry},
     task::{
-        closest_set::ClosestSet,
-        closest_candidates::ClosestCandidates,
-        candidate_node::CandidateNode,
-        task::{Task, TaskData},
+        ClosestSet,
+        ClosestCandidates,
+        CandidateNode,
+        TaskData,
     }
 };
 

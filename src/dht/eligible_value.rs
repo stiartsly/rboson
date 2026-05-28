@@ -5,7 +5,8 @@ pub(crate) struct EligibleValue {
     target: Id,
     expected_seq: i32,
     value: Option<Value>,
-    need_update: bool,
+
+    latest: bool,
 }
 
 impl EligibleValue {
@@ -13,8 +14,8 @@ impl EligibleValue {
         Self {
             target,
             expected_seq,
-            value: None,
-            need_update: false,
+            value : None,
+            latest: false
         }
     }
 
@@ -26,7 +27,7 @@ impl EligibleValue {
         self.value.is_none()
     }
 
-    pub(crate) fn update(&mut self, value: Value, need_update: bool) -> bool {
+    pub(crate) fn update(&mut self, value: Value, lastest: bool) -> bool {
         if value.id() != self.target
             || (self.expected_seq >= 0 && value.sequence_number() < self.expected_seq)
             || !value.is_valid()
@@ -34,22 +35,22 @@ impl EligibleValue {
             return false;
         }
 
-        match self.value.as_ref() {
-            Some(current) if value.sequence_number() <= current.sequence_number() => {}
+        let existing = self.value.as_ref();
+        match existing {
+            Some(v) if value.sequence_number() <= v.sequence_number() => {},
             _ => {
-                self.value = Some(value.clone());
-                self.need_update = need_update;
+                self.value = Some(value);
+                self.latest = lastest;
             }
         }
-
         true
     }
 
-    pub(crate) fn needs_update(&self) -> bool {
-        self.need_update
+    pub(crate) fn is_latest(&self) -> bool {
+        self.latest
     }
 
     pub(crate) fn value(&self) -> Option<Value> {
-        self.value.as_ref().map(|v|v.clone())
+        self.value.clone()
     }
 }

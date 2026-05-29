@@ -4,13 +4,13 @@ use std::{
 };
 
 use crate::{Id, PeerInfo};
-pub(crate) struct EligiblePeers {
-    target: Id,
-    expected_seq: i32,
-    expected_count: usize,
-    peers: HashMap<(Id, u64), PeerInfo>,
 
-    latest: bool,
+pub(crate) struct EligiblePeers {
+    target  : Id,
+    expected_seq    : i32,
+    expected_count  : usize,
+    peers   : HashMap<(Id, u64), PeerInfo>,
+    latest  : bool,
 }
 
 impl EligiblePeers {
@@ -41,14 +41,14 @@ impl EligiblePeers {
             self.peers.len() >= self.expected_count
     }
 
-    pub(crate) fn add(&mut self, mut peers: Vec<PeerInfo>, latest: bool) -> bool {
+    pub(crate) fn add(&mut self, peers: Vec<PeerInfo>, latest: bool) -> bool {
         for peer in &peers {
             if !self.is_peer_eligible(peer) {
                 return false;
             }
         }
 
-        while let Some(peer) = peers.pop() {
+        for peer in peers {
             let key = (peer.id().clone(), peer.fingerprint());
             if let Some(existing) = self.peers.get_mut(&key) {
                 if existing.sequence_number() < peer.sequence_number() {
@@ -56,8 +56,8 @@ impl EligiblePeers {
                     self.latest = latest;
                 }
             } else {
-                self.latest = latest;
                 self.peers.insert(key, peer);
+                self.latest = latest;
             }
         }
         true
@@ -74,10 +74,12 @@ impl EligiblePeers {
 
         let mut all: Vec<PeerInfo> = self.peers.values().cloned().collect();
         all.sort_by(|l, r| self.peer_order(l, r));
+        all.truncate(self.expected_count);
 
-        for peer in all.into_iter().skip(self.expected_count) {
-            self.peers.remove(&(peer.id().clone(), peer.fingerprint()));
-        }
+        self.peers = all
+            .into_iter()
+            .map(|p| ((p.id().clone(), p.fingerprint()), p))
+            .collect();
     }
 
     pub(crate) fn peers(&self) -> Vec<PeerInfo> {
@@ -89,23 +91,14 @@ impl EligiblePeers {
             && peer.is_valid()
             && (self.expected_seq < 0
                 || peer.sequence_number() >= self.expected_seq)
-
     }
 
     fn peer_order(&self, left: &PeerInfo, right: &PeerInfo) -> Ordering {
-        let by_seq = right.sequence_number().cmp(&left.sequence_number());
-        if by_seq != Ordering::Equal {
-            return by_seq ;
-        }
-
-        let by_auth = right.is_authenticated().cmp(&left.is_authenticated());
-        if by_auth != Ordering::Equal {
-            return by_auth;
-        }
-
-        match (left.nodeid(), right.nodeid()) {
-            (Some(l), Some(r)) => self.target.three_way_compare(l, r),
-            _ => Ordering::Equal,
-        }
+        right.sequence_number().cmp(&left.sequence_number())
+            .then_with(|| right.is_authenticated().cmp(&left.is_authenticated()))
+            .then_with(|| match (left.nodeid(), right.nodeid()) {
+                (Some(l), Some(r)) => self.target.three_way_compare(l, r),
+                _ => Ordering::Equal,
+            })
     }
 }

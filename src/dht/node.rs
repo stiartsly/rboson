@@ -1,4 +1,3 @@
-use std::ptr;
 use std::time::Duration;
 use std::{fs::File, io::Write};
 use std::sync::{Arc, Mutex};
@@ -49,16 +48,15 @@ use crate::dht::{
 };
 
 pub struct Node {
-    cfg: Box<dyn NodeConfig>,
-
+    cfg     : Box<dyn NodeConfig>,
     identity: CachedIdentity,
 
-    option: Mutex<LookupOption>,
-    status: Mutex<NodeStatus>,
+    option  : Mutex<LookupOption>,
+    status  : Mutex<NodeStatus>,
     storage_path: String,
 
-    dht4: Mutex<Option<Arc<Mutex<DHT>>>>,
-    dht6: Mutex<Option<Arc<Mutex<DHT>>>>,
+    dht4    : Mutex<Option<Arc<Mutex<DHT>>>>,
+    dht6    : Mutex<Option<Arc<Mutex<DHT>>>>,
 
     storage : Arc<Mutex<Box<dyn DataStorage>>>,
     tokenman: Arc<TokenManager>,
@@ -66,7 +64,7 @@ pub struct Node {
 
 impl Node {
     pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Self> {
-        Self::check_config(&cfg)?;
+        Self::check_config(cfg.as_ref())?;
         logger::setup(cfg.as_ref().log_level(), cfg.as_ref().log_file().as_deref());
         logger::disable_console_output();
 
@@ -113,7 +111,7 @@ impl Node {
         })
     }
 
-    fn check_config(cfg: &Box<dyn NodeConfig>) -> Result<()> {
+    fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
         if cfg.host4().is_none() && cfg.host6().is_none() {
             return Err(ArgumentError::new(
                 "At least one host/address must be specified".to_string()
@@ -188,6 +186,7 @@ impl Node {
 
         let port = self.cfg.port();
         let identity = self.identity.identity();
+
         if let Some(host4) = self.cfg.host4() {
             let dht = DHT::new_shared(
                 identity.clone(),
@@ -260,18 +259,12 @@ impl Node {
     pub fn node_info(&self) -> JointResult<NodeInfo> {
         let mut result = JointResult::new();
         if let Some(dht) = self.dht4() {
-            let ni = Arc::into_inner(dht.lock().unwrap().ni());
-            result.set_value(
-                Network::IPv4,
-                ni.unwrap()
-            );
+            let ni = Arc::unwrap_or_clone(dht.lock().unwrap().ni());
+            result.set_value(Network::IPv4, ni);
         }
         if let Some(dht) = self.dht6() {
-            let ni = Arc::into_inner(dht.lock().unwrap().ni());
-            result.set_value(
-                Network::IPv6,
-                ni.unwrap()
-            );
+            let ni = Arc::unwrap_or_clone(dht.lock().unwrap().ni());
+            result.set_value(Network::IPv6, ni);
         }
         result
     }
@@ -289,10 +282,7 @@ impl Node {
     }
 
     pub fn is_running(&self) -> bool {
-        let status_ptr: *const NodeStatus = &(*self.status.lock().unwrap());
-        unsafe {
-            ptr::read_volatile(status_ptr) == NodeStatus::Running
-        }
+        *self.status.lock().unwrap() == NodeStatus::Running
     }
 
     pub async fn bootstrap_one(&self,  node: &NodeInfo) -> Result<()> {
@@ -500,7 +490,7 @@ impl Node {
         persistent: bool
     ) -> Result<()> {
         if !value.is_valid() {
-            return Err(ArgumentError::new(format!("Invalid value")));
+            return Err(ArgumentError::new("Invalid value".to_string()));
         }
         if expected_seq < -1 {
             return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
@@ -740,27 +730,27 @@ fn get_keypair(path: &str) -> Result<signature::KeyPair> {
 
 impl Identity for Node {
     fn id(&self) -> &Id {
-        Identity::id(&self.identity)
+        self.identity.id()
     }
 
     fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
-        Identity::sign(&self.identity, data, signature)
+        self.identity.sign(data, signature)
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
-        Identity::verify(&self.identity, data, signature)
+        self.identity.verify(data, signature)
     }
 
     fn encrypt(&self, receiver: &Id, data: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        Identity::encrypt(&self.identity, receiver, data, cipher)
+        self.identity.encrypt(receiver, data, cipher)
     }
 
     fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
-        Identity::decrypt(&self.identity, sender, data, plain)
+        self.identity.decrypt(sender, data, plain)
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        Identity::create_crypto_context(&self.identity, id)
+        self.identity.create_crypto_context(id)
     }
 }
 /*
@@ -801,16 +791,10 @@ fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
 }*/
 
 fn store_nodeid(path: &str, id: &Id) -> Result<()> {
-    let mut fp = match File::create(path) {
-        Ok(v) => v,
-        Err(e) => return Err(IOError::new(
-            format!("Creating Id file error: {}", e))),
-    };
-
-    let result = fp.write_all(id.to_base58().as_bytes());
-    if let Err(e) = result {
-        return Err(IOError::new(format!("Writing ID error: {}", e)));
-    };
+    let mut fp = File::create(path)
+        .map_err(|e| IOError::new(format!("Creating Id file error: {e}")))?;
+    fp.write_all(id.to_base58().as_bytes())
+        .map_err(|e| IOError::new(format!("Writing ID error: {e}")))?;
     Ok(())
 }
 

@@ -4,7 +4,7 @@ use crate::{
     Id, PeerInfo, Value, core::Result
 };
 
-pub(crate) trait DataStorage: Send + Sync{
+pub(crate) trait DataStorage: Send + Sync {
     fn open(&mut self,
         path: &str
     ) -> Result<()>;
@@ -24,7 +24,7 @@ pub(crate) trait DataStorage: Send + Sync{
 
     fn get_value(&self, _: &Id) -> Result<Option<Value>>;
 
-    fn get_values(&self)-> Result<Vec<Value>>;
+    fn get_values(&self) -> Result<Vec<Value>>;
 
     fn update_value_announced_time(&mut self,  _: &Id) -> Result<()>;
 

@@ -216,4 +216,7 @@ mod unitests {
     mod test_value_lookup;
     mod test_peer_announce;
     mod test_value_announce;
+
+    // storage
+    mod test_storage;
 }

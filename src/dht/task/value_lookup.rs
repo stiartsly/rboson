@@ -45,7 +45,7 @@ impl ValueLookupTask {
         }
     }
 
-    pub(crate) fn result(&self) -> Option<Value> {
+    pub(crate) fn result(&mut self) -> Option<Value> {
         self.result.value()
     }
 }

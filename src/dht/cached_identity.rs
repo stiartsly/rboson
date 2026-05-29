@@ -14,9 +14,9 @@ use crate::{
 const CONTEXT_CACHE_CAPACITY: u64 = 10;
 
 pub(crate) struct CachedIdentity {
-    id: Id,
+    id      : Id,
     identity: Arc<CryptoIdentity>,
-    cache:  Mutex<Cache<Id, Arc<Mutex<CryptoContext>>>>,
+    cache   : Cache<Id, Arc<Mutex<CryptoContext>>>,
 }
 
 impl CachedIdentity {
@@ -24,16 +24,16 @@ impl CachedIdentity {
         Self {
             id: identity.id().clone(),
             identity: Arc::new(identity),
-            cache: Mutex::new(Cache::<Id, Arc<Mutex<CryptoContext>>>::new(CONTEXT_CACHE_CAPACITY)),
+            cache: Cache::new(CONTEXT_CACHE_CAPACITY),
         }
     }
 
     pub(crate) fn clear_cache(&self) {
-        self.cache.lock().unwrap().invalidate_all();
+        self.cache.invalidate_all();
     }
 
     pub(crate) fn context(&self, key: &Id) -> Arc<Mutex<CryptoContext>> {
-        self.cache.lock().unwrap().get_with(key.clone(), || {
+        self.cache.get_with(key.clone(), || {
             Arc::new(Mutex::new(CryptoContext::from_private_key(
                 key.clone(),
                 self.identity.encryption_keypair().private_key(),
@@ -63,8 +63,16 @@ impl Identity for CachedIdentity {
         self.context(receiver).lock().unwrap().encrypt(data, cipher)
     }
 
+    fn encrypt_into(&self, receiver: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        self.context(receiver).lock().unwrap().encrypt_into(plain)
+    }
+
     fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
         self.context(sender).lock().unwrap().decrypt(data, plain)
+    }
+
+    fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        self.context(sender).lock().unwrap().decrypt_into(cipher)
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {

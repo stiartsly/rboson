@@ -1,507 +1,272 @@
+use std::cell::UnsafeCell;
 use std::time::{Duration, SystemTime};
 use diesel::prelude::*;
+use log::warn;
 
 use crate::{
     as_ms,
     Id,
+    Error,
     PeerInfo,
     Value,
-    Error,
     Result,
-    errors::StateError,
-    dht::{
-        storage::data_storage::DataStorage,
-    }
+    errors::{StateError, ArgumentError},
 };
-
+use crate::core::cryptobox::Nonce;
 use crate::dht::storage::{
     user_version,
     drop_tbs,
     create_tbs,
+    get_value,
+    get_values,
+    put_value,
+    update_value_announced_time,
+    remove_value,
+    remove_expired_values,
+    get_peer,
+    get_peers_by_id,
+    get_peers_with_seq,
+    get_peers_authenticated_by,
+    get_peers_all,
+    put_peer,
+    update_peer_announced_time,
+    remove_peer,
+    remove_peers_by_id,
+    remove_expired_peers,
+
+    data_storage::DataStorage,
+    models::{Valore, NewValore, Peer as DbPeer, NewPeer}
 };
 
+// 2 hours in milliseconds (mirrors constants::MAX_VALUE_AGE / MAX_PEER_AGE)
+const DEFAULT_EXPIRY: Duration = Duration::from_secs(2 * 60 * 60);
+
+// Convert a Diesel / Display error into a boxed crate error.
+fn db_err(e: impl std::fmt::Display) -> Error {
+    StateError::new(e.to_string())
+}
+
 pub(crate) struct SqliteStorage {
-    connection: Option<SqliteConnection>,
+    connection: UnsafeCell<Option<SqliteConnection>>,
+    value_expiry: Duration,
+    peer_expiry: Duration,
 }
 
 impl SqliteStorage {
     pub(crate) fn new() -> Self {
-       Self { connection: None }
+        Self {
+            connection: UnsafeCell::new(None),
+            value_expiry: DEFAULT_EXPIRY,
+            peer_expiry:  DEFAULT_EXPIRY,
+        }
     }
 
-    fn conn(&mut self) -> &mut SqliteConnection {
-        self.connection.as_mut().unwrap()
+    // SAFETY: SqliteStorage is used through a single-threaded NodeRunner;
+    // the unsafe impl Send/Sync below reflects that guarantee.
+    fn conn(&self) -> &mut SqliteConnection {
+        unsafe { (*self.connection.get()).as_mut().unwrap() }
     }
 }
 
 unsafe impl Send for SqliteStorage {}
 unsafe impl Sync for SqliteStorage {}
 
+fn valore_to_value(v: Valore) -> Value {
+    Value::packed(
+        v.publicKey.as_ref().map(|pk| Id::try_from(pk.as_slice()).unwrap()),
+        v.recipient.as_ref().map(|r|  Id::try_from(r.as_slice()).unwrap()),
+        v.nonce.as_ref().map(|n| Nonce::try_from(n.as_slice()).unwrap()),
+        v.signature,
+        v.data,
+        v.sequenceNumber,
+    )
+}
+
+fn db_peer_to_info(p: DbPeer) -> PeerInfo {
+    PeerInfo::packed(
+        Id::try_from(p.id.as_slice()).unwrap(),
+        p.nonce,
+        p.sequenceNumber,
+        p.nodeId.map(|n| Id::try_from(n.as_slice()).unwrap()),
+        p.nodeSignature,
+        p.signature,
+        p.fingerprint as u64,
+        p.endpoint,
+        p.extra,
+    )
+}
+
 impl DataStorage for SqliteStorage {
-    fn initialize(
-        &mut self,
-        _: Duration,
-        _: Duration) -> Result<()> {
+    fn open(&mut self, path: &str) -> Result<()> {
+        let conn = SqliteConnection::establish(path)
+            .map_err(|e| db_err(format!("Failed to open SQLite at '{}': {}", path, e)))?;
+        // SAFETY: exclusive access via &mut self
+        unsafe { *self.connection.get() = Some(conn); }
+
+        let ver = user_version(self.conn());
+        if ver < 5 && !drop_tbs(self.conn()) {
+            return Err(StateError::new("Failed to drop old db tables".into()));
+        }
+        if !create_tbs(self.conn()) {
+            return Err(StateError::new("Failed to create db tables".into()));
+        }
         Ok(())
     }
 
-    fn open(&mut self, path: &str) -> Result<()> {
-        let connection = match SqliteConnection::establish(&path) {
-            Ok(c) => c,
-            Err(e) => return Err(Error::from(e))
-        };
-        self.connection = Some(connection);
-
-        // if we change the schema,
-        // we should check the user version, do the schema update,
-        // then increase the user_version;
-        let ver  = user_version(self.conn());
-        let conn = self.connection.as_mut().unwrap();
-        if ver < 4 && !drop_tbs(conn) {
-            return Err(StateError::new("Failed to update db tables".into()));
-        }
-        if !create_tbs(conn) {
-            return Err(StateError::new("Failed to update SQLite Text".into()));
-        }
-
+    fn initialize(&mut self, value_expiry: Duration, peer_expiry: Duration) -> Result<()> {
+        self.value_expiry = value_expiry;
+        self.peer_expiry  = peer_expiry;
         Ok(())
     }
 
     fn close(&mut self) -> Result<()> {
-        self.connection = None;
+        // SAFETY: exclusive access via &mut self
+        unsafe { *self.connection.get() = None; }
         Ok(())
     }
 
     fn purge(&mut self) -> Result<()> {
-        unimplemented!()
+        let now          = as_ms!(SystemTime::now()) as i64;
+        let value_cutoff = now - self.value_expiry.as_millis() as i64;
+        let peer_cutoff  = now - self.peer_expiry.as_millis() as i64;
+
+        if let Err(e) = remove_expired_values(self.conn(), value_cutoff) {
+            warn!("Purging expired values failed: {}", e);
+        }
+        if let Err(e) = remove_expired_peers(self.conn(), peer_cutoff) {
+            warn!("Purging expired peers failed: {}", e);
+        }
+        Ok(())
     }
 
-    fn put_value(&mut self,
-        _: Value,
-        _persistent: Option<bool>
-    ) -> Result<()> {
-        unimplemented!()
-    }
+    // ── values ───────────────────────────────────────────────────────────────
 
-    fn get_value(&self, _: &Id) -> Result<Option<Value>> {
-        unimplemented!()
-    }
-
-    fn get_values(&self)-> Result<Vec<Value>> {
-        unimplemented!()
-    }
-
-    fn update_value_announced_time(&mut self,  _: &Id) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn remove_value(&mut self, _: &Id) -> Result<()> {
-        unimplemented!()
-    }
-
-    // methods related to peer(s)
-
-    fn put_peer(&mut self,
-        _peer: PeerInfo,
-        _persistent: Option<bool>
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn put_peers(&mut self,
-        _: Vec<PeerInfo>,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn get_peer(&self,
-        _: &Id,
-        _: u64
-    ) -> Result<Option<PeerInfo>> {
-        unimplemented!()
-    }
-
-    fn get_peers(&self, _: &Id) -> Result<Vec<PeerInfo>> {
-        unimplemented!()
-    }
-
-    fn get_peers_with_expected_seq(&self,
-        _: &Id,
-        _: i32,
-        _: i32
-    ) -> Result<Vec<PeerInfo>> {
-        unimplemented!()
-    }
-
-    fn get_peers_authenticated_by(&self,
-        _: &Id,
-        _: &Id
-    ) -> Result<Vec<PeerInfo>> {
-        unimplemented!()
-    }
-
-    fn get_peers_all(& self) -> Result<Vec<PeerInfo>> {
-        unimplemented!()
-    }
-
-    fn update_peer_announced_time(&mut self,
-        _: &Id,
-        _: u64
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn remove_peer(&mut self,
-        _: &Id,
-        _: u64
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn remove_peers(&mut self, _: &Id) -> Result<()> {
-        unimplemented!()
-    }
-}
-
-/*
-impl DataStorage for SqliteStorage {
-    fn open(&mut self, path: &str) -> Result<()> {
-        let connection = match SqliteConnection::establish(&path) {
-            Ok(c) => c,
-            Err(e) => return Err(Error::from(e))
+    fn put_value(&mut self, value: Value, persistent: Option<bool>) -> Result<()> {
+        let now      = as_ms!(SystemTime::now()) as i64;
+        let value_id = value.id();
+        let v = NewValore {
+            id:             value_id.as_bytes(),
+            publicKey:      value.public_key().map(|pk| pk.as_bytes()),
+            privateKey:     value.private_key().map(|sk| sk.as_bytes()),
+            recipient:      value.recipient().map(|r| r.as_bytes()),
+            nonce:          value.nonce().map(|n| n.as_bytes()),
+            signature:      value.signature(),
+            data:           value.data(),
+            sequenceNumber: value.sequence_number(),
+            persistent:     persistent.unwrap_or(false),
+            timestamp:      now,
+            announced:      now,
         };
-        self.connection = Some(connection);
-
-        // if we change the schema,
-        // we should check the user version, do the schema update,
-        // then increase the user_version;
-        let ver  = user_version(self.conn());
-        let conn = self.connection.as_mut().unwrap();
-        if ver < 4 && !drop_tbs(conn) {
-            return Err(Error::State(format!("Failed to update db tables")));
-        }
-        if !create_tbs(conn) {
-            return Err(Error::State(format!("Failed to update SQLite Text")));
-        }
-
-        Ok(())
-    }
-    fn close(&mut self) -> Result<()> {
-        self.connection = None;
-        Ok(())
+        put_value(self.conn(), v)
+            .map(|_| ())
+            .map_err(db_err)
     }
 
-    fn expire(&mut self) -> Result<()> {
-        debug!("Remove all expired values and peers from local SQLite storage.");
-
-        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        remove_expired_values(self.conn(), before as i64)
-            .map_err(|e| warn!("Removing expired values from SQLite storage error: {}", e))
-            .ok();
-
-        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        remove_expired_peers(self.conn(), before as i64)
-            .map_err(|e| warn!("Removing expired peers from SQLite storage error: {}", e))
-            .ok();
-        Ok(())
+    fn get_value(&self, id: &Id) -> Result<Option<Value>> {
+        get_value(self.conn(), id.as_bytes())
+            .map(|opt| opt.map(valore_to_value))
+            .map_err(db_err)
     }
 
-    fn value(&mut self, id: &Id) -> Result<Option<Value>> {
-        let before = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        match get_value(self.conn(), id.as_bytes(), before as i64) {
-            Ok(Some(v)) => {
-                let value = Value::packed(
-                    v.publicKey.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
-                    v.recipient.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
-                    v.nonce.as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()),
-                    v.signature,
-                    v.data,
-                    v.sequenceNumber
-                );
+    fn get_values(&self) -> Result<Vec<Value>> {
+        get_values(self.conn())
+            .map(|vs| vs.into_iter().map(valore_to_value).collect())
+            .map_err(db_err)
+    }
 
-                // Retaining them solely to eliminate compilation warnings.
-                _ = v.id;
-                _ = v.timestamp;
-                _ = v.announced;
-                _ = v.persistent;
-
-                Ok(Some(value))
-            },
-            Ok(None) => Ok(None),
-            Err(e) => Err(Error::from(e))
-        }
-        Ok(None)
+    fn update_value_announced_time(&mut self, id: &Id) -> Result<()> {
+        let now = as_ms!(SystemTime::now()) as i64;
+        update_value_announced_time(self.conn(), id.as_bytes(), now)
+            .map(|_| ())
+            .map_err(db_err)
     }
 
     fn remove_value(&mut self, id: &Id) -> Result<()> {
         remove_value(self.conn(), id.as_bytes())
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
+            .map(|_| ())
+            .map_err(db_err)
     }
 
-    fn put_value(&mut self,
-        value: &Value,
-        expected_seq: Option<i32>,
-        persistent: Option<bool>,
-        update_last_announce: Option<bool>
-    ) -> Result<()> {
-        if value.is_mutable() && !value.is_valid() {
-            return Err(Error::Argument(format!("value signature validation failed.")));
-        }
-        let expected_seq = expected_seq.unwrap_or(-1);
-        let value_id = value.id();
-        if let Ok(Some(old)) = self.value(&value_id) {
-            if old.is_mutable() {
-                if !value.is_mutable() {
-                    return Err(Error::Argument(format!("Can not replace mutable value with immutable is not supported")));
-                }
-                if old.private_key().is_some() && !value.private_key().is_some() {
-                    return Err(Error::Argument(format!("Not the owner of value")));
-                }
-                if value.sequence_number() < old.sequence_number() {
-                    return Err(Error::Argument(format!("Sequence number less than current")));
-                }
-                if expected_seq >= 0 &&
-                    old.sequence_number() >= 0 &&
-                    old.sequence_number() != expected_seq {
-                    return Err(Error::Argument(format!("CAS failure")));
-                }
-            }
-        }
+    // ── peers ────────────────────────────────────────────────────────────────
 
-        let mut v = NewValore::default();
-        v.publicKey  = value.public_key()   .map(|v| v.as_bytes());
-        v.privateKey = value.private_key()  .map(|v| v.as_bytes());
-        v.recipient  = value.recipient()    .map(|v| v.as_bytes());
-        v.nonce      = value.nonce()        .map(|v| v.as_bytes());
-        v.signature  = value.signature();
-        v.data       = value.data().as_ref();
-        v.id         = value_id.as_bytes();
-        v.persistent = persistent.unwrap_or(false);
-        v.sequenceNumber = value.sequence_number();
-
-        v.timestamp  = ms_since_epoch() as i64;
-        v.announced  = if update_last_announce.unwrap_or(false) { v.timestamp } else { 0 };
-
-        put_value(self.conn(), v)
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
-    }
-
-    fn update_value_last_announce(&mut self, id: &Id) -> Result<()> {
-        let timestamp = ms_since_epoch();
-        update_value_last_announce(self.conn(),
-                id.as_bytes(),
-                timestamp as i64,
-                timestamp as i64)
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
-    }
-
-    fn persistent_values(&mut self, before: &SystemTime) -> Result<Vec<Value>> {
-        let before = elapsed_ms!(before) as i64;
-        let result = persistent_values(self.conn(), before);
-        let values = match result {
-            Ok(v) => v,
-            Err(e) => return Err(Error::from(e))
-        };
-
-        let values = values.into_iter()
-            .filter_map(|v| {
-                let value = Value::packed(
-                    v.publicKey.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
-                    v.recipient.as_ref().map(|v| Id::try_from(v.as_slice()).unwrap()),
-                    v.nonce.as_ref().map(|v| Nonce::try_from(v.as_slice()).unwrap()),
-                    v.signature,
-                    v.data,
-                    v.sequenceNumber
-                );
-
-                // Retaining them solely to eliminate compilation warnings.
-                _ = v.id;
-                _ = v.timestamp;
-                _ = v.announced;
-                _ = v.persistent;
-
-                Some(value)
-            }).collect();
-
-        Ok(values)
-    }
-
-    fn value_ids(&mut self) -> Result<Vec<Id>> {
-        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        value_ids(self.conn(), timestamp as i64)
-            .and_then(|v| {
-                let ids = v.iter()
-                    .map(|id| Id::try_from(id.as_slice()).unwrap())
-                    .collect();
-                Ok(ids)
-            }).map_err(|e| Error::from(e))
-    }
-
-    fn peers(&mut self, _eer_id: &Id, _max_peers: usize) -> Result<Vec<PeerInfo>> {
-        let result = get_peers( self.conn(),
-            peer_id.as_bytes(),
-            max_peers as i64,
-            timestamp as i64
-        );
-
-        let peers = match result {
-            Ok(v) => v,
-            Err(e) => return Err(Error::from(e))
-        };
-
-        let peers = peers.into_iter().filter_map(|v| {
-            let nodeid = Id::try_from(v.nodeId.as_slice()).unwrap();
-            let peer = PeerPackBuilder::new(nodeid)
-                .with_peerid(Some(Id::try_from(v.id.as_slice()).unwrap()))
-                .with_sk(v.privateKey.as_ref().map(|v| PrivateKey::try_from(v.as_slice()).unwrap()))
-                .with_port(v.port as u16)
-                .with_sig(Some(v.signature))
-                .with_url(v.alternativeURL)
-                .with_origin(match v.origin == v.nodeId {
-                    true => None,
-                    false => Some(Id::try_from(v.origin.as_slice()).unwrap())
-                }).build();
-
-            // Retaining them solely to eliminate compilation warnings.
-            _ = v.timestamp;
-            _ = v.announced;
-            _ = v.persistent;
-
-            Some(peer)
-        }).collect();
-
-        Ok(peers)
-    }
-
-    fn peer(&mut self, _id: &Id) -> Result<Option<PeerInfo>> {
-        let timestamp = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        match get_peer(self.conn(), id.as_bytes(), origin.as_bytes(), timestamp as i64) {
-            Ok(Some(v)) => {
-                let nodeid = Id::try_from(v.nodeId.as_slice()).unwrap();
-                let peer = PeerPackBuilder::new(nodeid)
-                    .with_peerid(Some(Id::try_from(v.id.as_slice()).unwrap()))
-                    .with_sk(v.privateKey.as_ref().map(|v| PrivateKey::try_from(v.as_slice()).unwrap()))
-                    .with_port(v.port as u16)
-                    .with_sig(Some(v.signature))
-                    .with_url(v.alternativeURL)
-                    .with_origin(match v.origin == v.nodeId {
-                        true => None,
-                        false => Some(Id::try_from(v.origin.as_slice()).unwrap())
-                    })
-                    .build();
-                Ok(Some(peer))
-            },
-            Ok(None) => Ok(None),
-            Err(e) => return Err(Error::from(e))
-        }
-        unimplemented!()
-    }
-
-    fn remove_peer(&mut self, peer_id: &Id) -> Result<()> {
-        remove_peer(self.conn(), peer_id.as_bytes(), origin.as_bytes())
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
-        unimplemented!()
-    }
-
-    fn put_peers(&mut self, _peer: &[PeerInfo]) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn put_peer(&mut self,
-        _peer: &PeerInfo,
-        expected_seq: Option<i32>,
-        _persistent: Option<bool>,
-        _update_last_announce: Option<bool>
-    ) -> Result<()> {
+    fn put_peer(&mut self, peer: PeerInfo, persistent: Option<bool>) -> Result<()> {
         if !peer.is_valid() {
-            return Err(Error::Argument(format!("peer signature validation failed.")));
+            return Err(ArgumentError::new("peer signature validation failed".into()));
         }
-
-        let mut p = NewPeer::default();
-        p.id        = peer.id().as_bytes();
-        p.nodeId    = peer.nodeid().as_bytes();
-        p.origin    = peer.origin().as_bytes();
-        p.privateKey= peer.private_key().map(|v|v.as_bytes());
-        p.persistent= persistent.unwrap_or(false);
-        p.port      = peer.port() as i32;
-        p.alternativeURL = peer.alternative_url();
-        p.signature = peer.signature();
-
-        p.timestamp = ms_since_epoch() as i64;
-        p.announced = if update_last_announce.unwrap_or(false) { p.timestamp } else { 0 };
-
-        put_peer(self.conn(), p)
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
-        unimplemented!()
-    }
-
-    fn update_peer_last_announce(&mut self, target: &Id, origin: &Id) -> Result<()> {
-        let timestamp = ms_since_epoch() as i64;
-        update_peer_last_announce(self.conn(),
-                target.as_bytes(),
-                origin.as_bytes(),
-                timestamp,
-                timestamp)
-            .and_then(|_| Ok(()))
-            .map_err(|e| Error::from(e))
-        unimplemented!()
-    }
-
-    fn persistent_peers(&mut self, before: &SystemTime) -> Result<Vec<PeerInfo>> {
-        let before = elapsed_ms!(before) as i64;
-        let result = persistent_peers(self.conn(), before);
-        let result = match result {
-            Ok(v) => v,
-            Err(e) => return Err(Error::from(e))
+        let now = as_ms!(SystemTime::now()) as i64;
+        let p = NewPeer {
+            id:             peer.id().as_bytes(),
+            fingerprint:    peer.fingerprint() as i64,
+            persistent:     persistent.unwrap_or(false),
+            privateKey:     peer.private_key().map(|sk| sk.as_bytes()),
+            nonce:          peer.nonce(),
+            sequenceNumber: peer.sequence_number(),
+            nodeId:         peer.nodeid().map(|n| n.as_bytes()),
+            nodeSignature:  peer.node_signature(),
+            signature:      peer.signature(),
+            endpoint:       peer.endpoint(),
+            extra:          peer.extra_data(),
+            timestamp:      now,
+            announced:      now,
         };
-
-        let peers = result.into_iter()
-            .filter_map(|v| {
-                let nodeid = Id::try_from(v.nodeId.as_slice()).unwrap();
-                let peer = PeerPackBuilder::new(nodeid)
-                    .with_peerid(Some(Id::try_from(v.id.as_slice()).unwrap()))
-                    .with_sk(v.privateKey.map(|v| PrivateKey::try_from(v.as_slice()).unwrap()))
-                    .with_port(v.port as u16)
-                    .with_sig(Some(v.signature))
-                    .with_url(v.alternativeURL)
-                    .with_origin(match v.origin == v.nodeId {
-                        true => None,
-                        false => Some(Id::try_from(v.origin.as_slice()).unwrap())
-                    })
-                    .build();
-
-                // Retaining them solely to eliminate compilation warnings.
-                _ = v.timestamp;
-                _ = v.announced;
-                _ = v.persistent;
-
-                Some(peer)
-            }).collect();
-
-        Ok(peers)
-        unimplemented!()
+        put_peer(self.conn(), p)
+            .map(|_| ())
+            .map_err(db_err)
     }
 
-    fn peer_ids(&mut self) -> Result<Vec<Id>> {
-        let timestamp  = ms_since_epoch() - constants::MAX_VALUE_AGE;
-        peer_ids(self.conn(), timestamp as i64)
-            .and_then(|v| {
-                let ids = v.iter()
-                    .map(|id| Id::try_from(id.as_slice()).unwrap())
-                    .collect();
-                Ok(ids)
-            }).map_err(|e| Error::from(e))
-        unimplemented!()
+    fn put_peers(&mut self, peers_in: Vec<PeerInfo>) -> Result<()> {
+        for peer in peers_in {
+            self.put_peer(peer, None)?;
+        }
+        Ok(())
     }
-}
-*/
 
-#[inline(always)]
-fn ms_since_epoch() -> u128 {
-    as_ms!(SystemTime::now())
+    fn get_peer(&self, id: &Id, fingerprint: u64) -> Result<Option<PeerInfo>> {
+        get_peer(self.conn(), id.as_bytes(), fingerprint as i64)
+            .map(|opt| opt.map(db_peer_to_info))
+            .map_err(db_err)
+    }
+
+    fn get_peers(&self, id: &Id) -> Result<Vec<PeerInfo>> {
+        get_peers_by_id(self.conn(), id.as_bytes())
+            .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
+            .map_err(db_err)
+    }
+
+    fn get_peers_with_expected_seq(&self, id: &Id, expected_seq: i32, limit: i32) -> Result<Vec<PeerInfo>> {
+        get_peers_with_seq(self.conn(), id.as_bytes(), expected_seq, limit as i64)
+            .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
+            .map_err(db_err)
+    }
+
+    fn get_peers_authenticated_by(&self, id: &Id, node_id: &Id) -> Result<Vec<PeerInfo>> {
+        get_peers_authenticated_by(self.conn(), id.as_bytes(), node_id.as_bytes())
+            .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
+            .map_err(db_err)
+    }
+
+    fn get_peers_all(&self) -> Result<Vec<PeerInfo>> {
+        get_peers_all(self.conn())
+            .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
+            .map_err(db_err)
+    }
+
+    fn update_peer_announced_time(&mut self, id: &Id, fingerprint: u64) -> Result<()> {
+        let now = as_ms!(SystemTime::now()) as i64;
+        update_peer_announced_time(self.conn(), id.as_bytes(), fingerprint as i64, now)
+            .map(|_| ())
+            .map_err(db_err)
+    }
+
+    fn remove_peer(&mut self, id: &Id, fingerprint: u64) -> Result<()> {
+        remove_peer(self.conn(), id.as_bytes(), fingerprint as i64)
+            .map(|_| ())
+            .map_err(db_err)
+    }
+
+    fn remove_peers(&mut self, id: &Id) -> Result<()> {
+        remove_peers_by_id(self.conn(), id.as_bytes())
+            .map(|_| ())
+            .map_err(db_err)
+    }
 }

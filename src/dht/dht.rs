@@ -1186,8 +1186,8 @@ impl DHT {
         task.with_listener(
             TaskListener::new().ended_fn(
                 move |t: &mut dyn Task| {
-                    let task = t.as_any()
-                        .downcast_ref::<ValueLookupTask>().unwrap();
+                    let task = t.as_any_mut()
+                        .downcast_mut::<ValueLookupTask>().unwrap();
                     promise.complete(Ok(task.result()));
             })
         );

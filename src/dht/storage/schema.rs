@@ -10,20 +10,23 @@ diesel::table! {
         sequenceNumber -> Integer,
         data -> Binary,
         timestamp -> BigInt,
-        announced -> BigInt
+        announced -> BigInt,
     }
 }
 
 diesel::table! {
-    peers (id) {
+    peers (id, fingerprint) {
         id -> Binary,
-        nodeId -> Binary,
-        origin -> Binary,
+        fingerprint -> BigInt,
         persistent -> Bool,
         privateKey -> Nullable<Binary>,
-        port -> Integer,
-        alternativeURL -> Nullable<Text>,
+        nonce -> Binary,
+        sequenceNumber -> Integer,
+        nodeId -> Nullable<Binary>,
+        nodeSignature -> Nullable<Binary>,
         signature -> Binary,
+        endpoint -> Text,
+        extra -> Nullable<Binary>,
         timestamp -> BigInt,
         announced -> BigInt,
     }

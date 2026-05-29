@@ -2,11 +2,10 @@
 use crate::{Id, Value};
 
 pub(crate) struct EligibleValue {
-    target: Id,
+    target  : Id,
     expected_seq: i32,
-    value: Option<Value>,
-
-    latest: bool,
+    value   : Option<Value>,
+    latest  : bool,
 }
 
 impl EligibleValue {
@@ -14,8 +13,8 @@ impl EligibleValue {
         Self {
             target,
             expected_seq,
-            value : None,
-            latest: false
+            value   : None,
+            latest  : false
         }
     }
 
@@ -27,7 +26,7 @@ impl EligibleValue {
         self.value.is_none()
     }
 
-    pub(crate) fn update(&mut self, value: Value, lastest: bool) -> bool {
+    pub(crate) fn update(&mut self, value: Value, latest: bool) -> bool {
         if value.id() != self.target
             || (self.expected_seq >= 0 && value.sequence_number() < self.expected_seq)
             || !value.is_valid()
@@ -35,13 +34,9 @@ impl EligibleValue {
             return false;
         }
 
-        let existing = self.value.as_ref();
-        match existing {
-            Some(v) if value.sequence_number() <= v.sequence_number() => {},
-            _ => {
-                self.value = Some(value);
-                self.latest = lastest;
-            }
+        if self.value.as_ref().map_or(true, |v| value.sequence_number() > v.sequence_number()) {
+            self.value = Some(value);
+            self.latest = latest;
         }
         true
     }
@@ -50,7 +45,7 @@ impl EligibleValue {
         self.latest
     }
 
-    pub(crate) fn value(&self) -> Option<Value> {
-        self.value.clone()
+    pub(crate) fn value(&mut self) -> Option<Value> {
+        self.value.take()
     }
 }

@@ -60,7 +60,7 @@ mod tests {
 
         assert_eq!(rt.size(), 1);
         assert_eq!(rt.is_empty(), false);
-        assert_eq!(rt.local_id(), &local_id);
+        assert_eq!(rt.local_nodeid(), &local_id);
         assert_eq!(rt.is_home_bucket(rt.bucket_at(0).unwrap().lock().unwrap().prefix()), true);
         assert_eq!(rt.bucket_entry(&Id::random()).is_none(), true);
         assert_eq!(rt.number_of_entries(), 0);
@@ -130,7 +130,7 @@ mod tests {
         let restored: RoutingTable = serde_cbor::from_slice(&cbor)
             .expect("Failed to deserialize RoutingTable");
 
-        assert_eq!(restored.local_id(), &Id::zero());
+        assert_eq!(restored.local_nodeid(), &Id::zero());
         assert_eq!(restored.contains(&low_id), true);
         assert_eq!(restored.contains(&high_id), true);
         assert_eq!(restored.number_of_entries(), KBucket::MAX_ENTRIES + 1);

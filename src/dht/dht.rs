@@ -26,6 +26,7 @@ use crate::dht::{
    // suspicious_node_detector,
 
     promise::Promise,
+    consumer::Consumer,
     token_manager::TokenManager,
     lookup_option::LookupOption,
     rpc::{
@@ -330,33 +331,33 @@ impl DHT {
         }
         info!("Starting DHT/{}:{} on {} ...", self.network, self.id(), self.addr());
 
-        let rt = Arc::new(Mutex::new(RoutingTable::new(self.id().clone())));
-        let taskman = Arc::new(Mutex::new(TaskManager::new()));
+        let rt = RoutingTable::new_shared(self.id().clone());
+        let taskman = TaskManager::new_shared();
 
         let server  = Arc::new(Mutex::new({
-
             let addr = self.ni.socket_addr().clone();
             let identity = self.identity.clone();
+            let dht = self.dht();
 
             let mut server = RpcServer::new(addr, identity, None);
+            server.message_handler({
+                let dht = dht.clone();
+                move |msg| crate::locked!(dht).on_message(msg)
+            });
+            server.callsent_handler({
+                let dht = dht.clone();
+                move |call| crate::locked!(dht).on_send(call)
+            });
+            server.calltimeout_handler({
+                let dht = dht.clone();
+                move |call| crate::locked!(dht).on_timeout(call)
+            });
 
-            let dht = self.dht();
-            server.set_message_cb({
-                let dht = dht.clone();
-                move |msg| dht.lock().unwrap().on_message(msg)
-            });
-            server.set_call_sent_cb({
-                let dht = dht.clone();
-                move |call| dht.lock().unwrap().on_send(call)
-            });
-            server.set_call_timeout_cb({
-                let dht = dht.clone();
-                move |call| dht.lock().unwrap().on_timeout(call)
-            });
-            server.set_reachable_cb({
+
+            server.reachable_handler({
                 let dht = dht.clone();
                 move |reachable| {
-                    let mut locked_dht = dht.lock().unwrap();
+                    let mut locked_dht = crate::locked!(dht);
                     if reachable {
                         locked_dht.set_status(ConnectionStatus::Connected);
                     } else {
@@ -365,6 +366,7 @@ impl DHT {
                     }
                 }
             });
+
             server.start()?;
             server
         }));
@@ -427,7 +429,7 @@ impl DHT {
         {
             let server = self.server();
             let mut locked = server.lock().unwrap();
-            locked.set_reachable_cb(|_| {});
+            locked.reachable_handler(|_| {});
             locked.stop();
         }
 
@@ -1268,16 +1270,16 @@ impl DHT {
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
         let mut task = NodeLookupTask::new(
-            dht.clone(),value.id(), false
+            dht.clone(), value.id(), false
         );
         task.with_name(format!("Store value: lookup closest node to {}", value.id()));
         task.with_want_token(true);
-        task.set_nested(announce_task.clone());
+        task.with_nested(announce_task.clone());
         task.with_listener({
             TaskListener::new().ended_fn(
                 Box::new(move |t: &dyn Task| {
                     let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
-                    if task.state() != State::Completed {
+                    if task.task_state() != State::Completed {
                         return;
                     }
 
@@ -1384,12 +1386,12 @@ impl DHT {
         );
         task.with_want_token(true);
         task.with_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
-        task.set_nested(announce_task.clone());
+        task.with_nested(announce_task.clone());
         task.with_listener(
             TaskListener::new().ended_fn(
                 Box::new(move |t: &dyn Task| {
                     let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
-                    if t.state() != State::Completed {
+                    if t.task_state() != State::Completed {
                         return;
                     }
 

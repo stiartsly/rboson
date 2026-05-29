@@ -1,5 +1,4 @@
 use crate::NodeStatus;
-
 pub trait NodeStatusListener {
     fn status_changed(&self,
         _new_status: NodeStatus,

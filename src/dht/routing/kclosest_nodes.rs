@@ -30,7 +30,7 @@ impl KClosestNodes {
             entries: Vec::new(),
             filter: Box::new(move |e: &KBucketEntry| {
                 let rt = cloned.lock().unwrap();
-                e.eligible_for_nodes_list() && e.id() != rt.local_id()
+                e.eligible_for_nodes_list() && e.id() != rt.local_nodeid()
             }),
         }
     }
@@ -65,7 +65,7 @@ impl KClosestNodes {
         let cloned = self.rt.clone();
         self.filter = Box::new(move |entry: &KBucketEntry| {
             let rt = cloned.lock().unwrap();
-            filter(entry) && entry.id() != rt.local_id()
+            filter(entry) && entry.id() != rt.local_nodeid()
         });
         self
     }

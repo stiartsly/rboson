@@ -1,11 +1,12 @@
 
 pub(crate) struct Consumer<T> {
-    ended_fn: Box<dyn Fn(T)>,
+    ended_fn: Box<dyn Fn(T) + Send>,
 }
 
-impl<T> Consumer<T> {
+impl<T: Send + 'static> Consumer<T> {
     pub(crate) fn new<F>(handler: F) -> Self
-    where F: Fn(T) + 'static,{
+    where F: Fn(T) + 'static + Send,{
+
         Self {
             ended_fn: Box::new(handler),
         }

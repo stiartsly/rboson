@@ -67,7 +67,7 @@ mod tests {
         let mut closest = KClosestNodes::new(table.clone(), target, 5);
         closest.fill();
 
-        let local_id = *table.lock().unwrap().local_id();
+        let local_id = *table.lock().unwrap().local_nodeid();
         assert!(!closest.entries().iter().any(|entry| entry.id() == &local_id));
 
         let mut previous = None;

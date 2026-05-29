@@ -1,13 +1,13 @@
-use std::fmt;
-use std::result::Result as SResult;
-use std::sync::{Arc, Mutex};
+use std::{
+    fmt,
+    result::Result as SResult,
+    sync::{Arc, Mutex},
+};
 use rbtree::RBTree;
 use libsodium_sys::randombytes_uniform;
 use serde::{
-    Deserialize,
-    Deserializer,
-    Serialize,
-    Serializer,
+    Deserialize, Deserializer,
+    Serialize, Serializer,
     de::{self, MapAccess, Visitor},
     ser::SerializeStruct,
 };
@@ -28,6 +28,10 @@ pub(crate) struct RoutingTable {
 }
 
 impl RoutingTable {
+    pub(crate) fn new_shared(nodeid: Id) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self::new(nodeid)))
+    }
+
     pub(crate) fn new(nodeid: Id) -> Self {
         let buckets = {
             let prefix = Prefix::new();
@@ -51,7 +55,7 @@ impl RoutingTable {
         p.is_prefix_of(&self.local_id)
     }
 
-    pub(crate) fn local_id(&self) -> &Id {
+    pub(crate) fn local_nodeid(&self) -> &Id {
         &self.local_id
     }
 
@@ -63,7 +67,7 @@ impl RoutingTable {
         self.buckets.iter()
             .find(|(k,_)| k.is_prefix_of(target))
             .map(|(_,v)| v.clone())
-            .expect("panic: no bucket found, this should never happen")
+            .expect("panic: no bucket found, should never happen")
     }
 
     pub(crate) fn bucket_at(&self, index: usize) -> Option<Arc<Mutex<KBucket>>> {

@@ -11,16 +11,16 @@ use log::{warn, debug};
 use crate::core::Result;
 use crate::dht::{
     dht::DHT,
+    msg::Message,
     consumer::Consumer,
-    msg::msg::Message,
     task::task_listener::TaskListener,
     rpc::{
-        rpc_target::Target,
-        rpccall::{RpcCall, State as CallState},
+        Target,
+        RpcCall, rpccall::State as CallState,
     }
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub(crate) enum State {
     Initialized,
@@ -30,8 +30,15 @@ pub(crate) enum State {
     Canceled,
 }
 
-const UNSTARTED_STATES: [State; 2] = [State::Initialized, State::Queued];
-const INCOMPLETED_STATES: [State; 3] = [State::Initialized, State::Queued, State::Running];
+const UNSTARTED_STATES: [State; 2] = [
+    State::Initialized,
+    State::Queued
+];
+const INCOMPLETED_STATES: [State; 3] = [
+    State::Initialized,
+    State::Queued,
+    State::Running
+];
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -45,7 +52,6 @@ impl fmt::Display for State {
     }
 }
 
-
 /** Maximum concurrent RPC requests for normal tasks. */
 const MAX_CONCURRENT_RPC_REQUESTS: usize = 16;
 /** Maximum concurrent RPC requests for low-priority tasks. */
@@ -53,7 +59,6 @@ const MAX_CONCURRENT_RPC_REQUESTS_LOW_PRIORITY: usize = 4;
 
 pub(crate) type TaskId = i32;
 static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
-
 fn next_taskid() -> TaskId {
     let id = NEXT_TASKID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     if id == 0 {
@@ -65,7 +70,7 @@ fn next_taskid() -> TaskId {
 
 pub(crate) struct TaskData {
     taskid      : TaskId,
-    task_name   : Option<String>,
+    task_name   : String,
     low_priori  : bool,
     state       : State,
 
@@ -84,14 +89,12 @@ impl TaskData {
     pub(crate) fn new() -> Self {
         Self {
             taskid      : next_taskid(),
-            task_name   : None,
+            task_name   : String::new(),
             low_priori  : false,
             state       : State::Initialized,
-
             created     : SystemTime::now(),
             started     : SystemTime::UNIX_EPOCH,
             ended       : SystemTime::UNIX_EPOCH,
-
             inflights   : HashMap::new(),
             listener    : None,
             end_handler : None,
@@ -112,31 +115,44 @@ pub(crate) trait Task: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
+    fn dht(&self) -> Arc<Mutex<DHT>>;
+
     fn task_id(&self) -> i32 {
         self.data().taskid
     }
     fn task_name(&self) -> &str {
-        self.data().task_name
-            .as_deref()
-            .unwrap_or("")
+        self.data().task_name.as_str()
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>>;
+    fn task_state(&self) -> State {
+        self.data().state
+    }
 
     fn with_name(&mut self, name: String) {
-        self.data_mut().task_name = Some(name);
+        self.data_mut().task_name = name;
+    }
+
+    fn with_nested(&mut self, nested: Arc<Mutex<Box<dyn Task>>>) {
+        self.data_mut().nested = Some(nested);
     }
 
     fn set_state_if(&mut self, expected: &State, new_state: State) -> bool {
-        if expected != &self.state() {
+        if expected != &self.task_state() {
             warn!("{}#{} invalid state transition: expected {}, but was {}",
-                    self.task_name(), self.task_id(), expected, self.state());
+                self.task_name(),
+                self.task_id(),
+                expected,
+                self.task_state()
+            );
             return false;
         }
 
         if self.is_ended() {
             warn!("{}#{} invalid state transition: task already ended: {}",
-                    self.task_name(), self.task_id(), self.state());
+                self.task_name(),
+                self.task_id(),
+                self.task_state()
+            );
             return false;
         }
 
@@ -145,27 +161,23 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn set_state_if_stateset(&mut self, expected: &[State], new_state: State) -> bool {
-        if !expected.contains(&self.state()) {
-            let expected_str = expected.iter()
+        if !expected.contains(&self.task_state()) {
+            let str = expected.iter()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
 
             warn!("{}#{} invalid state transition: expected one of {}, but was {}",
-                    self.task_name(), self.task_id(), expected_str, self.state());
+                self.task_name(),
+                self.task_id(),
+                str,
+                self.task_state()
+            );
             return false;
         }
 
         self.data_mut().state = new_state;
         true
-    }
-
-    fn state(&self) -> State {
-        self.data().state
-    }
-
-    fn set_nested(&mut self, nested: Arc<Mutex<Box<dyn Task>>>) {
-        self.data_mut().nested = Some(nested);
     }
 
     fn nested(&self) -> Option<Arc<Mutex<Box<dyn Task>>>> {
@@ -176,7 +188,7 @@ pub(crate) trait Task: Send + Sync {
         self.data().inflights.len()
     }
 
-    fn with_end_handler(&mut self, handler: Consumer<()>) {
+    fn with_ended_handler(&mut self, handler: Consumer<()>) {
         self.data_mut().end_handler = Some(handler);
     }
 
@@ -241,8 +253,8 @@ pub(crate) trait Task: Send + Sync {
             self.task_id()
         );
 
-        let consumer = self.data_mut().end_handler.take();
-        if let Some(handler) = consumer {
+        let end_handler = self.data_mut().end_handler.take();
+        if let Some(handler) = end_handler {
             handler.accept(());
             self.data_mut().end_handler = Some(handler);
         }
@@ -416,7 +428,7 @@ impl fmt::Display for dyn Task {
             self.task_id(),
             self.task_name(),
             addr_family,
-            self.state()
+            self.task_state()
         )
     }
 }

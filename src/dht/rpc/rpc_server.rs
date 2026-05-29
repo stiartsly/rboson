@@ -2,24 +2,15 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::{SystemTime, Duration},
-    collections::{HashSet, HashMap},
-    future::Future,
-    pin::Pin,
+    collections::HashMap,
 };
-
 use futures::StreamExt;
-use tokio::{
-    sync::{mpsc, oneshot},
-   //task,
-    task::JoinHandle,
-};
-use tokio_util::time::{delay_queue::Key, DelayQueue};
-
 use log::{info, warn, error, trace};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 use tokio::{
-    task,
     net::UdpSocket,
-    sync::mpsc::{UnboundedSender, UnboundedReceiver},
+    sync::oneshot,
+    sync::mpsc::{self, UnboundedSender, UnboundedReceiver},
 };
 
 use crate::{
@@ -33,15 +24,12 @@ use crate::{
         CryptoError
     }
 };
-
 use crate::dht::{
-    msg::msg::Message,
+    consumer::Consumer,
+    rpc::RpcCall,
+    msg::Message,
     timer::{self, Job, Command},
-    rpc::rpccall::RpcCall,
-    suspicious_node_detector::{
-        SuspiciousNodeDetector,
-        DefaultSuspiciousNodeDetector
-    },
+    suspicious_node_detector::DefaultSuspiciousNodeDetector,
 };
 
 pub(crate) struct RpcServer {
@@ -49,29 +37,27 @@ pub(crate) struct RpcServer {
     socket_addr     : SocketAddr,
 
     suspicious_node_detector: Option<DefaultSuspiciousNodeDetector>,
+    pending_calls       : HashMap<i32, Arc<Mutex<RpcCall>>>,
 
-    pending_calls   : HashMap<i32, Arc<Mutex<RpcCall>>>,
+    recv_packets        : u32,
+    recv_packets_at_last_reachable_check: u32,
+    last_reachable_check: SystemTime,
+    reachable           : bool,
 
-    recv_pkts       : u32,
-    recv_pkts_at_last_reachable_check: u32,
+    reachable_handler   : Option<Consumer<bool>>,
+    message_handler     : Option<Box<dyn Fn(&mut Message) + Send>>,
+    callsent_handler    : Option<Consumer<Arc<Mutex<RpcCall>>>>,
+    calltimeout_handler : Option<Consumer<Arc<Mutex<RpcCall>>>>,
 
-    last_reachable_check: Option<SystemTime>,
-    reachable       : bool,
+    start_time          : Option<SystemTime>,
+    is_running          : bool,
 
-    reachable_cb    : Option<Box<dyn Fn(bool) + Send>>,
-    message_cb      : Option<Box<dyn Fn(&mut Message) -> () + Send>>,
-    call_sent_cb    : Option<Box<dyn Fn(Arc<Mutex<RpcCall>>) -> () + Send>>,
-    call_timeout_cb : Option<Box<dyn Fn(Arc<Mutex<RpcCall>>) -> () + Send>>,
+    client              : timer::Client,
+    tx_channel          : UnboundedSender<Command>,
+    rx_channel          : Option<UnboundedReceiver<Command>>,
 
-    start_time      : Option<SystemTime>,
-    is_running      : bool,
-
-    client          : timer::Client,
-    tx_channel      : UnboundedSender<Command>,
-    rx_channel      : Option<UnboundedReceiver<Command>>,
-
-    tx_socket       : Option<UdpSocket>,
-    rx_socket       : Option<UdpSocket>,
+    tx_socket           : Option<UdpSocket>,
+    rx_socket           : Option<UdpSocket>,
 }
 
 impl RpcServer {
@@ -92,15 +78,15 @@ impl RpcServer {
             suspicious_node_detector,
             pending_calls: HashMap::new(),
 
-            recv_pkts: 0,
-            recv_pkts_at_last_reachable_check: 0,
-            last_reachable_check: None,
+            recv_packets: 0,
+            recv_packets_at_last_reachable_check: 0,
+            last_reachable_check: SystemTime::now(),
             reachable: false,
 
-            reachable_cb    : None,
-            message_cb      : None,
-            call_sent_cb    : None,
-            call_timeout_cb : None,
+            reachable_handler   : None,
+            message_handler     : None,
+            callsent_handler    : None,
+            calltimeout_handler : None,
 
             start_time: None,
             is_running: false,
@@ -137,16 +123,9 @@ impl RpcServer {
         }
 
         self.reachable = reachable;
-        if let Some(cb) = self.reachable_cb.as_ref() {
-            cb(reachable);
+        if let Some(handler) = self.reachable_handler.as_ref() {
+            handler.accept(reachable);
         }
-    }
-
-    pub(crate) fn set_reachable_cb<F>(&mut self, cb: F)
-    where
-        F: Fn(bool) + Send + 'static,
-    {
-        self.reachable_cb = Some(Box::new(cb));
     }
 
     pub(crate) fn is_reachable(&self) -> bool {
@@ -157,22 +136,28 @@ impl RpcServer {
         unimplemented!()
     }
 
-    pub(crate) fn set_message_cb<F>(&mut self, cb: F)
-    where F: Fn(&mut Message) -> () + Send + 'static,
+    pub(crate) fn reachable_handler<F>(&mut self, cb: F)
+    where F: Fn(bool) + Send + 'static,
     {
-        self.message_cb = Some(Box::new(cb));
+        self.reachable_handler = Some(Consumer::new(cb));
     }
 
-    pub(crate) fn set_call_sent_cb<F>(&mut self, cb: F)
-    where F: Fn(Arc<Mutex<RpcCall>>) -> () + Send + 'static,
+    pub(crate) fn message_handler<F>(&mut self, cb: F)
+    where F: Fn(&mut Message) + Send + 'static,
     {
-        self.call_sent_cb = Some(Box::new(cb));
+        self.message_handler = Some(Box::new(cb));
     }
 
-    pub(crate) fn set_call_timeout_cb<F>(&mut self, cb: F)
+    pub(crate) fn callsent_handler<F>(&mut self, cb: F)
     where F: Fn(Arc<Mutex<RpcCall>>) -> () + Send + 'static,
     {
-        self.call_timeout_cb = Some(Box::new(cb));
+        self.callsent_handler = Some(Consumer::new(cb));
+    }
+
+    pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
+    where F: Fn(Arc<Mutex<RpcCall>>) -> () + Send + 'static,
+    {
+        self.calltimeout_handler = Some(Consumer::new(cb));
     }
 
     pub(crate) fn start(&mut self) -> Result<()> {
@@ -439,10 +424,9 @@ async fn handle_packet(
 
     // Handle request
     if msg.is_req() {
-        let mut server = server.lock().unwrap();
-        let cb = server.message_cb.as_mut();
-        if let Some(cb) = cb {
-            cb(&mut msg);
+        let server = server.lock().unwrap();
+        if let Some(handler) = server.message_handler.as_ref() {
+            handler(&mut msg);
         }
         drop(server);
         return;
@@ -475,10 +459,9 @@ async fn handle_packet(
         }
 
         {
-            let mut server = server.lock().unwrap();
-            let cb = server.message_cb.as_mut();
-            if let Some(cb) = cb {
-                cb(&mut msg);
+            let server = server.lock().unwrap();
+            if let Some(handler) = server.message_handler.as_ref() {
+                handler(&mut msg);
             }
             drop(server);
         }

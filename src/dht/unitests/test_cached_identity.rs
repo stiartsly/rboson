@@ -19,7 +19,7 @@ mod tests {
         assert_eq!(cached.id(), &expected_id);
 
         let inner_identity = cached.identity();
-        assert_eq!(inner_identity.lock().unwrap().id(), &expected_id);
+        assert_eq!(inner_identity.id(), &expected_id);
         assert_eq!(Arc::ptr_eq(&inner_identity, &cached.identity()), true);
     }
 

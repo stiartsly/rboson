@@ -1,7 +1,7 @@
 use std::{
     mem,
     net::{IpAddr, SocketAddr},
-    cell::RefCell,
+    sync::Mutex,
     time::SystemTime
 };
 use sha2::{Digest, Sha256};
@@ -11,8 +11,8 @@ const TOKEN_TIMEOUT: u128 = 5 * 60 * 1000; // 5 minutes
 
 pub(crate) struct TokenManager {
     session_secret: [u8; 32],
-    timestamp: RefCell<SystemTime>,
-    previous_timestamp: RefCell<SystemTime>,
+    timestamp: Mutex<SystemTime>,
+    previous_timestamp: Mutex<SystemTime>,
 }
 
 impl TokenManager {
@@ -21,15 +21,16 @@ impl TokenManager {
 
         Self {
             session_secret,
-            timestamp: RefCell::new(SystemTime::now()),
-            previous_timestamp: RefCell::new(SystemTime::now()),
+            timestamp: Mutex::new(SystemTime::now()),
+            previous_timestamp: Mutex::new(SystemTime::now()),
         }
     }
 
     fn update_token_timestamp(&self) {
-        if self.timestamp.borrow().elapsed().unwrap().as_millis() > TOKEN_TIMEOUT {
-            *self.previous_timestamp.borrow_mut() = *self.timestamp.borrow();
-            *self.timestamp.borrow_mut() = SystemTime::now();
+        let mut locked = crate::locked!(self.timestamp);
+        if crate::elapsed_ms!(locked) > TOKEN_TIMEOUT {
+            *self.previous_timestamp.lock().unwrap() = *locked;
+            *locked = SystemTime::now();
         }
     }
 
@@ -73,7 +74,7 @@ fn generate_token(
     nodeid: &Id,
     addr: &SocketAddr,
     target: &Id,
-    timestamp: &RefCell<SystemTime>,
+    timestamp: &Mutex<SystemTime>,
     secret: &[u8],
 ) -> i32 {
     let mut input: Vec<u8> = Vec::with_capacity(
@@ -88,7 +89,8 @@ fn generate_token(
         + secret.len()
     );
 
-    let duration = timestamp.borrow().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    let duration = timestamp.lock().unwrap()
+        .duration_since(SystemTime::UNIX_EPOCH).unwrap();
 
     // nodeId + ip + port + targetId + timestamp + sessionSecret
     input.extend_from_slice(nodeid.as_bytes());

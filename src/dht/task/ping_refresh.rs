@@ -135,7 +135,7 @@ impl Task for PingRefreshTask {
 
             let msg = Message::ping_req();
             let todo = self.todo.clone();
-            let target = Target::from_entry(kentry);
+            let target = Target::from_bucket_entry(kentry);
 
             let handler = Consumer::new(move |_| {
                 todo.lock().unwrap().pop_front();

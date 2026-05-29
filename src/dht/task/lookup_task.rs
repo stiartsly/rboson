@@ -5,7 +5,7 @@ use crate::dht::{
     dht::DHT,
     utils::{is_any_unicast, is_bogon},
     rpc::{Target, Reachability, RpcCall},
-    msg::{ Body,LookupResponse},
+    msg::{Body,LookupResponse},
     routing::{ KBucket, KBucketEntry},
     task::{
         ClosestSet,
@@ -51,7 +51,7 @@ impl LookupTaskData {
         self.done_on_eligible_result
     }
 
-    pub(crate) fn mark_lookup_done(&mut self) {
+    pub(crate) fn done_lookup(&mut self) {
         self.done_on_lookup = true;
     }
 }

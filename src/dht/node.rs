@@ -61,7 +61,7 @@ pub struct Node {
     dht6: Mutex<Option<Arc<Mutex<DHT>>>>,
 
     storage : Arc<Mutex<Box<dyn DataStorage>>>,
-    tokenman: Arc<Mutex<TokenManager>>,
+    tokenman: Arc<TokenManager>,
 }
 
 impl Node {
@@ -109,7 +109,7 @@ impl Node {
             dht6: Mutex::new(None),
 
             storage: Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
-            tokenman: Arc::new(Mutex::new(TokenManager::new()))
+            tokenman: Arc::new(TokenManager::new())
         })
     }
 
@@ -189,7 +189,7 @@ impl Node {
         let port = self.cfg.port();
         let identity = self.identity.identity();
         if let Some(host4) = self.cfg.host4() {
-            let dht = Arc::new(Mutex::new(DHT::new(
+            let dht = DHT::new_shared(
                 identity.clone(),
                 Network::IPv4,
                 host4.into(),
@@ -198,9 +198,8 @@ impl Node {
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
                 self.tokenman.clone(),
-            )?));
+            )?;
 
-            dht.lock().unwrap().set_cloned(dht.clone());
             if let Err(err) = dht.lock().unwrap().start().await {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
@@ -209,7 +208,7 @@ impl Node {
         }
 
         if let Some(host6) = self.cfg.host6() {
-            let dht = Arc::new(Mutex::new(DHT::new(
+            let dht = DHT::new_shared(
                 identity.clone(),
                 Network::IPv6,
                 host6.into(),
@@ -218,9 +217,8 @@ impl Node {
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
                 self.tokenman.clone(),
-            )?));
+            )?;
 
-            dht.lock().unwrap().set_cloned(dht.clone());
             if let Err(err) = dht.lock().unwrap().start().await {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
@@ -262,15 +260,17 @@ impl Node {
     pub fn node_info(&self) -> JointResult<NodeInfo> {
         let mut result = JointResult::new();
         if let Some(dht) = self.dht4() {
+            let ni = Arc::into_inner(dht.lock().unwrap().ni());
             result.set_value(
                 Network::IPv4,
-                dht.lock().unwrap().ni().clone()
+                ni.unwrap()
             );
         }
         if let Some(dht) = self.dht6() {
+            let ni = Arc::into_inner(dht.lock().unwrap().ni());
             result.set_value(
                 Network::IPv6,
-                dht.lock().unwrap().ni().clone()
+                ni.unwrap()
             );
         }
         result

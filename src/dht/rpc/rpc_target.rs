@@ -5,8 +5,8 @@ use std::{
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    routing::kbucket_entry::KBucketEntry,
-    task::candidate_node::CandidateNode,
+    routing::KBucketEntry,
+    task::CandidateNode,
 };
 
 pub(crate) trait Reachability {
@@ -25,8 +25,9 @@ impl Target {
     pub(crate) fn from_candidate(candidate: Arc<Mutex<CandidateNode>>) -> Self {
         Self::Candidate(candidate)
     }
-    pub(crate) fn from_entry(kentry: KBucketEntry) -> Self {
-        Self::KBucketEntry(kentry)
+
+    pub(crate) fn from_bucket_entry(entry: KBucketEntry) -> Self {
+        Self::KBucketEntry(entry)
     }
 
     pub(crate) fn id(&self) -> Id {

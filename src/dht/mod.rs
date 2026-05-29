@@ -21,7 +21,8 @@ mod msg {
 
     pub(crate) use {
         msg::{Message, Body},
-        lookup_rsp::LookupResponse
+        lookup_req::LookupRequest,
+        lookup_rsp::LookupResponse,
     };
 }
 
@@ -48,6 +49,11 @@ mod task {
         closest_candidates::ClosestCandidates,
         closest_set::ClosestSet,
         candidate_node::CandidateNode,
+        peer_lookup::PeerLookupTask,
+        node_lookup::NodeLookupTask,
+        peer_announce::PeerAnnounceTask,
+        value_lookup::ValueLookupTask,
+        value_announce::ValueAnnounceTask,
     };
 }
 

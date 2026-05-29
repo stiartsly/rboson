@@ -19,24 +19,20 @@ use crate::dht::{
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
-    let identity = Arc::new(Mutex::new(CryptoIdentity::new()));
+    let identity = Arc::new(CryptoIdentity::new());
+    let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-    let tokenman = Arc::new(Mutex::new(TokenManager::new()));
 
-    let dht = Arc::new(Mutex::new(
-        DHT::new(
-            identity,
-            Network::IPv4,
-            "127.0.0.1".to_string(),
-            0,
-            None,
-            Vec::new(),
-            storage,
-            tokenman,
-        ).unwrap()
-    ));
-    dht.lock().unwrap().set_cloned(dht.clone());
-    dht
+    DHT::new_shared(
+        identity,
+        Network::IPv4,
+        "127.0.0.1".to_string(),
+        0,
+        None,
+        Vec::new(),
+        storage,
+        tokenman,
+    ).unwrap()
 }
 
 #[cfg(test)]

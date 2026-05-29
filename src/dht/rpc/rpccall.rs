@@ -61,8 +61,6 @@ pub(crate) struct RpcCall {
     cloned      : Option<Arc<Mutex<RpcCall>>>,
 }
 
-const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
-
 impl RpcCall {
     pub(crate) fn new(
         target: Target,
@@ -113,9 +111,9 @@ impl RpcCall {
         self.req.set_id(id);
     }
 
-    pub(crate) fn set_cloned(&mut self, cloned: Arc<Mutex<RpcCall>>) {
-        self.cloned = Some(cloned);
-    }
+    // pub(crate) fn set_cloned(&mut self, cloned: Arc<Mutex<RpcCall>>) {
+    //     self.cloned = Some(cloned);
+    // }
 
     pub(crate) fn is_reachable_at_creation(&self) -> bool {
         self.target_reachable
@@ -245,7 +243,7 @@ impl RpcCall {
         }
 
         let elapsed = crate::as_ms!(self.sent_time) as u64;
-        let remaining = RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
+        let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
         if remaining > 0 {
             self.update_state(State::Stalled);
             self.set_timeout_timer(remaining);
@@ -266,9 +264,7 @@ impl RpcCall {
 
     pub(crate) fn respond(&mut self, mut rsp: Message) {
         self.resp_time = SystemTime::now();
-        rsp.set_associated_call(
-            self.cloned.as_ref().unwrap().clone()
-        );
+        rsp.set_associated_call(self.cloned.clone());
 
         self.cancel_timeout_timer();
         self.rsp = Some(rsp);

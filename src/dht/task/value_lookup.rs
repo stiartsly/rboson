@@ -165,7 +165,7 @@ impl Task for ValueLookupTask {
             }
             if !self.result.is_empty() {
                 if LookupTask::data(self).done_on_eligible_result() {
-                    LookupTask::data_mut(self).mark_lookup_done();
+                    LookupTask::data_mut(self).done_lookup();
                 }
             }
         } else {

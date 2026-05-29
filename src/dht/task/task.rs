@@ -3,7 +3,7 @@ use std::{
     any::Any,
     sync::{Arc, Mutex},
     sync::atomic::{Ordering, AtomicI32},
-    collections::HashMap,
+    collections::{HashSet, HashMap},
     time::{SystemTime, Duration}
 };
 use log::{warn, debug};
@@ -78,11 +78,12 @@ pub(crate) struct TaskData {
     started     : SystemTime,
     ended       : SystemTime,
 
-    inflights   : HashMap<TaskId, Arc<Mutex<RpcCall>>>,
+    //inflights   : HashMap<TaskId, Arc<Mutex<RpcCall>>>,
+    inflights   : HashSet<i32>,
     listener    : Option<TaskListener>,
     end_handler : Option<Consumer<()>>,
 
-    nested      : Option<Arc<Mutex<Box<dyn Task>>>>
+    nested      : Option<Box<dyn Task>>
 }
 
 impl TaskData {
@@ -95,7 +96,7 @@ impl TaskData {
             created     : SystemTime::now(),
             started     : SystemTime::UNIX_EPOCH,
             ended       : SystemTime::UNIX_EPOCH,
-            inflights   : HashMap::new(),
+            inflights   : HashSet::new(),
             listener    : None,
             end_handler : None,
             nested      : None,
@@ -132,7 +133,7 @@ pub(crate) trait Task: Send + Sync {
         self.data_mut().task_name = name;
     }
 
-    fn with_nested(&mut self, nested: Arc<Mutex<Box<dyn Task>>>) {
+    fn with_nested(&mut self, nested: Box<dyn Task>) {
         self.data_mut().nested = Some(nested);
     }
 
@@ -180,8 +181,8 @@ pub(crate) trait Task: Send + Sync {
         true
     }
 
-    fn nested(&self) -> Option<Arc<Mutex<Box<dyn Task>>>> {
-        self.data().nested.as_ref().cloned()
+    fn nested_take(&mut self) -> Option<Box<dyn Task>> {
+        self.data_mut().nested.take()
     }
 
     fn inflight_size(&self) -> usize {
@@ -406,8 +407,7 @@ pub(crate) trait Task: Send + Sync {
         };
 
         let txid = call.txid();
-        let call = Arc::new(Mutex::new(call));
-        self.data_mut().inflights.insert(txid, call.clone());
+        self.data_mut().inflights.insert(txid);
 
         let server = self.dht().lock().unwrap().server().clone();
         let _ = server.lock().unwrap().send_call(call);

@@ -6,8 +6,8 @@ use crate::{
     Identity,
     core::{
         Result,
-        crypto_identity::CryptoIdentity,
-        crypto_context::CryptoContext,
+        CryptoIdentity,
+        CryptoContext,
     }
 };
 
@@ -15,7 +15,7 @@ const CONTEXT_CACHE_CAPACITY: u64 = 10;
 
 pub(crate) struct CachedIdentity {
     id: Id,
-    identity: Arc<Mutex<CryptoIdentity>>,
+    identity: Arc<CryptoIdentity>,
     cache:  Mutex<Cache<Id, Arc<Mutex<CryptoContext>>>>,
 }
 
@@ -23,7 +23,7 @@ impl CachedIdentity {
     pub(crate) fn new(identity: CryptoIdentity) -> Self {
         Self {
             id: identity.id().clone(),
-            identity: Arc::new(Mutex::new(identity)),
+            identity: Arc::new(identity),
             cache: Mutex::new(Cache::<Id, Arc<Mutex<CryptoContext>>>::new(CONTEXT_CACHE_CAPACITY)),
         }
     }
@@ -36,12 +36,12 @@ impl CachedIdentity {
         self.cache.lock().unwrap().get_with(key.clone(), || {
             Arc::new(Mutex::new(CryptoContext::from_private_key(
                 key.clone(),
-                self.identity.lock().unwrap().encryption_keypair().private_key(),
+                self.identity.encryption_keypair().private_key(),
             )))
         })
     }
 
-    pub(crate) fn identity(&self) -> Arc<Mutex<CryptoIdentity>> {
+    pub(crate) fn identity(&self) -> Arc<CryptoIdentity> {
         self.identity.clone()
     }
 }
@@ -52,11 +52,11 @@ impl Identity for CachedIdentity {
     }
 
     fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
-        self.identity.lock().unwrap().sign(data, signature)
+        self.identity.sign(data, signature)
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
-        self.identity.lock().unwrap().verify(data, signature)
+        self.identity.verify(data, signature)
     }
 
     fn encrypt(&self, receiver: &Id, data: &[u8], cipher: &mut [u8]) -> Result<usize> {

@@ -58,6 +58,13 @@ pub use crate::activeproxy::{
 */
 
 #[macro_export]
+macro_rules! locked {
+    ($mutex:expr) => {{
+        $mutex.lock().unwrap()
+    }};
+}
+
+#[macro_export]
 macro_rules! elapsed_ms {
     ($time:expr) => {{
         $time.elapsed().unwrap().as_millis() as u128

@@ -232,7 +232,7 @@ impl Task for NodeLookupTask {
 
         // If the target node is found, consider the lookup done immediately.
         if LookupTask::data(self).done_on_eligible_result() {
-            LookupTask::data_mut(self).mark_lookup_done();
+            LookupTask::data_mut(self).done_lookup();
         }
     }
 

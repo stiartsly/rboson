@@ -102,7 +102,7 @@ mod tests {
         let req = Message::ping_req();
         let call = RpcCall::with_entry(entry.clone(), req);
         let call = Arc::new(Mutex::new(call));
-        call.lock().unwrap().set_cloned(call.clone());
+       // call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(50);
 
         let state_changes = Arc::new(Mutex::new(State::Unsent));
@@ -157,7 +157,7 @@ mod tests {
         let target = make_nodeinfo("127.0.0.1:40003");
         let req = Message::ping_req();
         let error_call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
-        error_call.lock().unwrap().set_cloned(error_call.clone());
+       // error_call.lock().unwrap().set_cloned(error_call.clone());
 
         let mut err = Message::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
         err.set_id(target.id().clone());
@@ -174,7 +174,7 @@ mod tests {
         let target = make_nodeinfo("127.0.0.1:40004");
         let req = Message::ping_req();
         let call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
-        call.lock().unwrap().set_cloned(call.clone());
+       // call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(25);
 
         let stalled = Arc::new(Mutex::new(0usize));

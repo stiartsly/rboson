@@ -15,7 +15,10 @@ use tokio::{
 
 use crate::{
     Id,
+    NodeInfo,
     CryptoBox,
+    cryptobox::Nonce,
+    Identity,
     CryptoIdentity,
     errors::{
         Result,
@@ -33,8 +36,8 @@ use crate::dht::{
 };
 
 pub(crate) struct RpcServer {
-    identity        : Arc<Mutex<CryptoIdentity>>,
-    socket_addr     : SocketAddr,
+    identity            : Arc<CryptoIdentity>,
+    ni                  : Arc<NodeInfo>,
 
     suspicious_node_detector: Option<DefaultSuspiciousNodeDetector>,
     pending_calls       : HashMap<i32, Arc<Mutex<RpcCall>>>,
@@ -46,71 +49,59 @@ pub(crate) struct RpcServer {
 
     reachable_handler   : Option<Consumer<bool>>,
     message_handler     : Option<Box<dyn Fn(&mut Message) + Send>>,
-    callsent_handler    : Option<Consumer<Arc<Mutex<RpcCall>>>>,
-    calltimeout_handler : Option<Consumer<Arc<Mutex<RpcCall>>>>,
+    callsent_handler    : Option<Box<dyn Fn(&mut RpcCall) + Send>>,
+    calltimeout_handler : Option<Box<dyn Fn(&mut RpcCall) + Send>>,
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
 
     client              : timer::Client,
-    tx_channel          : UnboundedSender<Command>,
+    tx_channel          : Option<UnboundedSender<Command>>,
     rx_channel          : Option<UnboundedReceiver<Command>>,
 
-    tx_socket           : Option<UdpSocket>,
-    rx_socket           : Option<UdpSocket>,
+    tx_socket           : Option<Arc<UdpSocket>>,
+    rx_socket           : Option<Arc<UdpSocket>>,
 }
 
 impl RpcServer {
     const MAX_ACTIVE_CALLS: usize = 64;
-
     pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
 
     pub(crate) fn new(
-        socket_addr: SocketAddr,
-        identity: Arc<Mutex<CryptoIdentity>>,
+        ni: Arc<NodeInfo>,
+        identity: Arc<CryptoIdentity>,
         suspicious_node_detector: Option<DefaultSuspiciousNodeDetector>,
     ) -> Self {
-
-        let (tx, rx) = mpsc::unbounded_channel::<Command>();
         Self {
+            ni,
             identity,
-            socket_addr,
             suspicious_node_detector,
-            pending_calls: HashMap::new(),
-
-            recv_packets: 0,
+            pending_calls       : HashMap::new(),
+            recv_packets        : 0,
             recv_packets_at_last_reachable_check: 0,
             last_reachable_check: SystemTime::now(),
-            reachable: false,
-
+            reachable           : false,
             reachable_handler   : None,
             message_handler     : None,
             callsent_handler    : None,
             calltimeout_handler : None,
+            start_time          : None,
+            is_running          : false,
 
-            start_time: None,
-            is_running: false,
-
-            client          : timer::Client::new(),
-
-            tx_channel: tx,
-            rx_channel: Some(rx),
-
-            tx_socket: None,
-            rx_socket: None,
+            client              : timer::Client::new(),
+            tx_channel          : None,
+            rx_channel          : None,
+            tx_socket           : None,
+            rx_socket           : None,
         }
     }
 
-    fn identity(&self) -> Arc<Mutex<CryptoIdentity>> {
+    fn identity(&self) -> Arc<CryptoIdentity> {
         self.identity.clone()
     }
 
-    fn take_rx_channel(&mut self) -> UnboundedReceiver<Command> {
-        self.rx_channel.take().expect("unbound channel should be created.")
-    }
-
-    fn take_rx_socket(&mut self) -> UdpSocket {
-        self.rx_socket.take().expect("UDP socket should be created.")
+    fn tx_socket(&self) -> &Arc<UdpSocket> {
+        self.tx_socket.as_ref().expect("socket should be initialized")
     }
 
     pub(crate) fn has_pending_calls(&self) -> bool {
@@ -121,7 +112,6 @@ impl RpcServer {
         if self.reachable == reachable {
             return;
         }
-
         self.reachable = reachable;
         if let Some(handler) = self.reachable_handler.as_ref() {
             handler.accept(reachable);
@@ -149,60 +139,32 @@ impl RpcServer {
     }
 
     pub(crate) fn callsent_handler<F>(&mut self, cb: F)
-    where F: Fn(Arc<Mutex<RpcCall>>) -> () + Send + 'static,
+    where F: Fn(&mut RpcCall) + Send + 'static,
     {
-        self.callsent_handler = Some(Consumer::new(cb));
+        self.callsent_handler = Some(Box::new(cb));
     }
 
     pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
-    where F: Fn(Arc<Mutex<RpcCall>>) -> () + Send + 'static,
+    where F: Fn(&mut RpcCall) + Send + 'static,
     {
-        self.calltimeout_handler = Some(Consumer::new(cb));
+        self.calltimeout_handler = Some(Box::new(cb));
     }
 
-    pub(crate) fn start(&mut self) -> Result<()> {
-        let socket_addr = self.socket_addr.clone();
-        let std_socket = match std::net::UdpSocket::bind(socket_addr) {
-            Ok(socket) => socket,
+    pub(crate) async fn start(&mut self) -> Result<()> {
+        let (tx, rx) = mpsc::unbounded_channel::<Command>();
+        self.rx_channel = Some(rx);
+        self.tx_channel = Some(tx);
+
+        let socket_addr = self.ni.socket_addr().clone();
+        let socket = match UdpSocket::bind(socket_addr).await {
+            Ok(socket) => Arc::new(socket),
             Err(e) => {
                 error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
                 return Err(NetworkError::new(format!("{e}")));
             }
         };
-
-        if let Err(e) = std_socket.set_nonblocking(true) {
-            error!("Rpc server failed to configure udp socket at {}: {e}", socket_addr);
-            return Err(NetworkError::new(format!("{e}")));
-        }
-
-        let send_std = match std_socket.try_clone() {
-            Ok(socket) => socket,
-            Err(e) => {
-                error!("Rpc server failed to clone udp socket at {}: {e}", socket_addr);
-                return Err(NetworkError::new(format!("{e}")));
-            }
-        };
-
-        let rx_socket = match UdpSocket::from_std(std_socket) {
-            Ok(socket) => socket,
-            Err(e) => {
-                error!("Rpc server failed to create async rx socket for {}: {e}", socket_addr);
-                return Err(NetworkError::new(format!("{e}")));
-            }
-        };
-
-        let tx_socket = match UdpSocket::from_std(send_std) {
-            Ok(socket) => socket,
-            Err(e) => {
-                error!("Rpc server failed to create async tx socket for {}: {e}", socket_addr);
-                return Err(NetworkError::new(format!("{e}")));
-            }
-        };
-
-        {
-            self.rx_socket = Some(rx_socket);
-            self.tx_socket = Some(tx_socket);
-        }
+        self.rx_socket = Some(socket.clone());
+        self.tx_socket = Some(socket.clone());
 
         self.is_running = true;
         Ok(())
@@ -213,80 +175,89 @@ impl RpcServer {
             return;
         }
 
-        // Signal the run_loop to stop (fire-and-forget; don't wait for reply)
+        // Signal run_loop to stop (fire-and-forget; don't wait for reply)
         let (reply_tx, _) = oneshot::channel();
-        let _ = self.tx_channel.send(Command::Stop { reply: reply_tx });
+        if let Some(tx) = self.tx_channel.as_ref() {
+            let _ = tx.send(Command::Stop { reply: reply_tx });
+        }
 
         self.pending_calls.clear();
 
         self.tx_socket = None;
         self.rx_socket = None;
+        self.tx_channel = None;
+        self.rx_channel = None;
 
         self.is_running = false;
+
         self.reachable = false;
         self.start_time = None;
 
-        info!("RPC server stopped at {}", &self.socket_addr);
+        info!("RPC server stopped at {}", self.ni.socket_addr());
     }
 
-    pub(crate) async fn send_call(&mut self, call: Arc<Mutex<RpcCall>>) {
+    pub(crate) async fn send_call(&mut self, call: RpcCall) {
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
             error!("Too many active calls pending in the queue.");
             return;
         }
 
-        let txid = call.lock().unwrap().txid();
+        let txid = call.txid();
+        let call = Arc::new(Mutex::new(call));
         self.pending_calls.insert(txid, call.clone());
 
-        let mut locked = call.lock().unwrap();
+        let mut locked = crate::locked!(call);
         let mut msg = locked.req_mut();
         match self.send_msg(&mut msg).await {
             Ok(_) => {
                 locked.sent();
-                //TODO: if let Some(cb) = self.call_sent_cb.as_ref() {
-                //    cb(call);
-                //}
+                if let Some(handler) = self.callsent_handler.as_ref() {
+                    handler(&mut *locked);
+                }
             },
             Err(e) => {
-                self.pending_calls.remove(&txid);
-                call.lock().unwrap().fail(e);
+                let _ = self.pending_calls.remove(&txid);
+                locked.fail(e);
             }
         }
     }
 
     pub(crate) async fn send_msg(&mut self, msg: &mut Message) -> Result<usize> {
-        let id = self.identity.lock().unwrap().id().clone();
-        msg.set_id(id);
+        let nodeid = self.ni.id().clone();
+        msg.set_id(nodeid);
 
         let plain = serde_cbor::to_vec(&msg).map_err(|e| {
-            ProtocolError::new(format!("Error: failed to serialize message: {e}").into())
+            ProtocolError::new(format!("Serializing message error: {e}").into())
         })?;
 
-        let encrypted = self.identity().lock().unwrap().encrypt_into(
-            msg.remote_id(),
-            &plain
+        let len = Id::BYTES + Nonce::BYTES + CryptoBox::MAC_BYTES + plain.len();
+        let mut buf = Vec::with_capacity(len);
+        let len = self.identity.encrypt(
+            msg.remote_id(), &plain, &mut buf[Id::BYTES..]
         ).map_err(|e| {
-            CryptoError::new(format!("Error: failed to encrypt message: {e}").into())
+            CryptoError::new(format!("Encrypting message error: {e}").into())
         })?;
 
-        let mut data = Vec::with_capacity(encrypted.len() + Id::BYTES);
-        data.extend_from_slice(msg.id());
-        data.extend_from_slice(&encrypted);
+        buf[..Id::BYTES].copy_from_slice(msg.id().as_bytes());
 
-        let socket = self.tx_socket.as_ref().expect("socket should be initialized");
-        let len = socket.send_to(
-            &data, msg.remote_addr()
+        let sent_len = self.tx_socket().send_to(
+            &buf[..len + Id::BYTES], msg.remote_addr()
         ).await.map_err(|e| {
-            NetworkError::new(format!("Error: failed to send message: {}", e))
+            NetworkError::new(format!("Sending message error: {}", e))
         })?;
 
-        Ok(len)
+        if sent_len != len + Id::BYTES {
+            return Err(NetworkError::new(format!("Error: sent length {} does not match expected {}", sent_len, len + Id::BYTES)));
+        }
+        Ok(sent_len)
     }
 }
 
 pub(crate) async fn run_loop(server: Arc<Mutex<RpcServer>>) {
-    let mut rx = server.lock().unwrap().take_rx_channel();
-    let socket = server.lock().unwrap().take_rx_socket();
+    let mut rx = server.lock().unwrap().rx_channel.take()
+        .expect("channel should be initialized");
+    let socket = server.lock().unwrap().rx_socket.take().
+        expect("socket should be initialized");
 
     let mut queue = DelayQueue::new();
     let mut jobs = HashMap::<u64, Job>::new();
@@ -398,8 +369,7 @@ async fn handle_packet(
     let fromid = Id::try_from(&data[0.. Id::BYTES]).unwrap();
     let identity = server.lock().unwrap().identity();
 
-    let data = identity.lock().unwrap()
-        .decrypt_into(&fromid, &data[Id::BYTES ..]);
+    let data = identity.decrypt_into(&fromid, &data[Id::BYTES ..]);
     let decrypted = match data {
         Ok(v) => v,
         Err(err) => {

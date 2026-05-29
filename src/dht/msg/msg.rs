@@ -158,6 +158,16 @@ impl Body {
     }
 }
 
+static NEXT_TXID: AtomicI32 = AtomicI32::new(0);
+fn next_txid() -> i32 {
+    let id = NEXT_TXID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    if id == 0 {
+        NEXT_TXID.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    } else {
+        id
+    }
+}
+
 pub(crate) struct Message {
     id:     Option<Id>,        // The DHT node Id of the message sender.
 
@@ -187,16 +197,6 @@ impl Message {
             associated_call: None,
             remote_addr: None,
             remote_id: None,
-        }
-    }
-
-    fn next_txid() -> i32 {
-        static TXID_COUNTER: AtomicI32 = AtomicI32::new(1);
-        let txid = TXID_COUNTER.fetch_add(1, Ordering::SeqCst);
-        if txid == 0 {
-            TXID_COUNTER.fetch_add(1, Ordering::SeqCst)
-        } else {
-            txid
         }
     }
 
@@ -252,8 +252,8 @@ impl Message {
         self.associated_call.clone()
     }
 
-    pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {
-        self.associated_call = Some(call);
+    pub(crate) fn set_associated_call(&mut self, call: Option<Arc<Mutex<RpcCall>>>) {
+        self.associated_call = call;
     }
 
     pub(crate) fn remote_id(&self) -> &Id {
@@ -280,7 +280,7 @@ impl Message {
         Self::new(
             Kind::Request,
             Method::Ping,
-            Self::next_txid(),
+            next_txid(),
             None
         )
     }
@@ -306,7 +306,7 @@ impl Message {
         Self::new(
             Kind::Request,
             Method::FindNode,
-            Self::next_txid(),
+            next_txid(),
             Some(Body::FindNodeReq(req))
         )
     }
@@ -317,14 +317,11 @@ impl Message {
         nodes6: Option<Vec<NodeInfo>>,
         token: i32
     ) -> Self {
-        let rsp = FindNodeResponse::new(
+        let body = Body::FindNodeRsp(FindNodeResponse::new(
             nodes4, nodes6, token
-        );
+        ));
         Self::new(
-            Kind::Response,
-            Method::FindNode,
-            txid,
-            Some(Body::FindNodeRsp(rsp))
+            Kind::Response, Method::FindNode, txid, Some(body)
         )
     }
 
@@ -335,15 +332,10 @@ impl Message {
         expected_seq: i32,
         expected_count: i32,
     ) -> Self {
-        let req = FindPeerRequest::new(
+        let body = Body::FindPeerReq(FindPeerRequest::new(
             target, want4, want6, expected_seq, expected_count
-        );
-        Self::new(
-            Kind::Request,
-            Method::FindPeer,
-            Self::next_txid(),
-            Some(Body::FindPeerReq(req))
-        )
+        ));
+        Self::new(Kind::Request, Method::FindPeer, next_txid(), Some(body))
     }
 
     pub(crate) fn find_peer_rsp_with_nodes(
@@ -389,7 +381,7 @@ impl Message {
         Self::new(
             Kind::Request,
             Method::FindValue,
-            Self::next_txid(),
+            next_txid(),
             Some(Body::FindValueReq(req))
         )
     }
@@ -436,7 +428,7 @@ impl Message {
         Self::new(
             Kind::Request,
             Method::StoreValue,
-            Self::next_txid(),
+            next_txid(),
             Some(Body::StoreValueReq(req))
         )
     }
@@ -461,7 +453,7 @@ impl Message {
         Self::new(
             Kind::Request,
             Method::AnnouncePeer,
-            Self::next_txid(),
+            next_txid(),
             Some(Body::AnnouncePeerReq(req))
         )
     }

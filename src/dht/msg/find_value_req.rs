@@ -12,12 +12,10 @@ use crate::{
     Id,
     dht::msg::lookup_req::{
         LookupRequest,
-        Data as LookupData
+        Data as LookupData,
+        WANT4_MASK, WANT6_MASK,
     }
 };
-
-const WANT4_MASK: i32 = 0x01;
-const WANT6_MASK: i32 = 0x02;
 
 pub(crate) struct FindValueRequest {
     data: LookupData,

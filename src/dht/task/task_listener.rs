@@ -1,10 +1,10 @@
 use super::task::Task;
 
 pub(crate) struct TaskListener {
-    started_fn:    Option<Box<dyn Fn(&dyn Task)>>,
-    completed_fn:  Option<Box<dyn Fn(&dyn Task)>>,
-    canceled_fn:   Option<Box<dyn Fn(&dyn Task)>>,
-    ended_fn:      Option<Box<dyn Fn(&dyn Task)>>,
+    started_fn:    Option<Box<dyn Fn(&dyn Task) + Send>>,
+    completed_fn:  Option<Box<dyn Fn(&dyn Task) + Send>>,
+    canceled_fn:   Option<Box<dyn Fn(&dyn Task) + Send>>,
+    ended_fn:      Option<Box<dyn Fn(&dyn Task) + Send>>,
 }
 
 impl TaskListener {
@@ -17,23 +17,27 @@ impl TaskListener {
         }
     }
 
-    pub(crate) fn started_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
-        self.started_fn = Some(f);
+    pub(crate) fn started_fn<F>(mut self, f: F) -> Self
+    where F: Fn(&dyn Task) + Send + 'static {
+        self.started_fn = Some(Box::new(f));
         self
     }
 
-    pub(crate) fn completed_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
-        self.completed_fn  = Some(f);
+    pub(crate) fn completed_fn<F>(mut self, f: F) -> Self
+    where F: Fn(&dyn Task) + Send + 'static {
+        self.completed_fn  = Some(Box::new(f));
         self
     }
 
-    pub(crate) fn canceled_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
-        self.canceled_fn = Some(f);
+    pub(crate) fn canceled_fn<F>(mut self, f: F) -> Self
+    where F: Fn(&dyn Task) + Send + 'static {
+        self.canceled_fn = Some(Box::new(f));
         self
     }
 
-    pub(crate) fn ended_fn(mut self, f: Box<dyn Fn(&dyn Task)>) -> Self {
-        self.ended_fn = Some(f);
+    pub(crate) fn ended_fn<F>(mut self, f: F) -> Self
+    where F: Fn(&dyn Task) + Send + 'static {
+        self.ended_fn = Some(Box::new(f));
         self
     }
 

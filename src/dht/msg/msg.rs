@@ -44,12 +44,7 @@ pub(crate) enum Kind {
 impl Kind {
     const MASK: i32 = 0xE0;
     pub(crate) fn is_valid(_type: i32) -> bool {
-        match _type & Self::MASK {
-            0x00 => true,
-            0x20 => true,
-            0x40 => true,
-            _ => false,
-        }
+        matches!(_type & Self::MASK, 0x00 | 0x20 | 0x40)
     }
 
     pub(crate) fn to_key(&self) -> &'static str {
@@ -97,8 +92,7 @@ pub(crate) enum Method {
 impl Method {
     const MASK: i32 = 0x1F;
     pub(crate) fn is_valid(_type: i32) -> bool {
-        let method = _type & Self::MASK;
-        method >= 0 && method <= 0x06
+        (_type & Self::MASK) <= 0x06
     }
 }
 
@@ -255,7 +249,7 @@ impl Message {
     }
 
     pub(crate) fn associated_call(&self) -> Option<Arc<Mutex<RpcCall>>> {
-        self.associated_call.as_ref().map(|v| v.clone())
+        self.associated_call.clone()
     }
 
     pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {

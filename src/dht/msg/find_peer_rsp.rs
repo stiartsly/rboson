@@ -176,7 +176,7 @@ impl<'de> Deserialize<'de> for FindPeerResponse {
 
 impl fmt::Display for FindPeerResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut has_written_section = false;
+        let mut has_sep = false;
 
         if let Some(nodes4) = self.nodes4() {
             if !nodes4.is_empty() {
@@ -187,13 +187,13 @@ impl fmt::Display for FindPeerResponse {
                     }
                     write!(f, "[{}]", item)?;
                 }
-                has_written_section = true;
+                has_sep = true;
             }
         }
 
         if let Some(nodes6) = self.nodes6() {
             if !nodes6.is_empty() {
-                if has_written_section {
+                if has_sep {
                     write!(f, ",")?;
                 }
                 write!(f, "n6:")?;
@@ -203,7 +203,7 @@ impl fmt::Display for FindPeerResponse {
                     }
                     write!(f, "[{}]", item)?;
                 }
-                has_written_section = true;
+                has_sep = true;
             }
         }
 
@@ -212,7 +212,7 @@ impl fmt::Display for FindPeerResponse {
                 return Ok(());
             }
 
-            if has_written_section {
+            if has_sep {
                 write!(f, ",")?;
             }
             write!(f, "p:")?;

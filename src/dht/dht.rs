@@ -205,7 +205,7 @@ impl DHT {
         task.with_inject_candidates(nodes);
         task.with_listener(
             TaskListener::new().ended_fn(
-                Box::new(move |_| promise.complete(Ok(())))
+                move |_| promise.complete(Ok(()))
             )
         );
 
@@ -244,7 +244,7 @@ impl DHT {
             task.with_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
             task.with_listener(
                 TaskListener::new().ended_fn(
-                    Box::new(move |_| promise.complete(Ok(())))
+                    move |_| promise.complete(Ok(()))
                 )
             );
 
@@ -1257,7 +1257,7 @@ impl DHT {
         task.with_name(format!("Store value:{}", &value.id()));
         task.with_listener(
             TaskListener::new().ended_fn(
-                Box::new(move |_| promise.complete(Ok(())))
+                move |_| promise.complete(Ok(()))
             )
         );
 
@@ -1369,7 +1369,7 @@ impl DHT {
         task.with_name(format!("Announce peer: {}", peer.id()));
         task.with_listener(
             TaskListener::new().ended_fn(
-                Box::new(move |_| promise.complete(Ok(())))
+                move |_| promise.complete(Ok(()))
             )
         );
 

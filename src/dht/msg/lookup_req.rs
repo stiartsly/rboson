@@ -1,5 +1,9 @@
 use crate::Id;
 
+pub(crate) const WANT4_MASK: i32 = 0x01;
+pub(crate) const WANT6_MASK: i32 = 0x02;
+pub(crate) const WANT_TOKEN_MASK: i32 = 0x04;
+
 pub(crate) struct Data {
     target  : Id,
     want4   : bool,

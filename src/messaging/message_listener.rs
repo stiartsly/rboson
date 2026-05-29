@@ -1,16 +1,10 @@
-use super::message::Message;
+use crate::messaging::message::Message;
 
-#[allow(unused)]
-pub(crate) trait MessageListenerMut {
-    fn on_message(&mut self, message: Message);
-    fn on_sending(&mut self, message: Message);
-    fn on_sent(&mut self, message: Message);
-    fn on_broadcast(&mut self, message: Message);
-}
+/// Receives message delivery events.
+pub trait MessageListener: Send + Sync {
+    /// Called when a new inbound message arrives.
+    fn on_message(&self, message: &dyn Message);
 
-pub trait MessageListener {
-    fn on_message(&self, message: &Message);
-    fn on_sending(&self, message: &Message);
-    fn on_sent(&self, message: &Message);
-    fn on_broadcast(&self, message: &Message);
+    /// Called when an outbound message was successfully delivered.
+    fn on_sent(&self, message: &dyn Message) {}
 }

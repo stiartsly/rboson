@@ -1,24 +1,105 @@
-use std::fmt;
-use std::str::FromStr;
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::time::SystemTime;
 
-use crate::{
-    as_ms,
-    Id,
-    core::{
-        Error,
-        Result,
-        CryptoContext
+use crate::Id;
+use crate::messaging::errors::{Error, Result};
+
+// ---------------------------------------------------------------------------
+// ContentType
+// ---------------------------------------------------------------------------
+
+/// MIME content-type constants.
+pub mod content_type {
+    pub const HEADER_NAME: &str = "Content-Type";
+    pub const TEXT:        &str = "text/plain";
+    pub const JSON:        &str = "application/json";
+    pub const CBOR:        &str = "application/cbor";
+    pub const IMAGE_JPEG:  &str = "image/jpeg";
+    pub const IMAGE_PNG:   &str = "image/png";
+    pub const IMAGE_WEBP:  &str = "image/webp";
+    pub const AUDIO_AAC:   &str = "audio/aac";
+    pub const AUDIO_MP3:   &str = "audio/mpeg";
+    pub const AUDIO_WEBM:  &str = "audio/webm";
+    pub const VIDEO_MP4:   &str = "video/mp4";
+    pub const VIDEO_WEBM:  &str = "video/webm";
+    pub const BINARY:      &str = "application/octet-stream";
+}
+
+// ---------------------------------------------------------------------------
+// ContentDisposition
+// ---------------------------------------------------------------------------
+
+/// Whether a message body should be shown inline or as a downloadable attachment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentDisposition {
+    /// Display the content inline.
+    Inline,
+    /// Offer the content as a download, with an optional filename.
+    Attachment { filename: Option<String> },
+}
+
+impl ContentDisposition {
+    /// An inline disposition with no filename.
+    pub fn inline() -> Self {
+        ContentDisposition::Inline
     }
-};
 
+    /// An inline disposition carrying a filename hint.
+    pub fn inline_with_name(filename: impl Into<String>) -> Self {
+        ContentDisposition::Inline // simplified: ignore filename for inline
+    }
+
+    /// An attachment disposition.
+    pub fn attachment(filename: impl Into<String>) -> Self {
+        ContentDisposition::Attachment { filename: Some(filename.into()) }
+    }
+
+    /// The disposition type as a lowercase string (`"inline"` or `"attachment"`).
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            ContentDisposition::Inline       => "inline",
+            ContentDisposition::Attachment { .. } => "attachment",
+        }
+    }
+
+    /// The filename hint, if any.
+    pub fn filename(&self) -> Option<&str> {
+        match self {
+            ContentDisposition::Attachment { filename } => filename.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ContentDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ContentDisposition::Inline => f.write_str("inline"),
+            ContentDisposition::Attachment { filename: None }       => f.write_str("attachment"),
+            ContentDisposition::Attachment { filename: Some(name) } => {
+                write!(f, "attachment; filename=\"{}\"", name)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MessageType
+// ---------------------------------------------------------------------------
+
+/// Top-level category of a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
 pub enum MessageType {
-    Message= 0,
-    Call = 1,
-    Notification = 2,
+    /// Initial handshake / key-exchange message.
+    HandshakeMessage = 0,
+    /// Regular user-visible content message.
+    ContentMessage   = 1,
+    /// Control / signalling message (not user-visible).
+    ControlMessage   = 2,
+    /// State-synchronisation message.
+    StateMessage     = 3,
 }
 
 impl TryFrom<i32> for MessageType {
@@ -26,411 +107,125 @@ impl TryFrom<i32> for MessageType {
 
     fn try_from(value: i32) -> Result<Self> {
         match value {
-            0 => Ok(MessageType::Message),
-            1 => Ok(MessageType::Call),
-            2 => Ok(MessageType::Notification),
-            _ => Err(Error::Argument("Invalid integer for MessageType".into())),
+            0 => Ok(MessageType::HandshakeMessage),
+            1 => Ok(MessageType::ContentMessage),
+            2 => Ok(MessageType::ControlMessage),
+            3 => Ok(MessageType::StateMessage),
+            _ => Err(Error::Argument(format!("Unknown MessageType value: {}", value))),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContentType {
-    Text,
-    Json,
+// ---------------------------------------------------------------------------
+// Message content
+// ---------------------------------------------------------------------------
 
-    ImageJpeg,
-    ImagePng,
-    ImageWebp,
-
-    AudioAac,
-    AudioMp3,
-    AudioWebm,
-
-    VideoMp4,
-    VideoWebm,
-
-    Binary,
-}
-
-impl FromStr for ContentType {
-    type Err = Error;
-
-    fn from_str(value: &str) -> Result<Self> {
-        match value {
-            "text/plain"        => Ok(Self::Text),
-            "application/json"  => Ok(Self::Json),
-
-            "image/jpeg"        => Ok(Self::ImageJpeg),
-            "image/png"         => Ok(Self::ImagePng),
-            "image/webp"        => Ok(Self::ImageWebp),
-
-            "audio/aac"         => Ok(Self::AudioAac),
-            "audio/mpeg"        => Ok(Self::AudioMp3),
-            "audio/webm"        => Ok(Self::AudioWebm),
-
-            "video/mp4"         => Ok(Self::VideoMp4),
-            "video/webm"        => Ok(Self::VideoWebm),
-
-            "application/octet-stream" => Ok(Self::Binary),
-
-            _ => Err(Error::Argument("Unknown message content type".into())),
-        }
-    }
-}
-
-impl fmt::Display for ContentType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match *self {
-            Self::Text       => "text/plain",
-            Self::Json       => "application/json",
-
-            Self::ImageJpeg  => "image/jpeg",
-            Self::ImagePng   => "image/png",
-            Self::ImageWebp  => "image/webp",
-
-            Self::AudioAac   => "audio/aac",
-            Self::AudioMp3   => "audio/mpeg",
-            Self::AudioWebm  => "audio/webm",
-
-            Self::VideoMp4   => "video/mp4",
-            Self::VideoWebm  => "video/webm",
-
-            Self::Binary     => "application/octet-stream",
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContentDisposition {
-    Inline,
-    Attachment,
-}
-
-impl FromStr for ContentDisposition {
-    type Err = Error;
-
-    fn from_str(value: &str) -> Result<Self> {
-        match value {
-            "inline"            => Ok(Self::Inline),
-            "attachment"        => Ok(Self::Attachment),
-
-            _ => Err(Error::Argument("Unknown message content disposition".into())),
-        }
-    }
-}
-
-impl fmt::Display for ContentDisposition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match *self {
-            Self::Inline       => "inline",
-            Self::Attachment   => "attachment",
-        })
-    }
-}
-
-#[allow(unused)]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Message {
-    #[serde(rename = "v")]
-    version:    i32,
-    #[serde(rename = "f")]
-    #[serde(with = "crate::serde_id_as_bytes")]
-    from:       Id,
-    #[serde(rename = "r")]
-    #[serde(with = "crate::serde_id_as_bytes")]
-    to:         Id,         // alias: recipient
-
-    #[serde(rename = "s")]
-    serial_number: u32,
-    #[serde(rename = "c")]
-    created: u64,         // timestamp in seconds
-    #[serde(rename = "t")]
-    message_type: i32,
-
-    #[serde(rename = "p")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    properties: Option<serde_json::Map<String, serde_json::Value>>,
-
-    // Optional, default None[means: text/plain]
-    #[serde(rename = "m")] // alias: mime type
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+/// The decoded content of a [`Message`].
+pub struct Content {
+    headers:      HashMap<String, String>,
     content_type: Option<String>,
-
-    // Optional, default None means INLINE
-    #[serde(rename = "d")]
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
-    content_disposition: Option<String>,
-
-    #[serde(rename = "b")]
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
-    #[serde(with = "crate::serde_option_bytes_as_cbor")]
-    body: Option<Vec<u8>>,
-
-    // Available only for locally sent messages (originating from the message builder).
-    #[serde(skip)]
-    orginal_body:   Option<serde_json::Value>,
-
-    #[serde(skip)]
-    rid             : u64, // local message id
-    #[serde(skip)]
-    conversation_id : Option<Id>,
-    #[serde(skip)]
-    encrypted       : bool,
-    #[serde(skip)]
-    completed       : u64 // local sent or received timestamp
+    disposition:  Option<ContentDisposition>,
+    body:         Vec<u8>,
 }
 
-static VERSION: i32 = 1;
-
-impl Message {
-    pub(crate) fn new(mut mb: Builder) -> Self {
-        Self {
-            version         : VERSION,
-            from            : mb.from.take().unwrap(),
-            to              : mb.to.take().unwrap(),
-
-            serial_number   : mb.serial_number.unwrap(),
-            created         : as_ms!(SystemTime::now()) as u64,
-            message_type    : mb.msg_type as i32,
-
-            properties      : None,
-
-            content_type    : mb.content_type.map(|v| v.to_string()),
-            content_disposition: None,
-
-            body            : mb.body.take(),
-            orginal_body    : None,
-
-            rid             : 0,
-            conversation_id : None,
-            encrypted       : false,
-            completed       : 0,
-        }
+impl Content {
+    pub(crate) fn new(
+        headers:      HashMap<String, String>,
+        content_type: Option<String>,
+        disposition:  Option<ContentDisposition>,
+        body:         Vec<u8>,
+    ) -> Self {
+        Self { headers, content_type, disposition, body }
     }
 
-    pub(crate) fn dup_from(&self, body: Vec<u8>) -> Self {
-        Self {
-            version         : self.version,
-            from            : self.from.clone(),
-            to              : self.to.clone(),
-
-            serial_number   : self.serial_number,
-            created         : self.created,
-            message_type    : self.message_type,
-
-            properties      : self.properties.clone(),
-
-            content_type    : self.content_type.clone(),
-            content_disposition: self.content_disposition.clone(),
-
-            body            : Some(body),
-            orginal_body    : None,
-
-            rid             : self.rid,
-            conversation_id : self.conversation_id.clone(),
-            encrypted       : self.encrypted,
-            completed       : self.completed,
-        }
+    /// The raw header map.
+    pub fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
     }
 
-    pub fn version(&self) -> i32 {
-        self.version
+    /// The MIME content type, defaulting to `text/plain` when absent.
+    pub fn content_type(&self) -> &str {
+        self.content_type.as_deref().unwrap_or(content_type::TEXT)
     }
 
-    pub fn rid(&self) -> u64 {
-        self.rid
+    /// The content disposition, defaulting to `inline` when absent.
+    pub fn content_disposition(&self) -> ContentDisposition {
+        self.disposition.clone().unwrap_or(ContentDisposition::Inline)
     }
 
-    pub(crate) fn _set_rid(&mut self, rid: u64) {
-        self.rid = rid;
+    /// The raw body bytes.
+    pub fn body(&self) -> &[u8] {
+        &self.body
     }
 
-    pub fn conversation_id(&self) -> Option<&Id> {
-        self.conversation_id.as_ref()
+    /// Attempt to decode the body as a UTF-8 text string.
+    pub fn as_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.body).ok()
     }
 
-    pub(crate) fn set_conversation_id(&mut self, conversation_id: &Id) {
-        self.conversation_id = Some(conversation_id.clone());
-    }
-
-    pub fn from(&self) -> &Id {
-        &self.from
-    }
-
-    pub fn to(&self) -> &Id {
-        &self.to
-    }
-
-    pub fn serial_number(&self) -> u32 {
-        self.serial_number
-    }
-
-    pub fn created(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(self.created)
-    }
-
-    pub fn message_type(&self) -> MessageType {
-        MessageType::try_from(self.message_type).unwrap()
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.version == VERSION &&
-            self.message_type >= MessageType::Message as i32 &&
-            self.message_type <= MessageType::Notification as i32 &&
-            self.created > 0
-    }
-
-    pub(crate) fn _properties(&self) -> &HashMap<String, serde_json::Value> {
-        unimplemented!()
-    }
-
-    pub(crate) fn content_type(&self) -> String {
-        self.content_type.clone().unwrap_or_else(|| ContentType::Text.to_string())
-    }
-
-    pub(crate) fn _content_disposition(&self) -> String {
-        self.content_disposition.clone().unwrap_or_else(|| ContentDisposition::Inline.to_string())
-    }
-
-    pub(crate) fn has_original_body(&self) -> bool {
-        self.orginal_body.as_ref().map(|v| {
-            match v {
-                serde_json::Value::Null => true,
-                serde_json::Value::Array(arr) => arr.is_empty(),
-                serde_json::Value::Object(obj) => obj.is_empty(),
-                serde_json::Value::String(s) => s.is_empty(),
-                _ => false,
-            }
-        }).unwrap_or(true)
-    }
-
-    pub(crate) fn body(&self) -> Option<&[u8]> {
-        self.body.as_deref()
-    }
-
-    pub(crate) fn body_as_text(&self) -> Option<String> {
-        self.body.as_ref().map(|b| {
-            String::from_utf8_lossy(b).to_string()
-        })
-    }
-
-    pub(crate) fn _completed(&self) -> u64 {
-        self.completed
-    }
-
-    pub(crate) fn _mark_completed(&mut self, completed: SystemTime) {
-        self.completed = as_ms!(completed) as u64
-    }
-
-    pub(crate) fn is_encrypted(&self) -> bool {
-        self.encrypted
-    }
-
-    pub(crate) fn mark_encrypted(&mut self, encrypted: bool) {
-        self.encrypted = encrypted;
-    }
-
-    pub(crate) fn _on_sent(&self) {
-        // TODO: unimplemented!()
-    }
-
-    pub(crate) fn decrypt_body(&mut self, ctx: &CryptoContext) -> Result<()> {
-        self.body = self.body.as_ref().map(|v| {
-            ctx.decrypt_into(v)
-        }).transpose()?;
-        self.encrypted = false;
-        Ok(())
+    /// The body bytes as a `Vec<u8>`.
+    pub fn as_binary(&self) -> Vec<u8> {
+        self.body.clone()
     }
 }
 
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Message[from={}, to={}, type={} serialNumber={}]",
-            self.from,
-            self.to,
-            self.message_type,
-            self.serial_number
-        )
-    }
+// ---------------------------------------------------------------------------
+// Message
+// ---------------------------------------------------------------------------
+
+/// A single message in a conversation.
+pub trait Message: Send + Sync {
+    /// The local storage ID for this message.
+    fn id(&self) -> i64;
+
+    /// The ID of the conversation (= the other party's boson `Id`).
+    fn conversation_id(&self) -> &Id;
+
+    /// The intended recipient's boson `Id`.
+    fn recipient(&self) -> Option<&Id>;
+
+    /// The category of this message.
+    fn message_type(&self) -> MessageType;
+
+    /// The sender's boson `Id`.
+    fn from(&self) -> &Id;
+
+    /// When the message was authored.
+    fn created_at(&self) -> SystemTime;
+
+    /// When this device received the message (`None` for outbound messages).
+    fn received_at(&self) -> Option<SystemTime>;
+
+    /// When this device successfully sent the message (`None` for inbound).
+    fn sent_at(&self) -> Option<SystemTime>;
+
+    /// The raw encrypted payload bytes.
+    fn payload_as_bytes(&self) -> &[u8];
+
+    /// The decoded content, if decryption succeeded.
+    fn payload_as_content(&self) -> Option<&Content>;
 }
 
-#[allow(unused)]
-pub(crate) struct Builder {
-    //client      : &'a MessagingClient,
-    msg_type    : MessageType,
+// ---------------------------------------------------------------------------
+// MessageBuilder trait
+// ---------------------------------------------------------------------------
 
-    from        : Option<Id>,
-    to          : Option<Id>,
-    serial_number: Option<u32>,
-    properties : Option<HashMap<String, serde_json::Value>>,
-    content_type: Option<ContentType>,
-    body        : Option<Vec<u8>>,
+/// Fluent builder for composing and sending a message.
+///
+/// Methods that accept a `String`-like value take `&str` to remain dyn-compatible.
+pub trait MessageBuilder: Send + Sync {
+    /// Set the MIME content type.
+    fn content_type(self: Box<Self>, ct: &str) -> Box<dyn MessageBuilder>;
 
-    //message: Option<Message>,
-}
+    /// Set the content disposition.
+    fn content_disposition(self: Box<Self>, cd: ContentDisposition) -> Box<dyn MessageBuilder>;
 
-impl Builder {
-    pub(crate) fn new(msg_type: MessageType) -> Self {
-        Self {
-            msg_type,
-            from: None,
-            to: None,
-            serial_number: None,
-            properties: None,
-            content_type: None,
-            body: None,
-            // Add other fields if needed
-        }
-    }
+    /// Set a UTF-8 text body.
+    fn text_body(self: Box<Self>, text: &str) -> Box<dyn MessageBuilder>;
 
-    pub(crate) fn with_from(mut self, from: Id) -> Self {
-        self.from = Some(from);
-        self
-    }
+    /// Set an arbitrary binary body.
+    fn binary_body(self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilder>;
 
-    pub(crate) fn with_to(mut self, to: &Id) -> Self {
-        self.to = Some(to.clone());
-        self
-    }
-
-    pub(crate) fn with_serial_number(mut self, serial_number: u32) -> Self {
-        self.serial_number = Some(serial_number);
-        self
-    }
-
-    pub(crate) fn _with_property(mut self, name: &str, value: serde_json::Value) -> Self {
-        if let Some(map) = self.properties.as_mut() {
-            map.insert(name.to_string(), value);
-        } else {
-            let mut map = HashMap::new();
-            map.insert(name.to_string(), value);
-            self.properties = Some(map);
-        }
-        self
-    }
-
-    pub(crate) fn _clear_properties(mut self) -> Self {
-        if let Some(map) = self.properties.as_mut() {
-            map.clear();
-        }
-        self.properties = None;
-        self
-    }
-
-    pub(crate) fn _with_content_type(mut self, content_type: ContentType) -> Self {
-        self.content_type = Some(content_type);
-        self
-    }
-
-    pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
-        self.body = Some(body);
-        // TODO: original body.
-        self
-    }
-
-    pub(crate) fn build(self) -> Message {
-        assert!(self.to.is_some(), "Message 'to' field is required");
-        Message::new(self)
-    }
+    /// Add an arbitrary header.
+    fn header(self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder>;
 }

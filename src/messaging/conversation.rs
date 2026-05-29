@@ -1,131 +1,41 @@
-use std::fmt;
 use std::time::SystemTime;
+use crate::Id;
+use crate::messaging::contact::Contact;
 
-use crate::{
-    Id,
-    core::{Error, Result},
-    messaging::{
-        Contact,
-        message::Message
-    }
-};
+/// A conversation between the local user and another party (person or channel).
+///
+/// The conversation ID equals the other party's boson `Id`.
+pub trait Conversation: Send + Sync {
+    /// The unique identifier of this conversation (same as the participant's `Id`).
+    fn id(&self) -> &Id;
 
-pub static MAX_SNIPPET_LENGTH: usize = 128;
-pub static DEFAULT_AVATAR: Option<String> = None;
+    /// Display title – typically the contact's `display_name()`.
+    fn title(&self) -> &str;
 
-#[derive(Debug)]
-pub struct Conversation {
-    interlocutor    : Contact,
-    last_message    : Option<Message>,
-    snippet         : Option<String>,
-}
+    /// Optional avatar URI / identifier.
+    fn avatar(&self) -> Option<&str>;
 
-#[allow(unused)]
-impl Conversation {
-    pub(crate) fn new(interlocutor: Contact, last_message: Message) -> Self {
-        let mut conversation = Self {
-            interlocutor,
-            last_message: None,
-            snippet: None,
-        };
-        conversation.update(last_message)
-            .expect("Failed to update conversation with last message");
-        conversation
-    }
+    /// The contact representing the other participant.
+    fn contact(&self) -> &dyn Contact;
 
-    pub(crate) fn from_contact(interlocutor: Contact) -> Self {
-        Self {
-            interlocutor,
-            last_message: None,
-            snippet: None,
-        }
-    }
+    /// Whether this is a channel (group) conversation.
+    fn is_channel(&self) -> bool;
 
-    pub fn id(&self) -> &Id {
-        self.interlocutor.id()
-    }
+    /// Short text preview of the most recent activity.
+    fn preview(&self) -> &str;
 
-    pub fn title(&self) -> &str {
-        //self.interlocutor.display_name()
-        "TODO"
-    }
+    /// When this conversation was last updated.
+    fn updated_at(&self) -> Option<SystemTime>;
 
-    pub fn avatar(&self) -> Option<String> {
-        self.interlocutor.avatar_url().or_else(|| DEFAULT_AVATAR.clone())
-    }
+    /// Total number of messages in this conversation.
+    fn message_count(&self) -> usize;
 
-    pub fn snippet(&self) -> String {
-        if let Some(snippet) = self.snippet.as_ref() {
-            return snippet.to_string();
-        }
-        let Some(msg) = self.last_message.as_ref() else {
-            return "".into();
-        };
+    /// Number of messages the local user has not yet read.
+    fn unread_count(&self) -> usize;
 
-        let ctype = msg.content_type();
-        if ctype.starts_with("text/") {
-            let body = msg.body_as_text().unwrap_or("".to_string());
-            let trimmed = body.trim();
-            let snippet = if trimmed.len() > MAX_SNIPPET_LENGTH {
-                &trimmed[0..MAX_SNIPPET_LENGTH]
-            } else {
-                &trimmed[..]
-            };
-            snippet.to_string()
-        } else if ctype.starts_with("image/") {
-            "(Image)".into()
-        } else if ctype.starts_with("audio/") {
-            "(Audio)".into()
-        } else if ctype.starts_with("video/") {
-            "(Video)".into()
-        } else {
-            "(Attachment)".into()
-        }
-    }
+    /// Whether this conversation is muted (no notifications).
+    fn is_muted(&self) -> bool;
 
-    pub fn updated(&self) -> Option<SystemTime> {
-        self.last_message.as_ref().map(|v| v.created())
-    }
-
-    pub fn iterlocutor(&self) -> &Contact {
-        &self.interlocutor
-    }
-
-    pub(crate) fn update_interlocutor(&mut self, contact: Contact) -> Result<()> {
-        if contact.id() != self.interlocutor.id() {
-            Err(Error::Argument("Contact does not match the conversation".into()))?;
-        }
-        self.interlocutor = contact;
-        Ok(())
-    }
-
-    pub(crate) fn update(&mut self, message: Message) -> Result<()> {
-        if message.conversation_id().unwrap() != self.interlocutor.id() {
-            Err(Error::Argument("Message does not match the conversation".into()))?;
-        }
-
-        self.last_message = Some(message);
-        self.snippet = None; // invalidate the previous snippet
-        Ok(())
-    }
-
-    pub fn is(&self, conversation: &Conversation) -> bool {
-        self.id() == conversation.id()
-    }
-}
-
-impl PartialEq for Conversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.id() == other.id()
-    }
-}
-
-impl fmt::Display for Conversation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Conversation:{} [{}, {}]",
-            self.title(),
-            self.id(),
-            self.snippet().as_str()
-        )
-    }
+    /// Whether this conversation is pinned to the top.
+    fn is_pinned(&self) -> bool;
 }

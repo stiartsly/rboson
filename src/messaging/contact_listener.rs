@@ -1,25 +1,17 @@
+use crate::messaging::contact::Contact;
+use crate::Id;
 
-use crate::{
-    Id,
-    messaging::contact::Contact,
-};
+/// Receives events about changes to the local contact list.
+pub trait ContactListener: Send + Sync {
+    /// Called when a new contact has been added.
+    fn on_contact_added(&self, contact: &dyn Contact) {}
 
-pub trait ContactListener {
-    fn on_contacts_updating(&self,
-        version_id: &str,
-        contacts: Vec<Contact>
-    );
+    /// Called when one or more existing contacts were updated.
+    fn on_contacts_updated(&self, contacts: &[Box<dyn Contact>]) {}
 
-    fn on_contacts_updated(&self,
-        base_version_id: &str,
-        new_version_id: &str,
-        contacts: Vec<Contact>
-    );
+    /// Called when one or more contacts were removed.
+    fn on_contacts_removed(&self, contact_ids: &[Id]) {}
 
-    fn on_contacts_cleared(&self);
-
-    fn on_contact_profile(&self,
-        contact_id: &Id,
-        profile: &Contact
-    );
+    /// Called when every contact was cleared from the local list.
+    fn on_contacts_cleared(&self) {}
 }

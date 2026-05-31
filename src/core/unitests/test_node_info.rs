@@ -3,7 +3,7 @@ use std::net::{
     Ipv4Addr,
     SocketAddr
 };
-
+use serde_cbor::Value;
 use crate::core::{Id, NodeInfo};
 
 #[cfg(test)]
@@ -21,5 +21,17 @@ mod tests {
         assert_eq!(des, ni);
         assert_eq!(des.id(), &id);
         assert_eq!(des.version(), 0); // Lost version information.
+    }
+
+    #[test]
+    fn test_serde_failed_with_invalid_length() {
+        let encoded = serde_cbor::to_vec(&Value::Array(vec![
+            serde_cbor::value::to_value(Id::random()).expect("Failed to encode id"),
+            Value::Bytes(vec![127, 0, 0]),
+            Value::Integer(12345.into()),
+        ])).expect("Failed to serialize malformed node info");
+
+        let decoded = serde_cbor::from_slice::<NodeInfo>(&encoded);
+        assert!(decoded.is_err());
     }
 }

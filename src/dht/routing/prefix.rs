@@ -1,5 +1,7 @@
-use std::fmt;
-use std::cmp::Ordering;
+use std::{
+    fmt,
+    cmp::Ordering
+};
 use crate::core::Id;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,14 +11,15 @@ pub struct Prefix {
 }
 
 impl Prefix {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             id: Id::default(),
             depth: -1
         }
     }
 
-    pub fn from_id(src: &Id, depth: i32) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from(src: &Id, depth: i32) -> Self {
        assert!(depth < Id::BITS as i32);
 
         let mut id = Id::default();
@@ -25,27 +28,28 @@ impl Prefix {
         Self {id, depth }
     }
 
-    pub const fn id(&self) -> &Id {
+    pub(crate) const fn id(&self) -> &Id {
         &self.id
     }
 
-    pub const fn depth(&self) -> i32 {
+    #[allow(unused)]
+    pub(crate) const fn depth(&self) -> i32 {
         self.depth
     }
 
-    pub fn is_prefix_of(&self, id: &Id) -> bool {
+    pub(crate) fn is_prefix_of(&self, id: &Id) -> bool {
         Id::bits_equal(&self.id, id, self.depth)
     }
 
-    pub const fn is_splittable(&self) -> bool {
+    pub(crate) const fn is_splittable(&self) -> bool {
         self.depth < (Id::BITS - 1) as i32
     }
 
-    pub fn first(&self) -> Id {
+    pub(crate) fn first(&self) -> Id {
         self.id.clone()
     }
 
-    pub fn last(&self) -> Id {
+    pub(crate) fn last(&self) -> Id {
         let prefix = Prefix {
             id: Id::MAX_ID,
             depth: self.depth,
@@ -54,7 +58,7 @@ impl Prefix {
         self.id.distance(&trailing_bits)
     }
 
-    pub fn parent(&self) -> Prefix {
+    pub(crate) fn parent(&self) -> Prefix {
         let mut parent = self.clone();
         if self.depth == -1 {
             return parent;
@@ -66,7 +70,7 @@ impl Prefix {
         parent
     }
 
-    pub fn split_branch(&self, high_branch: bool) -> Prefix {
+    pub(crate) fn split_branch(&self, high_branch: bool) -> Prefix {
         let mut branch = self.clone();
         branch.depth += 1;
 
@@ -82,12 +86,12 @@ impl Prefix {
         branch
     }
 
-    pub fn is_sibling_of(&self, other: &Prefix) -> bool {
+    pub(crate) fn is_sibling_of(&self, other: &Prefix) -> bool {
         self.depth == other.depth &&
             Id::bits_equal(&self.id, &other.id, self.depth - 1)
     }
 
-    pub fn random_id(&self) -> Id {
+    pub(crate) fn random_id(&self) -> Id {
         let mut id = Id::random();
         Id::bits_copy(&self.id, &mut id, self.depth);
         id

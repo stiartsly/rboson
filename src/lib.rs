@@ -141,6 +141,7 @@ fn random_array<const N: usize>() -> [u8; N] {
     bytes
 }
 
+#[allow(unused)]
 fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; len];
     unsafe {

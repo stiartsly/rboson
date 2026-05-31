@@ -25,10 +25,6 @@ impl Error {
     pub(crate) fn description(&self) -> &str {
         &self.description
     }
-
-    pub(crate) fn msg(&self) -> &str {
-        self.description()
-    }
 }
 
 impl Serialize for Error {

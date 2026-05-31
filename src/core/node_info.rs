@@ -22,7 +22,7 @@ use super::{
     Network,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct NodeInfo {
     id: Id,
     addr: SocketAddr,
@@ -88,7 +88,13 @@ impl Hash for NodeInfo {
         0x6030A.hash(state); // 'n'
         self.id.hash(state);
         self.addr.hash(state);
-        self.ver.hash(state);
+    }
+}
+
+impl Eq for NodeInfo {}
+impl PartialEq for NodeInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.addr == other.addr
     }
 }
 
@@ -104,11 +110,10 @@ impl fmt::Display for NodeInfo {
 }
 
 impl Serialize for NodeInfo {
-    fn serialize<S>(&self, ser: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where S: Serializer,
     {
-        let mut s = ser.serialize_tuple(3)?;
+        let mut s = se.serialize_tuple(3)?;
         let addr = match self.addr.ip() {
             IpAddr::V4(addr4) => addr4.octets().to_vec(),
             IpAddr::V6(addr6) => addr6.octets().to_vec(),
@@ -117,16 +122,13 @@ impl Serialize for NodeInfo {
         s.serialize_element(&self.id)?;
         s.serialize_element(&addr)?;
         s.serialize_element(&self.addr.port())?;
-
-        // TODO: discard version information
         s.end()
     }
 }
 
 impl<'de> Deserialize<'de> for NodeInfo {
-    fn deserialize<D>(des: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    where D: Deserializer<'de>,
     {
         struct ImplVisitor;
         impl<'de> Visitor<'de> for ImplVisitor {
@@ -151,12 +153,14 @@ impl<'de> Deserialize<'de> for NodeInfo {
 
                 let ip = match ip_bytes.len() {
                     4 => {
-                        let ip: [u8; 4] = ip_bytes.as_slice().try_into().unwrap();
-                        IpAddr::V4(Ipv4Addr::from(ip))
+                        let mut octets = [0u8; 4];
+                        octets.copy_from_slice(&ip_bytes);
+                        IpAddr::V4(Ipv4Addr::from(octets))
                     },
                     16 => {
-                        let ip: [u8; 16] = ip_bytes.as_slice().try_into().unwrap();
-                        IpAddr::V6(Ipv6Addr::from(ip))
+                        let mut octets = [0u8; 16];
+                        octets.copy_from_slice(&ip_bytes);
+                        IpAddr::V6(Ipv6Addr::from(octets))
                     },
                     _ => return Err(de::Error::invalid_value(de::Unexpected::Bytes(&ip_bytes), &self)),
                 };
@@ -169,6 +173,6 @@ impl<'de> Deserialize<'de> for NodeInfo {
             }
         }
 
-        des.deserialize_tuple(4, ImplVisitor)
+        de.deserialize_tuple(3, ImplVisitor)
     }
 }

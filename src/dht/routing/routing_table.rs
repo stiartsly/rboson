@@ -21,7 +21,6 @@ use crate::{Id};
 use crate::dht::{
     rpc::Reachability,
     routing:: {
-        KClosestNodes,
         Prefix,
         KBucket,
         KBucketEntry,
@@ -79,12 +78,8 @@ impl RoutingTable {
             .expect("panic: no bucket found, should never happen")
     }
 
-    pub(crate) fn bucket_at(&self, index: usize) -> Option<Arc<Mutex<KBucket>>> {
-        self.buckets.iter().nth(index).map(|(_, v)| v.clone())
-    }
-
     pub(crate) fn buckets(&self) -> Vec<Arc<Mutex<KBucket>>> {
-        self.buckets.iter().map(|(_, v)| v.clone()).collect()
+        self.buckets.values().cloned().collect()
     }
 
     fn bucket_take(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
@@ -96,14 +91,24 @@ impl RoutingTable {
         self.buckets.remove(&key).unwrap()
     }
 
-    pub(crate) fn for_each_bucket(&self, mut f: impl FnMut(Arc<Mutex<KBucket>>)) {
-        self.buckets.iter().for_each(|(_,v)| f(v.clone()));
+    pub(crate) fn bucket_entry(&self, id: Option<&Id>) -> Option<KBucketEntry> {
+        if let Some(id) = id {
+            return self.bucket(id)
+                .lock().unwrap()
+                .entry(Some(id));
+        }
+
+        let rand_idx = unsafe {
+            randombytes_uniform(self.buckets.len() as u32)
+        } as usize;
+
+        self.buckets.iter()
+            .nth(rand_idx)
+            .map(|(_, bucket)| bucket.lock().unwrap().entry(None))
+            .flatten()
     }
 
-    pub(crate) fn bucket_entry(&self, id: &Id) -> Option<KBucketEntry> {
-        self.bucket(id).lock().unwrap().entry(id)
-    }
-
+    #[allow(unused)]
     pub(crate) fn contains(&self, id: &Id) -> bool {
         self.bucket(id).lock().unwrap().contains(id)
     }
@@ -112,23 +117,6 @@ impl RoutingTable {
         self.buckets.iter().map(|(_,v)|
             v.lock().unwrap().size()
         ).sum()
-    }
-
-    pub(crate) fn random_kentry(&self) -> Option<KBucketEntry> {
-        let keys = self.buckets.keys().collect::<Vec<_>>();
-        let rand = unsafe {
-            randombytes_uniform(keys.len() as u32)
-        } as usize;
-
-        self.buckets[keys[rand]].lock().unwrap().random_entry()
-    }
-
-    pub(crate) fn bucket_of(&self, id: &Id) -> usize {
-        self.buckets.iter()
-            .enumerate()
-            .find(|(_, (k, _))| k.is_prefix_of(id))
-            .map(|(idx, _)| idx)
-            .unwrap()
     }
 
     pub(crate) fn index_of(buckets: &Vec<Arc<Mutex<KBucket>>>, id: &Id) -> usize {
@@ -159,14 +147,6 @@ impl RoutingTable {
         } else {
             mid
         }
-    }
-
-    pub(crate) fn closest_nodes(
-        routing_table: Arc<Mutex<Self>>,
-        target: Id,
-        expected: usize,
-    ) -> KClosestNodes {
-        KClosestNodes::new(routing_table, target, expected)
     }
 
     pub(crate) fn put(&mut self, entry: KBucketEntry) {
@@ -263,7 +243,7 @@ impl RoutingTable {
         let mut low  = KBucket::new(lp.clone(), self.is_home_bucket(&lp));
         let mut high = KBucket::new(hp.clone(), self.is_home_bucket(&hp));
 
-        while let Some(entry) = locked.pop_first() {
+        while let Some(entry) = locked.pop() {
             match low.prefix().is_prefix_of(entry.id()) {
                 true  => low._put(entry),
                 false => high._put(entry)
@@ -307,7 +287,7 @@ impl RoutingTable {
 
     fn _remove(&mut self, id: &Id) -> Option<KBucketEntry> {
         let bucket = self.bucket(id);
-        let to_remove = match bucket.lock().unwrap().entry(id) {
+        let to_remove = match bucket.lock().unwrap().entry(Some(id)) {
             Some(v) => v.clone(),
             None => return None,
         };

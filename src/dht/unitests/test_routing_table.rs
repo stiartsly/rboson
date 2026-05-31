@@ -54,15 +54,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_basic_accessors_and_remove() {
+    fn test_put_and_remove() {
         let local_id = Id::random();
         let mut rt = RoutingTable::new(local_id);
 
         assert_eq!(rt.size(), 1);
         assert_eq!(rt.is_empty(), false);
         assert_eq!(rt.local_nodeid(), &local_id);
-        assert_eq!(rt.is_home_bucket(rt.bucket_at(0).unwrap().lock().unwrap().prefix()), true);
-        assert_eq!(rt.bucket_entry(&Id::random()).is_none(), true);
+        assert_eq!(rt.is_home_bucket(&rt.buckets().first().unwrap().lock().unwrap().prefix()), true);
+        assert_eq!(rt.bucket_entry(Some(&Id::random())).is_none(), true);
         assert_eq!(rt.number_of_entries(), 0);
 
         let id = make_id(0x00, 1);
@@ -71,7 +71,7 @@ mod tests {
 
         assert_eq!(rt.contains(&id), true);
         assert_eq!(rt.number_of_entries(), 1);
-        assert_eq!(rt.random_kentry().is_some(), true);
+        assert_eq!(rt.bucket_entry(None).is_some(), true);
 
         let removed = rt.remove(&id);
         assert_eq!(removed.is_some(), true);
@@ -104,37 +104,17 @@ mod tests {
         rt.put(entry);
 
         rt.on_send(&id);
-        let sent = rt.bucket_entry(&id).unwrap();
+        let sent = rt.bucket_entry(Some(&id)).unwrap();
         assert_eq!(*sent.last_sent() > SystemTime::UNIX_EPOCH, true);
 
         rt.on_timeout(&id);
-        assert_eq!(rt.bucket_entry(&id).unwrap().failed_requests(), 1);
+        assert_eq!(rt.bucket_entry(Some(&id)).unwrap().failed_requests(), 1);
 
         rt.on_responded(&id, 55);
-        let responsed = rt.bucket_entry(&id).unwrap();
+        let responsed = rt.bucket_entry(Some(&id)).unwrap();
         assert_eq!(responsed.is_reachable(), true);
         assert_eq!(responsed.failed_requests(), 0);
         assert_eq!(responsed.rtt(), 31);
-    }
-
-    #[test]
-    fn test_closest_nodes_and_serde() {
-        let (rt, low_id, high_id) = fill_and_split_table();
-        let shared = Arc::new(Mutex::new(rt));
-
-        let mut closest = RoutingTable::closest_nodes(shared.clone(), high_id, 4);
-        closest.fill();
-        assert_eq!(closest.size() <= 4, true);
-
-        let cbor = serde_cbor::to_vec(&*shared.lock().unwrap())
-            .expect("Failed to serialize RoutingTable");
-        let restored: RoutingTable = serde_cbor::from_slice(&cbor)
-            .expect("Failed to deserialize RoutingTable");
-
-        assert_eq!(restored.local_nodeid(), &Id::zero());
-        assert_eq!(restored.contains(&low_id), true);
-        assert_eq!(restored.contains(&high_id), true);
-        assert_eq!(restored.number_of_entries(), KBucket::MAX_ENTRIES + 1);
     }
 
     #[test]

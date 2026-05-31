@@ -36,7 +36,7 @@ mod tests {
     #[test]
     fn test_from_id() {
         let id = Id::random();
-        let prefix = Prefix::from_id(&id, 5);
+        let prefix = Prefix::from(&id, 5);
         assert_eq!(prefix.is_prefix_of(&id), true);
         assert_eq!(prefix.depth(), 5);
     }
@@ -49,7 +49,7 @@ mod tests {
         let id = rc.unwrap();
         assert_eq!(id.to_hexstr(), hexstr);
 
-        let prefix = Prefix::from_id(&id, 64);
+        let prefix = Prefix::from(&id, 64);
         assert_eq!(prefix.is_prefix_of(&id), true);
 
         let hexstr = "0x4833af415161cbd0ffffffffffffffffffffffffffffffffffffffffffffffff";
@@ -71,12 +71,12 @@ mod tests {
     fn test_is_splitable() {
         for i in 0 .. (Id::BITS as i32 -2) {
             let id = Id::random();
-            let prefix = Prefix::from_id(&id, i);
+            let prefix = Prefix::from(&id, i);
             assert_eq!(prefix.is_splittable(), true);
         }
 
         let id = Id::random();
-        let prefix = Prefix::from_id(&id, Id::BITS as i32 -1);
+        let prefix = Prefix::from(&id, Id::BITS as i32 -1);
         assert_eq!(prefix.is_splittable(), false);
     }
 
@@ -86,19 +86,19 @@ mod tests {
         let rc = Id::try_from(hexstr);
         assert_eq!(rc.is_ok(), true);
         let id = rc.unwrap();
-        let prefix = Prefix::from_id(&id, 84);
+        let prefix = Prefix::from(&id, 84);
 
         let hexstr = "0x4833af415161cbd0a3ef8faa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
         let rc = Id::try_from(hexstr);
         assert_eq!(rc.is_ok(), true);
         let id = rc.unwrap();
-        let prefix2 = Prefix::from_id(&id, 84);
+        let prefix2 = Prefix::from(&id, 84);
 
         let hexstr = "0x4833af415161cbd0a3ef93aa59a55fbadc9bd520a886a8fa214a3d09b6676cb8";
         let rc = Id::try_from(hexstr);
         assert_eq!(rc.is_ok(), true);
         //let id = rc.unwrap();
-        //let prefix3 = Prefix::from_id(&id, 84);
+        //let prefix3 = Prefix::from(&id, 84);
 
         assert_eq!(prefix2.is_sibling_of(&prefix), true);
         // TODO: assert_eq!(prefix3.is_sibling_of(&prefix), false);
@@ -108,7 +108,7 @@ mod tests {
     fn test_first() {
         for i in 0 .. Id::BITS as i32 -1 {
             let id = Id::random();
-            let prefix = Prefix::from_id(&id, i);
+            let prefix = Prefix::from(&id, i);
             let first = prefix.first();
             assert_eq!(prefix.is_prefix_of(&first), true);
         }
@@ -118,7 +118,7 @@ mod tests {
     fn test_last() {
         for i in 0 .. Id::BITS as i32 -1 {
             let id = Id::random();
-            let prefix = Prefix::from_id(&id, i);
+            let prefix = Prefix::from(&id, i);
             let last = prefix.last();
             assert_eq!(prefix.is_prefix_of(&last), true);
         }
@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn test_parent() {
         let id = Id::random();
-        let prefix = Prefix::from_id(&id, usize::MAX as i32);
+        let prefix = Prefix::from(&id, usize::MAX as i32);
         let parent = prefix.parent();
         assert_eq!(prefix == parent, true);
     }
@@ -136,7 +136,7 @@ mod tests {
     fn test_randomid() {
         for i in 0 .. Id::BITS as i32 {
             let id = Id::random();
-            let prefix = Prefix::from_id(&id, i);
+            let prefix = Prefix::from(&id, i);
             let rand_id = prefix.random_id();
 
             assert_eq!(prefix.is_prefix_of(&id), true);
@@ -149,7 +149,7 @@ mod tests {
     fn test_split_branch() {
         for i in 0 .. Id::BITS as i32 -1 {
             let id = Id::random();
-            let prefix = Prefix::from_id(&id, i);
+            let prefix = Prefix::from(&id, i);
             let pl = prefix.split_branch(false);
             let ph = prefix.split_branch(true);
 
@@ -163,8 +163,8 @@ mod tests {
     #[test]
     fn test_eq() {
         let id = Id::random();
-        let prefix1 = Prefix::from_id(&id, 5);
-        let prefix2 = Prefix::from_id(&id, 5);
+        let prefix1 = Prefix::from(&id, 5);
+        let prefix2 = Prefix::from(&id, 5);
         assert_eq!(prefix1, prefix2);
     }
 }

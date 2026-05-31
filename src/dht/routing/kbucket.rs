@@ -1,14 +1,12 @@
-use std::fmt;
-use std::time::SystemTime;
+use std::{
+    fmt,
+    time::SystemTime
+};
 use rbtree::RBTree;
 use libsodium_sys::randombytes_uniform;
 use log::info;
 
-use crate::{
-    elapsed_ms,
-    Id
-};
-
+use crate::Id;
 use crate::dht::{
     rpc::Reachability,
     routing::{Prefix, KBucketEntry},
@@ -31,12 +29,9 @@ use crate::dht::{
  */
 
 pub(crate) struct KBucket {
-    prefix: Prefix,
-    home_bucket: bool,
-
-    entries: RBTree<Id, KBucketEntry>,
-    youngest: Option<KBucketEntry>,  // youngest one.
-
+    prefix      : Prefix,
+    home_bucket : bool,
+    entries     : RBTree<Id, KBucketEntry>,
     last_refreshed: SystemTime,
 }
 
@@ -49,8 +44,6 @@ impl KBucket {
             prefix,
             home_bucket,
             entries: RBTree::new(),
-            youngest: None,
-
             last_refreshed: SystemTime::UNIX_EPOCH,
         }
     }
@@ -63,6 +56,7 @@ impl KBucket {
         &self.prefix
     }
 
+    #[allow(unused)]
     pub(crate) fn is_home_bucket(&self) -> bool {
         self.home_bucket
     }
@@ -75,93 +69,80 @@ impl KBucket {
         self.entries.values().cloned().collect()
     }
 
+    #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    #[allow(unused)]
     pub(crate) fn is_full(&self) -> bool {
         self.entries.len() >= KBucket::MAX_ENTRIES
-    }
-
-    pub(crate) fn entry(&self, id: &Id) -> Option<KBucketEntry> {
-        self.entries.get(id).map(|v|v.clone())
     }
 
     pub(crate) fn contains(&self, id: &Id) -> bool {
         self.entries.contains_key(id)
     }
 
-    pub(crate) fn random_entry(&self) -> Option<KBucketEntry> {
-        let keys: Vec<_> = self.entries.keys().collect();
-        if keys.is_empty() {
+    pub(crate) fn entry(&self, id: Option<&Id>) -> Option<KBucketEntry> {
+        if let Some(id) = id {
+            return self.entries.get(id).cloned();
+        }
+        if self.entries.is_empty() {
             return None;
         }
 
         let rand_idx = unsafe {
-            randombytes_uniform(keys.len() as u32)
+            randombytes_uniform(self.entries.len() as u32)
         } as usize;
 
-        self.entries.get(keys[rand_idx]).map(|v|v.clone())
+        self.entries.iter()
+            .nth(rand_idx)
+            .map(|(_, entry)| entry.clone())
     }
-
-    /*
-    pub(crate) fn entries(&self) -> Vec<KBucketEntry> {
-        self.entries.values().cloned().collect()
-    }
-    */
 
     pub(crate) fn update_refresh_time(&mut self) {
         self.last_refreshed = SystemTime::now()
     }
 
     pub(crate) fn needs_refreshing(&self) -> bool {
-        elapsed_ms!(&self.last_refreshed) > KBucket::REFRESH_INTERVAL
+        crate::elapsed_ms!(&self.last_refreshed) > KBucket::REFRESH_INTERVAL
             && self.find_any(|v| v.needs_ping()).is_some()
     }
 
-    pub(crate) fn pop_first(&mut self) -> Option<KBucketEntry> {
+    pub(crate) fn pop(&mut self) -> Option<KBucketEntry> {
         self.entries.pop_first().map(|(_,v)|v)
     }
 
-    pub(crate) fn _put(&mut self, entry: KBucketEntry) {
-        if let Some(item) = self.entries.get_mut(entry.id()) {
-            if item.equals(&entry) {
-                item.merge(&entry);
-                return;
-            }
+    pub(crate) fn _put(&mut self, new: KBucketEntry) {
+        let mut matched = None;
 
-            // NodeInfo id and address conflict
-            // Log the conflict and keep the existing entry
-            if item.matches(&entry) {
+        for (k, v) in self.entries.iter() {
+            if v.eq(&new) {
+                matched = Some(k.clone());
+                break;
+            }
+            if v.matches(&new) {
                 info!("New node {} claims same ID or IP as {}, might be impersonation attack or IP change.
-                    ignoring until old entry times out", entry, item);
+                    ignoring until old entry times out", new, v);
                 return;
             }
         }
+        if let Some(id) = matched {
+            let existing = self.entries.get_mut(&id).unwrap();
+            existing.merge(new);
+            return;
+        }
 
-        let entry_id = entry.id().clone();
-        if entry.is_reachable() {
+        let entry_id = new.id().clone();
+        if new.is_reachable() {
             // insert to the list if it still has room
             if self.entries.len() < KBucket::MAX_ENTRIES {
-                self.entries.insert(entry_id, entry.clone());
-                self.youngest = Some(entry.clone());
+                self.entries.insert(entry_id, new);
                 return;
             }
 
             // Try to replace the bad entry
-            if self._replace_bad_entry(entry.clone()) {
-                return;
-            }
-
-            let youngest = match self.youngest.as_ref() {
-                Some(v) => v,
-                None => return
-            };
-
-            if entry.created_time() > youngest.created_time() {
-                self.entries.replace_or_insert(entry_id, entry.clone());
-                self.youngest = Some(entry);
-            }
+            self._replace_bad_entry(new);
         }
     }
 
@@ -192,26 +173,24 @@ impl KBucket {
         }
     }
 
-    fn _replace_bad_entry(&mut self, new_entry: KBucketEntry) -> bool {
-        let mut replaced = false;
-        for (_,v) in self.entries.iter_mut() {
+    fn _replace_bad_entry(&mut self, new_entry: KBucketEntry) {
+        let mut bad_removed = None;
+        for (k,v) in self.entries.iter() {
             if v.needs_replacement() {
-                v.merge(&new_entry);
-                replaced = true;
+                bad_removed = Some(k.clone());
                 break;
             }
         }
-        replaced
+        if let Some(bad_id) = bad_removed {
+            self.entries.remove(&bad_id);
+            self.entries.insert(new_entry.id().clone(), new_entry);
+        }
     }
 
-    fn needs_replacement(&self) -> bool {
-        self.entries.iter().any(|(_,v)| v.needs_replacement())
-    }
-
-    fn find_any<P>(&self, mut predicate: P) -> Option<KBucketEntry>
+    fn find_any<P>(&self, mut test: P) -> Option<KBucketEntry>
     where P: FnMut(&KBucketEntry) -> bool {
         for (_,v) in self.entries.iter() {
-            if predicate(v) {
+            if test(v) {
                 return Some(v.clone());
             }
         }

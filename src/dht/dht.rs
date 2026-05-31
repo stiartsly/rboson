@@ -281,7 +281,7 @@ impl DHT {
             return;
         }
 
-        let Some(entry) = self.rt().lock().unwrap().random_kentry() else {
+        let Some(entry) = self.rt().lock().unwrap().bucket_entry(None) else {
             return;
         };
 
@@ -646,7 +646,7 @@ impl DHT {
         }
 
         let mut existed = false;
-        let result = rt.lock().unwrap().bucket_entry(remote_id);
+        let result = rt.lock().unwrap().bucket_entry(Some(remote_id));
         if let Some(existing) = result {
             if existing.socket_addr() != remote_addr ||
                 existing.socket_addr().port() != remote_port {
@@ -1247,7 +1247,7 @@ impl DHT {
     ) -> Result<Option<NodeInfo>> {
 
         let rt = dht.lock().unwrap().rt();
-        let node = rt.lock().unwrap().bucket_entry(target).map(|v| v.into());
+        let node = rt.lock().unwrap().bucket_entry(Some(target)).map(|v| v.into());
 
         if option == LookupOption::Local {
             return Ok(node);

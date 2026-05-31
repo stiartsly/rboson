@@ -1,28 +1,26 @@
-use std::fmt;
-use std::cmp::{min, max};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::result::Result as SResult;
-use std::time::{Duration, SystemTime};
+use std::{
+    fmt,
+    cmp::{min, max},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    result::Result as SResult,
+    time::{Duration, SystemTime}
+};
 
 use serde::{
-    Deserialize,
-    Deserializer,
-    Serialize,
-    Serializer,
+    Deserialize, Deserializer,
+    Serialize, Serializer,
     de::{self, MapAccess, Visitor},
     ser::SerializeStruct,
 };
 
 use crate::{
-    as_secs,
-    elapsed_ms,
     Id,
     NodeInfo,
     core::version,
-};
-use crate::dht::rpc::{
-    Reachability,
-    rpc_server::RpcServer,
+    dht::rpc::{
+        Reachability,
+        rpc_server::RpcServer,
+    }
 };
 
 /**
@@ -31,15 +29,15 @@ use crate::dht::rpc::{
  */
 #[derive(Clone, Debug)]
 pub(crate) struct KBucketEntry {
-    ni: NodeInfo,
+    ni          : NodeInfo,
 
     created     : SystemTime,
     last_seen   : SystemTime,
     last_sent   : SystemTime,
 
-    reachable: bool,
+    reachable   : bool,
     failed_requests: i32,
-    avg_rtt: Option<f64>,
+    avg_rtt     : Option<f64>,
 }
 
 impl KBucketEntry {
@@ -124,7 +122,7 @@ impl KBucketEntry {
     }
 
     fn within_backoff_window_at(&self, _: &SystemTime) -> bool {
-        self.failed_requests != 0 && elapsed_ms!(&self.last_sent) < self.backoff() as u128
+        self.failed_requests != 0 && crate::elapsed_ms!(&self.last_sent) < self.backoff() as u128
     }
 
     pub(crate) fn within_backoff_window(&self) -> bool {
@@ -155,18 +153,18 @@ impl KBucketEntry {
         // don't ping if recently seen to allow NAT entries to time out
         // see https://arxiv.org/pdf/1605.05606v1.pdf for numbers
         // and do exponential backoff after failures to reduce traffic
-        if elapsed_ms!(self.last_seen) < 30 * 1000 ||
+        if crate::elapsed_ms!(self.last_seen) < 30 * 1000 ||
             self.within_backoff_window_at(&self.last_seen) {
             return false;
         }
 
         self.failed_requests != 0
-            || elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
+            || crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
     pub(crate) fn old_and_stale(&self) -> bool {
         self.failed_requests > Self::OLD_AND_STALE_FAILURES
-            && elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
+            && crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
     ///Determines if this entry can be removed from the routing table without needing replacement.
@@ -198,8 +196,8 @@ impl KBucketEntry {
             self.old_and_stale()
     }
 
-    pub(crate) fn merge(&mut self, entry: &Self) {
-        if std::ptr::eq(self, entry) || !self.equals(entry) {
+    pub(crate) fn merge(&mut self, entry: Self) {
+        if !self.equals(&entry) {
             return;
         }
 
@@ -214,9 +212,9 @@ impl KBucketEntry {
             self.update_avg_rtt(avg_rtt);
         }
 
-        self.created = self.created.min(entry.created);
-        self.last_seen = self.last_seen.max(entry.last_seen);
-        self.last_sent = self.last_sent.max(entry.last_sent);
+        self.created    = self.created.min(entry.created);
+        self.last_seen  = self.last_seen.max(entry.last_seen);
+        self.last_sent  = self.last_sent.max(entry.last_sent);
     }
 
     pub(crate) fn rtt(&self) -> u64 {
@@ -273,20 +271,16 @@ impl AsRef<NodeInfo> for KBucketEntry {
         &self.ni
     }
 }
-
 impl Into<NodeInfo> for KBucketEntry {
     fn into(self) -> NodeInfo {
         self.ni
     }
 }
 
+impl Eq for KBucketEntry {}
 impl PartialEq for KBucketEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.ni == other.ni
-    }
-
-    fn ne(&self, other: &Self) -> bool {
-        self.ni != other.ni
+        self.ni.eq(&other.ni)
     }
 }
 
@@ -323,9 +317,9 @@ impl Serialize for KBucketEntry {
         state.serialize_field("id", self.id())?;
         state.serialize_field("addr", &addr)?;
         state.serialize_field("port", &self.socket_addr().port())?;
-        state.serialize_field("c", &Self::system_time_to_millis(self.created))?;
-        state.serialize_field("ls", &Self::system_time_to_millis(self.last_seen))?;
-        state.serialize_field("lt", &Self::system_time_to_millis(self.last_sent))?;
+        state.serialize_field("c", &(crate::as_ms!(self.created) as u64))?;
+        state.serialize_field("ls", &(crate::as_ms!(self.last_seen) as u64))?;
+        state.serialize_field("lt", &(crate::as_ms!(self.last_sent) as u64))?;
         state.serialize_field("f", &self.failed_requests)?;
 
         if self.ni.version() != 0 {
@@ -445,9 +439,9 @@ impl<'de> Deserialize<'de> for KBucketEntry {
 
                 let mut entry = KBucketEntry::new(id, SocketAddr::new(ip, port));
                 entry.set_ver(version);
-                entry.created = KBucketEntry::millis_to_system_time(created_ms);
-                entry.last_seen = KBucketEntry::millis_to_system_time(last_seen_ms);
-                entry.last_sent = KBucketEntry::millis_to_system_time(last_sent_ms);
+                entry.created = ms_to_system_time(created_ms);
+                entry.last_seen = ms_to_system_time(last_seen_ms);
+                entry.last_sent = ms_to_system_time(last_sent_ms);
                 entry.reachable = reachable;
                 entry.failed_requests = failed_requests;
                 entry.avg_rtt = avg_rtt.filter(|rtt| rtt.is_finite() && *rtt >= 0.0);
@@ -465,12 +459,12 @@ impl fmt::Display for KBucketEntry {
             "{}@{};seen:{}; age:{}",
             self.ni.id(),
             self.ni.socket_addr(),
-            as_secs!(self.last_seen),
-            as_secs!(self.created)
+            crate::as_secs!(self.last_seen),
+            crate::as_secs!(self.created)
         )?;
 
         if self.last_sent.elapsed().is_ok() {
-            write!(f, "; sent:{}", as_secs!(self.last_sent))?;
+            write!(f, "; sent:{}", crate::as_secs!(self.last_sent))?;
         }
         if self.failed_requests > 0 {
             write!(f, "; fail: {}", self.failed_requests - 0)?;
@@ -488,14 +482,7 @@ impl fmt::Display for KBucketEntry {
     }
 }
 
-impl KBucketEntry {
-    fn system_time_to_millis(time: SystemTime) -> u64 {
-        time.duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
-    fn millis_to_system_time(ms: u64) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
-    }
+#[inline(always)]
+fn ms_to_system_time(ms: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
 }

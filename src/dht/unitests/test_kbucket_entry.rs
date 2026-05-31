@@ -63,7 +63,7 @@ mod tests {
 
         let mut second = first.clone();
         second.on_responded(40);
-        first.merge(&second);
+        first.merge(second);
 
         assert_eq!(first.is_reachable(), true);
         assert!(first.rtt() < 100);

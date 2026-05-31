@@ -207,9 +207,9 @@ pub(crate) trait LookupTask {
             return;
         };
         let token = match body {
-            Body::FindNodeRsp(body) => body.token(),
-            Body::FindPeerRsp(body) => body.token(),
-            Body::FindValueRsp(body) => body.token(),
+            Body::FindNodeResponse(body) => body.token(),
+            Body::FindPeerResponse(body) => body.token(),
+            Body::FindValueResponse(body) => body.token(),
             _ => return,
         };
         cn.lock().unwrap().set_token(token);

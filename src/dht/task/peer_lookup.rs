@@ -11,7 +11,7 @@ use crate::dht::{
     eligible_peers::EligiblePeers,
     rpc::{RpcCall,Target},
     routing::{KBucket, KBucketEntry, KClosestNodes},
-    msg::{Body, Message, LookupResponse},
+    msg::{msg, Body, LookupResponse},
     task::{
         Task, TaskData,
         LookupTask, LookupTaskData,
@@ -123,7 +123,7 @@ impl Task for PeerLookupTask {
 
             let target = Target::from_candidate(next.clone());
             let network = self.dht.lock().unwrap().network();
-            let msg = Message::find_peer_req(
+            let msg = msg::find_peer_request(
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
@@ -143,11 +143,11 @@ impl Task for PeerLookupTask {
     fn call_responded(&mut self, call: &RpcCall) {
         LookupTask::call_responded(self, call);
 
-        if call.id_mismatched() {
+        if call.nodeid_mismatched() {
             return;
         }
         let msg = call.rsp().expect("panic: no response set");
-        let Body::FindPeerRsp(body) = msg.body().expect("no message body") else {
+        let Body::FindPeerResponse(body) = msg.body().expect("no message body") else {
             return;
         };
 

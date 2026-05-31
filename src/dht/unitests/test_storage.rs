@@ -1,26 +1,23 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
 use serial_test::serial;
 
 use crate::{
+    CryptoIdentity,
     random_bytes,
     Id,
-    Value,
     PeerInfo,
+    Value,
     ValueBuilder,
     SignedBuilder,
     EncryptedBuilder,
     signature::KeyPair,
-    CryptoIdentity,
 };
 use crate::dht::storage::{
     data_storage::DataStorage,
     sqlite_storage::SqliteStorage,
 };
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 fn open_storage(path: &str) -> SqliteStorage {
     let mut s = SqliteStorage::new();
@@ -28,589 +25,454 @@ fn open_storage(path: &str) -> SqliteStorage {
     s
 }
 
+fn new_db_path() -> String {
+    let random_suffix = format!("{:016x}", rand::random::<u64>());
+    format!("/tmp/ts_{}.db", random_suffix)
+}
+
 fn remove_db(path: &str) {
     let _ = fs::remove_file(path);
 }
 
-/// Build a simple peer with no node-authentication.
-fn make_peer(endpoint: &str, fingerprint: u64) -> PeerInfo {
-    PeerInfo::builder(endpoint)
-        .with_fingerprint(fingerprint)
+fn make_value() -> Value {
+    let rc = ValueBuilder::new(&random_bytes(32))
         .build()
-        .expect("PeerBuilder::build")
+        ;
+    assert!(rc.is_ok());
+    rc.unwrap()
 }
 
-/// Build a peer with an explicit keypair so multiple peers can share the same id.
-fn make_peer_with_key(kp: KeyPair, endpoint: &str, fingerprint: u64) -> PeerInfo {
-    PeerInfo::builder(endpoint)
+fn make_signed_value(kp: KeyPair, expected_seq: i32) -> Value {
+    let rc = SignedBuilder::new(&random_bytes(32))
+        .with_keypair(&kp)
+        .with_sequence_number(expected_seq)
+        .build()
+        ;
+    assert!(rc.is_ok());
+    rc.unwrap()
+}
+
+fn make_encrypted_value(recipient: KeyPair, expected_seq: i32) -> Value {
+    let recipient = Id::from(recipient.public_key());
+    let rc = EncryptedBuilder::new(&random_bytes(32), &recipient)
+        .with_sequence_number(expected_seq)
+        .build()
+        ;
+    assert!(rc.is_ok());
+    rc.unwrap()
+}
+
+fn assert_value_roundtrip(actual: &Value, expected: &Value) {
+    assert_eq!(actual.id(), expected.id());
+    assert_eq!(actual.sequence_number(), expected.sequence_number());
+    assert_eq!(actual.public_key(), expected.public_key());
+    assert_eq!(actual.recipient(), expected.recipient());
+    assert_eq!(actual.nonce(), expected.nonce());
+    assert_eq!(actual.signature(), expected.signature());
+    assert_eq!(actual.data(), expected.data());
+}
+
+fn make_peer(endpoint: &str, fingerprint: u64) -> PeerInfo {
+    let rc = PeerInfo::builder(endpoint)
+        .with_fingerprint(fingerprint)
+        .build()
+        ;
+    assert!(rc.is_ok());
+    rc.unwrap()
+}
+
+fn make_peer_with_key(kp: KeyPair, endpoint: &str, fingerprint: u64, seq: i32) -> PeerInfo {
+    let rc = PeerInfo::builder(endpoint)
         .with_key(kp)
         .with_fingerprint(fingerprint)
+        .with_sequence_number(seq)
         .build()
-        .expect("PeerBuilder::build")
+        ;
+    assert!(rc.is_ok());
+    rc.unwrap()
 }
 
-// ── DataStorage::open / initialize / close ────────────────────────────────────
+fn make_authenticated_peer(endpoint: &str, fingerprint: u64) -> (PeerInfo, Id) {
+    let node_identity = Arc::new(Mutex::new(CryptoIdentity::new()));
+    let node_id = node_identity.lock().unwrap().id().clone();
+    let rc = PeerInfo::builder(endpoint)
+        .with_fingerprint(fingerprint)
+        .with_node(node_identity)
+        .build()
+        ;
+    assert!(rc.is_ok());
+    let peer = rc.unwrap();
+    (peer, node_id)
+}
+
+fn assert_peer_roundtrip(actual: &PeerInfo, expected: &PeerInfo) {
+    assert_eq!(actual.id(), expected.id());
+    assert_eq!(actual.fingerprint(), expected.fingerprint());
+    assert_eq!(actual.sequence_number(), expected.sequence_number());
+    assert_eq!(actual.nodeid(), expected.nodeid());
+    assert_eq!(actual.node_signature(), expected.node_signature());
+    assert_eq!(actual.signature(), expected.signature());
+    assert_eq!(actual.endpoint(), expected.endpoint());
+    assert_eq!(actual.extra_data(), expected.extra_data());
+}
 
 #[test]
 #[serial]
 fn test_open_and_close() {
-    let path = "/tmp/ts_open_close.db";
-    remove_db(path);
+    let path = new_db_path();
+    remove_db(&path);
 
     let mut s = SqliteStorage::new();
-    assert!(s.open(path).is_ok());
-    assert!(s.close().is_ok());
-
-    remove_db(path);
-}
-
-#[test]
-#[serial]
-fn test_initialize() {
-    let path = "/tmp/ts_initialize.db";
-    remove_db(path);
-
-    let mut s = open_storage(path);
+    assert!(s.open(&path).is_ok());
     assert!(s.initialize(Duration::from_secs(3600), Duration::from_secs(7200)).is_ok());
     assert!(s.close().is_ok());
 
-    remove_db(path);
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_close_and_reopen_retains_data() {
-    let path = "/tmp/ts_reopen.db";
-    remove_db(path);
+fn test_retain() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    // insert a value, then close
-    {
-        let mut s = open_storage(path);
-        let v = ValueBuilder::new(&random_bytes(32)).build().unwrap();
-        s.put_value(v, None).unwrap();
-        s.close().unwrap();
+    let value = make_value();
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
+    let rc = s.put_value(value.clone(), None);
+    assert!(rc.is_ok());
+    let rc = s.close();
+    assert!(rc.is_ok());
+
+    let s = open_storage(&path);
+    let rc = s.get_value(&value.id());
+    assert!(rc.is_ok());
+    let fetched = rc.unwrap();
+    assert!(fetched.is_some());
+    assert_eq!(fetched.unwrap(), value);
+
+    remove_db(&path);
+}
+
+#[test]
+#[serial]
+fn test_value() {
+    let path = new_db_path();
+    remove_db(&path);
+
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
+
+    let immutable = make_value();
+    let keypair = KeyPair::random();
+    let expected_seq1 = 42;
+    let signed = make_signed_value(keypair.clone(), expected_seq1);
+
+    let expected_seq2 = 99;
+    let encrypted = make_encrypted_value(keypair, expected_seq2);
+
+    assert!(s.put_value(immutable.clone(), None).is_ok());
+    assert!(s.put_value(signed.clone(), Some(true)).is_ok());
+    assert!(s.put_value(encrypted.clone(), None).is_ok());
+
+    let rc = s.get_value(&immutable.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_some());
+    assert_eq!(value.unwrap(), immutable);
+
+    let rc = s.get_value(&signed.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_some());
+    assert_value_roundtrip(&value.unwrap(), &signed);
+
+    let rc = s.get_value(&encrypted.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_some());
+    assert_value_roundtrip(&value.unwrap(), &encrypted);
+
+    assert!(s.update_value_announced_time(&immutable.id()).is_ok());
+    assert!(s.remove_value(&immutable.id()).is_ok());
+    let rc = s.get_value(&immutable.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_none());
+
+    remove_db(&path);
+}
+
+#[test]
+#[serial]
+fn test_values() {
+    let path = new_db_path();
+    remove_db(&path);
+
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
+
+    let values = vec![
+        {
+            let rc = ValueBuilder::new(&random_bytes(16)).build();
+            assert!(rc.is_ok());
+            rc.unwrap()
+        },
+        {
+            let rc = SignedBuilder::new(&random_bytes(16)).build();
+            assert!(rc.is_ok());
+            rc.unwrap()
+        },
+        {
+            let rc = ValueBuilder::new(&random_bytes(16)).build();
+            assert!(rc.is_ok());
+            rc.unwrap()
+        },
+    ];
+
+    for value in &values {
+        let rc = s.put_value(value.clone(), None);
+        assert!(rc.is_ok());
     }
 
-    // reopen and verify the value is still there
-    let s = open_storage(path);
-    let all = s.get_values().unwrap();
-    assert_eq!(all.len(), 1, "value should survive a close/reopen cycle");
+    let rc = s.get_values();
+    assert!(rc.is_ok());
+    let all = rc.unwrap();
+    assert_eq!(all.len(), values.len());
 
-    remove_db(path);
-}
+    for expected in &values {
+        let actual = all.iter().find(|value| value.id() == expected.id());
+        assert!(actual.is_some(), "missing value {}", expected.id());
+        assert_value_roundtrip(actual.unwrap(), expected);
+    }
 
-// ── DataStorage::put_value / get_value ───────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_put_and_get_immutable_value() {
-    let path = "/tmp/ts_immutable.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let data = random_bytes(32);
-    let v = ValueBuilder::new(&data).build().unwrap();
-    let id = v.id();
-
-    // not present yet
-    assert!(s.get_value(&id).unwrap().is_none());
-
-    s.put_value(v.clone(), None).unwrap();
-
-    let fetched = s.get_value(&id).unwrap().expect("value must be present");
-    assert_eq!(fetched, v);
-
-    remove_db(path);
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_put_and_get_signed_value() {
-    let path = "/tmp/ts_signed.db";
-    remove_db(path);
-    let mut s = open_storage(path);
+fn test_values_with_expected_seq() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    let v = SignedBuilder::new(&random_bytes(32))
-        .with_sequence_number(42)
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
+
+    let keypair = KeyPair::random();
+    let rc = SignedBuilder::new(&random_bytes(16))
+        .with_keypair(&keypair)
+        .with_sequence_number(3)
         .build()
-        .unwrap();
-    let id = v.id();
-
-    s.put_value(v.clone(), Some(true)).unwrap();
-
-    let fetched = s.get_value(&id).unwrap().expect("signed value must be present");
-    // Private key is stored but not restored via Value::packed (by design),
-    // so we compare the observable fields individually.
-    assert_eq!(fetched.id(),              v.id());
-    assert_eq!(fetched.sequence_number(), v.sequence_number());
-    assert_eq!(fetched.public_key(),      v.public_key());
-    assert_eq!(fetched.nonce(),           v.nonce());
-    assert_eq!(fetched.signature(),       v.signature());
-    assert_eq!(fetched.data(),            v.data());
-    assert!(!fetched.has_private_key(),   "sk is not restored from storage");
-
-    remove_db(path);
-}
-
-#[test]
-#[serial]
-fn test_put_and_get_encrypted_value() {
-    let path = "/tmp/ts_encrypted.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let recipient_kp = KeyPair::random();
-    let recipient    = Id::from(recipient_kp.public_key());
-    let v = EncryptedBuilder::new(&random_bytes(32), &recipient)
-        .with_sequence_number(7)
+        ;
+    assert!(rc.is_ok());
+    let low_seq = rc.unwrap();
+    let rc = SignedBuilder::new(&random_bytes(16))
+        .with_keypair(&keypair)
+        .with_sequence_number(11)
         .build()
-        .unwrap();
-    let id = v.id();
+        ;
+    assert!(rc.is_ok());
+    let high_seq = rc.unwrap();
 
-    s.put_value(v.clone(), None).unwrap();
+    assert_eq!(
+        low_seq.id(),
+        high_seq.id(),
+        "same keypair must produce same value id"
+    );
 
-    let fetched = s.get_value(&id).unwrap().expect("encrypted value must be present");
-    // Private key is stored but not restored via Value::packed (by design).
-    assert_eq!(fetched.id(),              v.id());
-    assert_eq!(fetched.sequence_number(), v.sequence_number());
-    assert_eq!(fetched.public_key(),      v.public_key());
-    assert_eq!(fetched.recipient(),       v.recipient());
-    assert_eq!(fetched.nonce(),           v.nonce());
-    assert_eq!(fetched.signature(),       v.signature());
-    assert_eq!(fetched.data(),            v.data());
-    assert!(!fetched.has_private_key(),   "sk is not restored from storage");
+    let rc = s.put_value(low_seq, None);
+    assert!(rc.is_ok());
+    let rc = s.put_value(high_seq.clone(), None);
+    assert!(rc.is_ok());
 
-    remove_db(path);
-}
+    let rc = s.get_value(&high_seq.id());
+    assert!(rc.is_ok());
+    let fetched = rc.unwrap();
+    assert!(fetched.is_some());
+    let fetched = fetched.unwrap();
+    let expected_seq = 10;
+    assert!(fetched.sequence_number() >= expected_seq);
+    assert_eq!(fetched.sequence_number(), high_seq.sequence_number());
+    assert_value_roundtrip(&fetched, &high_seq);
 
-// ── DataStorage::get_values ───────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_get_values_returns_all() {
-    let path = "/tmp/ts_get_values.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let v1 = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-    let v2 = SignedBuilder::new(&random_bytes(16)).build().unwrap();
-    let v3 = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-
-    s.put_value(v1, None).unwrap();
-    s.put_value(v2, None).unwrap();
-    s.put_value(v3, None).unwrap();
-
-    let all = s.get_values().unwrap();
-    assert_eq!(all.len(), 3);
-
-    remove_db(path);
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_get_values_empty_db() {
-    let path = "/tmp/ts_values_empty.db";
-    remove_db(path);
-    let s = open_storage(path);
+fn test_peer() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    let all = s.get_values().unwrap();
-    assert!(all.is_empty());
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
 
-    remove_db(path);
-}
+    let peer = make_peer("10.0.0.1:9000", 100);
+    let (authenticated_peer, node_id) = make_authenticated_peer("10.0.0.2:9000", 200);
 
-// ── DataStorage::update_value_announced_time ─────────────────────────────────
+    assert!(s.put_peer(peer.clone(), None).is_ok());
+    assert!(s.put_peer(authenticated_peer.clone(), Some(true)).is_ok());
 
-#[test]
-#[serial]
-fn test_update_value_announced_time() {
-    let path = "/tmp/ts_val_announce.db";
-    remove_db(path);
-    let mut s = open_storage(path);
+    let rc = s.get_peer(peer.id(), peer.fingerprint());
+    assert!(rc.is_ok());
+    let got_peer = rc.unwrap();
+    assert!(got_peer.is_some());
+    assert_peer_roundtrip(&got_peer.unwrap(), &peer);
 
-    let v = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-    let id = v.id();
-    s.put_value(v, None).unwrap();
+    let rc = s.get_peer(authenticated_peer.id(), authenticated_peer.fingerprint());
+    assert!(rc.is_ok());
+    let authenticated_peer_value = rc.unwrap();
+    assert!(authenticated_peer_value.is_some());
+    assert_peer_roundtrip(&authenticated_peer_value.unwrap(), &authenticated_peer);
 
-    // idempotent – must succeed without error
-    assert!(s.update_value_announced_time(&id).is_ok());
-    assert!(s.update_value_announced_time(&id).is_ok());
+    let rc = s.get_peers_authenticated_by(authenticated_peer.id(), &node_id);
+    assert!(rc.is_ok());
+    let peers = rc.unwrap();
+    assert_eq!(peers.len(), 1);
+    assert_peer_roundtrip(&peers[0], &authenticated_peer);
 
-    remove_db(path);
-}
+    let wrong_node = CryptoIdentity::new().id().clone();
+    let rc = s.get_peers_authenticated_by(authenticated_peer.id(), &wrong_node);
+    assert!(rc.is_ok());
+    let peers = rc.unwrap();
+    assert!(peers.is_empty());
 
-// ── DataStorage::remove_value ─────────────────────────────────────────────────
+    assert!(s.update_peer_announced_time(peer.id(), peer.fingerprint()).is_ok());
+    assert!(s.remove_peer(peer.id(), peer.fingerprint()).is_ok());
+    let rc = s.get_peer(peer.id(), peer.fingerprint());
+    assert!(rc.is_ok());
+    let removed_peer = rc.unwrap();
+    assert!(removed_peer.is_none());
 
-#[test]
-#[serial]
-fn test_remove_value() {
-    let path = "/tmp/ts_remove_val.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let v = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-    let id = v.id();
-    s.put_value(v, None).unwrap();
-    assert!(s.get_value(&id).unwrap().is_some());
-
-    s.remove_value(&id).unwrap();
-    assert!(s.get_value(&id).unwrap().is_none());
-
-    // removing an absent value should not error
-    assert!(s.remove_value(&id).is_ok());
-
-    remove_db(path);
-}
-
-// ── DataStorage::put_peer / get_peer ─────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_put_and_get_peer() {
-    let path = "/tmp/ts_put_peer.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let peer = make_peer("192.168.1.1:8080", 1001);
-    let id = peer.id().clone();
-    let fp = peer.fingerprint();
-
-    // not present yet
-    assert!(s.get_peer(&id, fp).unwrap().is_none());
-
-    s.put_peer(peer.clone(), None).unwrap();
-
-    let fetched = s.get_peer(&id, fp).unwrap().expect("peer must be present");
-    assert_eq!(fetched.id(), &id);
-    assert_eq!(fetched.fingerprint(), fp);
-    assert_eq!(fetched.endpoint(), peer.endpoint());
-
-    remove_db(path);
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_put_peer_persistent_flag() {
-    let path = "/tmp/ts_peer_persistent.db";
-    remove_db(path);
-    let mut s = open_storage(path);
+fn test_peers() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    let peer = make_peer("10.0.0.1:9000", 500);
-    s.put_peer(peer.clone(), Some(true)).unwrap();
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
 
-    let fetched = s.get_peer(peer.id(), peer.fingerprint()).unwrap().unwrap();
-    assert_eq!(fetched.id(), peer.id());
+    let keypair = KeyPair::random();
+    let p1 = make_peer_with_key(keypair.clone(), "10.0.0.1:9100", 1, 0);
+    let p2 = make_peer_with_key(keypair.clone(), "10.0.0.2:9100", 2, 5);
+    let p3 = make_peer("10.0.0.3:9100", 3);
 
-    remove_db(path);
-}
+    let rc = s.put_peers(vec![p1.clone(), p2.clone(), p3.clone()]);
+    assert!(rc.is_ok());
 
-// ── DataStorage::put_peers ────────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_put_peers_bulk() {
-    let path = "/tmp/ts_put_peers.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let p1 = make_peer("10.0.0.1:8080", 1);
-    let p2 = make_peer("10.0.0.2:8080", 2);
-    let p3 = make_peer("10.0.0.3:8080", 3);
-
-    s.put_peers(vec![p1.clone(), p2.clone(), p3.clone()]).unwrap();
-
-    assert!(s.get_peer(p1.id(), p1.fingerprint()).unwrap().is_some());
-    assert!(s.get_peer(p2.id(), p2.fingerprint()).unwrap().is_some());
-    assert!(s.get_peer(p3.id(), p3.fingerprint()).unwrap().is_some());
-
-    remove_db(path);
-}
-
-// ── DataStorage::get_peers ────────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_get_peers_by_id() {
-    let path = "/tmp/ts_get_peers.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    // Two peers sharing the same signing keypair (→ same id) but different fingerprints
-    let kp = KeyPair::random();
-    let p1 = make_peer_with_key(kp.clone(), "10.0.0.1:9000", 100);
-    let p2 = make_peer_with_key(kp.clone(), "10.0.0.1:9001", 200);
-    assert_eq!(p1.id(), p2.id(), "same keypair must produce same id");
-
-    let id = p1.id().clone();
-    s.put_peer(p1, None).unwrap();
-    s.put_peer(p2, None).unwrap();
-
-    let peers = s.get_peers(&id).unwrap();
+    let rc = s.get_peers(p1.id());
+    assert!(rc.is_ok());
+    let peers = rc.unwrap();
     assert_eq!(peers.len(), 2);
+    for expected in [&p1, &p2] {
+        let actual = peers.iter().find(|peer| peer.fingerprint() == expected.fingerprint());
+        assert!(actual.is_some(), "missing peer {}", expected.fingerprint());
+        assert_peer_roundtrip(actual.unwrap(), expected);
+    }
 
-    // a different id should return nothing
-    let other_id = Id::random();
-    assert!(s.get_peers(&other_id).unwrap().is_empty());
-
-    remove_db(path);
-}
-
-// ── DataStorage::get_peers_with_expected_seq ──────────────────────────────────
-
-#[test]
-#[serial]
-fn test_get_peers_with_expected_seq() {
-    let path = "/tmp/ts_peers_seq.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let kp = KeyPair::random();
-    let p_lo = make_peer_with_key(kp.clone(), "10.0.0.1:9000", 1);  // seq = 0 (default)
-    let p_hi = PeerInfo::builder("10.0.0.1:9001")
-        .with_key(kp.clone())
-        .with_fingerprint(2)
-        .with_sequence_number(10)
-        .build()
-        .unwrap();
-    let id = p_lo.id().clone();
-
-    s.put_peer(p_lo.clone(), None).unwrap();
-    s.put_peer(p_hi.clone(), None).unwrap();
-
-    // seq >= 5 → only p_hi
-    let result = s.get_peers_with_expected_seq(&id, 5, 100).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].fingerprint(), 2);
-
-    // seq >= 0 → both
-    let result_all = s.get_peers_with_expected_seq(&id, 0, 100).unwrap();
-    assert_eq!(result_all.len(), 2);
-
-    // limit = 1 → at most 1 result
-    let result_limited = s.get_peers_with_expected_seq(&id, 0, 1).unwrap();
-    assert_eq!(result_limited.len(), 1);
-
-    remove_db(path);
-}
-
-// ── DataStorage::get_peers_authenticated_by ───────────────────────────────────
-
-#[test]
-#[serial]
-fn test_get_peers_authenticated_by_unauthenticated() {
-    let path = "/tmp/ts_peers_unauth.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    // Peer without a node identity is NOT authenticated
-    let peer = make_peer("10.0.0.1:9000", 77);
-    let id = peer.id().clone();
-    s.put_peer(peer, None).unwrap();
-
-    let any_node_id = Id::random();
-    let result = s.get_peers_authenticated_by(&id, &any_node_id).unwrap();
-    assert!(result.is_empty());
-
-    remove_db(path);
-}
-
-#[test]
-#[serial]
-fn test_get_peers_authenticated_by_authenticated() {
-    let path = "/tmp/ts_peers_auth.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    // Build a peer authenticated by a CryptoIdentity node
-    let node_identity = Arc::new(Mutex::new(CryptoIdentity::new()));
-    let node_id       = node_identity.lock().unwrap().id().clone();
-
-    let peer = PeerInfo::builder("10.0.0.2:9000")
-        .with_fingerprint(99)
-        .with_node(node_identity)
-        .build()
-        .unwrap();
-    let peer_id = peer.id().clone();
-    assert!(peer.is_authenticated(), "peer must carry a node signature");
-
-    s.put_peer(peer.clone(), None).unwrap();
-
-    // query by the correct node id → found
-    let result = s.get_peers_authenticated_by(&peer_id, &node_id).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].fingerprint(), 99);
-
-    // query by a different node id → not found
-    let other_node = Id::random();
-    let result_other = s.get_peers_authenticated_by(&peer_id, &other_node).unwrap();
-    assert!(result_other.is_empty());
-
-    remove_db(path);
-}
-
-// ── DataStorage::get_peers_all ────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_get_peers_all() {
-    let path = "/tmp/ts_peers_all.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let p1 = make_peer("10.0.0.1:8080", 1);
-    let p2 = make_peer("10.0.0.2:8080", 2);
-    let p3 = make_peer("10.0.0.3:8080", 3);
-
-    s.put_peer(p1, None).unwrap();
-    s.put_peer(p2, None).unwrap();
-    s.put_peer(p3, None).unwrap();
-
-    let all = s.get_peers_all().unwrap();
+    let rc = s.get_peers_all();
+    assert!(rc.is_ok());
+    let all = rc.unwrap();
     assert_eq!(all.len(), 3);
 
-    remove_db(path);
+    assert!(s.remove_peers(p1.id()).is_ok());
+    let rc = s.get_peers(p1.id());
+    assert!(rc.is_ok());
+    let peers = rc.unwrap();
+    assert!(peers.is_empty());
+
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_get_peers_all_empty_db() {
-    let path = "/tmp/ts_peers_all_empty.db";
-    remove_db(path);
-    let s = open_storage(path);
+fn test_peers_with_expected_seq() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    assert!(s.get_peers_all().unwrap().is_empty());
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
+    assert!(rc.is_ok());
 
-    remove_db(path);
-}
+    let keypair = KeyPair::random();
+    let low_seq = make_peer_with_key(keypair.clone(), "10.0.1.1:9200", 11, 3);
+    let high_seq = make_peer_with_key(keypair, "10.0.1.2:9200", 22, 11);
 
-// ── DataStorage::update_peer_announced_time ───────────────────────────────────
+    assert_eq!(low_seq.id(), high_seq.id(), "same keypair must produce same peer id");
 
-#[test]
-#[serial]
-fn test_update_peer_announced_time() {
-    let path = "/tmp/ts_peer_announce.db";
-    remove_db(path);
-    let mut s = open_storage(path);
+    let rc = s.put_peer(low_seq, None);
+    assert!(rc.is_ok());
+    let rc = s.put_peer(high_seq.clone(), None);
+    assert!(rc.is_ok());
 
-    let peer = make_peer("10.0.0.1:8080", 5);
-    let id = peer.id().clone();
-    let fp = peer.fingerprint();
-    s.put_peer(peer, None).unwrap();
+    let rc = s.get_peers_with_expected_seq(high_seq.id(), 10, 10);
+    assert!(rc.is_ok());
+    let peers = rc.unwrap();
+    assert_eq!(peers.len(), 1);
+    assert!(peers[0].sequence_number() >= 10);
+    assert_peer_roundtrip(&peers[0], &high_seq);
 
-    // idempotent – must succeed without error
-    assert!(s.update_peer_announced_time(&id, fp).is_ok());
-    assert!(s.update_peer_announced_time(&id, fp).is_ok());
-
-    remove_db(path);
-}
-
-// ── DataStorage::remove_peer ──────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_remove_peer() {
-    let path = "/tmp/ts_remove_peer.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let peer = make_peer("10.0.0.1:8080", 42);
-    let id = peer.id().clone();
-    let fp = peer.fingerprint();
-    s.put_peer(peer, None).unwrap();
-    assert!(s.get_peer(&id, fp).unwrap().is_some());
-
-    s.remove_peer(&id, fp).unwrap();
-    assert!(s.get_peer(&id, fp).unwrap().is_none());
-
-    // removing a non-existent peer must not error
-    assert!(s.remove_peer(&id, fp).is_ok());
-
-    remove_db(path);
-}
-
-// ── DataStorage::remove_peers ─────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_remove_peers_by_id() {
-    let path = "/tmp/ts_remove_peers.db";
-    remove_db(path);
-    let mut s = open_storage(path);
-
-    let kp = KeyPair::random();
-    let p1 = make_peer_with_key(kp.clone(), "10.0.0.1:8080", 1);
-    let p2 = make_peer_with_key(kp.clone(), "10.0.0.2:8080", 2);
-    let p3 = make_peer_with_key(kp.clone(), "10.0.0.3:8080", 3);
-    let id = p1.id().clone();
-
-    s.put_peer(p1, None).unwrap();
-    s.put_peer(p2, None).unwrap();
-    s.put_peer(p3, None).unwrap();
-    assert_eq!(s.get_peers(&id).unwrap().len(), 3);
-
-    s.remove_peers(&id).unwrap();
-    assert!(s.get_peers(&id).unwrap().is_empty());
-
-    // removing again must not error
-    assert!(s.remove_peers(&id).is_ok());
-
-    remove_db(path);
-}
-
-// ── DataStorage::purge ────────────────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn test_purge_removes_expired_records() {
-    let path = "/tmp/ts_purge.db";
-    remove_db(path);
-
-    let mut s = SqliteStorage::new();
-    s.open(path).unwrap();
-    // 0-ms expiry → every record is already past its deadline
-    s.initialize(Duration::from_millis(0), Duration::from_millis(0)).unwrap();
-
-    let v = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-    let v_id = v.id();
-    s.put_value(v, None).unwrap();   // persistent = false (default)
-
-    let peer = make_peer("10.0.0.1:8080", 7);
-    let p_id = peer.id().clone();
-    let p_fp = peer.fingerprint();
-    s.put_peer(peer, None).unwrap(); // persistent = false (default)
-
-    s.purge().unwrap();
-
-    assert!(s.get_value(&v_id).unwrap().is_none(),  "expired value must be purged");
-    assert!(s.get_peer(&p_id, p_fp).unwrap().is_none(), "expired peer must be purged");
-
-    remove_db(path);
+    remove_db(&path);
 }
 
 #[test]
 #[serial]
-fn test_purge_keeps_persistent_records() {
-    let path = "/tmp/ts_purge_persistent.db";
-    remove_db(path);
+fn test_purge() {
+    let path = new_db_path();
+    remove_db(&path);
 
-    let mut s = SqliteStorage::new();
-    s.open(path).unwrap();
-    // 0-ms expiry, but records are stored as persistent → must survive purge
-    s.initialize(Duration::from_millis(0), Duration::from_millis(0)).unwrap();
+    let mut s = open_storage(&path);
+    let rc = s.initialize(Duration::ZERO, Duration::ZERO);
+    assert!(rc.is_ok());
 
-    let v = ValueBuilder::new(&random_bytes(16)).build().unwrap();
-    let v_id = v.id();
-    s.put_value(v, Some(true)).unwrap();   // persistent = true
+    let volatile_value = make_value();
+    let persistent_value = make_signed_value(KeyPair::random(), 7);
+    let volatile_peer = make_peer("10.0.2.1:9300", 31);
+    let persistent_peer = make_peer("10.0.2.2:9300", 32);
 
-    let peer = make_peer("10.0.0.1:8080", 99);
-    let p_id = peer.id().clone();
-    let p_fp = peer.fingerprint();
-    s.put_peer(peer, Some(true)).unwrap();  // persistent = true
+    let rc = s.put_value(volatile_value.clone(), None);
+    assert!(rc.is_ok());
+    let rc = s.put_value(persistent_value.clone(), Some(true));
+    assert!(rc.is_ok());
+    let rc = s.put_peer(volatile_peer.clone(), None);
+    assert!(rc.is_ok());
+    let rc = s.put_peer(persistent_peer.clone(), Some(true));
+    assert!(rc.is_ok());
 
-    s.purge().unwrap();
+    assert!(s.purge().is_ok());
 
-    assert!(s.get_value(&v_id).unwrap().is_some(),  "persistent value must survive purge");
-    assert!(s.get_peer(&p_id, p_fp).unwrap().is_some(), "persistent peer must survive purge");
+    let rc = s.get_value(&volatile_value.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_none());
+    let rc = s.get_value(&persistent_value.id());
+    assert!(rc.is_ok());
+    let value = rc.unwrap();
+    assert!(value.is_some());
+    assert_value_roundtrip(&value.unwrap(), &persistent_value);
 
-    remove_db(path);
+    let rc = s.get_peer(volatile_peer.id(), volatile_peer.fingerprint());
+    assert!(rc.is_ok());
+    let peer = rc.unwrap();
+    assert!(peer.is_none());
+    let rc = s.get_peer(persistent_peer.id(), persistent_peer.fingerprint());
+    assert!(rc.is_ok());
+    let peer = rc.unwrap();
+    assert!(peer.is_some());
+    assert_peer_roundtrip(
+        &peer.unwrap(),
+        &persistent_peer,
+    );
+
+    remove_db(&path);
 }

@@ -10,20 +10,24 @@ use serde::{
 
 pub(crate) struct Error {
     code: i32,
-    msg: String,
+    description: String,
 }
 
 impl Error {
-    pub(crate) fn new(code: i32, msg: String) -> Self {
-        Self { code, msg }
+    pub(crate) fn new(code: i32, description: String) -> Self {
+        Self { code, description }
     }
 
     pub(crate) fn code(&self) -> i32 {
         self.code
     }
 
+    pub(crate) fn description(&self) -> &str {
+        &self.description
+    }
+
     pub(crate) fn msg(&self) -> &str {
-        &self.msg
+        self.description()
     }
 }
 
@@ -33,7 +37,7 @@ impl Serialize for Error {
     {
         let mut s = se.serialize_map(None)?;
         s.serialize_entry("c", &self.code)?;
-        s.serialize_entry("m", &self.msg)?;
+        s.serialize_entry("m", &self.description)?;
         s.end()
     }
 }
@@ -109,6 +113,6 @@ impl<'de> Deserialize<'de> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "c:{},m:{}", self.code(), self.msg())
+        write!(f, "c:{},m:{}", self.code(), self.description())
     }
 }

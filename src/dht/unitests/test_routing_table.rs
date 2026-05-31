@@ -82,16 +82,17 @@ mod tests {
     #[test]
     fn test_bucket_of_and_split() {
         let (rt, low_id, high_id) = fill_and_split_table();
+        let buckets = rt.buckets();
 
         assert_eq!(rt.size(), 2);
 
-        let (low_idx, low_bucket) = rt.bucket_of(&low_id);
-        let (high_idx, high_bucket) = rt.bucket_of(&high_id);
+        let low_idx = RoutingTable::index_of(&buckets, &low_id);
+        let high_idx = RoutingTable::index_of(&buckets, &high_id);
 
         assert_eq!(low_idx, 0);
         assert_eq!(high_idx, 1);
-        assert_eq!(low_bucket.lock().unwrap().prefix().is_prefix_of(&low_id), true);
-        assert_eq!(high_bucket.lock().unwrap().prefix().is_prefix_of(&high_id), true);
+        assert_eq!(buckets[low_idx].lock().unwrap().prefix().is_prefix_of(&low_id), true);
+        assert_eq!(buckets[high_idx].lock().unwrap().prefix().is_prefix_of(&high_id), true);
     }
 
     #[test]

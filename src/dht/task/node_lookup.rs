@@ -9,7 +9,7 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     rpc::{RpcCall, Target},
-    msg::{Message, Body, LookupResponse},
+    msg::{msg, Body, LookupResponse},
     routing::{
         KBucket,
         KBucketEntry,
@@ -170,13 +170,12 @@ impl Task for NodeLookupTask {
 
             let target = Target::from_candidate(next.clone());
             let network = self.dht.lock().unwrap().network();
-            let msg = Message::find_node_req(
+            let msg = msg::find_node_request(
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
-                self.want_token
+                Some(self.want_token)
             );
-
             let handler = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
@@ -191,12 +190,12 @@ impl Task for NodeLookupTask {
     fn call_responded(&mut self, call: &RpcCall) {
         LookupTask::call_responded(self, call);
 
-        if call.id_mismatched() {
+        if call.nodeid_mismatched() {
             return;
         }
 
         let msg = call.rsp().expect("no response set");
-        let Body::FindNodeRsp(body) = msg.body().expect("no message body") else {
+        let Body::FindNodeResponse(body) = msg.body().expect("no message body") else {
             return;
         };
 

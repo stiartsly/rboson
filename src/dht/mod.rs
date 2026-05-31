@@ -23,6 +23,15 @@ mod msg {
         msg::{Message, Body},
         lookup_req::LookupRequest,
         lookup_rsp::LookupResponse,
+        find_node_req::FindNodeRequest,
+        find_node_rsp::FindNodeResponse,
+        find_peer_req::FindPeerRequest,
+        find_peer_rsp::FindPeerResponse,
+        find_value_req::FindValueRequest,
+        find_value_rsp::FindValueResponse,
+        announce_peer_req::AnnouncePeerRequest,
+        store_value_req::StoreValueRequest,
+        error::Error as ErrorBody,
     };
 }
 
@@ -204,6 +213,7 @@ mod unitests {
     mod test_find_peer_rsp;
     mod test_find_value_req;
     mod test_find_value_rsp;
+    mod test_message;
     mod test_store_value_req;
     mod test_error;
 

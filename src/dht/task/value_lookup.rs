@@ -10,7 +10,7 @@ use crate::dht::{
     eligible_value::EligibleValue,
     consumer::Consumer,
     rpc::{RpcCall, Target},
-    msg::{LookupResponse, Body, Message},
+    msg::{msg, LookupResponse, Body},
     routing::{
         KBucket,
         KBucketEntry,
@@ -126,7 +126,7 @@ impl Task for ValueLookupTask {
 
             let target = Target::from_candidate(next.clone());
             let network = self.dht.lock().unwrap().network();
-            let msg = Message::find_value_req(
+            let msg = msg::find_value_request(
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
@@ -145,11 +145,11 @@ impl Task for ValueLookupTask {
     fn call_responded(&mut self, call: &RpcCall) {
         LookupTask::call_responded(self, call);
 
-        if call.id_mismatched() {
+        if call.nodeid_mismatched() {
             return;
         }
         let rsp = call.rsp().expect("no response set");
-        let Body::FindValueRsp(body) = rsp.body().expect("no message body") else {
+        let Body::FindValueResponse(body) = rsp.body().expect("no message body") else {
             return;
         };
 

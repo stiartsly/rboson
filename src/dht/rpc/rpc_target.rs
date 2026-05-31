@@ -30,20 +30,27 @@ impl Target {
         Self::KBucketEntry(entry)
     }
 
-    pub(crate) fn id(&self) -> Id {
+    pub(crate) fn node_info(&self) -> NodeInfo {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().id().clone(),
-            Target::KBucketEntry(v) => v.id().clone(),
-            Target::NodeInfo(v) => v.id().clone(),
+            Target::Candidate(v) => v.lock().unwrap().as_ref().clone(),
+            Target::KBucketEntry(v) => v.as_ref().clone(),
+            Target::NodeInfo(v) => v.clone(),
         }
     }
 
-    pub(crate) fn socket_addr(&self) -> SocketAddr {
+    pub(crate) fn expected_rtt(&self) -> Option<u64> {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().as_ref().socket_addr().clone(),
-            Target::KBucketEntry(v) => v.socket_addr().clone(),
-            Target::NodeInfo(v) => v.socket_addr().clone(),
+            Target::KBucketEntry(v) => Some(v.rtt()),
+            _ => None,
         }
+    }
+
+    pub(crate) fn id(&self) -> Id {
+        self.node_info().id().clone()
+    }
+
+    pub(crate) fn socket_addr(&self) -> SocketAddr {
+        *self.node_info().socket_addr()
     }
 }
 

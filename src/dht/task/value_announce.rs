@@ -9,7 +9,7 @@ use crate::Value;
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    msg::Message,
+    msg::msg,
     rpc::Target,
     task::{
         Task, TaskData,
@@ -103,7 +103,7 @@ impl Task for ValueAnnounceTask {
                 self.todo.lock().unwrap().pop_front();
                 continue;
             }
-            let msg = Message::store_value_req(
+            let msg = msg::store_value_request(
                 self.value.clone(),
                 token,
                 self.expected_seq,

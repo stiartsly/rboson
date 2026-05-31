@@ -1,5 +1,7 @@
-use std::sync::{Arc, Mutex};
-use std::cmp::Ordering;
+use std::{
+    sync::{Arc, Mutex},
+    cmp::Ordering
+};
 
 use crate::{Id, NodeInfo};
 use crate::dht::routing::{
@@ -17,79 +19,57 @@ pub(crate) struct KClosestNodes {
 
 impl KClosestNodes {
     pub(crate) fn new(
-        routing_table: Arc<Mutex<RoutingTable>>,
+        rt: Arc<Mutex<RoutingTable>>,
         target: Id,
         capacity: usize
     ) -> Self {
-        let cloned = routing_table.clone();
-
         Self {
-            rt: routing_table,
+            rt: rt.clone(),
             target,
             capacity,
-            entries: Vec::new(),
-            filter: Box::new(move |e: &KBucketEntry| {
-                let rt = cloned.lock().unwrap();
-                e.eligible_for_nodes_list() && e.id() != rt.local_nodeid()
-            }),
+            entries: Vec::with_capacity(capacity + KBucket::MAX_ENTRIES),
+            filter: wrap_filter(rt, |e: &KBucketEntry| e.eligible_for_nodes_list()),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn target(&self) -> &Id {
         &self.target
     }
 
+    #[cfg(test)]
     pub(crate) fn size(&self) -> usize {
         self.entries.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_full(&self) -> bool {
         self.entries.len() >= self.capacity
     }
 
-    pub(crate) fn is_complete(&self) -> bool {
-        self.entries.len() == self.capacity
-    }
+    #[cfg(test)]
+    pub(crate) fn entries(&self) -> &[KBucketEntry] {
+        &self.entries
+     }
 
-    pub(crate) fn set_filter<F>(&mut self, filter: F)
-    where
-        F: Fn(&KBucketEntry) -> bool + 'static
+    pub(crate) fn set_filter<F>(&mut self, cb: F)
+    where F: Fn(&KBucketEntry) -> bool + 'static
     {
-        self.filter = Box::new(filter);
+        self.filter = wrap_filter(self.rt.clone(), cb);
     }
 
-    pub(crate) fn filter<F>(&mut self, filter: F) -> &mut Self
-    where
-        F: Fn(&KBucketEntry) -> bool + 'static
-    {
-        let cloned = self.rt.clone();
-        self.filter = Box::new(move |entry: &KBucketEntry| {
-            let rt = cloned.lock().unwrap();
-            filter(entry) && entry.id() != rt.local_nodeid()
-        });
-        self
-    }
-
-    pub(crate) fn fill(&mut self) -> &mut Self {
-        self.entries.clear();
-
-        let empty = {
+    pub(crate) fn fill(&mut self) {
+        let buckets = {
             let locked_rt = self.rt.lock().unwrap();
-            locked_rt.buckets().is_empty()
+            locked_rt.buckets()
         };
-
-        if empty {
-            return self;
+        if buckets.is_empty() {
+            return;
         }
 
-        let (idx, buckets) = {
-            let locked_rt = self.rt.lock().unwrap();
-            let (idx, _) = locked_rt.bucket_of(&self.target);
-            let buckets = locked_rt.buckets();
-            (idx, buckets)
-        };
-
-        self.add_entries(&buckets[idx]);
+        let idx = RoutingTable::index_of(&buckets, &self.target);
+        let bucket = buckets[idx].clone();
+        self.add_entries(&bucket);
 
         let mut low  = idx;
         let mut high = idx;
@@ -101,7 +81,6 @@ impl KClosestNodes {
             } else {
                 None
             };
-
             let high_bucket = if high < len - 1 {
                 Some(buckets[high + 1].clone())
             } else {
@@ -119,10 +98,9 @@ impl KClosestNodes {
                 low -= 1;
                 self.add_entries(low_bucket.as_ref().unwrap());
             } else {
-                let low_bucket = low_bucket.unwrap();
+                let low_bucket  = low_bucket.unwrap();
                 let high_bucket = high_bucket.unwrap();
-
-                let low_prefix = low_bucket.lock().unwrap().prefix().clone();
+                let low_prefix  = low_bucket.lock().unwrap().prefix().clone();
                 let high_prefix = high_bucket.lock().unwrap().prefix().clone();
 
                 let ordering = self.target.three_way_compare(
@@ -148,38 +126,38 @@ impl KClosestNodes {
             }
         }
         self.shave();
-        self
-    }
-
-    pub(crate) fn entries(&self) -> &Vec<KBucketEntry> {
-        &self.entries
-    }
-
-    pub(crate) fn nodes(&self) -> Vec<NodeInfo> {
-        self.entries.iter().map(|entry| entry.as_ref().clone()).collect()
     }
 
     fn add_entries(&mut self, bucket: &Arc<Mutex<KBucket>>) {
-        bucket.lock().unwrap().entries().iter().for_each(|item| {
-            if (self.filter)(item) {
-                self.entries.push(item.clone())
+        let entries = bucket.lock().unwrap().entries();
+        for item in entries {
+            if (self.filter)(&item) {
+                self.entries.push(item)
             }
-        });
+        };
     }
 
     fn shave(&mut self) {
-        self.entries.sort_by(|a, b|
-            self.target.three_way_compare(a.id(), b.id())
+        self.entries.sort_by(|e1, e2|
+            self.target.three_way_compare(e1.id(), e2.id())
         );
 
         if self.entries.len() <= self.capacity {
             return;
         }
-
         // split off the entries that exceed the capacity, and drop them
         // to free the resource.
         _ = self.entries.split_off(self.capacity);
     }
+}
+
+fn wrap_filter<F>(rt: Arc<Mutex<RoutingTable>>, filter: F) -> Box<dyn Fn(&KBucketEntry) -> bool>
+where F: Fn(&KBucketEntry) -> bool + 'static,
+{
+    Box::new(move |entry: &KBucketEntry| {
+        let rt = rt.lock().unwrap();
+        filter(entry) && entry.id() != rt.local_nodeid()
+    })
 }
 
 impl Into<Vec<KBucketEntry>> for KClosestNodes {

@@ -9,7 +9,7 @@ use crate::PeerInfo;
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    msg::Message,
+    msg::msg,
     rpc::Target,
     task::{
         ClosestSet,
@@ -104,7 +104,7 @@ impl Task for PeerAnnounceTask {
                 continue;
             }
 
-            let msg = Message::announce_peer_req(
+            let msg = msg::announce_peer_request(
                 self.peer.clone(),
                 token,
                 self.expected_seq,

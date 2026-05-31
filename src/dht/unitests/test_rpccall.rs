@@ -6,7 +6,7 @@ use std::{
 use crate::{Id, NodeInfo};
 use crate::errors::ProtocolError;
 use crate::dht::{
-    msg::{Message, msg::Method},
+    msg::{msg, msg::Method},
     routing::KBucketEntry,
     rpc::{
         RpcCall, rpccall::State,
@@ -32,9 +32,9 @@ fn make_entry(addr: &str) -> KBucketEntry {
     entry
 }
 
-fn make_response(call: &RpcCall) -> Message {
-    let mut rsp = Message::ping_rsp(call.txid());
-    rsp.set_id(call.target_id());
+fn make_response(call: &RpcCall) -> msg::Message {
+    let mut rsp = msg::ping_response(call.txid());
+    rsp.set_nodeid(call.target_id());
     rsp.set_remote(call.target_id(), call.target().socket_addr());
     rsp
 }
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn test_with_node() {
         let target = make_nodeinfo("127.0.0.1:40001");
-        let req = Message::ping_req();
+        let req = msg::ping_request();
         let txid = req.txid();
         let mut call = RpcCall::with_node(target.clone(), req);
 
@@ -53,7 +53,7 @@ mod tests {
         call.set_local_nodeid(local_nodeid);
         call.set_expected_rtt_if_absent(40);
 
-        assert_eq!(call.req().id(), &local_nodeid);
+        assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
         assert_eq!(call.target().socket_addr(), target.socket_addr().clone());
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_with_entry() {
         let target = make_entry("127.0.0.1:40002");
-        let req = Message::ping_req();
+        let req = msg::ping_request();
         let txid = req.txid();
         let mut call = RpcCall::with_entry(target.clone(), req);
 
@@ -79,7 +79,7 @@ mod tests {
         call.set_local_nodeid(local_nodeid);
         call.set_expected_rtt_if_absent(42);
 
-        assert_eq!(call.req().id(), &local_nodeid);
+        assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
         assert_eq!(call.target().socket_addr(), target.socket_addr().clone());
@@ -99,7 +99,7 @@ mod tests {
         let mut entry = make_entry("127.0.0.1:40002");
         entry.set_reachable(true);
 
-        let req = Message::ping_req();
+        let req = msg::ping_request();
         let call = RpcCall::with_entry(entry.clone(), req);
         let call = Arc::new(Mutex::new(call));
        // call.lock().unwrap().set_cloned(call.clone());
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(locked.is_reachable_at_creation(), true);
         assert_eq!(locked.state(), State::Responded);
         assert_eq!(locked.rsp().is_some(), true);
-        assert_eq!(locked.id_mismatched(), false);
+        assert_eq!(locked.nodeid_mismatched(), false);
         assert_eq!(locked.addr_mismatched(), false);
         assert_eq!(locked.rtt().is_some(), true);
         assert_eq!(*responded.lock().unwrap(), 1);
@@ -155,12 +155,12 @@ mod tests {
 
         // test error response
         let target = make_nodeinfo("127.0.0.1:40003");
-        let req = Message::ping_req();
+        let req = msg::ping_request();
         let error_call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
        // error_call.lock().unwrap().set_cloned(error_call.clone());
 
-        let mut err = Message::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
-        err.set_id(target.id().clone());
+        let mut err = msg::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
+        err.set_nodeid(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
         error_call.lock().unwrap().respond(err);
 
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_stall_timeout_cancel() {
         let target = make_nodeinfo("127.0.0.1:40004");
-        let req = Message::ping_req();
+        let req = msg::ping_request();
         let call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
        // call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(25);
@@ -201,22 +201,22 @@ mod tests {
         assert_eq!(*timed_out.lock().unwrap(), 1);
 
         let target2 = make_nodeinfo("127.0.0.1:40005");
-        let req2 = Message::ping_req();
+        let req2 = msg::ping_request();
         let mut wrong_method = RpcCall::with_node(target2.clone(), req2);
-        let mut rsp = Message::store_value_rsp(wrong_method.txid());
-        rsp.set_id(target2.id().clone());
+        let mut rsp = msg::store_value_response(wrong_method.txid());
+        rsp.set_nodeid(target2.id().clone());
         rsp.set_remote(target2.id().clone(), *target2.socket_addr());
         wrong_method.respond_wrong_method(rsp);
         assert_eq!(wrong_method.state(), State::Err);
         assert_eq!(wrong_method.cause().unwrap().to_string().contains("wrong method"), true);
 
-        let req3 = Message::ping_req();
+        let req3 = msg::ping_request();
         let mut failed = RpcCall::with_node(target2.clone(), req3);
         failed.fail(ProtocolError::new("failed".into()));
         assert_eq!(failed.state(), State::Err);
         assert_eq!(failed.cause().unwrap().to_string().contains("failed"), true);
 
-        let req4 = Message::ping_req();
+        let req4 = msg::ping_request();
         let mut canceled = RpcCall::with_node(target2, req4);
         canceled.cancel();
         assert_eq!(canceled.state(), State::Canceled);
@@ -228,7 +228,7 @@ mod tests {
     async fn test_scheduler_timeout_canceled() {
         /*
         let target = make_target("127.0.0.1:40006");
-        let req = Arc::new(Mutex::new(Message::ping_req()));
+        let req = Arc::new(Mutex::new(msg::ping_request()));
         let call = Arc::new(Mutex::new(RpcCall::with_node(target, req)));
         call.lock().unwrap().set_cloned(call.clone());
 

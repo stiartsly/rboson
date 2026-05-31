@@ -67,12 +67,13 @@ impl RpcCall {
         mut req: Message,
     ) -> Self
     {
+        let target_reachable = target.is_reachable();
         req.set_remote(
             target.id(),
             target.socket_addr()
         );
         Self {
-            target_reachable: target.is_reachable(),
+            target_reachable,
             target,
             req,
             rsp         : None,
@@ -108,7 +109,7 @@ impl RpcCall {
     }
 
     pub(crate) fn set_local_nodeid(&mut self, id: Id) {
-        self.req.set_id(id);
+        self.req.set_nodeid(id);
     }
 
     // pub(crate) fn set_cloned(&mut self, cloned: Arc<Mutex<RpcCall>>) {
@@ -167,9 +168,9 @@ impl RpcCall {
         self.state < State::Timeout
     }
 
-    pub(crate) fn id_mismatched(&self) -> bool {
+    pub(crate) fn nodeid_mismatched(&self) -> bool {
         self.rsp.as_ref().map(|v| {
-            v.id() != &self.target_id()
+            v.nodeid() != &self.target_id()
         }).unwrap_or(true)
     }
 
@@ -242,7 +243,10 @@ impl RpcCall {
             return;
         }
 
-        let elapsed = crate::as_ms!(self.sent_time) as u64;
+        let elapsed = self.sent_time
+            .elapsed()
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64;
         let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
         if remaining > 0 {
             self.update_state(State::Stalled);
@@ -253,13 +257,12 @@ impl RpcCall {
     }
 
     pub(crate) fn sent(&mut self) {
-        if self.expected_rtt <= 0 {
-            return;
-        }
-
         self.sent_time = SystemTime::now();
         self.update_state(State::Sent);
-        self.set_timeout_timer(self.expected_rtt);
+
+        if self.expected_rtt > 0 {
+            self.set_timeout_timer(self.expected_rtt);
+        }
     }
 
     pub(crate) fn respond(&mut self, mut rsp: Message) {
@@ -296,6 +299,8 @@ impl RpcCall {
 
     // Handles a response with an incorrect method, treating it as a protocol error.
     pub(crate) fn respond_wrong_method(&mut self, rsp: Message) {
+        self.resp_time = SystemTime::now();
+        self.cancel_timeout_timer();
         self.rsp = Some(rsp);
         self.cause = Some(ProtocolError::new(format!("Got response with wrong method")));
         self.update_state(State::Err);

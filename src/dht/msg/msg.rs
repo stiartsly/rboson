@@ -1,12 +1,10 @@
-use std::fmt;
-use std::result::Result as SResult;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicI32, Ordering};
-use serde_cbor::value::{
-    to_value,
-    Value as CborValue
+use std::{
+    fmt,
+    net::SocketAddr,
+    result::Result as SResult,
+    sync::{Arc, Mutex, atomic::{AtomicI32, Ordering}}
 };
+use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{
     Deserialize,
     Serialize,
@@ -16,25 +14,26 @@ use serde::{
 
 use crate::{
     Id,
+    Value,
     NodeInfo,
     PeerInfo,
-    Value,
     core::version,
-    dht::rpc::rpccall::RpcCall
-};
-use crate::dht::msg::{
-    error::Error,
-    find_node_req::FindNodeRequest,
-    find_node_rsp::FindNodeResponse,
-    find_peer_req::FindPeerRequest,
-    find_peer_rsp::FindPeerResponse,
-    find_value_req::FindValueRequest,
-    find_value_rsp::FindValueResponse,
-    announce_peer_req::AnnouncePeerRequest,
-    store_value_req::StoreValueRequest,
+    dht::rpc::RpcCall,
+    dht::msg::{
+        ErrorBody,
+        FindNodeRequest,
+        FindNodeResponse,
+        FindPeerRequest,
+        FindPeerResponse,
+        FindValueRequest,
+        FindValueResponse,
+        AnnouncePeerRequest,
+        StoreValueRequest,
+    },
 };
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub(crate) enum Kind {
     Error = 0,
     Request = 0x20,
@@ -45,14 +44,6 @@ impl Kind {
     const MASK: i32 = 0xE0;
     pub(crate) fn is_valid(_type: i32) -> bool {
         matches!(_type & Self::MASK, 0x00 | 0x20 | 0x40)
-    }
-
-    pub(crate) fn to_key(&self) -> &'static str {
-        match self {
-            Kind::Error => "e",
-            Kind::Request => "q",
-            Kind::Response => "r",
-        }
     }
 }
 
@@ -78,15 +69,16 @@ impl fmt::Display for Kind {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub(crate) enum Method {
-    Unknown = 0x00,
-    Ping = 0x01,
-    FindNode = 0x02,
-    AnnouncePeer = 0x03,
-    FindPeer = 0x04,
-    StoreValue = 0x05,
-    FindValue = 0x6,
+    Unknown     = 0x00,
+    Ping        = 0x01,
+    FindNode    = 0x02,
+    AnnouncePeer= 0x03,
+    FindPeer    = 0x04,
+    StoreValue  = 0x05,
+    FindValue   = 0x06,
 }
 
 impl Method {
@@ -127,33 +119,82 @@ impl fmt::Display for Method {
 }
 
 pub(crate) enum Body {
-    FindNodeReq(FindNodeRequest),
-    FindNodeRsp(FindNodeResponse),
-    FindPeerReq(FindPeerRequest),
-    FindPeerRsp(FindPeerResponse),
-    FindValueReq(FindValueRequest),
-    FindValueRsp(FindValueResponse),
-    AnnouncePeerReq(AnnouncePeerRequest),
-    StoreValueReq(StoreValueRequest),
-    Error(Error),
+    FindNodeRequest(FindNodeRequest),
+    FindNodeResponse(FindNodeResponse),
+    FindPeerRequest(FindPeerRequest),
+    FindPeerResponse(FindPeerResponse),
+    FindValueRequest(FindValueRequest),
+    FindValueResponse(FindValueResponse),
+    AnnouncePeerRequest(AnnouncePeerRequest),
+    StoreValueRequest(StoreValueRequest),
+    Error(ErrorBody),
 }
 
 impl Body {
-    fn from_value(_kind: Kind, _: Option<Method>, _: &CborValue) -> Option<Self> {
-        unimplemented!()
+    fn from_value(kind: Kind, method: Method, value: CborValue) -> Result<Option<Self>, String> {
+        match kind {
+            Kind::Error => from_value::<ErrorBody>(value)
+                .map(Body::Error)
+                .map(Some)
+                .map_err(|e| format!("failed to decode error body: {}", e)),
+            Kind::Request => match method {
+                Method::Ping => Ok(None),
+                Method::FindNode => from_value::<FindNodeRequest>(value)
+                    .map(Body::FindNodeRequest)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_node request: {}", e)),
+                Method::AnnouncePeer => from_value::<AnnouncePeerRequest>(value)
+                    .map(Body::AnnouncePeerRequest)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode announce_peer request: {}", e)),
+                Method::FindPeer => from_value::<FindPeerRequest>(value)
+                    .map(Body::FindPeerRequest)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_peer request: {}", e)),
+                Method::StoreValue => from_value::<StoreValueRequest>(value)
+                    .map(Body::StoreValueRequest)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode store_value request: {}", e)),
+                Method::FindValue => from_value::<FindValueRequest>(value)
+                    .map(Body::FindValueRequest)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_value request: {}", e)),
+                Method::Unknown => Err("invalid unknown request".into()),
+            },
+            Kind::Response => match method {
+                Method::Ping | Method::AnnouncePeer | Method::StoreValue => Ok(None),
+                Method::FindNode => from_value::<FindNodeResponse>(value)
+                    .map(Body::FindNodeResponse)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_node response: {}", e)),
+                Method::FindPeer => from_value::<FindPeerResponse>(value)
+                    .map(Body::FindPeerResponse)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_peer response: {}", e)),
+                Method::FindValue => from_value::<FindValueResponse>(value)
+                    .map(Body::FindValueResponse)
+                    .map(Some)
+                    .map_err(|e| format!("failed to decode find_value response: {}", e)),
+                Method::Unknown => Err("invalid unknown response".into()),
+            },
+        }
     }
+}
 
-    fn to_value(&self) -> Option<serde_cbor::Value> {
+impl Serialize for Body {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where S: Serializer
+    {
         match self {
-            Body::FindNodeReq(req) => to_value(req).ok(),
-            Body::FindPeerReq(req) => to_value(req).ok(),
-            Body::FindValueReq(req) => to_value(req).ok(),
-            Body::StoreValueReq(req) => to_value(req).ok(),
-            Body::AnnouncePeerReq(req) => to_value(req).ok(),
-            Body::FindNodeRsp(rsp) => to_value(rsp).ok(),
-            Body::FindPeerRsp(rsp) => to_value(rsp).ok(),
-            Body::FindValueRsp(rsp) => to_value(rsp).ok(),
-            Body::Error(err) => to_value(err).ok(),
+            Body::FindNodeRequest(body) => body.serialize(se),
+            Body::FindNodeResponse(body) => body.serialize(se),
+            Body::FindPeerRequest(body) => body.serialize(se),
+            Body::FindPeerResponse(body) => body.serialize(se),
+            Body::FindValueRequest(body) => body.serialize(se),
+            Body::FindValueResponse(body) => body.serialize(se),
+            Body::AnnouncePeerRequest(body) => body.serialize(se),
+            Body::StoreValueRequest(body) => body.serialize(se),
+            Body::Error(body) => body.serialize(se),
         }
     }
 }
@@ -169,18 +210,17 @@ fn next_txid() -> i32 {
 }
 
 pub(crate) struct Message {
-    id:     Option<Id>,        // The DHT node Id of the message sender.
-
+    nodeid  : Option<Id>,        // The DHT node Id of the message sender.
     kind    : Kind,
     method  : Method,
     txid    : i32,
     ver     : i32,
+
     body    : Option<Body>,
 
-    associated_call: Option<Arc<Mutex<RpcCall>>>,
-
-    remote_addr : Option<SocketAddr>,
-    remote_id: Option<Id>,
+    associated_call : Option<Arc<Mutex<RpcCall>>>,
+    remote_addr     : Option<SocketAddr>,
+    remote_id       : Option<Id>,
 }
 
 impl Message {
@@ -188,7 +228,7 @@ impl Message {
 
     fn new(kind: Kind, method: Method,  txid: i32, body: Option<Body>) -> Self {
         Self {
-            id: None,
+            nodeid: None,
             kind,
             method,
             txid,
@@ -216,6 +256,7 @@ impl Message {
         self.kind == Kind::Request
     }
 
+    #[allow(unused)]
     pub(crate) fn is_rsp(&self) -> bool {
         self.kind == Kind::Response
     }
@@ -224,12 +265,12 @@ impl Message {
         self.kind == Kind::Error
     }
 
-    pub(crate) fn id(&self) -> &Id {
-        self.id.as_ref().expect("Id not set")
+    pub(crate) fn nodeid(&self) -> &Id {
+        self.nodeid.as_ref().expect("Id not set")
     }
 
-    pub(crate) fn set_id(&mut self, id: Id) {
-        self.id = Some(id)
+    pub(crate) fn set_nodeid(&mut self, id: Id) {
+        self.nodeid = Some(id)
     }
 
     pub(crate) fn txid(&self) -> i32 {
@@ -244,6 +285,7 @@ impl Message {
         self.ver
     }
 
+    #[allow(unused)]
     pub(crate) fn readable_version(&self) -> String {
         version::format_version(self.ver)
     }
@@ -275,224 +317,11 @@ impl Message {
         self.remote_addr = Some(addr);
         self
     }
-
-    pub(crate) fn ping_req() -> Self {
-        Self::new(
-            Kind::Request,
-            Method::Ping,
-            next_txid(),
-            None
-        )
-    }
-
-    pub(crate) fn ping_rsp(txid: i32) -> Self {
-        Self::new(
-            Kind::Response,
-            Method::Ping,
-            txid,
-            None
-        )
-    }
-
-    pub(crate) fn find_node_req(
-        target: Id,
-        want4: bool,
-        want6: bool,
-        want_token:bool
-    ) -> Self {
-        let req = FindNodeRequest::new(
-            target, want4, want6, want_token
-        );
-        Self::new(
-            Kind::Request,
-            Method::FindNode,
-            next_txid(),
-            Some(Body::FindNodeReq(req))
-        )
-    }
-
-    pub(crate) fn find_node_rsp(
-        txid: i32,
-        nodes4: Option<Vec<NodeInfo>>,
-        nodes6: Option<Vec<NodeInfo>>,
-        token: i32
-    ) -> Self {
-        let body = Body::FindNodeRsp(FindNodeResponse::new(
-            nodes4, nodes6, token
-        ));
-        Self::new(
-            Kind::Response, Method::FindNode, txid, Some(body)
-        )
-    }
-
-    pub(crate) fn find_peer_req(
-        target: Id,
-        want4: bool,
-        want6: bool,
-        expected_seq: i32,
-        expected_count: i32,
-    ) -> Self {
-        let body = Body::FindPeerReq(FindPeerRequest::new(
-            target, want4, want6, expected_seq, expected_count
-        ));
-        Self::new(Kind::Request, Method::FindPeer, next_txid(), Some(body))
-    }
-
-    pub(crate) fn find_peer_rsp_with_nodes(
-        txid: i32,
-        nodes4: Option<Vec<NodeInfo>>,
-        nodes6: Option<Vec<NodeInfo>>
-    ) -> Self {
-        let body = Body::FindPeerRsp(
-            FindPeerResponse::with_nodes(nodes4, nodes6)
-        );
-        Self::new(
-            Kind::Response,
-            Method::FindPeer,
-            txid,
-            Some(body)
-        )
-    }
-
-    pub(crate) fn find_peer_rsp(
-        txid: i32,
-        peers: Vec<PeerInfo>
-    ) -> Self {
-        let body = Body::FindPeerRsp(
-            FindPeerResponse::with_peers(peers)
-        );
-        Self::new(
-            Kind::Response,
-            Method::FindPeer,
-            txid,
-            Some(body)
-        )
-    }
-
-    pub(crate) fn find_value_req(
-        target: Id,
-        want4: bool,
-        want6: bool,
-        expected_seq: i32,
-    ) -> Self {
-        let req = FindValueRequest::new(
-            target, want4, want6, expected_seq
-        );
-        Self::new(
-            Kind::Request,
-            Method::FindValue,
-            next_txid(),
-            Some(Body::FindValueReq(req))
-        )
-    }
-
-    pub(crate) fn find_value_rsp_with_nodes(
-        txid: i32,
-        nodes4: Option<Vec<NodeInfo>>,
-        nodes6: Option<Vec<NodeInfo>>
-    ) -> Self {
-        let body = Body::FindValueRsp(
-            FindValueResponse::with_nodes(nodes4, nodes6)
-        );
-        Self::new(
-            Kind::Response,
-            Method::FindValue,
-            txid,
-            Some(body)
-        )
-    }
-
-    pub(crate) fn find_value_rsp(
-        txid: i32,
-        value: Value
-    ) -> Self {
-        let body = Body::FindValueRsp(
-            FindValueResponse::with_value(value)
-        );
-        Self::new(
-            Kind::Response,
-            Method::FindValue,
-            txid,
-            Some(body)
-        )
-    }
-
-    pub(crate) fn store_value_req(
-        value: Value,
-        token: i32,
-        expected_seq: i32
-    ) -> Self {
-        let req = StoreValueRequest::new(
-            value, token, expected_seq
-        );
-        Self::new(
-            Kind::Request,
-            Method::StoreValue,
-            next_txid(),
-            Some(Body::StoreValueReq(req))
-        )
-    }
-
-    pub(crate) fn store_value_rsp(txid: i32) -> Self {
-        Self::new(
-            Kind::Response,
-            Method::StoreValue,
-            txid,
-            None
-        )
-    }
-
-    pub(crate) fn announce_peer_req(
-        peer: PeerInfo,
-        token: i32,
-        expected_seq: i32,
-    ) -> Self {
-        let req = AnnouncePeerRequest::new(
-            peer, token, Some(expected_seq)
-        );
-        Self::new(
-            Kind::Request,
-            Method::AnnouncePeer,
-            next_txid(),
-            Some(Body::AnnouncePeerReq(req))
-        )
-    }
-
-    pub(crate) fn announce_peer_rsp(txid: i32) -> Self {
-        Self::new(
-            Kind::Response,
-            Method::AnnouncePeer,
-            txid,
-            None
-        )
-    }
-
-    pub(crate) fn error(
-        method: Method,
-        txid: i32,
-        code: i32,
-        msg: String
-    ) -> Self {
-        let error = Error::new(code, msg);
-        Self::new(
-            Kind::Error,
-            method,
-            txid,
-            Some(Body::Error(error))
-        )
-    }
-}
-
-impl std::fmt::Debug for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        panic!()
-    }
 }
 
 impl Serialize for Message {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer
+    where S: Serializer
     {
         let mut s = se.serialize_map(None)?;
         s.serialize_entry("y", &(self.composite_type()))?;
@@ -500,14 +329,10 @@ impl Serialize for Message {
         s.serialize_entry("v", &self.ver)?;
         if let Some(body) = self.body.as_ref() {
             match self.kind() {
-                Kind::Request => s.serialize_key("q")?,
-                Kind::Response => s.serialize_key("r")?,
-                Kind::Error => s.serialize_key("e")?,
+                Kind::Request => s.serialize_entry("q", body)?,
+                Kind::Response => s.serialize_entry("r", body)?,
+                Kind::Error => s.serialize_entry("e", body)?,
             }
-            let value = body.to_value().ok_or_else(
-                || serde::ser::Error::custom("Failed to serialize message body")
-            )?;
-            s.serialize_value(&value)?;
         }
         s.end()
     }
@@ -515,8 +340,7 @@ impl Serialize for Message {
 
 impl<'de> Deserialize<'de> for Message {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>
+    where D: Deserializer<'de>
     {
         enum Field {
             Type,               // "y"  - i32
@@ -530,8 +354,7 @@ impl<'de> Deserialize<'de> for Message {
 
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
+            where D: Deserializer<'de>,
             {
                 let key = String::deserialize(de)?;
                 match key.as_str() {
@@ -551,38 +374,49 @@ impl<'de> Deserialize<'de> for Message {
             type Value = Message;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("Message field")
+                formatter.write_str("a Message struct")
             }
 
             fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>
+            where V: MapAccess<'de>
             {
-
                 let mut kind: Option<Kind> = None;
                 let mut method: Option<Method> = None;
-                let mut txid: i32 = 0;
-                let mut ver: i32 = 0;
+                let mut txid: Option<i32> = None;
+                let mut ver: Option<i32> = None;
                 let mut body: Option<Body> = None;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
                         Field::Type => {
-                            let type_ = map.next_value()?;
-                                let Some(type_) = type_ else {
-                                return Err(de::Error::missing_field("y"));
-                            };
-
+                            if kind.is_some() || method.is_some() {
+                                return Err(de::Error::duplicate_field("y"));
+                            }
+                            let type_ = map.next_value::<i32>()?;
                             if !Kind::is_valid(type_) || !Method::is_valid(type_) {
                                 return Err(de::Error::custom(format!(
-                                    "Invalid message kind {} or method {}", Kind::from(type_), Method::from(type_)
+                                    "invalid message kind/method composite type: {}", type_
                                 )));
                             }
                             kind = Some(Kind::from(type_));
                             method = Some(Method::from(type_));
                         },
-                        Field::TransactionId => txid = map.next_value::<i32>()?,
-                        Field::Version => ver = map.next_value()?,
+                        Field::TransactionId => {
+                            if txid.is_some() {
+                                return Err(de::Error::duplicate_field("t"));
+                            }
+                            let current_txid = map.next_value::<i32>()?;
+                            if current_txid == 0 {
+                                return Err(de::Error::custom("invalid '[t]xid' field: should be non-zero integer"));
+                            }
+                            txid = Some(current_txid);
+                        }
+                        Field::Version => {
+                            if ver.is_some() {
+                                return Err(de::Error::duplicate_field("v"));
+                            }
+                            ver = Some(map.next_value::<i32>()?);
+                        }
                         Field::Request => {
                             let Some(kind) = kind else {
                                 return Err(de::Error::custom("Field 'q' must come after field 'y'"));
@@ -593,8 +427,12 @@ impl<'de> Deserialize<'de> for Message {
                             if kind != Kind::Request {
                                 return Err(de::Error::custom("Field 'q' is only valid for request messages"));
                             }
-
-                            body = Body::from_value(kind, Some(method), &map.next_value::<CborValue>()?);
+                            if body.is_some() {
+                                return Err(de::Error::duplicate_field("q"));
+                            }
+                            let value = map.next_value::<CborValue>()?;
+                            body = Body::from_value(kind, method, value)
+                                .map_err(de::Error::custom)?;
 
                         },
                         Field::Response => {
@@ -607,7 +445,12 @@ impl<'de> Deserialize<'de> for Message {
                             if kind != Kind::Response {
                                 return Err(de::Error::custom("Field 'r' is only valid for response messages"));
                             }
-                            body = Body::from_value(kind, Some(method), &map.next_value::<CborValue>()?);
+                            if body.is_some() {
+                                return Err(de::Error::duplicate_field("r"));
+                            }
+                            let value = map.next_value::<CborValue>()?;
+                            body = Body::from_value(kind, method, value)
+                                .map_err(de::Error::custom)?;
                         },
                         Field::Error => {
                             let Some(kind) = kind else {
@@ -616,26 +459,126 @@ impl<'de> Deserialize<'de> for Message {
                             if kind != Kind::Error {
                                 return Err(de::Error::custom("Field 'e' is only valid for error messages"));
                             };
-                            body = Body::from_value(kind, None, &map.next_value::<CborValue>()?);
+                            if body.is_some() {
+                                return Err(de::Error::duplicate_field("e"));
+                            }
+                            let value = map.next_value::<CborValue>()?;
+                            body = Body::from_value(kind, Method::Unknown, value)
+                                .map_err(de::Error::custom)?;
                         },
                         _ => _ = map.next_value::<IgnoredAny>()?,
                     }
                 }
 
-                Ok(Message::new(
+                let mut msg = Message::new(
                     kind.ok_or_else(|| de::Error::missing_field("y"))?,
                     method.ok_or_else(|| de::Error::missing_field("y"))?,
-                    txid,
+                    txid.ok_or_else(|| de::Error::missing_field("t"))?,
                     body
-                ))
+                );
+                msg.ver = ver.ok_or_else(|| de::Error::missing_field("v"))?;
+                Ok(msg)
             }
         }
         de.deserialize_map(FieldVisitor)
     }
 }
 
+pub(crate) fn ping_request() -> Message {
+    Message::new( Kind::Request, Method::Ping, next_txid(), None)
+}
+
+pub(crate) fn ping_response(txid: i32) -> Message {
+    Message::new( Kind::Response, Method::Ping, txid, None)
+}
+
+pub(crate) fn find_node_request(target: Id, want4: bool, want6: bool, want_token: Option<bool>) -> Message {
+    let body = Body::FindNodeRequest(
+        FindNodeRequest::new(target, want4, want6, want_token.unwrap_or(false))
+    );
+    Message::new(Kind::Request, Method::FindNode, next_txid(), Some(body))
+}
+
+pub(crate) fn find_node_response(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>, token: i32)-> Message {
+    let body = Body::FindNodeResponse(
+        FindNodeResponse::new(nodes4, nodes6, token)
+    );
+    Message::new(Kind::Response, Method::FindNode, txid, Some(body))
+}
+
+pub(crate) fn find_peer_request(target: Id, want4: bool, want6: bool, expected_seq: i32, expected_count: i32) -> Message {
+    let body = Body::FindPeerRequest(
+        FindPeerRequest::new(target, want4, want6, expected_seq, expected_count)
+    );
+    Message::new(Kind::Request, Method::FindPeer, next_txid(), Some(body))
+}
+
+pub(crate) fn find_peer_response_with_nodes(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>) -> Message {
+    let body = Body::FindPeerResponse(
+        FindPeerResponse::with_nodes(nodes4, nodes6)
+    );
+    Message::new(Kind::Response, Method::FindPeer, txid, Some(body))
+}
+
+pub(crate) fn find_peer_response(txid: i32, peers: Vec<PeerInfo>) -> Message {
+    let body = Body::FindPeerResponse(
+        FindPeerResponse::with_peers(peers)
+    );
+    Message::new(Kind::Response, Method::FindPeer, txid, Some(body))
+}
+
+pub(crate) fn find_value_request(target: Id, want4: bool, want6: bool, expected_seq: i32) -> Message {
+    let body = Body::FindValueRequest(
+        FindValueRequest::new(target, want4, want6, expected_seq)
+    );
+    Message::new(Kind::Request, Method::FindValue, next_txid(),Some(body))
+}
+
+pub(crate) fn find_value_response_with_nodes(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>)-> Message {
+    let body = Body::FindValueResponse(
+        FindValueResponse::with_nodes(nodes4, nodes6)
+    );
+    Message::new(Kind::Response, Method::FindValue, txid, Some(body))
+}
+
+pub(crate) fn find_value_response(txid: i32, value: Value) -> Message {
+    let body = Body::FindValueResponse(
+        FindValueResponse::with_value(value)
+    );
+    Message::new(Kind::Response, Method::FindValue, txid, Some(body))
+}
+
+pub(crate) fn store_value_request(value: Value, token: i32, expected_seq: i32) -> Message {
+    let body = Body::StoreValueRequest(
+        StoreValueRequest::new(value, token, expected_seq)
+    );
+    Message::new(Kind::Request, Method::StoreValue, next_txid(), Some(body))
+}
+
+pub(crate) fn store_value_response(txid: i32) -> Message {
+    Message::new(Kind::Response, Method::StoreValue, txid, None)
+}
+
+pub(crate) fn announce_peer_request(peer: PeerInfo, token: i32, expected_seq: i32) -> Message {
+    let body = Body::AnnouncePeerRequest(
+        AnnouncePeerRequest::new(peer, token, Some(expected_seq))
+    );
+    Message::new(Kind::Request, Method::AnnouncePeer, next_txid(), Some(body))
+}
+
+pub(crate) fn announce_peer_response(txid: i32) -> Message {
+    Message::new(Kind::Response, Method::AnnouncePeer, txid, None)
+}
+
+pub(crate) fn error(method: Method, txid: i32, code: i32, description: String) -> Message {
+    let body = Body::Error(
+        ErrorBody::new(code, description)
+    );
+    Message::new(Kind::Error, method, txid, Some(body))
+}
+
 impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         unimplemented!()
     }
 }

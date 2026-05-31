@@ -9,6 +9,7 @@ use log::{info, warn, error, trace};
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 use tokio::{
     net::UdpSocket,
+    task::JoinHandle,
     sync::oneshot,
     sync::mpsc::{self, UnboundedSender, UnboundedReceiver},
 };
@@ -54,6 +55,7 @@ pub(crate) struct RpcServer {
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
+    reachable_check_task: Option<JoinHandle<()>>,
 
     client              : timer::Client,
     tx_channel          : Option<UnboundedSender<Command>>,
@@ -66,6 +68,8 @@ pub(crate) struct RpcServer {
 impl RpcServer {
     const MAX_ACTIVE_CALLS: usize = 64;
     pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
+    const REACHABILITY_CHECK_INTERVAL: Duration = Duration::from_millis(5_000);
+    const REACHABILITY_TIMEOUT: Duration = Duration::from_millis(60_000);
 
     pub(crate) fn new(
         ni: Arc<NodeInfo>,
@@ -87,6 +91,7 @@ impl RpcServer {
             calltimeout_handler : None,
             start_time          : None,
             is_running          : false,
+            reachable_check_task: None,
 
             client              : timer::Client::new(),
             tx_channel          : None,
@@ -123,7 +128,57 @@ impl RpcServer {
     }
 
     pub(crate) fn age(&self) -> Duration {
-        unimplemented!()
+        self.start_time
+            .and_then(|start_time| start_time.elapsed().ok())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    fn check_reachability(&mut self) {
+        let now = SystemTime::now();
+
+        if self.recv_packets != self.recv_packets_at_last_reachable_check {
+            self.set_reachable(true);
+            self.last_reachable_check = now;
+            self.recv_packets_at_last_reachable_check = self.recv_packets;
+            return;
+        }
+
+        let timed_out = now
+            .duration_since(self.last_reachable_check)
+            .unwrap_or(Duration::ZERO) > Self::REACHABILITY_TIMEOUT;
+        if timed_out && self.recv_packets != 0 && self.recv_packets_at_last_reachable_check != 0 {
+            self.set_reachable(false);
+        }
+    }
+
+    pub(crate) fn start_reachability_check(server: Arc<Mutex<RpcServer>>) {
+        let task_server = server.clone();
+        let task = tokio::spawn(async move {
+            tokio::time::sleep(Self::REACHABILITY_CHECK_INTERVAL.mul_f32(2.0)).await;
+
+            loop {
+                {
+                    let mut locked = match task_server.lock() {
+                        Ok(locked) => locked,
+                        Err(_) => break,
+                    };
+
+                    if !locked.is_running {
+                        break;
+                    }
+
+                    locked.check_reachability();
+                }
+
+                tokio::time::sleep(Self::REACHABILITY_CHECK_INTERVAL).await;
+            }
+        });
+
+        if let Ok(mut locked) = server.lock() {
+            if let Some(previous) = locked.reachable_check_task.replace(task) {
+                previous.abort();
+            }
+        }
     }
 
     pub(crate) fn reachable_handler<F>(&mut self, cb: F)
@@ -166,7 +221,14 @@ impl RpcServer {
         self.rx_socket = Some(socket.clone());
         self.tx_socket = Some(socket.clone());
 
+        let now = SystemTime::now();
+        self.start_time = Some(now);
         self.is_running = true;
+        self.reachable = true;
+        self.last_reachable_check = now;
+        self.recv_packets = 0;
+        self.recv_packets_at_last_reachable_check = 0;
+
         Ok(())
     }
 
@@ -182,6 +244,10 @@ impl RpcServer {
         }
 
         self.pending_calls.clear();
+
+        if let Some(task) = self.reachable_check_task.take() {
+            task.abort();
+        }
 
         self.tx_socket = None;
         self.rx_socket = None;
@@ -224,7 +290,7 @@ impl RpcServer {
 
     pub(crate) async fn send_msg(&mut self, msg: &mut Message) -> Result<usize> {
         let nodeid = self.ni.id().clone();
-        msg.set_id(nodeid);
+        msg.set_nodeid(nodeid);
 
         let plain = serde_cbor::to_vec(&msg).map_err(|e| {
             ProtocolError::new(format!("Serializing message error: {e}").into())
@@ -238,7 +304,7 @@ impl RpcServer {
             CryptoError::new(format!("Encrypting message error: {e}").into())
         })?;
 
-        buf[..Id::BYTES].copy_from_slice(msg.id().as_bytes());
+        buf[..Id::BYTES].copy_from_slice(msg.nodeid().as_bytes());
 
         let sent_len = self.tx_socket().send_to(
             &buf[..len + Id::BYTES], msg.remote_addr()
@@ -385,12 +451,13 @@ async fn handle_packet(
         }
     };
 
-    msg.set_id(fromid);
+    msg.set_nodeid(fromid);
     msg.set_remote(fromid.clone(), from.clone());
 
     trace!("Received {}:{} from {}@{}: {}", msg.method(), msg.kind(),
             fromid, from, msg);
 
+        server.lock().unwrap().recv_packets += 1;
 
     // Handle request
     if msg.is_req() {

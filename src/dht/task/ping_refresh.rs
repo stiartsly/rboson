@@ -8,7 +8,7 @@ use log::{debug, error};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    msg::Message,
+    msg::msg,
     task::{Task, TaskData},
     rpc::{RpcCall, Target},
     routing::{KBucket, KBucketEntry}
@@ -133,7 +133,7 @@ impl Task for PingRefreshTask {
                 continue;
             }
 
-            let msg = Message::ping_req();
+            let msg = msg::ping_request();
             let todo = self.todo.clone();
             let target = Target::from_bucket_entry(kentry);
 

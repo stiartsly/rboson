@@ -2,7 +2,7 @@ pub mod core;
 pub mod did;
 pub mod dht;
 //pub mod activeproxy;
-pub mod messaging;
+//pub mod messaging;
 
 pub use crate::core::{
     id::{
@@ -67,7 +67,7 @@ macro_rules! locked {
 #[macro_export]
 macro_rules! elapsed_ms {
     ($time:expr) => {{
-        $time.elapsed().unwrap().as_millis() as u128
+        $time.elapsed().unwrap_or(std::time::Duration::MAX).as_millis() as u128
     }};
 }
 

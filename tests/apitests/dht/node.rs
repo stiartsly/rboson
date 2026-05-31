@@ -207,8 +207,8 @@ async fn test_sign() {
     remove_working_path(&path2);
 }
 
-//#[tokio::test]
-//#[serial]
+#[tokio::test]
+#[serial]
 async fn test_find_node() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -275,8 +275,9 @@ async fn test_find_node() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_store_value() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -318,8 +319,9 @@ async fn test_store_value() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_announce_peer() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -360,8 +362,9 @@ async fn test_announce_peer() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_find_value() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -433,8 +436,9 @@ async fn test_find_value() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_find_peer() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -500,8 +504,9 @@ async fn test_find_peer() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_get_value() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -547,8 +552,9 @@ async fn test_get_value() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_get_peer() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -593,8 +599,9 @@ async fn test_get_peer() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_remove_value() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
@@ -643,8 +650,9 @@ async fn test_remove_value() {
     remove_working_path(&path3);
 }
 
-//#[tokio::test]
-//#[serial]
+#[ignore]
+#[tokio::test]
+#[serial]
 async fn test_remove_peer() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");

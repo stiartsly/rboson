@@ -38,13 +38,6 @@ impl Target {
         }
     }
 
-    pub(crate) fn expected_rtt(&self) -> Option<u64> {
-        match self {
-            Target::KBucketEntry(v) => Some(v.rtt()),
-            _ => None,
-        }
-    }
-
     pub(crate) fn id(&self) -> Id {
         self.node_info().id().clone()
     }

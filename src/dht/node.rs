@@ -248,12 +248,14 @@ impl Node {
 
         self.storage.lock().unwrap().close()?;
 
+        logger::teardown();
+
         info!("Kademlia node stopped.");
         Ok(())
     }
 
     pub fn id(&self) -> &Id {
-        Identity::id(self)
+        self.identity.id()
     }
 
     pub fn node_info(&self) -> JointResult<NodeInfo> {

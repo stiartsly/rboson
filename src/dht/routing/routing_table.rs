@@ -19,6 +19,7 @@ use serde::{
 
 use crate::{Id};
 use crate::dht::{
+    consumer::Consumer,
     rpc::Reachability,
     routing:: {
         Prefix,
@@ -169,8 +170,30 @@ impl RoutingTable {
         self.bucket(id).lock().unwrap().on_responded(id, rtt);
     }
 
-    pub(crate) fn maintenance(&mut self) {
+    pub(crate) fn maintenance(&mut self, bootstrap_ids: Vec<Id>, consumer: Consumer<Arc<Mutex<KBucket>>>) {
         self._merge_buckets();
+
+        for bucket in self.buckets.values() {
+            let mut locked = bucket.lock().unwrap();
+            let is_home = locked.is_home_bucket();
+            locked.cleanup(&self.local_id, &bootstrap_ids,
+                Consumer::new(move |_entry| {
+                    unimplemented!()
+                })
+            );
+
+           let refresh_needed = locked.needs_refreshing();
+            let replacement_needed = locked.needs_replacement_ping()
+                || (is_home && locked.find_pingable_replacement().is_some());
+
+            if refresh_needed || replacement_needed {
+                log::debug!("Refreshing bucket {}...", locked.prefix());
+                consumer.accept(bucket.clone());
+            }
+
+            // Promotes one per bucket per maintenance cycle to avoid blocking; full recovery over iterations.
+            locked.promote_verified_replacement();
+        }
     }
 
     pub(crate) fn save(&self, path: &str) -> crate::Result<()> {

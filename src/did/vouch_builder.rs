@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    Error,
     Result,
     errors::ArgumentError,
     CryptoIdentity,

@@ -3,7 +3,6 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     collections::{VecDeque, HashSet},
 };
-use tokio::task;
 use log::{debug, error};
 
 use crate::locked;

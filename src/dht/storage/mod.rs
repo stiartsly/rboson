@@ -79,6 +79,7 @@ pub(crate) fn get_value(
 }
 
 // SELECT * FROM valores
+#[allow(unused)]
 pub(crate) fn get_values(
     conn: &mut SqliteConnection,
 ) -> Result<Vec<Valore>, Error> {
@@ -120,6 +121,7 @@ pub(crate) fn remove_value(
 }
 
 // DELETE FROM valores WHERE persistent != TRUE AND timestamp < ?
+#[allow(unused)]
 pub(crate) fn remove_expired_values(
     conn: &mut SqliteConnection,
     before: i64,
@@ -178,6 +180,7 @@ pub(crate) fn get_peers_with_seq(
 }
 
 // SELECT * FROM peers WHERE id = ? AND nodeId = ?
+#[allow(unused)]
 pub(crate) fn get_peers_authenticated_by(
     conn: &mut SqliteConnection,
     id: &[u8],
@@ -191,6 +194,7 @@ pub(crate) fn get_peers_authenticated_by(
 }
 
 // SELECT * FROM peers
+#[allow(unused)]
 pub(crate) fn get_peers_all(
     conn: &mut SqliteConnection,
 ) -> Result<Vec<Peer>, Error> {
@@ -252,6 +256,7 @@ pub(crate) fn remove_peers_by_id(
 }
 
 // DELETE FROM peers WHERE persistent != TRUE AND timestamp < ?
+#[allow(unused)]
 pub(crate) fn remove_expired_peers(
     conn: &mut SqliteConnection,
     before: i64,

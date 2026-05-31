@@ -8,17 +8,9 @@ use std::{
 use indexmap::map::IndexMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
-use tokio::task::JoinHandle;
 
 use crate::{
-    Id,
-    Network,
-    NodeInfo,
-    PeerInfo,
-    Value,
-    core::version,
-    crypto_identity::CryptoIdentity,
-    errors::Result
+    Id, Network, NodeInfo, PeerInfo, Value, core::version, crypto_identity::CryptoIdentity, dht::task::ping_refresh::PingRefreshTask, errors::Result
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -26,6 +18,9 @@ use crate::dht::{
     promise::Promise,
     token_manager::TokenManager,
     lookup_option::LookupOption,
+    timer::Client,
+    consumer::Consumer,
+    storage::data_storage::DataStorage,
     rpc::{
         Reachability,
         RpcCall, rpccall::State as CallState,
@@ -37,7 +32,6 @@ use crate::dht::{
         LookupResponse,
         msg::{self, Kind, Method, Body},
     },
-    storage::data_storage::DataStorage,
     suspicious_node_detector::{
         SuspiciousNodeDetector,
         DefaultSuspiciousNodeDetector
@@ -87,7 +81,8 @@ pub(crate) struct DHT {
     last_bootstrap  : SystemTime,
     last_maintenance: SystemTime,
     bootstrapping   : bool,
-    periodic_tasks  : Vec<JoinHandle<()>>,
+
+    timer_client    : Client,
 
     suspicious_detector: Option<Arc<Mutex<DefaultSuspiciousNodeDetector>>>,
 
@@ -104,6 +99,7 @@ impl DHT {
     const RANDOM_PING_INTERVAL  : u64 = 10 * 1000;                  // 10 seconds
 
     const BOOTSTRAP_IF_LESS_THAN_X_ENTRIES: usize = 30;
+    const USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES: usize = 8;
 
     pub(crate) fn new_shared(
         identity: Arc<CryptoIdentity>,
@@ -140,7 +136,7 @@ impl DHT {
                 last_bootstrap  : SystemTime::UNIX_EPOCH,
                 last_maintenance: SystemTime::UNIX_EPOCH,
                 bootstrapping   : false,
-                periodic_tasks  : Vec::new(),
+                timer_client    : Client::new(),
                 suspicious_detector: None,
                 self_cloned     : weak_self.clone(),
             })
@@ -256,6 +252,40 @@ impl DHT {
         }
     }
 
+    fn try_ping_maintenance(&mut self,
+        bucket: Arc<Mutex<KBucket>>,
+        check_all: bool,
+        remove_on_timeout: bool,
+        _probe_replacement: bool,
+        name: String
+    ) {
+        if self.server().lock().unwrap().is_reachable() {
+            return;
+        }
+
+        // TODO: if maintenanceTask.
+
+        let refresh_needed = bucket.lock().unwrap().needs_refreshing();
+        let replacement_needed = bucket.lock().unwrap().needs_replacement_ping() ||
+            bucket.lock().unwrap().is_home_bucket() && bucket.lock().unwrap().find_pingable_replacement().is_some();
+
+        if refresh_needed || replacement_needed /* TODO: maintenance_tasks */ {
+            let mut task = Box::new(PingRefreshTask::new(self.dht()));
+            task.with_name(name);
+            task.with_check_all(check_all);
+            task.with_remove_on_timeout(remove_on_timeout);
+            // TODO: task.with_probe_replacement(probe_replacement);
+            task.with_bucket(bucket);
+
+            //if (maintenanceTasks.putIfAbsent(bucket, task) == null) {
+			//	task.addListener(t -> maintenanceTasks.remove(bucket, task));
+			//	taskManager.add(task);
+			//}
+
+            self.taskman.add(task);
+        }
+    }
+
     pub(crate) fn random_lookup(&mut self) {
         if !self.server().lock().unwrap().is_reachable() {
             debug!("Periodic: not performing random lookup, server is uneachable");
@@ -300,29 +330,26 @@ impl DHT {
         }
 
         info!("Periodic: DHT update...");
-        self.routing_table_maintenance();
+        self.rt_maintenance();
 
         let entries = self.rt().lock().unwrap().number_of_entries();
-        let self_lookup_due = self.last_bootstrap
-            .elapsed()
-            .unwrap_or(Duration::MAX)
-            .as_millis() > Self::SELF_LOOKUP_INTERVAL;
+        if entries < Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES ||
+            crate::elapsed_ms!(self.last_bootstrap) > Self::SELF_LOOKUP_INTERVAL {
 
-        if entries < Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES || self_lookup_due {
-            let dht = self.dht();
-            let bootstrap_nodes = if entries < Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES {
+            let bootstrap_nodes = if entries < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
                 self.bootstrap_nodes.clone()
             } else {
                 Vec::new()
             };
 
-            tokio::spawn(async move {
-                DHT::do_bootstrap(dht, bootstrap_nodes).await;
+            let dht = self.dht();
+            let _ = tokio::spawn(async move {
+                Self::do_bootstrap(dht, bootstrap_nodes).await;
             });
         }
     }
 
-    fn routing_table_maintenance(&mut self) {
+    fn rt_maintenance(&mut self) {
         let elapsed = self.last_maintenance
             .elapsed()
             .unwrap_or(Duration::MAX)
@@ -333,7 +360,17 @@ impl DHT {
 
         info!("Routing table maintenance ...");
         self.last_maintenance = SystemTime::now();
-        self.rt().lock().unwrap().maintenance();
+
+        let dht = self.dht();
+        self.rt().lock().unwrap().maintenance(
+            self.bootstrap_ids.clone(),
+            Consumer::new(move |bucket: Arc<Mutex<KBucket>>| {
+                let prefix = bucket.lock().unwrap().prefix().clone();
+                dht.lock().unwrap().try_ping_maintenance(bucket, false, false, false,
+                    format!("Routing table maintenance: refreshing bucket {}", prefix)
+                );
+            })
+        );
     }
 
     fn persist_routing_table(&mut self) {
@@ -354,41 +391,8 @@ impl DHT {
         }
     }
 
-    fn spawn_periodic_task(
-        &mut self,
-        initial_delay: Duration,
-        interval: Duration,
-        action: fn(&mut DHT),
-    ) {
-        let dht = self.dht();
-        let handle = tokio::spawn(async move {
-            tokio::time::sleep(initial_delay).await;
-
-            loop {
-                {
-                    let mut locked = match dht.lock() {
-                        Ok(locked) => locked,
-                        Err(_) => break,
-                    };
-
-                    if !locked.is_running {
-                        break;
-                    }
-
-                    action(&mut *locked);
-                }
-
-                tokio::time::sleep(interval).await;
-            }
-        });
-
-        self.periodic_tasks.push(handle);
-    }
-
-    fn cancel_periodic_tasks(&mut self) {
-        while let Some(handle) = self.periodic_tasks.pop() {
-            handle.abort();
-        }
+    async fn cancel_periodic_tasks(&mut self) {
+        _ = self.timer_client.stop().await;
     }
 
     fn set_status(&mut self, status: ConnectionStatus) {
@@ -486,7 +490,7 @@ impl DHT {
             }
         });
 
-        self.setup_periodic_tasks();
+        self.setup_periodic_tasks()?;
         self.is_running = true;
 
         info!("Started DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
@@ -501,10 +505,10 @@ impl DHT {
         info!("Stopping DHT {}:{} on {}:{}......", self.network, self.id(), self.host, self.port);
 
         self.is_running = false;
-        self.set_status(ConnectionStatus::Disconnected);
-        self.cancel_periodic_tasks();
-
         self.bootstrapping = false;
+        self.set_status(ConnectionStatus::Disconnected);
+
+        self.cancel_periodic_tasks().await;
         self.taskman.cancel_all();
 
         if let Some(path) = self.persist_file.as_ref() {
@@ -525,38 +529,49 @@ impl DHT {
         info!("Stopped DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
     }
 
-    fn setup_periodic_tasks(&mut self) {
-        self.spawn_periodic_task(
+    fn setup_periodic_tasks(&mut self) -> Result<()> {
+        self.timer_client.add_timer(
             Duration::from_secs(30),
-            Duration::from_secs(30),
-            DHT::update,
-        );
-        self.spawn_periodic_task(
+            Some(Duration::from_secs(320)), {
+                let dht = self.dht();
+                move || dht.lock().unwrap().update()
+            }
+        )?;
+
+        self.timer_client.add_timer(
             Duration::from_millis(Self::RANDOM_LOOKUP_INTERVAL),
-            Duration::from_millis(Self::RANDOM_LOOKUP_INTERVAL),
-            DHT::random_lookup,
-        );
-        self.spawn_periodic_task(
+            Some(Duration::from_millis(Self::RANDOM_LOOKUP_INTERVAL)), {
+                let dht = self.dht();
+                move || dht.lock().unwrap().random_lookup()
+            }
+        )?;
+        self.timer_client.add_timer(
             Duration::from_millis(Self::RANDOM_PING_INTERVAL),
-            Duration::from_millis(Self::RANDOM_PING_INTERVAL),
-            DHT::random_ping,
-        );
+            Some(Duration::from_millis(Self::RANDOM_PING_INTERVAL)), {
+                let dht = self.dht();
+                move || dht.lock().unwrap().random_ping()
+            }
+        )?;
 
         if self.suspicious_detector.is_some() {
-            self.spawn_periodic_task(
+            self.timer_client.add_timer(
                 Duration::from_secs(60),
-                Duration::from_secs(30),
-                DHT::purge_suspicious_nodes,
-            );
+                Some(Duration::from_secs(30)), {
+                    let dht = self.dht();
+                    move || dht.lock().unwrap().purge_suspicious_nodes()
+                }
+            )?;
         }
-
         if self.persist_file.is_some() {
-            self.spawn_periodic_task(
+            self.timer_client.add_timer(
                 Duration::from_secs(120),
-                Duration::from_millis(Self::ROUTING_TABLE_PERSIST_INTERVAL),
-                DHT::persist_routing_table,
-            );
+                Some(Duration::from_millis(Self::ROUTING_TABLE_PERSIST_INTERVAL)), {
+                    let dht = self.dht();
+                    move || dht.lock().unwrap().persist_routing_table()
+                }
+            )?;
         }
+        Ok(())
     }
 
     fn received(&mut self, locked_msg: &mut Message) {
@@ -1127,10 +1142,8 @@ impl DHT {
         if dht.lock().unwrap().bootstrapping {
             return;
         }
-        if dht.lock().unwrap().last_bootstrap
-            .elapsed()
-            .unwrap_or(Duration::MAX)
-            .as_millis() < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
+        if crate::elapsed_ms!(dht.lock().unwrap().last_bootstrap) <
+            Self::BOOTSTRAP_MIN_INTERVAL as u128 {
             return;
         }
 

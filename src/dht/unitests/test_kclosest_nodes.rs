@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    Id, NodeInfo,
+    Id,
     dht::routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,

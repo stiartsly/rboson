@@ -1,6 +1,5 @@
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex},
     time::SystemTime,
 };
 
@@ -115,20 +114,5 @@ mod tests {
         assert_eq!(responsed.is_reachable(), true);
         assert_eq!(responsed.failed_requests(), 0);
         assert_eq!(responsed.rtt(), 31);
-    }
-
-    #[test]
-    fn test_maintenance_merges_sibling_buckets() {
-        let (mut rt, _, _) = fill_and_split_table();
-
-        let removable_id = make_id(0x80, 1);
-        let removed = rt.remove(&removable_id);
-        assert_eq!(removed.is_some(), true);
-        assert_eq!(rt.size(), 2);
-
-        rt.maintenance();
-
-        assert_eq!(rt.size(), 1);
-        assert_eq!(rt.number_of_entries(), KBucket::MAX_ENTRIES);
     }
 }

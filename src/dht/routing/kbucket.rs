@@ -9,6 +9,7 @@ use log::info;
 use crate::Id;
 use crate::dht::{
     rpc::Reachability,
+    consumer::Consumer,
     routing::{Prefix, KBucketEntry},
 };
 
@@ -109,6 +110,18 @@ impl KBucket {
             && self.find_any(|v| v.needs_ping()).is_some()
     }
 
+    pub(crate) fn needs_replacement_ping(&self) -> bool {
+        unimplemented!()
+    }
+
+    pub(crate) fn find_pingable_replacement(&self) -> Option<KBucketEntry> {
+        unimplemented!()
+    }
+
+    pub(crate) fn promote_verified_replacement(&mut self) {
+        unimplemented!()
+    }
+
     pub(crate) fn pop(&mut self) -> Option<KBucketEntry> {
         self.entries.pop_first().map(|(_,v)|v)
     }
@@ -195,6 +208,13 @@ impl KBucket {
             }
         }
         None
+    }
+
+    pub(crate) fn cleanup(&mut self,
+        _local_id: &Id,
+        _bootstrap_ids: &[Id],
+        _dropped_handler: Consumer<KBucketEntry>) {
+        unimplemented!()
     }
 }
 

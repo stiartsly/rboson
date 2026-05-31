@@ -109,30 +109,6 @@ impl RpcServer {
         self.tx_socket.as_ref().expect("socket should be initialized")
     }
 
-    pub(crate) fn has_pending_calls(&self) -> bool {
-        self.pending_calls.len() > 0
-    }
-
-    pub(crate) fn set_reachable(&mut self, reachable: bool) {
-        if self.reachable == reachable {
-            return;
-        }
-        self.reachable = reachable;
-        if let Some(handler) = self.reachable_handler.as_ref() {
-            handler.accept(reachable);
-        }
-    }
-
-    pub(crate) fn is_reachable(&self) -> bool {
-        self.reachable
-    }
-
-    pub(crate) fn age(&self) -> Duration {
-        self.start_time
-            .and_then(|start_time| start_time.elapsed().ok())
-            .unwrap_or(Duration::ZERO)
-    }
-
     fn check_reachability(&mut self) {
         let now = SystemTime::now();
 
@@ -148,7 +124,56 @@ impl RpcServer {
             .unwrap_or(Duration::ZERO) > Self::REACHABILITY_TIMEOUT;
         if timed_out && self.recv_packets != 0 && self.recv_packets_at_last_reachable_check != 0 {
             self.set_reachable(false);
+            // TODO: reset timeout_sampler
         }
+    }
+
+    pub(crate) fn set_reachable(&mut self, reachable: bool) {
+        if self.reachable == reachable {
+            return;
+        }
+        self.reachable = reachable;
+        if let Some(handler) = self.reachable_handler.as_ref() {
+            handler.accept(reachable);
+        }
+    }
+
+    pub(crate) fn reachable_handler<F>(&mut self, cb: F)
+    where F: Fn(bool) + Send + 'static,
+    {
+        self.reachable_handler = Some(Consumer::new(cb));
+    }
+
+    pub(crate) fn is_reachable(&self) -> bool {
+        self.reachable
+    }
+
+    pub(crate) fn has_pending_calls(&self) -> bool {
+        !self.pending_calls.is_empty()
+    }
+
+    pub(crate) fn age(&self) -> Duration {
+        self.start_time
+            .and_then(|start_time| start_time.elapsed().ok())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub(crate) fn message_handler<F>(&mut self, cb: F)
+    where F: Fn(&mut Message) + Send + 'static,
+    {
+        self.message_handler = Some(Box::new(cb));
+    }
+
+    pub(crate) fn callsent_handler<F>(&mut self, cb: F)
+    where F: Fn(&mut RpcCall) + Send + 'static,
+    {
+        self.callsent_handler = Some(Box::new(cb));
+    }
+
+    pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
+    where F: Fn(&mut RpcCall) + Send + 'static,
+    {
+        self.calltimeout_handler = Some(Box::new(cb));
     }
 
     pub(crate) fn start_reachability_check(server: Arc<Mutex<RpcServer>>) {
@@ -181,29 +206,6 @@ impl RpcServer {
         }
     }
 
-    pub(crate) fn reachable_handler<F>(&mut self, cb: F)
-    where F: Fn(bool) + Send + 'static,
-    {
-        self.reachable_handler = Some(Consumer::new(cb));
-    }
-
-    pub(crate) fn message_handler<F>(&mut self, cb: F)
-    where F: Fn(&mut Message) + Send + 'static,
-    {
-        self.message_handler = Some(Box::new(cb));
-    }
-
-    pub(crate) fn callsent_handler<F>(&mut self, cb: F)
-    where F: Fn(&mut RpcCall) + Send + 'static,
-    {
-        self.callsent_handler = Some(Box::new(cb));
-    }
-
-    pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
-    where F: Fn(&mut RpcCall) + Send + 'static,
-    {
-        self.calltimeout_handler = Some(Box::new(cb));
-    }
 
     pub(crate) async fn start(&mut self) -> Result<()> {
         let (tx, rx) = mpsc::unbounded_channel::<Command>();
@@ -399,11 +401,11 @@ pub(crate) async fn run_loop(server: Arc<Mutex<RpcServer>>) {
                     jobs.remove(&jobid);
                 }
 
-                tokio::spawn(async move {
+                let _ = tokio::spawn(async move {
                     if job.is_active() {
-                        job.invoke().await;
+                        job.invoke();
                     }
-                });
+                }).await;
             }
             recv = socket.recv_from(&mut buff) => {
                 let (len, from) = match recv {

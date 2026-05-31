@@ -3,7 +3,7 @@ use std::{
     any::Any,
     sync::{Arc, Mutex},
     sync::atomic::{Ordering, AtomicI32},
-    collections::{HashSet, HashMap},
+    collections::HashSet,
     time::{SystemTime, Duration}
 };
 use log::{warn, debug};
@@ -317,20 +317,24 @@ pub(crate) trait Task: Send + Sync {
         self.data().inflights.is_empty()
     }
 
+    #[allow(unused)]
     fn started_time(&self) -> SystemTime {
         self.data().started
     }
 
+    #[allow(unused)]
     fn ended_time(&self) -> SystemTime {
         self.data().ended
     }
 
+    #[allow(unused)]
     fn leading_time(&self) -> Option<Duration> {
         self.data().ended.duration_since(
             self.data().started
         ).ok()
     }
 
+    #[allow(unused)]
     fn age(&self) -> Option<Duration> {
         self.data().created.elapsed().ok()
     }

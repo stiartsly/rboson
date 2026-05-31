@@ -11,7 +11,7 @@ use crate::{
     errors::ProtocolError,
 };
 use crate::dht::{
-    timer::TaskHandle,
+    timer::TimerId,
     msg::{Body, Message, msg::Kind},
     task::CandidateNode,
     routing::KBucketEntry,
@@ -57,7 +57,7 @@ pub(crate) struct RpcCall {
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
-    timeout_task: Option<TaskHandle>,
+    timeout_task: Option<TimerId>,
     cloned      : Option<Arc<Mutex<RpcCall>>>,
 }
 

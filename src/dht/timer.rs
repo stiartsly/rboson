@@ -1,44 +1,42 @@
 use std::{
-    future::Future,
-    pin::Pin,
+    time::Duration,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
-    },
-    time::Duration,
+    }
 };
-
 use tokio::{sync::{mpsc, oneshot}};
 use tokio_util::time::{DelayQueue};
+use log::error;
 
 use crate::{
     core::errors::{Result, StateError},
 };
 
-type JobFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
-type JobHandler = Arc<dyn Fn() -> JobFuture + Send + Sync>;
-
-pub(crate) type TaskHandle = u64;
+pub(crate) type TimerId = u64;
 
 #[derive(Clone)]
 pub(crate) struct Job {
-    pub(crate) id: u64,
+    pub(crate) id: TimerId,
     pub(crate) interval: Option<Duration>,
-    cb: JobHandler,
+
+    cb: Arc<Box<dyn Fn() + Send + Sync>>,
     active: Arc<AtomicBool>,
 }
 
 impl Job {
-    fn new(id: u64, interval: Option<Duration>, callback: JobHandler) -> Self {
+    fn new<F>(id: TimerId, interval: Option<Duration>, cb: F) -> Self
+    where F: Fn() + Send + Sync +'static
+    {
         Self {
             id,
             interval,
-            cb: callback,
+            cb: Arc::new(Box::new(cb)),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
 
-    pub(crate) fn invoke(&self) -> JobFuture {
+    pub(crate) fn invoke(&self) {
         (self.cb)()
     }
 
@@ -57,7 +55,7 @@ pub(crate) enum Command {
         job: Job,
     },
     Remove {
-        job_id: u64,
+        job_id: TimerId,
         reply: oneshot::Sender<bool>,
     },
     Stop {
@@ -84,18 +82,16 @@ impl Client {
         }
     }
 
-    pub(crate) fn add<F, Fut>(
+    pub(crate) fn add_timer<F>(
         &self,
         delay: Duration,
         interval: Option<Duration>,
         cb: F,
-    ) -> Result<TaskHandle>
+    ) -> Result<TimerId>
     where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
+        F: Fn() + Send + Sync + 'static
     {
         let taskid = self.next_jobid.fetch_add(1, Ordering::Relaxed);
-        let cb: JobHandler = Arc::new(move || Box::pin(cb()));
         let job = Job::new(taskid, interval, cb);
 
         self.tx
@@ -105,7 +101,8 @@ impl Client {
         Ok(taskid)
     }
 
-    pub(crate) async fn cancel(&self, handle: TaskHandle) -> Result<bool> {
+    #[allow(unused)]
+    pub(crate) async fn cancel_timer(&self, handle: TimerId) -> Result<bool> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(Command::Remove {
@@ -118,13 +115,12 @@ impl Client {
             .map_err(|_| StateError::new(format!("Error: channel closed")))?)
     }
 
-    pub(crate) async fn stop(&self) -> Result<()> {
+    pub(crate) async fn stop(&self) {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(Command::Stop { reply: reply_tx })
-            .map_err(|_| StateError::new(format!("Error: channel closed")))?;
+        let _ = self.tx.send(Command::Stop { reply: reply_tx })
+            .map_err(|_| error!("Error: channel closed"));
 
-        Ok(reply_rx.await
-            .map_err(|_| StateError::new(format!("Error: channel closed")))?)
+        let _ = reply_rx.await
+            .map_err(|_| error!("Error: channel closed"));
     }
 }

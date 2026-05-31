@@ -1,8 +1,10 @@
-use std::cmp::Ordering;
-use std::str::FromStr;
-use std::ops::Deref;
-use std::fmt;
-use std::result::Result as SResult;
+use std::{
+    fmt,
+    cmp::Ordering,
+    str::FromStr,
+    ops::Deref,
+    result::Result as SResult
+};
 use bs58;
 use serde::{
     Serialize,Deserialize,
@@ -17,15 +19,6 @@ use crate::{
     Result,
     errors::ArgumentError,
 };
-
-fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
-    unsafe {
-        libsodium_sys::randombytes_buf(
-            array.as_mut_ptr() as *mut libc::c_void,
-            N
-        );
-    }
-}
 
 pub const DID_PREFIX: &str = "did:boson:";
 

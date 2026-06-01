@@ -1,7 +1,7 @@
 use std::{
     fmt,
     any::Any,
-    sync::{Arc, Mutex},
+    sync::{Arc, Weak, Mutex},
     sync::atomic::{Ordering, AtomicI32},
     collections::HashSet,
     time::{SystemTime, Duration}
@@ -116,7 +116,7 @@ pub(crate) trait Task: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    fn dht(&self) -> Arc<Mutex<DHT>>;
+    fn dht(&self) -> Weak<Mutex<DHT>>;
 
     fn task_id(&self) -> i32 {
         self.data().taskid
@@ -413,7 +413,9 @@ pub(crate) trait Task: Send + Sync {
         let txid = call.txid();
         self.data_mut().inflights.insert(txid);
 
-        let server = self.dht().lock().unwrap().server().clone();
+        let dht = self.dht().upgrade()
+            .expect("panic: DHT instance dropped.");
+        let server = dht.lock().unwrap().server().clone();
         let _ = server.lock().unwrap().send_call(call);
         Ok(())
     }
@@ -421,7 +423,9 @@ pub(crate) trait Task: Send + Sync {
 
 impl fmt::Display for dyn Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let addr = self.dht().lock().unwrap().addr().clone();
+        let dht = self.dht().upgrade()
+            .expect("panic: DHT instance dropped.");
+        let addr = dht.lock().unwrap().addr().clone();
         let addr_family = match addr.is_ipv4() {
             true => "ipv4",
             false => "ipv6"

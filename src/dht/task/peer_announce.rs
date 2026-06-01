@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex},
+    sync::{Arc, Weak, Mutex},
     collections::VecDeque,
 };
 use log::{debug, error};
@@ -25,14 +25,14 @@ pub(crate) struct PeerAnnounceTask {
     peer: PeerInfo,
     expected_seq: i32,
 
-    dht: Arc<Mutex<DHT>>
+    dht: Weak<Mutex<DHT>>
 }
 
 const MAX_TODO_ENTRIES: usize = 24;
 
 impl PeerAnnounceTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Weak<Mutex<DHT>>,
         peer: PeerInfo,
         expected_seq: i32
     ) -> Self {
@@ -87,7 +87,7 @@ impl Task for PeerAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 

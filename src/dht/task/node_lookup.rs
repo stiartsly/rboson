@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    sync::{Weak, Mutex}
 };
 use log::{debug, error};
 
@@ -34,12 +34,12 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result: Option<NodeInfo>,
-    dht: Arc<Mutex<DHT>>,
+    dht: Weak<Mutex<DHT>>,
 }
 
 impl NodeLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Weak<Mutex<DHT>>,
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
@@ -94,7 +94,7 @@ impl LookupTask for NodeLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -128,7 +128,7 @@ impl Task for NodeLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -138,8 +138,12 @@ impl Task for NodeLookupTask {
             false => self.target().clone()
         };
 
+        let Some(strong_dht) = self.dht.upgrade() else {
+            return;
+        };
+        let rt = strong_dht.lock().unwrap().rt();
+
         let kes:Vec<KBucketEntry> = {
-            let rt = self.dht.lock().unwrap().rt();
             let mut kns = KClosestNodes::new(
                 rt,
                 target,
@@ -162,6 +166,11 @@ impl Task for NodeLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
+        let Some(strong_dht) = self.dht.upgrade() else {
+            return;
+        };
+        let network = strong_dht.lock().unwrap().network();
+
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
@@ -169,7 +178,6 @@ impl Task for NodeLookupTask {
             };
 
             let target = Target::from_candidate(next.clone());
-            let network = self.dht.lock().unwrap().network();
             let msg = msg::find_node_request(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -193,13 +201,17 @@ impl Task for NodeLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
+        let dht = self.dht.upgrade()
+            .expect("panic: DHT instance dropped.");
+        let msg = call.rsp()
+            .expect("no response set");
 
-        let msg = call.rsp().expect("no response set");
-        let Body::FindNodeResponse(body) = msg.body().expect("no message body") else {
+        let Body::FindNodeResponse(body) = msg.body()
+            .expect("no message body") else {
             return;
         };
 
-        let network = self.dht.lock().unwrap().network();
+        let network = dht.lock().unwrap().network();
         let nodes = body.nodes(network);
         let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;

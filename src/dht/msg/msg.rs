@@ -484,6 +484,12 @@ impl<'de> Deserialize<'de> for Message {
     }
 }
 
+impl AsRef<Message> for Message {
+    fn as_ref(&self) -> &Message {
+        self
+    }
+}
+
 pub(crate) fn ping_request() -> Message {
     Message::new( Kind::Request, Method::Ping, next_txid(), None)
 }

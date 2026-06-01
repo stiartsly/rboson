@@ -45,7 +45,7 @@ mod tests {
     fn test_task() {
         let target = Id::random();
         let dht = make_dht();
-        let task = NodeLookupTask::new(dht.clone(), target.clone(), true);
+        let task = NodeLookupTask::new(Arc::downgrade(&dht), target.clone(), true);
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);
@@ -55,7 +55,7 @@ mod tests {
         assert!(!task.want_target());
 
         let target = Id::random();
-        let mut task = NodeLookupTask::new(dht.clone(), target, false);
+        let mut task = NodeLookupTask::new(Arc::downgrade(&dht), target, false);
 
         task.with_bootstrap(true);
         task.with_want_token(true);

@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    sync::{Weak, Mutex}
 };
 use log::{debug, error, warn};
 
@@ -27,12 +27,12 @@ pub(crate) struct ValueLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligibleValue,
-    dht: Arc<Mutex<DHT>>,
+    dht: Weak<Mutex<DHT>>,
 }
 
 impl ValueLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Weak<Mutex<DHT>>,
         target: Id,
         expected_seq: i32,
         done_on_eligible_result: bool
@@ -55,7 +55,7 @@ impl LookupTask for ValueLookupTask {
         &Task::data(self)
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         Task::dht(self)
     }
 
@@ -89,12 +89,14 @@ impl Task for ValueLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 
     fn prepare(&mut self) {
-        let rt = self.dht.lock().unwrap().rt();
+        let dht = self.dht.upgrade()
+            .expect("panic: DHT instance dropped.");
+        let rt = dht.lock().unwrap().rt();
         let entries:Vec<KBucketEntry> = {
             let mut kns = KClosestNodes::new(
                 rt,
@@ -118,6 +120,10 @@ impl Task for ValueLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
+        let dht = self.dht.upgrade()
+            .expect("panic: DHT instance dropped.");
+        let network = dht.lock().unwrap().network();
+
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
@@ -125,7 +131,6 @@ impl Task for ValueLookupTask {
             };
 
             let target = Target::from_candidate(next.clone());
-            let network = self.dht.lock().unwrap().network();
             let msg = msg::find_value_request(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -169,7 +174,9 @@ impl Task for ValueLookupTask {
                 }
             }
         } else {
-            let network = self.dht.lock().unwrap().network();
+            let dht = self.dht.upgrade()
+                .expect("panic: DHT instance dropped.");
+            let network = dht.lock().unwrap().network();
             let nodes = body.nodes(network);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {

@@ -332,14 +332,14 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::find_node(dht, &target, option).await
+                    dht.lock().unwrap().find_node(&target, option).await
                 } else {
                     Ok(None)
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::find_node(dht, &target, option).await
+                    dht.lock().unwrap().find_node(&target, option).await
                 } else {
                     Ok(None)
                 }
@@ -391,14 +391,16 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::find_value(dht, &target, expected_seq, option).await
+                    dht.lock().unwrap()
+                        .find_value(&target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::find_value(dht, &target, expected_seq, option).await
+                    dht.lock().unwrap()
+                        .find_value(&target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
@@ -461,14 +463,16 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::find_peer(dht, &target, expected_seq, expected_count, option).await
+                    dht.lock().unwrap()
+                         .find_peer(&target, expected_seq, expected_count, option).await
                 } else {
                     Ok(Vec::new())
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::find_peer(dht, &target, expected_seq, expected_count, option).await
+                    dht.lock().unwrap()
+                         .find_peer(&target, expected_seq, expected_count, option).await
                 } else {
                     Ok(Vec::new())
                 }
@@ -519,14 +523,14 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::store_value(dht, val4, expected_seq).await
+                    dht.lock().unwrap().store_value(val4, expected_seq).await
                 } else {
                     Ok(())
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::store_value(dht, val6, expected_seq).await
+                    dht.lock().unwrap().store_value(val6, expected_seq).await
                 } else {
                     Ok(())
                 }
@@ -578,14 +582,16 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    DHT::announce_peer(dht, peer4, expected_seq).await
+                    dht.lock().unwrap()
+                        .announce_peer(peer4, expected_seq).await
                 } else {
                     Ok(())
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    DHT::announce_peer(dht, peer6, expected_seq).await
+                    dht.lock().unwrap()
+                        .announce_peer(peer6, expected_seq).await
                 } else {
                     Ok(())
                 }

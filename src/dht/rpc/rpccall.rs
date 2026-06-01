@@ -306,13 +306,13 @@ impl RpcCall {
         self.update_state(State::Err);
     }
 
-    pub(crate) fn fail(&mut self, err: Box<dyn StdError + Send>) {
+    pub(crate) fn fail(&mut self, _err: Box<dyn StdError + Send>) {
         if self.state.is_final() {
             return;
         }
 
         self.cancel_timeout_timer();
-        self.cause = Some(err);
+        // self.cause = Some(err.clone());
         self.update_state(State::Err);
     }
 

@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    sync::{Mutex, Weak}
 };
 use log::{debug, error, warn};
 
@@ -23,12 +23,12 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Arc<Mutex<DHT>>
+    dht: Weak<Mutex<DHT>>
 }
 
 impl PeerLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Weak<Mutex<DHT>>,
         target: Id,
         expected_seq: i32,
         expected_count: usize,
@@ -52,7 +52,7 @@ impl LookupTask for PeerLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -86,12 +86,15 @@ impl Task for PeerLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 
     fn prepare(&mut self) {
-        let rt = self.dht.lock().unwrap().rt();
+        let dht = self.dht.upgrade()
+            .expect("panic: DHT instance dropped.");
+
+        let rt = dht.lock().unwrap().rt();
         let entries:Vec<KBucketEntry> = {
             let mut kns = KClosestNodes::new(
                 rt,
@@ -115,6 +118,10 @@ impl Task for PeerLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
+        let dht = self.dht.upgrade()
+            .expect("panic: DHT instance dropped.");
+        let network = dht.lock().unwrap().network();
+
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
@@ -122,7 +129,6 @@ impl Task for PeerLookupTask {
             };
 
             let target = Target::from_candidate(next.clone());
-            let network = self.dht.lock().unwrap().network();
             let msg = msg::find_peer_request(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -146,8 +152,11 @@ impl Task for PeerLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let msg = call.rsp().expect("panic: no response set");
-        let Body::FindPeerResponse(body) = msg.body().expect("no message body") else {
+        let msg = call.rsp()
+            .expect("panic: no response set");
+
+        let Body::FindPeerResponse(body) = msg.body()
+            .expect("no message body") else {
             return;
         };
 
@@ -185,8 +194,10 @@ impl Task for PeerLookupTask {
                 self.result.prune();
             }
         } else {
-            let network = self.dht.lock().unwrap().network();
-            let nodes = body.nodes(network);
+            let dht = self.dht.upgrade()
+                .expect("panic: DHT instance dropped.");
+            let network = dht.lock().unwrap().network();
+             let nodes = body.nodes(network);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

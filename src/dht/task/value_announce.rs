@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex},
+    sync::{Arc, Weak, Mutex},
     collections::VecDeque,
 };
 use log::{debug, error};
@@ -27,12 +27,12 @@ pub(crate) struct ValueAnnounceTask {
     value: Value,
     expected_seq: i32,
 
-    dht: Arc<Mutex<DHT>>
+    dht: Weak<Mutex<DHT>>
 }
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Weak<Mutex<DHT>>,
         value: Value,
         expected_seq: i32,
     ) -> Self {
@@ -87,7 +87,7 @@ impl Task for ValueAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }
 

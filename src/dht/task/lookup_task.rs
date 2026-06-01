@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Weak, Mutex};
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
@@ -58,7 +58,7 @@ impl LookupTaskData {
 
 pub(crate) trait LookupTask {
     fn base_data(&self) -> &TaskData;
-    fn dht(&self) -> Arc<Mutex<DHT>>;
+    fn dht(&self) -> Weak<Mutex<DHT>>;
 
     fn data(&self) -> &LookupTaskData;
     fn data_mut(&mut self) -> &mut LookupTaskData;
@@ -76,8 +76,14 @@ pub(crate) trait LookupTask {
     }
 
     fn add_candidates_with_nodes(&mut self, mut nodes: Vec<NodeInfo>) {
-        let dht = self.dht();
-        let locked = dht.lock().unwrap();
+        let strong_dht = match self.dht().upgrade() {
+            Some(dht) => dht,
+            None => return,
+        };
+        let locked_dht = strong_dht.lock().unwrap();
+        let local_id   = locked_dht.id().clone();
+        let local_addr = locked_dht.addr().clone();
+        drop(locked_dht);
 
         let mut todo: Vec<NodeInfo> = Vec::new();
         while let Some(ni) = nodes.pop() {
@@ -88,8 +94,8 @@ pub(crate) trait LookupTask {
             };
 
             if bogon ||self.data().closest.contains(ni.id()) ||
-                locked.id() == ni.id() ||
-                locked.addr() == ni.socket_addr() {
+                &local_id == ni.id() ||
+                &local_addr == ni.socket_addr() {
                 continue;
             }
             todo.push(ni);
@@ -101,8 +107,14 @@ pub(crate) trait LookupTask {
     }
 
     fn add_candidates_with_kentries(&mut self, mut entries: Vec<KBucketEntry>) {
-        let dht = self.dht();
-        let locked = dht.lock().unwrap();
+        let strong_dht = match self.dht().upgrade() {
+            Some(dht) => dht,
+            None => return,
+        };
+        let locked_dht = strong_dht.lock().unwrap();
+        let local_id   = locked_dht.id().clone();
+        let local_addr = locked_dht.addr().clone();
+        drop(locked_dht);
 
         let mut todo: Vec<KBucketEntry> = Vec::new();
         while let Some(entry) = entries.pop() {
@@ -114,8 +126,8 @@ pub(crate) trait LookupTask {
             };
 
             if bogon ||self.data().closest.contains(ni.id()) ||
-                locked.id() == ni.id() ||
-                locked.addr() == ni.socket_addr() {
+                &local_id == ni.id() ||
+                &local_addr == ni.socket_addr() {
                 continue;
             }
             todo.push(entry);

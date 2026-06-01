@@ -42,7 +42,8 @@ mod tests {
     #[test]
     fn test_default() {
         let target = Id::random();
-        let mut task = ValueLookupTask::new(make_dht(), target, 7, true);
+        let dht    = make_dht();
+        let mut task   = ValueLookupTask::new(Arc::downgrade(&dht), target.clone(), 7, true);
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);

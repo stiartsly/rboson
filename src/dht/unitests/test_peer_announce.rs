@@ -75,7 +75,8 @@ mod tests {
     #[test]
     fn test_default() {
         let peer = make_peer();
-        let task = PeerAnnounceTask::new(make_dht(), peer.clone(), 7);
+        let dht  = make_dht();
+        let task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer.clone(), 7);
 
         assert!(task.data().is_done());
         assert!(task.is_done());
@@ -84,7 +85,8 @@ mod tests {
     #[test]
     fn test_task_with_closestset() {
         let peer = make_peer();
-        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        let dht = make_dht();
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_done());
 
         task.with_closest(make_closestset(42));
@@ -95,7 +97,8 @@ mod tests {
     fn test_cancel() {
         println!(">>>> test_cancel line:{}", line!());
         let peer = make_peer();
-        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        let dht  = make_dht();
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -119,7 +122,8 @@ mod tests {
     #[test]
     fn test_complete() {
         let peer = make_peer();
-        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        let dht = make_dht();
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -140,7 +144,8 @@ mod tests {
     #[test]
     fn test_start() {
         let peer = make_peer();
-        let mut task = PeerAnnounceTask::new(make_dht(), peer, -1);
+        let dht = make_dht();
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 

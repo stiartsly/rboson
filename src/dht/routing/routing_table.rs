@@ -162,8 +162,8 @@ impl RoutingTable {
         self._on_timeout(id)
     }
 
-    pub(crate) fn on_send(&mut self, id: &Id) {
-        self._on_send(id)
+    pub(crate) fn on_request_send(&mut self, id: &Id) {
+        self._on_request_send(id)
     }
 
     pub(crate) fn on_responded(&mut self, id: &Id, rtt: u64) {
@@ -323,7 +323,7 @@ impl RoutingTable {
         self.bucket(id).lock().unwrap().on_timeout(id);
     }
 
-    fn _on_send(&mut self, id: &Id) {
+    fn _on_request_send(&mut self, id: &Id) {
         self.bucket(id).lock().unwrap().on_send(id);
     }
 

@@ -54,12 +54,14 @@ fn make_small_rt() -> Arc<Mutex<RoutingTable>> {
     Arc::new(Mutex::new(rt))
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_fill() {
+
         let rt = make_split_rt();
         let target = make_id(0x80, 1);
         let capacity = 4;

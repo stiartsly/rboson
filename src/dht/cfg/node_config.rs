@@ -11,6 +11,7 @@ pub trait NodeConfig: Send + Sync {
     fn private_key(&self) -> &signature::PrivateKey;
 
     fn data_dir(&self) -> &str;
+    fn database_uri(&self) -> &str;
     fn bootstrap_nodes(&self) -> &[NodeInfo];
 
     fn log_level(&self) -> LevelFilter { LevelFilter::Info }

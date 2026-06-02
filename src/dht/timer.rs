@@ -87,7 +87,7 @@ impl Client {
         delay: Duration,
         interval: Option<Duration>,
         cb: F,
-    ) -> Result<TimerId>
+    ) -> Result<&Self>
     where
         F: Fn() + Send + Sync + 'static
     {
@@ -98,7 +98,21 @@ impl Client {
             .send(Command::Add { delay, job })
             .map_err(|_| StateError::new(format!("Error: channel closed")))?;
 
-        Ok(taskid)
+        Ok(self)
+    }
+
+    pub(crate) fn add_timer_if(
+        &self,
+        predicate: bool,
+        delay: Duration,
+        interval: Option<Duration>,
+        cb: impl Fn() + Send + Sync + 'static,
+    ) -> Result<&Self> {
+        if predicate {
+            return self.add_timer(delay, interval, cb);
+        } else {
+            Ok(self)
+        }
     }
 
     #[allow(unused)]

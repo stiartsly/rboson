@@ -26,6 +26,7 @@ pub struct NodeConfiguration {
     port: u16,
     private_key: signature::PrivateKey,
     data_dir: String,
+    database_uri: String,
     bootstrap_nodes: Vec<NodeInfo>,
     log_level: LevelFilter,
     log_file: Option<String>,
@@ -42,6 +43,8 @@ struct YamlNodeConfig {
     private_key: String,
     #[serde(rename = "dataDir")]
     data_dir: Option<String>,
+    #[serde(rename = "databaseUri")]
+    database_uri: String,
     #[serde(default)]
     bootstraps: Vec<YamlNodeEntry>,
     logger: Option<YamlLoggerConfig>,
@@ -127,6 +130,7 @@ impl TryFrom<YamlNodeConfig> for NodeConfiguration {
             port    : yaml.port,
             private_key: sk,
             data_dir: expand_data_dir(yaml.data_dir),
+            database_uri: yaml.database_uri,
             bootstrap_nodes,
             log_level: log_level(logger.and_then(|logger| logger.level.as_deref())),
             log_file: logger.and_then(|logger| logger.log_file.clone()),
@@ -154,6 +158,10 @@ impl NodeConfig for NodeConfiguration {
 
     fn data_dir(&self) -> &str {
         &self.data_dir
+    }
+
+    fn database_uri(&self) -> &str {
+        &self.database_uri
     }
 
     fn bootstrap_nodes(&self) -> &[NodeInfo] {

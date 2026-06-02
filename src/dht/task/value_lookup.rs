@@ -94,12 +94,18 @@ impl Task for ValueLookupTask {
     }
 
     fn prepare(&mut self) {
-        let dht = self.dht.upgrade()
-            .expect("panic: DHT instance dropped.");
-        let rt = dht.lock().unwrap().rt();
+        let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to prepare: DHT instance dropped",
+                self.task_name(),
+                self.task_id()
+            );
+            return;
+        };
+
         let entries:Vec<KBucketEntry> = {
+            let locked_dht = strong_dht.lock().unwrap();
             let mut kns = KClosestNodes::new(
-                rt,
+                &locked_dht,
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -174,10 +180,17 @@ impl Task for ValueLookupTask {
                 }
             }
         } else {
-            let dht = self.dht.upgrade()
-                .expect("panic: DHT instance dropped.");
-            let network = dht.lock().unwrap().network();
+            let Some(strong_dht) = self.dht.upgrade() else {
+                error!("{}#{} failed to iterate: DHT instance dropped",
+                        self.task_name(),
+                        self.task_id()
+                );
+                return;
+            };
+
+            let network = strong_dht.lock().unwrap().network();
             let nodes = body.nodes(network);
+            drop(strong_dht);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

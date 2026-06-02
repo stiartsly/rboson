@@ -117,10 +117,9 @@ impl Task for PingRefreshTask {
             target_id
         );
 
-        let strong_dht = Task::dht(self).upgrade();
-        if let Some(dht) = strong_dht {
-            let rt = dht.lock().unwrap().rt();
-            rt.lock().unwrap().remove(&target_id);
+        if let Some(strong_dht) = self.dht.upgrade() {
+            let mut locked = strong_dht.lock().unwrap();
+            locked.rt_mut().remove(&target_id);
         }
     }
 

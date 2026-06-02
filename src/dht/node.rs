@@ -1,17 +1,17 @@
-use std::time::Duration;
-use std::{fs::File, io::Write};
-use std::sync::{Arc, Mutex};
-use tokio::task;
+use std::{
+    fs::File,
+    io::Write,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration
+};
 use log::{warn, error, info};
-
 use crate::{
     CryptoIdentity,
     create_dirs,
     Id,
     Result,
-    NodeInfo,
-    PeerInfo,
-    Value,
+    NodeInfo, PeerInfo, Value,
     Network,
     signature,
     JointResult,
@@ -21,11 +21,9 @@ use crate::{
     errors::{
         StateError,
         IOError,
-        DBError,
         ArgumentError
     }
 };
-
 use crate::dht::{
     cfg::node_config::NodeConfig,
     node_status::NodeStatus,
@@ -35,6 +33,7 @@ use crate::dht::{
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
+    version,
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
@@ -51,19 +50,20 @@ pub struct Node {
     cfg     : Box<dyn NodeConfig>,
     identity: CachedIdentity,
 
-    option  : Mutex<LookupOption>,
-    status  : Mutex<NodeStatus>,
-    storage_path: String,
+    lookup_option  : Mutex<LookupOption>,
+    status      : Mutex<NodeStatus>,
+    data_dir    : String,
+    database_uri: String,
 
-    dht4    : Mutex<Option<Arc<Mutex<DHT>>>>,
-    dht6    : Mutex<Option<Arc<Mutex<DHT>>>>,
+    dht4        : Mutex<Option<Arc<Mutex<DHT>>>>,
+    dht6        : Mutex<Option<Arc<Mutex<DHT>>>>,
 
-    storage : Arc<Mutex<Box<dyn DataStorage>>>,
-    tokenman: Arc<TokenManager>,
+    storage     : Arc<Mutex<Box<dyn DataStorage>>>,
+    tokenman    : Arc<TokenManager>,
 }
 
 impl Node {
-    pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Self> {
+    pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
         Self::check_config(cfg.as_ref())?;
         logger::setup(cfg.as_ref().log_level(), cfg.as_ref().log_file().as_deref());
         logger::disable_console_output();
@@ -71,8 +71,19 @@ impl Node {
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
 
-        let path = {
+        let data_dir = {
             let mut path = cfg.data_dir().to_string();
+            if path.is_empty() {
+                path.push_str(".")
+            }
+            if !path.ends_with("/") {
+                path.push_str("/");
+            }
+            path
+        };
+
+        let database_uri = {
+            let mut path = cfg.database_uri().to_string();
             if path.is_empty() {
                 path.push_str(".")
             }
@@ -87,28 +98,25 @@ impl Node {
             CryptoIdentity::from_keypair(kp)
         });
 
-        let id_path = path.clone() + "id";
-        _ = store_nodeid(&id_path, identity.id()).map_err(|e| {
-            error!("Persisting nodeid data error {}, skipped", e); e
+        let id_path = data_dir.clone() + "id";
+        let _ = cache_nodeid(&id_path, identity.id()).map_err(|e| {
+            error!("Failed to cache node id to {}: {}", id_path, e);
         });
 
         info!("Current Node id: {}", identity.id());
 
-        Ok( Self {
+        Ok(Arc::new(Self {
             cfg,
             identity,
-
-            storage_path: path.clone(),
-
-            option: Mutex::new(LookupOption::Conservative),
-            status: Mutex::new(NodeStatus::Stopped),
-
-            dht4: Mutex::new(None),
-            dht6: Mutex::new(None),
-
-            storage: Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
+            data_dir,
+            database_uri,
+            lookup_option: Mutex::new(LookupOption::Conservative),
+            status  : Mutex::new(NodeStatus::Stopped),
+            dht4    : Mutex::new(None),
+            dht6    : Mutex::new(None),
+            storage : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
             tokenman: Arc::new(TokenManager::new())
-        })
+        }))
     }
 
     fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
@@ -117,14 +125,13 @@ impl Node {
                 "At least one host/address must be specified".to_string()
             ));
         }
-
         if cfg.bootstrap_nodes().is_empty() {
             warn!("No bootstrap nodes are configured");
         }
 
         let data_dir = cfg.data_dir();
         if !data_dir.is_empty() {
-            let path = std::path::Path::new(data_dir);
+            let path = Path::new(data_dir);
             if path.exists() {
                 if !path.is_dir() {
                     error!("Data path {} is not a directory", data_dir);
@@ -144,6 +151,7 @@ impl Node {
                 })?;
             }
         }
+
         Ok(())
     }
 
@@ -158,7 +166,7 @@ impl Node {
     }
 
     #[inline(always)]
-    fn option(&self, option: Option<LookupOption>) -> LookupOption {
+    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
         option.unwrap_or_else(|| self.default_lookup_option())
     }
 
@@ -176,9 +184,9 @@ impl Node {
         }
         *self.status.lock().unwrap() = NodeStatus::Initializing;
 
-        let db_path = format!("{}node.db", self.storage_path);
+        let storagedb = format!("{}{}", self.data_dir, self.database_uri);
         let mut storage = self.storage.lock().unwrap();
-        storage.open(&db_path)?;
+        storage.open(&storagedb)?;
         storage.initialize(
             Duration::from_millis(120 * 60 * 1000),
             Duration::from_millis(120 * 60 * 1000),
@@ -193,17 +201,19 @@ impl Node {
                 Network::IPv4,
                 host4.into(),
                 port,
-                Some(format!("{}dht4.cache", self.storage_path)),
+                Some(format!("{}dht4.cache", self.data_dir)),
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
                 self.tokenman.clone(),
             )?;
 
-            if let Err(err) = dht.lock().unwrap().start().await {
+            let rc = dht.lock().unwrap().start().await;
+            if let Err(err) = rc  {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
+            } else {
+                *self.dht4.lock().unwrap() = Some(dht);
             }
-            *self.dht4.lock().unwrap() = Some(dht);
         }
 
         if let Some(host6) = self.cfg.host6() {
@@ -212,17 +222,19 @@ impl Node {
                 Network::IPv6,
                 host6.into(),
                 port,
-                Some(format!("{}dht6.cache", self.storage_path)),
+                Some(format!("{}dht6.cache", self.data_dir)),
                 self.cfg.bootstrap_nodes().to_vec(),
                 self.storage.clone(),
                 self.tokenman.clone(),
             )?;
 
-            if let Err(err) = dht.lock().unwrap().start().await {
+            let rc = dht.lock().unwrap().start().await;
+            if let Err(err) = rc  {
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
+            } else {
+                *self.dht6.lock().unwrap() = Some(dht);
             }
-            *self.dht6.lock().unwrap() = Some(dht);
         }
 
         *self.status.lock().unwrap() = NodeStatus::Running;
@@ -248,9 +260,9 @@ impl Node {
 
         self.storage.lock().unwrap().close()?;
 
+        info!("Kademlia node stopped.");
         logger::teardown();
 
-        info!("Kademlia node stopped.");
         Ok(())
     }
 
@@ -272,15 +284,15 @@ impl Node {
     }
 
     pub fn version(&self) -> String {
-        unimplemented!()
+        version::format_version(version::ver())
     }
 
     pub fn set_default_lookup_option(&self, option: LookupOption) {
-        *self.option.lock().unwrap() = option;
+        *self.lookup_option.lock().unwrap() = option;
     }
 
     pub fn default_lookup_option(&self) -> LookupOption {
-        self.option.lock().unwrap().clone()
+        self.lookup_option.lock().unwrap().clone()
     }
 
     pub fn is_running(&self) -> bool {
@@ -297,10 +309,10 @@ impl Node {
         }
         self.check_running()?;
 
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
-        let nodes4 = nodes.to_vec();
-        let nodes6 = nodes.to_vec();
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
+        let nodes4  = nodes.to_vec();
+        let nodes6  = nodes.to_vec();
 
         tokio::join!(
             async move {
@@ -324,10 +336,10 @@ impl Node {
     ) -> Result<JointResult<NodeInfo>> {
         self.check_running()?;
 
-        let option = self.option(lookup_option);
-        let target = target.clone();
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
+        let option  = self.lookup_option(lookup_option);
+        let target  = target.clone();
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
 
         let (rc4, rc6) = tokio::join!(
             async move {
@@ -346,13 +358,13 @@ impl Node {
             }
         );
 
-        let mut jresult = JointResult::<NodeInfo>::new();
-        for result in [rc4, rc6] {
-            if let Some(ni) = result? {
-                jresult.set_value(ni.network(), ni);
+        let mut jres = JointResult::<NodeInfo>::new();
+        for rc in [rc4, rc6] {
+            if let Some(ni) = rc? {
+                jres.set_value(ni.network(), ni);
             }
         }
-        Ok(jresult)
+        Ok(jres)
     }
 
     pub async fn find_value(&self,
@@ -365,7 +377,7 @@ impl Node {
         }
         self.check_running()?;
 
-        let option  = self.option(lookup_option);
+        let option  = self.lookup_option(lookup_option);
         let target  = value_id.clone();
         let dht4    = self.dht4();
         let dht6    = self.dht6();
@@ -406,8 +418,8 @@ impl Node {
                 }
             }
         );
-        for result in [rc4, rc6] {
-            if let Some(value) = result? {
+        for rc in [rc4, rc6] {
+            if let Some(value) = rc? {
                 eligible.update(value, true);
             }
         }
@@ -432,7 +444,7 @@ impl Node {
         self.check_running()?;
 
         let target  = peer_id.clone();
-        let option  = self.option(lookup_option);
+        let option  = self.lookup_option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
@@ -464,7 +476,7 @@ impl Node {
             async move {
                 if let Some(dht) = dht4 {
                     dht.lock().unwrap()
-                         .find_peer(&target, expected_seq, expected_count, option).await
+                    .find_peer(&target, expected_seq, expected_count, option).await
                 } else {
                     Ok(Vec::new())
                 }
@@ -478,8 +490,9 @@ impl Node {
                 }
             }
         );
-        for result in [rc4, rc6] {
-            eligible.add(result?, true);
+
+        for rc in [rc4, rc6] {
+            eligible.add(rc?, true);
         }
         eligible.prune();
 
@@ -536,12 +549,13 @@ impl Node {
                 }
             }
         );
-        for result in [rc4, rc6] {
-            let _ = result?;
+        for rc in [rc4, rc6] {
+            let _ = rc?;
         }
 
         let value_id = value.id();
-        let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
+        let _ = self.storage.lock().unwrap()
+                    .update_value_announced_time(&value_id);
         Ok(())
     }
 
@@ -597,82 +611,44 @@ impl Node {
                 }
             }
         );
-        for result in [rc4, rc6] {
-            let _ = result?;
+        for rc in [rc4, rc6] {
+            let _ = rc?;
         }
 
         // update the peer announced time.
-        let _ = self.storage.lock().unwrap().update_peer_announced_time(
-            peer.id(),
-            peer.fingerprint()
-        );
+        _ = self.storage.lock().unwrap()
+                .update_peer_announced_time(peer.id(), peer.fingerprint());
         Ok(())
     }
 
-    pub async fn value(&self, value_id: Id) -> Result<Option<Value>> {
+    pub fn value(&self, value_id: Id) -> Result<Option<Value>> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().get_value(&value_id)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().get_value(&value_id)
     }
 
-    pub async fn remove_value(&self, value_id: Id) -> Result<()> {
+    pub fn remove_value(&self, value_id: Id) -> Result<()> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().remove_value(&value_id)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().remove_value(&value_id)
     }
 
     pub async fn peers(&self, peer_id: Id) -> Result<Vec<PeerInfo>> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().get_peers(&peer_id)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().get_peers(&peer_id)
     }
 
     pub async fn remove_peers(&self, peer_id: Id) -> Result<()> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().remove_peers(&peer_id)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().remove_peers(&peer_id)
     }
 
     pub async fn peer(&self, peer_id: Id, finger_print: u64) -> Result<Option<PeerInfo>> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().get_peer(&peer_id, finger_print)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().get_peer(&peer_id, finger_print)
     }
 
     pub async fn remove_peer(&self, peer_id: Id, finger_print: u64) -> Result<()> {
         self.check_running()?;
-
-        let storage = self.storage.clone();
-        task::spawn_local(async move {
-            storage.lock().unwrap().remove_peer(&peer_id, finger_print)
-        }).await.map_err(|e|
-            DBError::new(format!("{}", e))
-        )?
+        self.storage.lock().unwrap().remove_peer(&peer_id, finger_print)
     }
 
     pub fn sign(&self, data: &[u8], signature:&mut [u8]) -> Result<usize> {
@@ -704,38 +680,6 @@ impl Node {
     }
 }
 
-/*
-fn get_keypair(path: &str) -> Result<signature::KeyPair> {
-    create_dirs(path).map_err(|e| {
-        return StateError::new(format!("Checking persistence error: {}", e));
-    }).ok().unwrap();
-
-    let keypath = path.to_string() + "key";
-    let keypair;
-
-    match fs::metadata(&keypath) {
-        Ok(metadata) => {
-            // Loading key from persistence.
-            if metadata.is_dir() {
-                return Err(StateError::new(format!("Bad file path {} for key storage.", keypath)));
-            };
-            keypair = load_key(&keypath)
-                .map_err(|e| StateError::new(format!("Error loading key: {}", e)))?
-        },
-        Err(_) => {
-            // otherwise, generate a fresh keypair
-            keypair = signature::KeyPair::random();
-            store_key(&keypath, &keypair)
-                .map_err(|e|return e)
-                .ok()
-                .unwrap();
-        }
-    };
-
-    Ok(keypair)
-}
-*/
-
 impl Identity for Node {
     fn id(&self) -> &Id {
         self.identity.id()
@@ -761,44 +705,8 @@ impl Identity for Node {
         self.identity.create_crypto_context(id)
     }
 }
-/*
-use std::str;
-fn load_key(path: &str) -> Result<signature::KeyPair> {
-    let mut fp = match File::open(path) {
-        Ok(v) => v,
-        Err(e) => return Err(IOError::new(
-            format!("Openning key file error: {}", e))),
-    };
 
-    let mut buf = Vec::new();
-    if let Err(e) = fp.read_to_end(&mut buf) {
-        return Err(IOError::new(format!("Reading key error: {}", e)));
-    };
-
-    let sk: signature::PrivateKey = str::from_utf8(&buf).map_err(|e| {
-        return StateError::new(format!("Key file is not UTF-8: {}", e));
-    })?.try_into().map_err(|e| {
-        return StateError::new(format!("Key file is not a valid key: {}", e));
-    })?;
-
-    Ok(signature::KeyPair::from(&sk))
-}
-
-fn store_key(path: &str, keypair: &signature::KeyPair) -> Result<()> {
-    let mut fp = match File::create(path) {
-        Ok(v) => v,
-        Err(e) => return Err(IOError::new(
-            format!("Creating key file error: {}", e))),
-    };
-
-    let result = fp.write_all(keypair.private_key().to_string().as_bytes());
-    if let Err(e) = result {
-        return Err(IOError::new(format!("Writing key error: {}", e)));
-    }
-    Ok(())
-}*/
-
-fn store_nodeid(path: &str, id: &Id) -> Result<()> {
+fn cache_nodeid(path: &str, id: &Id) -> Result<()> {
     let mut fp = File::create(path)
         .map_err(|e| IOError::new(format!("Creating Id file error: {e}")))?;
     fp.write_all(id.to_base58().as_bytes())

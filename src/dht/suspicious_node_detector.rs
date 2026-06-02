@@ -12,7 +12,7 @@ const SUSPICIOUS_HITS_THRESHOLD: usize = 32;
 const DEFAULT_OBSERVATION_PERIOD: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_BAN_DURATION: Duration = Duration::from_secs(30 * 60);
 
-pub trait SuspiciousNodeDetector {
+pub trait SuspiciousNodeDetector : Send + Sync {
     fn is_suspicious_with_expected(&self, addr: &SocketAddr, expected: Option<&Id>) -> bool;
 
     fn is_suspicious(&self, addr: &SocketAddr) -> bool {
@@ -80,6 +80,9 @@ impl Default for DefaultSuspiciousNodeDetector {
         )
     }
 }
+
+unsafe impl Send for ObservationRecord {}
+unsafe impl Sync for ObservationRecord {}
 
 impl DefaultSuspiciousNodeDetector {
     pub fn new(

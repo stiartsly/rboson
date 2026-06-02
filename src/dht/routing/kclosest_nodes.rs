@@ -4,13 +4,18 @@ use std::{
 };
 
 use crate::{Id, NodeInfo};
-use crate::dht::routing::{
-    KBucket,
-    KBucketEntry,
-    RoutingTable
+use crate::dht::{
+    dht::DHT,
+    routing::{
+        KBucket,
+        KBucketEntry,
+        RoutingTable
+    }
 };
+
 pub(crate) struct KClosestNodes {
-    rt      : Arc<Mutex<RoutingTable>>,
+    local_id: Id,
+    buckets : Vec<Arc<Mutex<KBucket>>>,
     target  : Id,
     capacity: usize,
     entries : Vec<KBucketEntry>,
@@ -19,17 +24,26 @@ pub(crate) struct KClosestNodes {
 
 impl KClosestNodes {
     pub(crate) fn new(
-        rt: Arc<Mutex<RoutingTable>>,
+        dht: &DHT,
         target: Id,
         capacity: usize
     ) -> Self {
+        let local_id = dht.rt().local_nodeid().clone();
+        let buckets  = dht.rt().buckets();
         Self {
-            rt: rt.clone(),
+            filter: Self::default_filter(local_id.clone()),
+            local_id,
+            buckets,
             target,
             capacity,
             entries: Vec::with_capacity(capacity + KBucket::MAX_ENTRIES),
-            filter: wrap_filter(rt, |e: &KBucketEntry| e.eligible_for_nodes_list()),
         }
+    }
+
+    fn default_filter(local_id: Id) -> Box<dyn Fn(&KBucketEntry) -> bool> {
+        Box::new(move |entry: &KBucketEntry| {
+            entry.eligible_for_nodes_list() && entry.id() != &local_id
+        })
     }
 
     #[cfg(test)]
@@ -50,19 +64,19 @@ impl KClosestNodes {
     #[cfg(test)]
     pub(crate) fn entries(&self) -> &[KBucketEntry] {
         &self.entries
-     }
+    }
 
     pub(crate) fn set_filter<F>(&mut self, cb: F)
     where F: Fn(&KBucketEntry) -> bool + 'static
     {
-        self.filter = wrap_filter(self.rt.clone(), cb);
+        let local_id = self.local_id.clone();
+        self.filter = Box::new(move |entry: &KBucketEntry| {
+            cb(entry) && entry.id() != &local_id
+        });
     }
 
     pub(crate) fn fill(&mut self) {
-        let buckets = {
-            let locked_rt = self.rt.lock().unwrap();
-            locked_rt.buckets()
-        };
+        let buckets = self.buckets.clone();
         if buckets.is_empty() {
             return;
         }
@@ -149,15 +163,6 @@ impl KClosestNodes {
         // to free the resource.
         _ = self.entries.split_off(self.capacity);
     }
-}
-
-fn wrap_filter<F>(rt: Arc<Mutex<RoutingTable>>, filter: F) -> Box<dyn Fn(&KBucketEntry) -> bool>
-where F: Fn(&KBucketEntry) -> bool + 'static,
-{
-    Box::new(move |entry: &KBucketEntry| {
-        let rt = rt.lock().unwrap();
-        filter(entry) && entry.id() != rt.local_nodeid()
-    })
 }
 
 impl Into<Vec<KBucketEntry>> for KClosestNodes {

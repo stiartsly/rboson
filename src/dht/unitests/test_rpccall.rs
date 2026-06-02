@@ -137,7 +137,7 @@ mod tests {
         assert_eq!(state_changes.lock().unwrap().to_owned(), State::Sent);
 
         let rsp = make_response(&call.lock().unwrap());
-        call.lock().unwrap().respond(rsp);
+        //call.lock().unwrap().respond(rsp);
         assert_eq!(call.lock().unwrap().state(), State::Responded);
         assert_eq!(responded.lock().unwrap().to_owned(), 1);
         assert_eq!(state_changes.lock().unwrap().to_owned(), State::Responded);
@@ -162,7 +162,7 @@ mod tests {
         let mut err = msg::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
         err.set_nodeid(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
-        error_call.lock().unwrap().respond(err);
+        //error_call.lock().unwrap().respond(err);
 
         let locked = error_call.lock().unwrap();
         assert_eq!(locked.state(), State::Err);

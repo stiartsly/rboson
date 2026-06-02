@@ -36,7 +36,6 @@ impl TaskManager {
         if self.canceling.load(Ordering::SeqCst) {
             return;
         }
-
         if task.is_ended() {
             return;
         }

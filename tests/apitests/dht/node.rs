@@ -1,7 +1,9 @@
-use std::time::Duration;
+use std::{
+    time::Duration,
+    fs,
+    sync::Arc,
+};
 use serial_test::serial;
-use std::fs;
-
 use boson::{
     cryptobox::{Nonce, CryptoBox},
     core::{PeerBuilder, Result, ValueBuilder},
@@ -31,7 +33,7 @@ fn working_path(input: &str) -> String {
     path.display().to_string()
 }
 
-fn create_node(port: u16, path: &str) -> Result<Node> {
+fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
     let private_key = signature::KeyPair::random().private_key().to_string();
     let config_path = format!("{path}/node.yaml");
     let yaml = format!(
@@ -44,7 +46,7 @@ fn create_node(port: u16, path: &str) -> Result<Node> {
     fs::write(&config_path, yaml)?;
     let cfg = NodeConfiguration::load(&config_path).unwrap();
 
-    Ok(Node::new(Box::new(cfg)).unwrap())
+    Ok(Node::new(Box::new(cfg))?)
 }
 
 #[tokio::test]
@@ -533,7 +535,7 @@ async fn test_get_value() {
     _ = node1.store_value(&value, -1, false).await.unwrap();
 
     let value_id = value.id();
-    let result = node1.value(value_id).await;
+    let result = node1.value(value_id);
     match result {
         Ok(Some(v)) => {
             assert_eq!(v.id(), value_id);
@@ -628,13 +630,13 @@ async fn test_remove_value() {
     _ = node1.store_value(&value, -1, false).await.unwrap();
 
     let value_id = value.id();
-    let result = node1.remove_value(value_id.clone()).await;
+    let result = node1.remove_value(value_id.clone());
     match result {
         Ok(_) => assert!(true),
         Err(e) => panic!("remove value error: {}", e),
     }
 
-    let result = node1.value(value_id).await;
+    let result = node1.value(value_id);
     match result {
         Ok(Some(_)) => assert!(false),
         Ok(None) => assert!(true),

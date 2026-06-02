@@ -133,19 +133,23 @@ impl Task for NodeLookupTask {
     }
 
     fn prepare(&mut self) {
+        let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to prepare: DHT instance dropped",
+                    self.task_name(),
+                    self.task_id()
+            );
+            return;
+        };
+
         let target = match self.bootstrap {
             true => self.target().distance(&Id::MAX_ID),
             false => self.target().clone()
         };
 
-        let Some(strong_dht) = self.dht.upgrade() else {
-            return;
-        };
-        let rt = strong_dht.lock().unwrap().rt();
-
         let kes:Vec<KBucketEntry> = {
-            let mut kns = KClosestNodes::new(
-                rt,
+            let locked_dht = strong_dht.lock().unwrap();
+             let mut kns = KClosestNodes::new(
+                &locked_dht,
                 target,
                 KBucket::MAX_ENTRIES *3
             );
@@ -167,9 +171,14 @@ impl Task for NodeLookupTask {
         LookupTask::iterate(self);
 
         let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to iterate: DHT instance dropped",
+                    self.task_name(),
+                    self.task_id()
+            );
             return;
         };
         let network = strong_dht.lock().unwrap().network();
+        drop(strong_dht);
 
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
@@ -201,17 +210,24 @@ impl Task for NodeLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let dht = self.dht.upgrade()
-            .expect("panic: DHT instance dropped.");
-        let msg = call.rsp()
-            .expect("no response set");
+
+        let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to process response: DHT instance dropped",
+                    self.task_name(),
+                    self.task_id()
+            );
+            return;
+        };
+        let network = strong_dht.lock().unwrap().network();
+        drop(strong_dht);
+
+        let msg = call.rsp().expect("no response set");
 
         let Body::FindNodeResponse(body) = msg.body()
             .expect("no message body") else {
             return;
         };
 
-        let network = dht.lock().unwrap().network();
         let nodes = body.nodes(network);
         let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;

@@ -294,8 +294,8 @@ impl Message {
         self.associated_call.clone()
     }
 
-    pub(crate) fn set_associated_call(&mut self, call: Option<Arc<Mutex<RpcCall>>>) {
-        self.associated_call = call;
+    pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {
+        self.associated_call = Some(call);
     }
 
     pub(crate) fn remote_id(&self) -> &Id {

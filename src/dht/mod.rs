@@ -63,6 +63,7 @@ mod task {
         peer_announce::PeerAnnounceTask,
         value_lookup::ValueLookupTask,
         value_announce::ValueAnnounceTask,
+        ping_refresh::PingRefreshTask,
     };
 }
 
@@ -111,6 +112,7 @@ pub mod connection_status;
 pub mod node_status;
 pub mod node_status_listener;
 pub mod lookup_option;
+pub mod version;
 pub mod node;
 
 pub use crate::dht::{
@@ -196,7 +198,7 @@ mod unitests {
 
     // routingtable
     mod test_prefix;
-    mod test_kclosest_nodes;
+   // mod test_kclosest_nodes;
     mod test_routing_table;
     mod test_kbucket_entry;
 

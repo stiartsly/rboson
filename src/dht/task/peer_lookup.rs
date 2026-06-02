@@ -91,13 +91,18 @@ impl Task for PeerLookupTask {
     }
 
     fn prepare(&mut self) {
-        let dht = self.dht.upgrade()
-            .expect("panic: DHT instance dropped.");
+        let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to prepare: DHT instance dropped",
+                self.task_name(),
+                self.task_id()
+            );
+            return;
+        };
 
-        let rt = dht.lock().unwrap().rt();
-        let entries:Vec<KBucketEntry> = {
+        let entries: Vec<KBucketEntry> = {
+            let locked = strong_dht.lock().unwrap();
             let mut kns = KClosestNodes::new(
-                rt,
+                &locked,
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -116,11 +121,17 @@ impl Task for PeerLookupTask {
     }
 
     fn iterate(&mut self) {
-        LookupTask::iterate(self);
+        let Some(strong_dht) = self.dht.upgrade() else {
+            error!("{}#{} failed to iterate: DHT instance dropped",
+                    self.task_name(),
+                    self.task_id()
+            );
+            return;
+        };
+        let network = strong_dht.lock().unwrap().network();
+        drop(strong_dht);
 
-        let dht = self.dht.upgrade()
-            .expect("panic: DHT instance dropped.");
-        let network = dht.lock().unwrap().network();
+        LookupTask::iterate(self);
 
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
@@ -194,10 +205,17 @@ impl Task for PeerLookupTask {
                 self.result.prune();
             }
         } else {
-            let dht = self.dht.upgrade()
-                .expect("panic: DHT instance dropped.");
-            let network = dht.lock().unwrap().network();
-             let nodes = body.nodes(network);
+            let Some(strong_dht) = self.dht.upgrade() else {
+                error!("{}#{} failed to iterate: DHT instance dropped",
+                        self.task_name(),
+                        self.task_id()
+                );
+                return;
+            };
+
+            let network = strong_dht.lock().unwrap().network();
+            let nodes = body.nodes(network);
+            drop(strong_dht);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

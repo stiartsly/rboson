@@ -67,9 +67,9 @@ privateKey: ${NODE_PRIVATE_KEY}
 #   - SQLite: Ideal for lightweight or personal nodes. (e.g., jdbc:sqlite:node.db)
 #   - PostgreSQL: Recommended for high-performance or super nodes.
 #
-database:
+databaseUri: storage.db
   # Database connection URI.
-  uri: jdbc:sqlite:node.db
+  # uri: jdbc:sqlite:node.db
 
   # Connection pool size. 0 uses the default for the specific driver.
   # poolSize: 0

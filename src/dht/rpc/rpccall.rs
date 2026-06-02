@@ -265,14 +265,14 @@ impl RpcCall {
         }
     }
 
-    pub(crate) fn respond(&mut self, mut rsp: Message) {
+    pub(crate) fn respond(&mut self, rsp: &Message) {
         self.resp_time = SystemTime::now();
-        rsp.set_associated_call(self.cloned.clone());
+       // rsp.set_associated_call(self.cloned.clone());
 
         self.cancel_timeout_timer();
-        self.rsp = Some(rsp);
+        // self.rsp = Some(rsp.clone());
 
-        let rsp = self.rsp.as_ref().unwrap();
+        //let rsp = self.rsp.as_ref().unwrap();
         if rsp.is_err() {
             self.cause = match rsp.body() {
                 Some(Body::Error(err)) => Some(ProtocolError::new(err.to_string())),

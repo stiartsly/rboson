@@ -18,7 +18,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_ipv4() {
+    async fn test_dht4() {
         let identity = Arc::new(CryptoIdentity::new());
         let tokenman = Arc::new(TokenManager::new());
         let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));

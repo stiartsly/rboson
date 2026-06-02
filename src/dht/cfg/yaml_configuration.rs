@@ -68,7 +68,7 @@ fn default_port() -> u16 {
 }
 
 impl NodeConfiguration {
-    pub fn from_yaml(input: &str) -> Result<Self> {
+    pub fn from(input: &str) -> Result<Self> {
         let expanded = expand_env(input)?;
         let config = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
             .map_err(|e| ArgumentError::new(format!("Invalid node.yaml content: {e}")))?;
@@ -80,7 +80,7 @@ impl NodeConfiguration {
         let input = fs::read_to_string(path).map_err(|e|
             IOError::new(format!("Reading config {} failed: {e}", path.display()))
         )?;
-        Self::from_yaml(&input)
+        Self::from(&input)
     }
 
     pub fn load_default() -> Result<Self> {

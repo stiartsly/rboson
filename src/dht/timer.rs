@@ -74,8 +74,7 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    pub(crate) fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub(crate) fn new(tx: mpsc::UnboundedSender<Command>) -> Self {
         Self {
             next_jobid: AtomicU64::new(1),
             tx,

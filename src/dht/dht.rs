@@ -30,7 +30,7 @@ use crate::dht::{
     rpc::{
         Reachability,
         RpcCall, rpccall::State as CallState,
-        rpc_server::RpcServer,
+        rpc_server::{RpcServer, RunLoopContext},
     },
     msg::{
         Message,
@@ -494,11 +494,19 @@ impl DHT {
             }
         });
 
-        let timer_client = s.timer_client();
         s.start().await?;
-        //s.run_loop()?;
 
-        self.server = Some(Arc::new(Mutex::new(s)));
+        let server = Arc::new(Mutex::new(s));
+        let run_loop_ctx = RunLoopContext::new(
+            server.clone(),
+            self.weak_dht().upgrade().expect("DHT instance should still be alive"),
+        );
+        tokio::spawn(async move {
+            run_loop_ctx.run_loop().await;
+        });
+
+        let timer_client = server.lock().unwrap().timer_client();
+        self.server = Some(server);
         self.timer_client = Some(timer_client);
         self.set_status(ConnectionStatus::Connecting);
 

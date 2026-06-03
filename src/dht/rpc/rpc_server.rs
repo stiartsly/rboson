@@ -1,7 +1,7 @@
 use std::{
     fmt,
     net::SocketAddr,
-    sync::{Arc, Weak, Mutex},
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime},
     collections::HashMap,
 };
@@ -25,7 +25,6 @@ use crate::dht::{
     rpc::RpcCall,
     msg::Message,
     timer::{self, Job, Command},
-    suspicious_node_detector::DefaultSuspiciousNodeDetector,
 };
 
 #[allow(dead_code)]
@@ -50,7 +49,7 @@ pub(crate) struct RpcServer {
     is_running          : bool,
     reachable_check_task: Option<JoinHandle<()>>,
 
-    client              : Arc<timer::Client>,
+    timer_client        : Option<Arc<timer::Client>>,
     tx_channel          : Option<UnboundedSender<Command>>,
     rx_channel          : Option<UnboundedReceiver<Command>>,
 
@@ -70,6 +69,7 @@ impl RpcServer {
         identity: Arc<CryptoIdentity>,
         suspicious_node_detector: Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     ) -> Self {
+
         Self {
             ni,
             identity,
@@ -87,7 +87,7 @@ impl RpcServer {
             is_running          : false,
             reachable_check_task: None,
 
-            client              : Arc::new(timer::Client::new()),
+            timer_client        : None,
             tx_channel          : None,
             rx_channel          : None,
             tx_socket           : None,
@@ -100,7 +100,9 @@ impl RpcServer {
     }
 
     pub(crate) fn timer_client(&self) -> Arc<timer::Client> {
-        self.client.clone()
+        self.timer_client.as_ref()
+            .expect("timer client should be initialized")
+            .clone()
     }
 
     fn tx_socket(&self) -> &Arc<UdpSocket> {
@@ -216,6 +218,7 @@ impl RpcServer {
 
     pub(crate) async fn start(&mut self) -> Result<()> {
         let (tx, rx) = mpsc::unbounded_channel::<Command>();
+        self.timer_client = Some(Arc::new(timer::Client::new(tx.clone())));
         self.rx_channel = Some(rx);
         self.tx_channel = Some(tx);
 
@@ -239,6 +242,13 @@ impl RpcServer {
         self.recv_packets_at_last_reachable_check = 0;
 
         Ok(())
+    }
+
+    pub(crate) fn run_loop_context(
+        rpc_server: Arc<Mutex<RpcServer>>,
+        dht: Arc<Mutex<DHT>>,
+    ) -> RunLoopContext {
+        RunLoopContext::new(rpc_server, dht)
     }
 
     pub(crate) fn stop(&mut self) {
@@ -330,7 +340,7 @@ impl RpcServer {
         Ok(sent_len)
     }
 
-    async fn parse_packet(
+    fn parse_packet(
         &mut self,
         data: &[u8],
         from: &SocketAddr
@@ -476,7 +486,7 @@ impl fmt::Display for RpcServer {
 }
 
 #[allow(dead_code)]
-struct RunLoopContext {
+pub(crate) struct RunLoopContext {
     timer_queue : DelayQueue<timer::TimerId>,
     jobs        : HashMap<u64, Job>,
     keys        : HashMap<u64, Key>,
@@ -489,7 +499,7 @@ struct RunLoopContext {
 
 #[allow(dead_code)]
 impl RunLoopContext {
-    fn new(rpc_server: Arc<Mutex<RpcServer>>, dht: Arc<Mutex<DHT>>) -> Self {
+    pub(crate) fn new(rpc_server: Arc<Mutex<RpcServer>>, dht: Arc<Mutex<DHT>>) -> Self {
         Self {
             timer_queue : DelayQueue::new(),
             jobs        : HashMap::new(),
@@ -583,10 +593,10 @@ impl RunLoopContext {
                     };
 
                     let msg = rpc_server.lock().unwrap()
-                        .parse_packet(&buf[..len], &from).await;
+                        .parse_packet(&buf[..len], &from);
 
                     if let Some(msg) = msg {
-                        self.dht.lock().unwrap().on_message(&msg);
+                        dht.lock().unwrap().on_message(&msg);
                     }
                 }
                 else => break,

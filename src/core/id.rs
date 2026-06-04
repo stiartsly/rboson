@@ -57,7 +57,7 @@ impl Id {
 
     pub fn try_from_hexstr(input: &str) -> Result<Self> {
         let Some(input) = input.strip_prefix("0x") else {
-            return Err(ArgumentError::new("Hex format strings must have a '0x' prefix.".into()));
+            return Err(ArgumentError::new("Hex format strings must have a '0x' prefix."));
         };
 
         let mut bytes = [0u8; Id::BYTES];
@@ -69,7 +69,7 @@ impl Id {
 
     pub fn try_from_base58(input: &str) -> Result<Self> {
         if input.starts_with("0x") {
-            return Err(ArgumentError::new("Base58 format strings must not have a '0x' prefix.".into()));
+            return Err(ArgumentError::new("Base58 format strings must not have a '0x' prefix."));
         }
 
         let mut bytes = [0u8; Id::BYTES];

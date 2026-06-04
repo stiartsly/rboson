@@ -151,10 +151,10 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            return Err(ArgumentError::new("Id cannot be empty".into()).into());
+            return Err(ArgumentError::new("Id cannot be empty"));
         }
         if self.claims.is_empty() {
-            return Err(ArgumentError::new("Claims cannot be empty".into()).into());
+            return Err(ArgumentError::new("Claims cannot be empty"));
         }
 
         let id = self.identity.id().clone();

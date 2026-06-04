@@ -1,10 +1,3 @@
-pub(crate) mod storage;
-pub mod errors;
-mod cfg {
-    pub(crate) mod node_config;
-    pub(crate) mod yaml_configuration;
-}
-
 mod msg {
     pub(crate) mod msg;
     pub(crate) mod error;
@@ -96,40 +89,40 @@ mod rpc {
     };
 }
 
+mod storage;
 mod cached_identity;
 mod dht;
-mod timer;
-mod token_manager;
-
 mod consumer;
 mod promise;
 mod eligible_peers;
 mod eligible_value;
 mod suspicious_node_detector;
+mod token_manager;
+mod timer_queue;
+mod timer_client;
 
+pub mod node_config;
+pub mod yaml_configuration;
+pub mod errors;
 pub mod connection_status_listener;
 pub mod connection_status;
 pub mod node_status;
 pub mod node_status_listener;
 pub mod lookup_option;
-pub mod version;
 pub mod node;
 
 pub use crate::dht::{
+    node::Node,
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
     node_status_listener::NodeStatusListener,
-    node::Node,
-    cfg::node_config::NodeConfig,
-    cfg::yaml_configuration::NodeConfiguration,
+    node_config::NodeConfig,
+    yaml_configuration::NodeConfiguration,
 };
 
 pub(crate) mod utils {
-    use std::net::{
-        SocketAddr,
-        IpAddr
-    };
+    use std::net::{ SocketAddr, IpAddr};
 
     pub(crate) fn is_broadcast(ip: &IpAddr) -> bool {
         match ip {

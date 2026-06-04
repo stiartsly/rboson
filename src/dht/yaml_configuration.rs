@@ -13,51 +13,48 @@ use crate::{
     NodeInfo,
     signature,
     errors::{Result, IOError, ArgumentError},
-    dht::cfg::node_config::{
-        NodeConfig,
-        DEFAULT_DHT_PORT
-    }
+    dht::{NodeConfig, node_config::DEFAULT_DHT_PORT},
 };
 
 #[derive(Debug, Clone)]
 pub struct NodeConfiguration {
-    host4: Option<String>,
-    host6: Option<String>,
-    port: u16,
-    private_key: signature::PrivateKey,
-    data_dir: String,
+    host4       : Option<String>,
+    host6       : Option<String>,
+    port        : u16,
+    private_key : signature::PrivateKey,
+    data_dir    : String,
     database_uri: String,
     bootstrap_nodes: Vec<NodeInfo>,
-    log_level: LevelFilter,
-    log_file: Option<String>,
-    devp: bool,
+    log_level   : LevelFilter,
+    log_file    : Option<String>,
+    devp        : bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct YamlNodeConfig {
-    ipv4: Option<bool>,
-    ipv6: Option<bool>,
+    ipv4        : Option<bool>,
+    ipv6        : Option<bool>,
     #[serde(default = "default_port")]
-    port: u16,
+    port        : u16,
     #[serde(rename = "privateKey")]
-    private_key: String,
+    private_key : String,
     #[serde(rename = "dataDir")]
-    data_dir: Option<String>,
+    data_dir    : Option<String>,
     #[serde(rename = "databaseUri")]
     database_uri: String,
     #[serde(default)]
-    bootstraps: Vec<YamlNodeEntry>,
-    logger: Option<YamlLoggerConfig>,
+    bootstraps  : Vec<YamlNodeEntry>,
+    logger      : Option<YamlLoggerConfig>,
     #[serde(rename = "enableDeveloperMode", default)]
-    devp: bool,
+    devp        : bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct YamlLoggerConfig {
     #[serde(rename = "logLevel")]
-    level: Option<String>,
+    level       : Option<String>,
     #[serde(rename = "logFile")]
-    log_file: Option<String>,
+    log_file    : Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,7 +229,7 @@ fn expand_env(input: &str) -> Result<String> {
 
         let var_start = start + 2;
         let Some(endoff) = input[var_start..].find('}') else {
-            return Err(ArgumentError::new("Unclosed environment placeholder in node.yaml".into()));
+            return Err(ArgumentError::new("Unclosed environment placeholder in node.yaml"));
         };
         let end = var_start + endoff;
         let name = &input[var_start..end];

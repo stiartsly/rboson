@@ -45,7 +45,7 @@ impl EligibleValue {
         self.latest
     }
 
-    pub(crate) fn value(&mut self) -> Option<Value> {
-        self.value.take()
+    pub(crate) fn value(&self) -> Option<Value> {
+        self.value.as_ref().map(|v| v.clone())
     }
 }

@@ -73,17 +73,18 @@ impl DIDUrl {
     pub fn parse(did_url: &str) -> Result<Self>{
         let trimmed: &str = did_url.trim();
         if trimmed.is_empty() {
-            return Err(StateError::new("DIDUrl cannot be empty".into()).into());
+            return Err(StateError::new("DIDUrl cannot be empty"));
         }
 
         let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
         if parts.len() != 3 && parts.len() != 1 {
-            return Err(MalformedError::new(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)).into());
+            return Err(MalformedError::new(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)));
         }
 
         let scheme = if parts.len() == 3 {
             if parts[0] != DID_SCHEME {
-                return Err(MalformedError::new(format!("Invalid DIDUrl scheme: {}", parts[0])).into());
+                return Err(MalformedError::new(format!("Invalid DIDUrl scheme: {}", parts[0])));
+
             }
             Some(DID_SCHEME)
         } else {

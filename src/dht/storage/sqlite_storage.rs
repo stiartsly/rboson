@@ -66,6 +66,13 @@ impl SqliteStorage {
     fn conn(&self) -> &mut SqliteConnection {
         unsafe { (*self.connection.get()).as_mut().unwrap() }
     }
+
+    pub(crate) fn supports(database_uri: &str) -> bool {
+        database_uri.starts_with("jdbc:sqlite:")
+    }
+    pub(crate) fn remove_prefix(database_uri: &str) -> &str {
+        database_uri.trim_start_matches("jdbc:sqlite:")
+    }
 }
 
 unsafe impl Send for SqliteStorage {}
@@ -105,10 +112,10 @@ impl DataStorage for SqliteStorage {
 
         let ver = user_version(self.conn());
         if ver < 5 && !drop_tbs(self.conn()) {
-            return Err(StateError::new("Failed to drop old db tables".into()));
+            return Err(StateError::new("Failed to drop old db tables"));
         }
         if !create_tbs(self.conn()) {
-            return Err(StateError::new("Failed to create db tables".into()));
+            return Err(StateError::new("Failed to create db tables"));
         }
         Ok(())
     }
@@ -191,7 +198,7 @@ impl DataStorage for SqliteStorage {
 
     fn put_peer(&mut self, peer: PeerInfo, persistent: Option<bool>) -> Result<()> {
         if !peer.is_valid() {
-            return Err(ArgumentError::new("peer signature validation failed".into()));
+            return Err(ArgumentError::new("peer signature validation failed"));
         }
         let now = as_ms!(SystemTime::now()) as i64;
         let p = NewPeer {

@@ -126,7 +126,7 @@ impl VerificationMethod {
     pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()> {
         match self {
             VerificationMethod::Reference(ref mut r) => r.update_reference(entity),
-            VerificationMethod::Entity(_) => Err(ArgumentError::new("Cannot update Entity with Reference".into()).into()),
+            VerificationMethod::Entity(_) => Err(ArgumentError::new("Cannot update Entity with Reference").into()),
         }
     }
 }
@@ -252,11 +252,11 @@ impl Reference {
 
     pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()>{
         if entity.is_reference() {
-            return Err(ArgumentError::new("Cannot update Reference with another Reference".into()));
+            return Err(ArgumentError::new("Cannot update Reference with another Reference"));
         }
 
         if entity.id != self.id {
-            return Err(ArgumentError::new("Entity ID does not match Reference ID".into()));
+            return Err(ArgumentError::new("Entity ID does not match Reference ID"));
         }
         self.entity = Some(entity);
         Ok(())

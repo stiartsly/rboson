@@ -28,7 +28,7 @@ fn make_dht() -> Arc<Mutex<DHT>> {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
 
-    DHT::new_shared(
+    DHT::new(
         identity,
         Network::IPv4,
         "127.0.0.1".to_string(),

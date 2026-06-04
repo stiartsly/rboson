@@ -1,7 +1,6 @@
 pub(crate) mod logger;
 pub(crate) mod version;
 
-pub mod errors;
 pub mod id;
 pub mod joint_result;
 pub mod network;
@@ -13,6 +12,7 @@ pub mod cryptobox;
 pub mod node_info;
 pub mod peer_info;
 pub mod value;
+pub mod errors;
 
 pub use crate::core::{
     id::{Id, DID_PREFIX},

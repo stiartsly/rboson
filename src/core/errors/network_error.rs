@@ -10,8 +10,8 @@ pub struct NetworkError {
 }
 
 impl NetworkError {
-    pub fn new(message: String) -> Box<Self> {
-        Box::new(Self { message })
+    pub fn new(message: impl Into<String>) -> Box<Self> {
+        Box::new(Self { message: message.into() })
     }
 }
 

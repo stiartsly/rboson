@@ -11,7 +11,6 @@ use crate::{
     errors::ProtocolError,
 };
 use crate::dht::{
-    timer::TimerId,
     msg::{Body, Message, msg::Kind},
     task::CandidateNode,
     routing::KBucketEntry,
@@ -57,7 +56,7 @@ pub(crate) struct RpcCall {
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
-    timeout_task: Option<TimerId>,
+    //TODO： timeout_task: Option<TimerId>,
     cloned      : Option<Arc<Mutex<RpcCall>>>,
 }
 
@@ -82,7 +81,7 @@ impl RpcCall {
             state       : State::Unsent,
             listener    : None,
             cause       : None,
-            timeout_task: None,
+            // TODO:timeout_task: None,
             expected_rtt: 0,
             cloned      : None,
         }
@@ -228,16 +227,16 @@ impl RpcCall {
     }
 
     fn set_timeout_timer(&mut self, _timeout: u64) {
-        self.timeout_task = None;
+        // TODO: self.timeout_task = None;
         // TODO:
     }
 
     fn cancel_timeout_timer(&mut self) {
-        self.timeout_task = None;
+        // TODO: self.timeout_task = None;
     }
 
     fn check_timeout(&mut self) {
-        self.timeout_task = None;
+        // TODO:self.timeout_task = None;
 
         if self.state != State::Sent && self.state != State::Stalled {
             return;

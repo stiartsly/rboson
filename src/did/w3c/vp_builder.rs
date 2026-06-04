@@ -56,7 +56,7 @@ impl VerifiablePresentationBuilder {
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            return Err(ArgumentError::new("Credential Id cannot be empty".into()));
+            return Err(ArgumentError::new("Credential Id cannot be empty"));
         }
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
@@ -64,7 +64,7 @@ impl VerifiablePresentationBuilder {
                 ArgumentError::new(format!("Id must has the fragment part: {}", id))
             })?;
             if url.fragment().is_none() {
-                Err(ArgumentError::new("Id must has the fragment part".into()))?;
+                Err(ArgumentError::new("Id must has the fragment part"))?;
             }
             url
         } else {
@@ -86,7 +86,7 @@ impl VerifiablePresentationBuilder {
         contexts: Vec<&str>
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            return Err(ArgumentError::new("Credential type cannot be empty".into()));
+            return Err(ArgumentError::new("Credential type cannot be empty"));
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -132,11 +132,11 @@ impl VerifiablePresentationBuilder {
         T: serde::Serialize,
     {
         if id.is_empty() {
-            return Err(ArgumentError::new("Credential Id cannot be empty".into()));
+            return Err(ArgumentError::new("Credential Id cannot be empty"));
         }
 
         if credential_type.is_empty() {
-            return Err(ArgumentError::new("Credential type cannot be empty".into()));
+            return Err(ArgumentError::new("Credential type cannot be empty"));
         }
 
         let vc = VerifiableCredential::builder(self.holder.clone())
@@ -163,7 +163,7 @@ impl BosonIdentityObjectBuilder for VerifiablePresentationBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.credentials.is_empty() {
-            Err(ArgumentError::new("VCs can not empty for VP".into()))?
+            Err(ArgumentError::new("VCs can not empty for VP"))?
         }
 
         let unsigned = VP::unsigned(

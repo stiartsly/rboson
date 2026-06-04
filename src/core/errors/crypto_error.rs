@@ -9,8 +9,8 @@ pub struct CryptoError {
 }
 
 impl CryptoError {
-    pub fn new(message: String) -> Box<Self>  {
-        Box::new(Self { message })
+    pub fn new(message: impl Into<String>) -> Box<Self>  {
+        Box::new(Self { message: message.into() })
     }
 }
 

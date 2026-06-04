@@ -65,7 +65,7 @@ impl VerifiableCredentialBuilder {
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            Err(ArgumentError::new("Credential Id cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential Id cannot be empty"))?;
         }
 
         if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
@@ -74,7 +74,7 @@ impl VerifiableCredentialBuilder {
             })?;
 
             if url.fragment().is_none() {
-                Err(ArgumentError::new("Id must has the fragment part".into()))?;
+                Err(ArgumentError::new("Id must has the fragment part"))?;
             }
 
             /*
@@ -96,7 +96,7 @@ impl VerifiableCredentialBuilder {
         context: &str
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -122,7 +122,7 @@ impl VerifiableCredentialBuilder {
         contexts: Vec<&str>
     ) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -230,19 +230,19 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            Err(ArgumentError::new("VC Id cannot be empty".into()))?;
+            Err(ArgumentError::new("VC Id cannot be empty"))?;
         }
         let Some(id) = self.id.as_ref() else {
-            return Err(ArgumentError::new("VC Id cannot be empty".into()));
+            return Err(ArgumentError::new("VC Id cannot be empty"));
         };
         if self.claims.is_empty() {
-            return Err(ArgumentError::new("VC Claims can not be empty".into()));
+            return Err(ArgumentError::new("VC Claims can not be empty"));
         }
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = id.parse::<DIDUrl>()?;
             if url.fragment().is_none() {
-                return Err(ArgumentError::new("VC Id must has the fragment part".into()));
+                return Err(ArgumentError::new("VC Id must has the fragment part"));
             }
             url
         } else {

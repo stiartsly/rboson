@@ -56,7 +56,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks".into()));
+                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks"));
             }
         }
         self.crypto_box.decrypt(cipher, plain)
@@ -66,7 +66,7 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks".into()));
+                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks"));
             }
         }
         self.crypto_box.decrypt_into(&cipher)

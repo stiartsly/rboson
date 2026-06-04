@@ -89,10 +89,10 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
 }
 
 #[allow(unused)]
-pub(crate) fn enable_console_output(enable: bool) {
+pub(crate) fn enable_console_output() {
     unsafe {
         if let Some(ref mut v) = MY_LOGGER {
-            v.console_output_enabled = enable;
+            v.console_output_enabled = true;
         }
     }
 }

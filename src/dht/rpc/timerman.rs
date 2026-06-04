@@ -6,32 +6,26 @@ use std::{
     collections::HashMap,
 };
 use log::{info, warn, error, trace};
+use futures::StreamExt;
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 use tokio::{
     net::UdpSocket,
     task::JoinHandle,
+    sync::oneshot,
+    sync::mpsc::{self, UnboundedSender, UnboundedReceiver},
 };
 
 use crate::{
-    CryptoBox,
-    CryptoIdentity,
-    Id, Identity,
-    NodeInfo,
-    cryptobox::Nonce,
-    errors::{
-        Error,
-        Result,
-        CryptoError,
-        NetworkError,
-        ProtocolError,
-        StateError
-    },
-    dht::{
-        suspicious_node_detector::SuspiciousNodeDetector,
-        dht::DHT,
-        consumer::Consumer,
-        rpc::RpcCall,
-        msg::Message,
+    CryptoBox, CryptoIdentity, Id, Identity, NodeInfo, cryptobox::Nonce, dht::suspicious_node_detector::SuspiciousNodeDetector, errors::{
+        CryptoError, Error, NetworkError, ProtocolError, Result, StateError
     }
+};
+use crate::dht::{
+    dht::DHT,
+    consumer::Consumer,
+    rpc::RpcCall,
+    msg::Message,
+    timer::{self, Job, Command},
 };
 
 #[allow(dead_code)]
@@ -56,11 +50,12 @@ pub(crate) struct RpcServer {
     is_running          : bool,
     reachable_check_task: Option<JoinHandle<()>>,
 
+    timer_client        : Option<Arc<timer::Client>>,
+    tx_channel          : Option<UnboundedSender<Command>>,
+    rx_channel          : Option<UnboundedReceiver<Command>>,
+
     tx_socket           : Option<Arc<UdpSocket>>,
     rx_socket           : Option<Arc<UdpSocket>>,
-
-    task                : Option<JoinHandle<()>>,
-    quit                : Arc<Mutex<bool>>,
 }
 
 #[allow(dead_code)]
@@ -93,10 +88,11 @@ impl RpcServer {
             is_running          : false,
             reachable_check_task: None,
 
+            timer_client        : None,
+            tx_channel          : None,
+            rx_channel          : None,
             tx_socket           : None,
             rx_socket           : None,
-            quit                : Arc::new(Mutex::new(false)),
-            task                : None,
         }
     }
 
@@ -104,8 +100,18 @@ impl RpcServer {
         self.identity.clone()
     }
 
+    pub(crate) fn timer_client(&self) -> Arc<timer::Client> {
+        self.timer_client.as_ref()
+            .expect("timer client should be initialized")
+            .clone()
+    }
+
     fn tx_socket(&self) -> &Arc<UdpSocket> {
         self.tx_socket.as_ref().expect("socket should be initialized")
+    }
+
+    fn rx_channel_take(&mut self) -> UnboundedReceiver<Command> {
+        self.rx_channel.take().expect("rx channel should be initialized")
     }
 
     fn rx_socket_take(&mut self) -> Arc<UdpSocket> {
@@ -212,6 +218,11 @@ impl RpcServer {
     */
 
     pub(crate) async fn start(&mut self) -> Result<()> {
+        let (tx, rx) = mpsc::unbounded_channel::<Command>();
+        self.timer_client = Some(Arc::new(timer::Client::new(tx.clone())));
+        self.rx_channel = Some(rx);
+        self.tx_channel = Some(tx);
+
         let socket_addr = self.ni.socket_addr();
         let socket = match UdpSocket::bind(socket_addr).await {
             Ok(socket) => Arc::new(socket),
@@ -234,14 +245,15 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(crate) async fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         if !self.is_running {
             return;
         }
 
-        if let Some(task) = self.task.take() {
-            *self.quit.lock().unwrap() = true;
-            task.await.ok();
+        // Signal run_loop to stop (fire-and-forget; don't wait for reply)
+        let (reply_tx, _) = oneshot::channel();
+        if let Some(tx) = self.tx_channel.as_ref() {
+            let _ = tx.send(Command::Stop { reply: reply_tx });
         }
 
         self.pending_calls.clear();
@@ -252,10 +264,13 @@ impl RpcServer {
 
         self.tx_socket = None;
         self.rx_socket = None;
+        self.tx_channel = None;
+        self.rx_channel = None;
+
         self.is_running = false;
+
         self.reachable = false;
         self.start_time = None;
-        self.task = None;
 
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
@@ -449,48 +464,6 @@ impl RpcServer {
         None
     }
 
-    pub(crate) fn run_loop(
-        rpc_server: Arc<Mutex<RpcServer>>,
-        dht: Weak<Mutex<DHT>>
-    ) {
-        let server = rpc_server.clone();
-        let socket = server.lock().unwrap().rx_socket_take();
-        let quit = server.lock().unwrap().quit.clone();
-        let dht = dht.upgrade().expect("DHT instance has been dropped.");
-
-        let task = tokio::spawn(async move {
-            let mut buf = vec![0u8; 2048];
-            loop {
-                tokio::select! {
-                    biased;
-                    packet = socket.recv_from(&mut buf) => {
-                        let (len, from) = match packet {
-                            Ok(v) => v,
-                            Err(e) => {
-                                error!("Rpc server failed to receive packet:{e}");
-                                continue;
-                            }
-                        };
-
-                        let msg = server.lock().unwrap()
-                            .parse_packet(&buf[..len], &from);
-
-                        if let Some(msg) = msg {
-                            dht.lock().unwrap().on_message(&msg);
-                        };
-
-                    }
-                    else => {},
-                }
-
-                if *quit.lock().unwrap() {
-                    break;
-                }
-            }
-        });
-
-        rpc_server.lock().unwrap().task = Some(task);
-    }
 }
 
 impl fmt::Display for RpcServer {
@@ -504,5 +477,149 @@ impl fmt::Display for RpcServer {
             self.ni.port(),
             self.age()
         )
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) struct RunLoopContext {
+    timer_queue : DelayQueue<timer::TimerId>,
+    jobs        : HashMap<u64, Job>,
+    keys        : HashMap<u64, Key>,
+
+    rx_channel  : UnboundedReceiver<Command>,
+    rx_socket   : Arc<UdpSocket>,
+    tx_server   : Arc<Mutex<RpcServer>>,
+    dht         : Weak<Mutex<DHT>>,
+}
+
+#[allow(dead_code)]
+impl RunLoopContext {
+    pub(crate) fn new(rpc_server: Arc<Mutex<RpcServer>>, dht: Weak<Mutex<DHT>>) -> Self {
+        println!("rpc server >>> line: {}", line!());
+        let rx_channel = rpc_server.lock().unwrap().rx_channel_take();
+        let rx_socket  = rpc_server.lock().unwrap().rx_socket_take();
+
+        Self {
+            timer_queue : DelayQueue::new(),
+            jobs        : HashMap::new(),
+            keys        : HashMap::new(),
+
+            rx_channel,
+            rx_socket,
+            tx_server   : rpc_server.clone(),
+            dht,
+        }
+    }
+
+    fn rx_channel(&mut self) -> &mut UnboundedReceiver<Command> {
+        &mut self.rx_channel
+    }
+
+    fn rx_socket(&mut self) -> &Arc<UdpSocket> {
+        &self.rx_socket
+    }
+
+    fn add_timer(&mut self, delay: Duration, job: Job) {
+        let jobid = job.id;
+        if let Some(key) = self.keys.remove(&jobid) {
+            let _ = self.timer_queue.remove(&key);
+        }
+
+        let key = self.timer_queue.insert(jobid, delay);
+        self.keys.insert(jobid, key);
+        self.jobs.insert(jobid, job);
+    }
+
+    fn remove_timer(&mut self, job_id: u64, reply: oneshot::Sender<bool>) {
+        let mut removed = false;
+        if let Some(job) = self.jobs.remove(&job_id) {
+            job.cancel();
+            removed = true;
+        }
+        if let Some(key) = self.keys.remove(&job_id) {
+            let _ = self.timer_queue.remove(&key);
+            removed = true;
+        }
+        let _ = reply.send(removed);
+    }
+
+    fn stop_timers(&mut self, reply: oneshot::Sender<()>) {
+        self.timer_queue.clear();
+        self.jobs.clear();
+        self.keys.clear();
+        let _ = reply.send(());
+    }
+
+    fn has_timers(&self) -> bool {
+        !self.jobs.is_empty() || !self.keys.is_empty()
+    }
+
+    pub(crate) async fn run_loop(mut self) {
+        let mut buf = vec![0u8; 2048];
+        let rpc_server = self.tx_server.clone();
+        let dht = self.dht.upgrade().expect("DHT instance should still be alive");
+
+        println!("run_loop >>>>> line: {}", line!());
+
+        loop {
+            tokio::select! {
+                biased;
+
+                command = self.rx_channel.recv() => {
+                    match command {
+                        Some(Command::Add { delay, job }) => {
+                            self.add_timer(delay, job);
+                        }
+                        Some(Command::Remove { job_id, reply }) => {
+                            self.remove_timer(job_id, reply);
+                        }
+                        Some(Command::Stop { reply }) => {
+                            self.stop_timers(reply);
+                            break;
+                        }
+                        None => {
+                            if !self.has_timers() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                packet = self.rx_socket.recv_from(&mut buf) => {
+                    let (len, from) = match packet {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("Rpc server failed to receive packet:{e}");
+                            continue;
+                        }
+                    };
+
+                    let msg = rpc_server.lock().unwrap()
+                        .parse_packet(&buf[..len], &from);
+
+                    if let Some(msg) = msg {
+                        dht.lock().unwrap().on_message(&msg);
+                    }
+                }
+                Some(expired) = self.timer_queue.next(), if self.has_timers() => {
+                    let job_id = expired.into_inner();
+                    self.keys.remove(&job_id);
+
+                    let Some(job) = self.jobs.remove(&job_id) else {
+                        continue;
+                    };
+
+                    if !job.is_active() {
+                        continue;
+                    }
+
+                    job.invoke();
+
+                    if let Some(interval) = job.interval {
+                        self.add_timer(interval, job);
+                    }
+                }
+                else => break,
+            }
+        }
     }
 }

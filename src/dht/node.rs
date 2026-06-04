@@ -1,39 +1,36 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration
 };
-use log::{warn, error, info};
+use log::{warn, info};
+use tokio::{
+    task::JoinHandle,
+    sync::mpsc
+};
+
 use crate::{
-    CryptoIdentity,
-    create_dirs,
-    Id,
-    Result,
+    CryptoContext, CryptoIdentity,
+    Id, Identity, JointResult, Network,
     NodeInfo, PeerInfo, Value,
-    Network,
-    signature,
-    JointResult,
-    Identity,
-    CryptoContext,
-    core::logger,
-    errors::{
-        StateError,
-        IOError,
-        ArgumentError
-    }
+    core::{logger,version},
+    Result,
+    errors::{ ArgumentError, IOError, StateError},
+    signature
 };
 use crate::dht::{
-    cfg::node_config::NodeConfig,
-    node_status::NodeStatus,
+    dht::{self, DHT},
+    NodeConfig,
     LookupOption,
-    dht::DHT,
+    node_status::NodeStatus,
     eligible_value::EligibleValue,
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
-    version,
+    timer_client::TimerClient,
+    timer_queue::{TimerQueue, Command},
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
@@ -46,17 +43,25 @@ use crate::dht::{
     }
 };
 
+const MAX_PEER_AGE  : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
+const MAX_VALUE_AGE : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
+
+const RE_ANNOUNCE_INTERVAL : Duration = Duration::from_millis(5 * 60 * 1000);        // 5 minutes in milliseconds
+const STORAGE_EXPIRE_INTERVAL : Duration = Duration::from_millis(10 * 60 * 1000);    // 10 minutes in milliseconds
+
 pub struct Node {
-    cfg     : Box<dyn NodeConfig>,
-    identity: CachedIdentity,
+    cfg         : Box<dyn NodeConfig>,
+    identity    : CachedIdentity,
 
     lookup_option  : Mutex<LookupOption>,
     status      : Mutex<NodeStatus>,
     data_dir    : String,
-    database_uri: String,
 
     dht4        : Mutex<Option<Arc<Mutex<DHT>>>>,
     dht6        : Mutex<Option<Arc<Mutex<DHT>>>>,
+
+    timer_client: Mutex<Option<Arc<TimerClient>>>,
+    timer_task  : Mutex<Option<JoinHandle<()>>>,
 
     storage     : Arc<Mutex<Box<dyn DataStorage>>>,
     tokenman    : Arc<TokenManager>,
@@ -65,32 +70,29 @@ pub struct Node {
 impl Node {
     pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
         Self::check_config(cfg.as_ref())?;
-        logger::setup(cfg.as_ref().log_level(), cfg.as_ref().log_file().as_deref());
-        logger::disable_console_output();
+
+        // Setup logger before any log is generated.
+        logger::setup(
+            cfg.as_ref().log_level(),
+            cfg.as_ref().log_file()
+        );
+        logger::enable_console_output();
 
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
 
-        let data_dir = {
-            let mut path = cfg.data_dir().to_string();
-            if path.is_empty() {
-                path.push_str(".")
-            }
-            if !path.ends_with("/") {
-                path.push_str("/");
-            }
+        let data_dir = cfg.data_dir().into();
+        let database_uri = {
+            let mut path = PathBuf::new();
+            path.push(cfg.data_dir());
+            path.push(SqliteStorage::remove_prefix(cfg.database_uri()));
             path
         };
-
-        let database_uri = {
-            let mut path = cfg.database_uri().to_string();
-            if path.is_empty() {
-                path.push_str(".")
-            }
-            if !path.ends_with("/") {
-                path.push_str("/");
-            }
-            path
+        let storage_db = {
+            let mut storage = SqliteStorage::new();
+            storage.open(database_uri.to_str().unwrap())?;
+            storage.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
+            storage
         };
 
         let identity = CachedIdentity::new({
@@ -98,10 +100,17 @@ impl Node {
             CryptoIdentity::from_keypair(kp)
         });
 
-        let id_path = data_dir.clone() + "id";
-        let _ = cache_nodeid(&id_path, identity.id()).map_err(|e| {
-            error!("Failed to cache node id to {}: {}", id_path, e);
-        });
+        // Cache the node id to a file for quick access in the future.
+        let bs58 = identity.id().to_base58();
+        File::create({
+            let mut path = PathBuf::new();
+            path.push(cfg.data_dir());
+            path.push("id");
+            path
+        }).map_err(|e| IOError::new(
+                format!("Creating node id cache file error: {e}")))?
+            .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
+                format!("Writing node id cache file error: {e}")))?;
 
         info!("Current Node id: {}", identity.id());
 
@@ -109,49 +118,56 @@ impl Node {
             cfg,
             identity,
             data_dir,
-            database_uri,
-            lookup_option: Mutex::new(LookupOption::Conservative),
-            status  : Mutex::new(NodeStatus::Stopped),
-            dht4    : Mutex::new(None),
-            dht6    : Mutex::new(None),
-            storage : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
-            tokenman: Arc::new(TokenManager::new())
+            lookup_option   : Mutex::new(LookupOption::Conservative),
+            status          : Mutex::new(NodeStatus::Stopped),
+            dht4            : Mutex::new(None),
+            dht6            : Mutex::new(None),
+            timer_client    : Mutex::new(None),
+            timer_task      : Mutex::new(None),
+            storage         : Arc::new(Mutex::new(Box::new(storage_db))),
+            tokenman        : Arc::new(TokenManager::new())
         }))
     }
 
     fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
         if cfg.host4().is_none() && cfg.host6().is_none() {
             return Err(ArgumentError::new(
-                "At least one host/address must be specified".to_string()
-            ));
+                "At least one host/address must be specified"));
         }
         if cfg.bootstrap_nodes().is_empty() {
-            warn!("No bootstrap nodes are configured");
+            return Err(ArgumentError::new(
+                "At least one bootstrap node must be specified"));
         }
 
         let data_dir = cfg.data_dir();
-        if !data_dir.is_empty() {
-            let path = Path::new(data_dir);
-            if path.exists() {
-                if !path.is_dir() {
-                    error!("Data path {} is not a directory", data_dir);
-                    return Err(ArgumentError::new(format!(
-                        "Data path {} is not a directory",
-                        data_dir
-                    )));
-                }
-            } else {
-                create_dirs(data_dir).map_err(|e| {
-                    error!("Data path {} can not be created", data_dir);
-                    ArgumentError::new(format!(
-                        "Data path {} can not be created: {}",
-                        data_dir,
-                        e
-                    ))
-                })?;
-            }
+        if data_dir.is_empty() {
+            return Err(ArgumentError::new("Data directory cannot be empty"));
         }
+        let path = Path::new(data_dir);
+        if path.exists() {
+            if !path.is_dir() {
+                return Err(ArgumentError::new(
+                    format!("Data path {} is not a directory", data_dir)))
+            }
+        } else {
+            fs::create_dir_all(path).map_err(|e| {
+                ArgumentError::new(
+                    format!("Data path {} can not be created: {}", data_dir, e))
+            })?;
+        };
 
+        let database_uri = cfg.database_uri();
+        if database_uri.is_empty() {
+            return Err(ArgumentError::new("Database URI cannot be empty"));
+        }
+        if database_uri.contains("/") {
+            return Err(ArgumentError::new(
+                "Database URI cannot contain path separator '/'"));
+        }
+        if !SqliteStorage::supports(database_uri) {
+            return Err(ArgumentError::new(
+                format!("Unsupported database URI: {}", database_uri)));
+        }
         Ok(())
     }
 
@@ -166,7 +182,7 @@ impl Node {
     }
 
     #[inline(always)]
-    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
+    fn option(&self, option: Option<LookupOption>) -> LookupOption {
         option.unwrap_or_else(|| self.default_lookup_option())
     }
 
@@ -178,63 +194,114 @@ impl Node {
         }
     }
 
+    #[inline(always)]
+    async fn start_timer_runtime(&self) {
+        let (tx, rx) = mpsc::channel::<Command>(64);
+        let timer_queue = TimerQueue::new(rx);
+        let timer_client = Arc::new(TimerClient::new(tx));
+
+        let timer_task = tokio::spawn(async move {
+            timer_queue.run().await;
+        });
+
+        *self.timer_task.lock().unwrap() = Some(timer_task);
+        *self.timer_client.lock().unwrap() = Some(timer_client);
+    }
+
+    #[inline(always)]
+    async fn stop_timer_runtime(&self) {
+        let timer_client = self.timer_client.lock().unwrap().take();
+        let timer_task = self.timer_task.lock().unwrap().take();
+
+        if let Some(timer_client) = timer_client {
+            let _ = timer_client.stop_all().await;
+        }
+        if let Some(timer_task) = timer_task {
+            let _ = timer_task.await;
+        }
+    }
+
+    #[inline(always)]
+    fn timer_client(&self) -> Arc<TimerClient> {
+        self.timer_client.lock().unwrap()
+            .as_ref().expect("Timer client is not initalized")
+            .clone()
+    }
+
     pub async fn start(&self) -> Result<()> {
         if *self.status.lock().unwrap() != NodeStatus::Stopped {
             return Ok(());
         }
         *self.status.lock().unwrap() = NodeStatus::Initializing;
 
-        let storagedb = format!("{}{}", self.data_dir, self.database_uri);
-        let mut storage = self.storage.lock().unwrap();
-        storage.open(&storagedb)?;
-        storage.initialize(
-            Duration::from_millis(120 * 60 * 1000),
-            Duration::from_millis(120 * 60 * 1000),
-        )?;
+        self.start_timer_runtime().await;
+        if let Err(err) = self.setup_periodic_tasks().await {
+            self.stop_timer_runtime().await;
+            *self.status.lock().unwrap() = NodeStatus::Stopped;
+            return Err(err);
+        }
 
         let port = self.cfg.port();
-        let identity = self.identity.identity();
+        let mut builder = dht::Builder::new();
+        builder.with_timer_client(self.timer_client())
+            .with_identity(self.identity.identity())
+            .with_storage(self.storage.clone())
+            .with_tokenman(self.tokenman.clone())
+            .with_bootstrap_nodes(self.cfg.bootstrap_nodes())
+            .with_datadir(self.data_dir.as_str());
 
         if let Some(host4) = self.cfg.host4() {
-            let dht = DHT::new_shared(
-                identity.clone(),
-                Network::IPv4,
-                host4.into(),
-                port,
-                Some(format!("{}dht4.cache", self.data_dir)),
-                self.cfg.bootstrap_nodes().to_vec(),
-                self.storage.clone(),
-                self.tokenman.clone(),
-            )?;
-
-            let rc = dht.lock().unwrap().start().await;
-            if let Err(err) = rc  {
+            let rc = builder.build_dht4(host4, port);
+            if let Err(err) = rc {
+                self.stop_timer_runtime().await;
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
-            } else {
-                *self.dht4.lock().unwrap() = Some(dht);
             }
+
+            let mut dht4 = rc.unwrap();
+            dht4.set_connection_status_listener();
+
+            if let Err(err) = dht4.start().await {
+                self.stop_timer_runtime().await;
+                *self.status.lock().unwrap() = NodeStatus::Stopped;
+                return Err(err);
+            }
+
+            *self.dht4.lock().unwrap() = Some({
+                let dht = Arc::new(Mutex::new(dht4));
+                dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+                dht
+            });
         }
 
         if let Some(host6) = self.cfg.host6() {
-            let dht = DHT::new_shared(
-                identity.clone(),
-                Network::IPv6,
-                host6.into(),
-                port,
-                Some(format!("{}dht6.cache", self.data_dir)),
-                self.cfg.bootstrap_nodes().to_vec(),
-                self.storage.clone(),
-                self.tokenman.clone(),
-            )?;
-
-            let rc = dht.lock().unwrap().start().await;
-            if let Err(err) = rc  {
+            let rc = builder.build_dht6(host6, port);
+            if let Err(err) = rc {
+                if let Some(dht4) = self.dht4.lock().unwrap().take() {
+                    dht4.lock().unwrap().stop().await;
+                }
+                self.stop_timer_runtime().await;
                 *self.status.lock().unwrap() = NodeStatus::Stopped;
                 return Err(err);
-            } else {
-                *self.dht6.lock().unwrap() = Some(dht);
             }
+
+            let mut dht6 = rc.unwrap();
+            dht6.set_connection_status_listener();
+
+            if let Err(err) = dht6.start().await {
+                if let Some(dht4) = self.dht4.lock().unwrap().take() {
+                    dht4.lock().unwrap().stop().await;
+                }
+                self.stop_timer_runtime().await;
+                *self.status.lock().unwrap() = NodeStatus::Stopped;
+                return Err(err);
+            }
+
+            *self.dht6.lock().unwrap() = Some({
+                let dht = Arc::new(Mutex::new(dht6));
+                dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+                dht
+            });
         }
 
         *self.status.lock().unwrap() = NodeStatus::Running;
@@ -258,11 +325,48 @@ impl Node {
             dht.lock().unwrap().stop().await;
         }
 
+        self.stop_timer_runtime().await;
         self.storage.lock().unwrap().close()?;
 
         info!("Kademlia node stopped.");
         logger::teardown();
 
+        Ok(())
+    }
+
+    async fn setup_periodic_tasks(&self) -> Result<()> {
+        let timer_client = self.timer_client.lock().unwrap()
+            .as_ref().expect("Timer client is not initalized")
+            .clone();
+
+        let storage = self.storage.clone();
+        let _ = timer_client.add_timer(
+            Duration::from_millis(30*1000),
+            Some(STORAGE_EXPIRE_INTERVAL),
+            move || {
+                _ = storage.lock().unwrap().purge();
+            }
+        ).await?;
+
+        let storage = self.storage.clone();
+        let _ = timer_client.add_timer(
+            Duration::from_millis(5*60*1000),
+            Some(RE_ANNOUNCE_INTERVAL),
+            move || {
+                // TODO:
+                let _ = storage.clone();
+                unimplemented!();
+            }
+        ).await?;
+
+        let tokenman = self.tokenman.clone();
+        let _ = timer_client.add_timer(
+            TokenManager::TOKEN_TIMEOUT,
+            Some(TokenManager::TOKEN_TIMEOUT),
+            move || {
+                tokenman.update_token_timestamp();
+            }
+        ).await?;
         Ok(())
     }
 
@@ -305,7 +409,7 @@ impl Node {
 
     pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
         if nodes.is_empty() {
-            return Err(ArgumentError::new("Bootstrap nodes cannot be empty".to_string()));
+            return Err(ArgumentError::new("Bootstrap nodes cannot be empty"));
         }
         self.check_running()?;
 
@@ -336,35 +440,35 @@ impl Node {
     ) -> Result<JointResult<NodeInfo>> {
         self.check_running()?;
 
-        let option  = self.lookup_option(lookup_option);
         let target  = target.clone();
+        let option  = self.option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let (rc4, rc6) = tokio::join!(
-            async move {
+        let rc = tokio::select!{
+            v = async move {
                 if let Some(dht) = dht4 {
                     dht.lock().unwrap().find_node(&target, option).await
                 } else {
                     Ok(None)
                 }
-            },
-            async move {
+            }, if dht4.is_some() => (Network::IPv4, v),
+            v = async move {
                 if let Some(dht) = dht6 {
                     dht.lock().unwrap().find_node(&target, option).await
                 } else {
                     Ok(None)
                 }
-            }
-        );
+            }, if dht6.is_some() => (Network::IPv6, v),
+        };
 
-        let mut jres = JointResult::<NodeInfo>::new();
-        for rc in [rc4, rc6] {
-            if let Some(ni) = rc? {
-                jres.set_value(ni.network(), ni);
+        Ok({
+            let mut jres = JointResult::<NodeInfo>::new();
+            if let Some(ni) = rc.1? {
+                jres.set_value(rc.0, ni);
             }
-        }
-        Ok(jres)
+            jres
+        })
     }
 
     pub async fn find_value(&self,
@@ -373,21 +477,21 @@ impl Node {
         lookup_option: Option<LookupOption>
     ) -> Result<Option<Value>> {
         if expected_seq < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(
+                format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
-        let option  = self.lookup_option(lookup_option);
         let target  = value_id.clone();
+        let option  = self.option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
         let mut eligible = EligibleValue::new(
-            target,
-            expected_seq
+            target, expected_seq
         );
 
-        let value = self.storage.lock().unwrap().get_value(&target)?;
+        let value = crate::locked!(self.storage).get_value(&target)?;
         if let Some(v) = value {
             let is_mutable = v.is_mutable();
             eligible.update(v, false);
@@ -400,33 +504,33 @@ impl Node {
             }
         }
 
-        let (rc4, rc6) = tokio::join!(
-            async move {
+        let rc = tokio::select!(
+            v = async move {
                 if let Some(dht) = dht4 {
-                    dht.lock().unwrap()
-                        .find_value(&target, expected_seq, option).await
+                    crate::locked!(dht).find_value(
+                        &target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
-            },
-            async move {
+            }, if dht4.is_some() => v,
+            v = async move {
                 if let Some(dht) = dht6 {
-                    dht.lock().unwrap()
-                        .find_value(&target, expected_seq, option).await
+                    crate::locked!(dht).find_value(
+                        &target, expected_seq, option).await
                 } else {
                     Ok(None)
                 }
-            }
+            }, if dht6.is_some() => v
         );
-        for rc in [rc4, rc6] {
-            if let Some(value) = rc? {
-                eligible.update(value, true);
-            }
+
+        if let Some(value) = rc? {
+            eligible.update(value, true);
         }
 
         if !eligible.is_empty() && eligible.is_latest() {
-            let value = eligible.value().unwrap();
-            let _ = self.storage.lock().unwrap().put_value(value, None);
+            let _ = crate::locked!(self.storage).put_value(
+                eligible.value().unwrap(), None
+            );
         }
 
         Ok(eligible.value())
@@ -439,26 +543,22 @@ impl Node {
         lookup_option: Option<LookupOption>
     ) -> Result<Vec<PeerInfo>> {
         if expected_seq < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(
+                format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
         let target  = peer_id.clone();
-        let option  = self.lookup_option(lookup_option);
+        let option  = self.option(lookup_option);
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
         let mut eligible = EligiblePeers::new(
-            target,
-            expected_seq,
-            expected_count
+            target, expected_seq, expected_count
         );
 
-        let peers = self.storage.lock().unwrap().get_peers_with_expected_seq(
-            &target,
-            expected_seq,
-            expected_count as i32
-        )?;
+        let peers = crate::locked!(self.storage).get_peers_with_expected_seq(
+                &target, expected_seq, expected_count as i32)?;
         eligible.add(peers, false);
         eligible.prune();
 
@@ -472,33 +572,30 @@ impl Node {
             }
         }
 
-        let (rc4, rc6) = tokio::join!(
-            async move {
+        let rc = tokio::select!(
+            v = async move {
                 if let Some(dht) = dht4 {
-                    dht.lock().unwrap()
-                    .find_peer(&target, expected_seq, expected_count, option).await
+                    crate::locked!(dht).find_peer(
+                        &target, expected_seq, expected_count, option).await
                 } else {
                     Ok(Vec::new())
                 }
-            },
-            async move {
+            }, if dht4.is_some() => v,
+            v = async move {
                 if let Some(dht) = dht6 {
-                    dht.lock().unwrap()
-                         .find_peer(&target, expected_seq, expected_count, option).await
+                    crate::locked!(dht).find_peer(
+                        &target, expected_seq, expected_count, option).await
                 } else {
                     Ok(Vec::new())
                 }
-            }
+            }, if dht6.is_some() => v
         );
 
-        for rc in [rc4, rc6] {
-            eligible.add(rc?, true);
-        }
+        eligible.add(rc?, true);
         eligible.prune();
 
         if !eligible.is_empty() && eligible.is_latest() {
-            let peers = eligible.peers();
-            let _ = self.storage.lock().unwrap().put_peers(peers);
+            let _ = self.storage.lock().unwrap().put_peers(eligible.peers());
         }
         Ok(eligible.peers())
     }
@@ -509,10 +606,11 @@ impl Node {
         persistent: bool
     ) -> Result<()> {
         if !value.is_valid() {
-            return Err(ArgumentError::new("Invalid value".to_string()));
+            return Err(ArgumentError::new("The value is verified to be invalid"));
         }
         if expected_seq < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(
+                format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
@@ -528,22 +626,22 @@ impl Node {
         )?;
 
         // store the value to the network.
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
-        let val4 = value.clone();
-        let val6 = value.clone();
+        let value4  = value.clone();
+        let value6  = value.clone();
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
 
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    dht.lock().unwrap().store_value(val4, expected_seq).await
+                    dht.lock().unwrap().store_value(value4, expected_seq).await
                 } else {
                     Ok(())
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    dht.lock().unwrap().store_value(val6, expected_seq).await
+                    dht.lock().unwrap().store_value(value6, expected_seq).await
                 } else {
                     Ok(())
                 }
@@ -554,8 +652,8 @@ impl Node {
         }
 
         let value_id = value.id();
-        let _ = self.storage.lock().unwrap()
-                    .update_value_announced_time(&value_id);
+        let _ = crate::locked!(self.storage)
+                .update_value_announced_time(&value_id);
         Ok(())
     }
 
@@ -565,14 +663,15 @@ impl Node {
         persistent: bool
     ) -> Result<()> {
         if !peer.is_valid() {
-            return Err(ArgumentError::new(format!("Peer {} is invalid", peer.id())));
+            return Err(ArgumentError::new("The peer is verified to be invalid."));
         }
         if expected_seq < -1 {
-            return Err(ArgumentError::new(format!("Invalid expected sequence number: {}", expected_seq)));
+            return Err(ArgumentError::new(
+                format!("Invalid expected sequence number: {expected_seq}")));
         }
         self.check_running()?;
 
-        let result = self.storage.lock().unwrap().get_peer(
+        let result = crate::locked!(self.storage).get_peer(
             peer.id(), peer.fingerprint()
         )?;
 
@@ -582,16 +681,15 @@ impl Node {
         }
 
         // store the new peer locally.
-        let _ = self.storage.lock().unwrap().put_peer(
-            peer.clone(),
-            Some(persistent)
+        let _ = crate::locked!(self.storage).put_peer(
+            peer.clone(), Some(persistent)
         );
 
         // announce the peer to the network.
-        let peer4 = peer.clone();
-        let peer6 = peer.clone();
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
+        let peer4   = peer.clone();
+        let peer6   = peer.clone();
+        let dht4    = self.dht4();
+        let dht6    = self.dht6();
 
         let (rc4, rc6) = tokio::join!(
             async move {
@@ -616,39 +714,39 @@ impl Node {
         }
 
         // update the peer announced time.
-        _ = self.storage.lock().unwrap()
+        _ = crate::locked!(self.storage)
                 .update_peer_announced_time(peer.id(), peer.fingerprint());
         Ok(())
     }
 
     pub fn value(&self, value_id: Id) -> Result<Option<Value>> {
         self.check_running()?;
-        self.storage.lock().unwrap().get_value(&value_id)
+        crate::locked!(self.storage).get_value(&value_id)
     }
 
     pub fn remove_value(&self, value_id: Id) -> Result<()> {
         self.check_running()?;
-        self.storage.lock().unwrap().remove_value(&value_id)
+        crate::locked!(self.storage).remove_value(&value_id)
     }
 
     pub async fn peers(&self, peer_id: Id) -> Result<Vec<PeerInfo>> {
         self.check_running()?;
-        self.storage.lock().unwrap().get_peers(&peer_id)
+        crate::locked!(self.storage).get_peers(&peer_id)
     }
 
     pub async fn remove_peers(&self, peer_id: Id) -> Result<()> {
         self.check_running()?;
-        self.storage.lock().unwrap().remove_peers(&peer_id)
+        crate::locked!(self.storage).remove_peers(&peer_id)
     }
 
     pub async fn peer(&self, peer_id: Id, finger_print: u64) -> Result<Option<PeerInfo>> {
         self.check_running()?;
-        self.storage.lock().unwrap().get_peer(&peer_id, finger_print)
+        crate::locked!(self.storage).get_peer(&peer_id, finger_print)
     }
 
     pub async fn remove_peer(&self, peer_id: Id, finger_print: u64) -> Result<()> {
         self.check_running()?;
-        self.storage.lock().unwrap().remove_peer(&peer_id, finger_print)
+        crate::locked!(self.storage).remove_peer(&peer_id, finger_print)
     }
 
     pub fn sign(&self, data: &[u8], signature:&mut [u8]) -> Result<usize> {
@@ -704,14 +802,6 @@ impl Identity for Node {
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         self.identity.create_crypto_context(id)
     }
-}
-
-fn cache_nodeid(path: &str, id: &Id) -> Result<()> {
-    let mut fp = File::create(path)
-        .map_err(|e| IOError::new(format!("Creating Id file error: {e}")))?;
-    fp.write_all(id.to_base58().as_bytes())
-        .map_err(|e| IOError::new(format!("Writing ID error: {e}")))?;
-    Ok(())
 }
 
 fn check_value(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {

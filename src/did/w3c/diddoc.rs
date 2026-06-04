@@ -341,7 +341,7 @@ impl DIDDocument {
 	pub fn validate(&self) -> Result<()> {
 		match self.is_genuine() {
             true => Ok(()),
-            false => Err(SignatureError::new("Document signature is not valid".into())),
+            false => Err(SignatureError::new("Document signature is not valid")),
         }
 	}
 

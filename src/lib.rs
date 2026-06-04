@@ -101,7 +101,6 @@ macro_rules! unwrap_mut {
 
 use std::net::IpAddr;
 use crate::errors::NetworkError;
-use crate::errors::IOError;
 fn local_addr(ipv4: bool) -> Result<IpAddr>{
     let if_addrs = match get_if_addrs::get_if_addrs() {
         Ok(v) => v,
@@ -116,18 +115,7 @@ fn local_addr(ipv4: bool) -> Result<IpAddr>{
             return Ok(ip)
         }
     }
-    Err(NetworkError::new("No working network interfaces".into()))
-}
-
-fn create_dirs(input: &str) -> crate::core::Result<()> {
-    let path = std::path::Path::new(input);
-    if path.exists() {
-        return Ok(())
-    }
-
-    std::fs::create_dir_all(path).map_err(|e|
-        IOError::new(format!("Creating directory path {} error: {e}", input)).into()
-    )
+    Err(NetworkError::new("No working network interfaces"))
 }
 
 fn random_array<const N: usize>() -> [u8; N] {
@@ -157,6 +145,7 @@ pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
     v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
 }
 
+#[allow(unused)]
 pub(crate) fn is_empty<T: IsEmpty>(v: &T) -> bool {
     v.is_empty()
 }

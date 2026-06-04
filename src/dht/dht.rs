@@ -12,11 +12,8 @@ use log::{debug, info, warn, error};
 use crate::{
     Id, Network,
     NodeInfo, PeerInfo, Value,
-    crypto_identity::CryptoIdentity,
-    errors::{
-        Result,
-        StateError,
-    }
+    errors::Result,
+    crypto_identity::CryptoIdentity
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -24,13 +21,13 @@ use crate::dht::{
     promise::Promise,
     token_manager::TokenManager,
     lookup_option::LookupOption,
-    timer,
     consumer::Consumer,
+    timer_client::TimerClient,
     storage::data_storage::DataStorage,
     rpc::{
         Reachability,
         RpcCall, rpccall::State as CallState,
-        rpc_server::{RpcServer, RunLoopContext},
+        rpc_server::{RpcServer},
     },
     msg::{
         Message,
@@ -60,24 +57,90 @@ use crate::dht::{
     }
 };
 
+pub(crate) struct Builder<'a> {
+    identity    : Option<Arc<CryptoIdentity>>,
+    storage     : Option<Arc<Mutex<Box<dyn DataStorage>>>>,
+    tokenman    : Option<Arc<TokenManager>>,
+    timer_client: Option<Arc<TimerClient>>,
+    data_dir    : Option<&'a str>,
+
+    bootstrap_nodes: Option<&'a[NodeInfo]>,
+}
+
+impl<'a> Builder<'a> {
+    pub(crate) fn new() -> Self {
+        Self {
+            identity: None,
+            storage : None,
+            tokenman: None,
+            data_dir: None,
+            bootstrap_nodes : None,
+            timer_client    : None,
+        }
+    }
+
+    pub(crate) fn with_identity(&mut self, identity: Arc<CryptoIdentity>) -> &mut Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    pub(crate) fn with_bootstrap_nodes(&mut self, bootstrap_nodes: &'a [NodeInfo]) -> &mut Self {
+        self.bootstrap_nodes = Some(bootstrap_nodes);
+        self
+    }
+
+    pub(crate) fn with_timer_client(&mut self, timer_client: Arc<TimerClient>) -> &mut Self {
+        self.timer_client = Some(timer_client);
+        self
+    }
+
+    pub(crate) fn with_storage(&mut self, storage: Arc<Mutex<Box<dyn DataStorage>>>) -> &mut Self {
+        self.storage = Some(storage);
+        self
+    }
+
+    pub(crate) fn with_tokenman(&mut self, tokenman: Arc<TokenManager>) -> &mut Self {
+        self.tokenman = Some(tokenman);
+        self
+    }
+
+    pub(crate) fn with_datadir(&mut self, datadir: &'a str) -> &mut Self {
+        self.data_dir = Some(datadir);
+        self
+    }
+
+    pub(crate) fn build_dht4(&self, host: &str, port: u16) -> Result<DHT> {
+        let data_dir = format!(
+            "{}/dht4.cache",
+            self.data_dir.as_ref().unwrap()
+        );
+        DHT::new(self, Network::IPv4, host, port, data_dir)
+    }
+
+    pub(crate) fn build_dht6(&self, host: &str, port: u16) -> Result<DHT> {
+         let data_dir = format!(
+            "{}/dht6.cache",
+            self.data_dir.as_ref().unwrap()
+        );
+        DHT::new(self, Network::IPv4, host, port, data_dir)
+    }
+}
+
 pub(crate) struct DHT {
     identity        : Arc<CryptoIdentity>,
     ni              : Arc<NodeInfo>,
-
     network         : Network,
     host            : String,
     port            : u16,
-
     is_running      : bool,
     status          : ConnectionStatus,
 
     storage         : Arc<Mutex<Box<dyn DataStorage>>>,
     tokenman        : Arc<TokenManager>,
     taskman         : Arc<TaskManager>,
-
     server          : Option<Arc<Mutex<RpcServer>>>,
 
-    persist_file    : Option<String>,
+    persist_file    : String,
     last_saved      : Option<SystemTime>,
     rt              : RoutingTable,
 
@@ -87,14 +150,13 @@ pub(crate) struct DHT {
     last_maintenance: SystemTime,
     bootstrapping   : bool,
 
-    timer_client    : Option<Arc<timer::Client>>,
+    timer_client    : Arc<TimerClient>,
 
-    suspicious_detector: Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
-    weak_cloned     : Weak<Mutex<DHT>>
+    suspicious_detector         : Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
+    pub(crate) weak_cloned      : Weak<Mutex<DHT>>
 }
 
 impl DHT {
-
     const BOOTSTRAP_MIN_INTERVAL: u64 = 4 * 60 * 1000;              // 4 minutes
     const SELF_LOOKUP_INTERVAL: u128 = 30 * 60 * 1000;              // 30 minutes
     const ROUTING_TABLE_PERSIST_INTERVAL: u64 = 10 * 60 * 1000;     // 10 minutes
@@ -105,47 +167,57 @@ impl DHT {
     const BOOTSTRAP_IF_LESS_THAN_X_ENTRIES: usize = 30;
     const USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES: usize = 8;
 
-    pub(crate) fn new_shared(
-        identity: Arc<CryptoIdentity>,
+    fn new(
+        builder : &Builder,
         network : Network,
-        host    : String,
+        host    : &str,
         port    : u16,
-        persist_path    : Option<String>,
-        bootstrap_nodes : Vec<NodeInfo>,
-        storage : Arc<Mutex<Box<dyn DataStorage>>>,
-        tokenman: Arc<TokenManager>
-    ) -> Result<Arc<Mutex<Self>>> {
+        persist_file: String,
+    ) -> Result<Self> {
+        assert!(builder.identity.is_some());
+        assert!(builder.storage.is_some());
+        assert!(builder.timer_client.is_some());
+        assert!(builder.tokenman.is_some());
+        assert!(builder.bootstrap_nodes.is_some());
+        assert!(builder.data_dir.is_some());
+
+        let identity = builder.identity.as_ref().unwrap().clone();
+        let storage  = builder.storage.as_ref().unwrap().clone();
+        let tokenman = builder.tokenman.as_ref().unwrap().clone();
+        let tclient  = builder.timer_client.as_ref().unwrap().clone();
 
         let nodeid = identity.id().clone();
+        let host   = host.to_string();
         let socket_addr = SocketAddr::new(host.parse()?, port);
-        let node_info = NodeInfo::new(nodeid, socket_addr);
+        let ni = Arc::new(NodeInfo::new(nodeid, socket_addr));
+        let bootstrap_nodes = builder.bootstrap_nodes
+            .map(|nodes| nodes.to_vec())
+            .unwrap_or_else(Vec::new);
 
-        Ok(Arc::new_cyclic(|weak_self| {
-            Mutex::new(Self {
-                identity,
-                network,
-                host,
-                port,
-                ni              : Arc::new(node_info),
-                is_running      : false,
-                status          : ConnectionStatus::Disconnected,
-                storage,
-                tokenman,
-                taskman         : Arc::new(TaskManager::new()),
-                server          : None,
-                rt              : RoutingTable::new(nodeid),
-                persist_file    : persist_path,
-                last_saved      : None,
-                bootstrap_nodes,
-                bootstrap_ids   : Vec::new(),
-                last_bootstrap  : SystemTime::UNIX_EPOCH,
-                last_maintenance: SystemTime::UNIX_EPOCH,
-                bootstrapping   : false,
-                timer_client    : None,
-                suspicious_detector: None,
-                weak_cloned     : weak_self.clone(),
-            })
-        }))
+        Ok( Self {
+            identity,
+            network,
+            host,
+            port,
+            ni,
+            is_running      : false,
+            status          : ConnectionStatus::Disconnected,
+            storage,
+            tokenman,
+            taskman         : Arc::new(TaskManager::new()),
+            server          : None,
+            rt              : RoutingTable::new(nodeid),
+            persist_file,
+            last_saved      : None,
+            bootstrap_nodes,
+            bootstrap_ids   : Vec::new(),
+            last_bootstrap  : SystemTime::UNIX_EPOCH,
+            last_maintenance: SystemTime::UNIX_EPOCH,
+            bootstrapping   : false,
+            timer_client    : tclient,
+            suspicious_detector: None,
+            weak_cloned      : Weak::new(), // will be set later
+        })
     }
 
     pub(crate) fn network(&self) -> Network {
@@ -399,12 +471,8 @@ impl DHT {
     }
 
     fn persist_routing_table(&mut self) {
-        let Some(path) = self.persist_file.as_ref() else {
-            return;
-        };
-
         info!("Periodic: persisting routing table ...");
-        match self.rt.save(path) {
+        match self.rt.save(&self.persist_file) {
             Ok(()) => self.last_saved = Some(SystemTime::now()),
             Err(err) => error!("Can not save the routing table: {}", err),
         }
@@ -432,6 +500,10 @@ impl DHT {
         // TODO:
     }
 
+    pub(crate) fn set_connection_status_listener(&mut self) {
+        unimplemented!();
+    }
+
     pub(crate) async fn start(&mut self) -> Result<()> {
         if self.is_running {
             return Ok(());
@@ -440,20 +512,16 @@ impl DHT {
 
         // initialize routing table
         let mut rt = RoutingTable::new(self.id().clone());
-        if let Some(path) = self.persist_file.as_ref() {
-            if let Err(e) = rt.load(path) {
-                warn!("Failed to load routing table from {}:{}.", path, e);
-            };
-        }
+        if let Err(e) = rt.load(&self.persist_file) {
+            warn!("Failed to load routing table from {}:{}.", self.persist_file, e);
+        };
 
         // initialize RPC server
         let identity = self.identity.clone();
-        let mut s = RpcServer::new(
-            self.ni(),
-            identity,
-            self.suspicious_detector.clone()
+        let mut server = RpcServer::new(
+            self.ni(), identity, self.suspicious_detector.clone()
         );
-        s.message_handler({
+        server.message_handler({
             let dht = self.weak_dht();
             move |msg| {
                 if let Some(dht) = dht.upgrade() {
@@ -461,7 +529,7 @@ impl DHT {
                 }
             }
         });
-        s.callsent_handler({
+        server.callsent_handler({
             let dht = self.weak_dht();
             move |call| {
                 if let Some(dht) = dht.upgrade() {
@@ -469,7 +537,7 @@ impl DHT {
                 }
             }
         });
-        s.calltimeout_handler({
+        server.calltimeout_handler({
             let dht = self.weak_dht();
             move |call| {
                 if let Some(dht) = dht.upgrade() {
@@ -477,7 +545,7 @@ impl DHT {
                 }
             }
         });
-        s.reachable_handler({
+        server.reachable_handler({
             let dht = self.weak_dht();
             move |reachable| {
                 let Some(dht) = dht.upgrade() else {
@@ -494,23 +562,18 @@ impl DHT {
             }
         });
 
-        s.start().await?;
+        server.start().await?;
 
-        let server = Arc::new(Mutex::new(s));
-        let run_loop_ctx = RunLoopContext::new(
-            server.clone(),
-            self.weak_dht().upgrade().expect("DHT instance should still be alive"),
-        );
-        tokio::spawn(async move {
-            run_loop_ctx.run_loop().await;
-        });
+        let server = Arc::new(Mutex::new(server));
+        let weak = self.weak_dht();
 
-        let timer_client = server.lock().unwrap().timer_client();
+        println!("dht >>>> line: {}", line!());
+        let _ = RpcServer::run_loop(server.clone(), weak);
+
         self.server = Some(server);
-        self.timer_client = Some(timer_client);
         self.set_status(ConnectionStatus::Connecting);
 
-        self.setup_periodic_tasks()?;
+        self.setup_periodic_tasks().await?;
         self.is_running = true;
 
         info!("Started DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
@@ -528,94 +591,79 @@ impl DHT {
         self.bootstrapping = false;
         self.set_status(ConnectionStatus::Disconnected);
 
-        if let Some(client) = self.timer_client.as_ref() {
-            client.stop().await;
-        };
-
         if let Some(server) = self.server.as_mut() {
             let mut locked = server.lock().unwrap();
             locked.reachable_handler(|_| {});
-            locked.stop();
+            let _ = locked.stop();
         }
 
         self.taskman.cancel_all();
 
-        if let Some(path) = self.persist_file.as_ref() {
-            _ = self.rt.save(path.as_str()).map_err(|err| {
-                warn!("Failed to persist routing table to {}: {}", path, err);
-            });
-            self.last_saved = Some(SystemTime::now());
-        }
+        _ = self.rt.save(&self.persist_file).map_err(|err| {
+            warn!("Failed to persist routing table to {}: {}", self.persist_file, err);
+        });
+        self.last_saved = Some(SystemTime::now());
 
-        self.timer_client = None;
         self.server = None;
-        self.persist_file = None;
-
         info!("Stopped DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
     }
 
-    fn setup_periodic_tasks(&self) -> Result<()> {
-        let Some(timer_client) = self.timer_client.as_ref() else {
-            return Err(StateError::new("Timer client not initialized".into()));
-        };
-
-        timer_client.add_timer(
+    async fn setup_periodic_tasks(&self) -> Result<()> {
+        let weak = self.weak_dht();
+        let _ = self.timer_client.add_timer(
             Duration::from_secs(30),
             Some(Duration::from_secs(320)),
-            {
-                let weak = self.weak_dht();
-                move || {
-                    if let Some(dht) = weak.upgrade() {
-                        dht.lock().unwrap().update()
-                    }
+            move || {
+                if let Some(dht) = weak.upgrade() {
+                    dht.lock().unwrap().update()
                 }
             }
-        )?.add_timer(
+        ).await?;
+
+        let weak = self.weak_dht();
+        let _ = self.timer_client.add_timer(
             Duration::from_millis(Self::RANDOM_LOOKUP_INTERVAL),
             Some(Duration::from_millis(Self::RANDOM_LOOKUP_INTERVAL)),
-            {
-                let weak = self.weak_dht();
-                move || {
-                    if let Some(dht) = weak.upgrade() {
-                        dht.lock().unwrap().random_lookup()
-                    }
+            move || {
+                if let Some(dht) = weak.upgrade() {
+                    dht.lock().unwrap().random_lookup()
                 }
             }
-        )?.add_timer(
+        ).await?;
+
+        let weak = self.weak_dht();
+        let _ = self.timer_client.add_timer(
             Duration::from_millis(Self::RANDOM_PING_INTERVAL),
-            Some(Duration::from_millis(Self::RANDOM_PING_INTERVAL)), {
-                let weak = self.weak_dht();
-                move || {
-                    if let Some(dht) = weak.upgrade() {
-                        dht.lock().unwrap().random_ping()
-                    }
+            Some(Duration::from_millis(Self::RANDOM_PING_INTERVAL)),
+            move || {
+                if let Some(dht) = weak.upgrade() {
+                    dht.lock().unwrap().random_ping()
                 }
             }
-        )?.add_timer_if(
+        ).await?;
+
+        let weak = self.weak_dht();
+        self.timer_client.add_timer_if(
             self.suspicious_detector.is_some(),
             Duration::from_secs(60),
             Some(Duration::from_secs(30)),
-            {
-                let weak = self.weak_dht();
-                move || {
-                    if let Some(dht) = weak.upgrade() {
-                        dht.lock().unwrap().purge_suspicious_nodes()
-                    }
+            move || {
+                if let Some(dht) = weak.upgrade() {
+                    dht.lock().unwrap().purge_suspicious_nodes()
                 }
             }
-        )?.add_timer_if(
-            self.persist_file.is_some(),
+        ).await?;
+
+        let weak = self.weak_dht();
+        self.timer_client.add_timer(
             Duration::from_secs(120),
             Some(Duration::from_millis(Self::ROUTING_TABLE_PERSIST_INTERVAL)),
-            {
-                let weak = self.weak_dht();
-                move || {
-                    if let Some(dht) = weak.upgrade() {
-                        dht.lock().unwrap().persist_routing_table()
-                    }
+            move || {
+                if let Some(dht) = weak.upgrade() {
+                    dht.lock().unwrap().persist_routing_table()
                 }
-            },
-        )?;
+            }
+        ).await?;
         Ok(())
     }
 

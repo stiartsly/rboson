@@ -176,15 +176,15 @@ impl Credential {
     pub fn validate(&self) -> Result<()> {
         let now = as_secs!(SystemTime::now());
         if self.valid_from.is_some() && self.valid_from.unwrap() > now {
-            return Err(BeforeValidPeriodError::new("Credential is not yet valid".into()).into());
+            return Err(BeforeValidPeriodError::new("Credential is not yet valid"));
         }
         if self.valid_until.is_some() && self.valid_until.unwrap() < now {
-            return Err(ExpiredError::new("Credential has expired".into()).into());
+            return Err(ExpiredError::new("Credential has expired"));
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(SignatureError::new("Credential signature is not valid".into()).into()),
+            false => Err(SignatureError::new("Credential signature is not valid")),
         }
     }
 

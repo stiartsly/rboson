@@ -80,15 +80,15 @@ impl PeerBuilder {
 
     pub fn build(self) -> Result<PeerInfo> {
         if self.endpoint.is_empty() {
-            return Err(StateError::new("Missing endpoint.".into()));
+            return Err(StateError::new("Missing endpoint."));
         }
         if self.seq < 0 {
-            return Err(StateError::new("Invalid sequence number".into()));
+            return Err(StateError::new("Invalid sequence number"));
         }
         if let Some(nonce) = self.nonce.as_ref() {
             if nonce.len() != PeerInfo::NONCE_BYTES {
                 return Err(StateError::new(format!("Invalid nonce length {}, expected {}",
-                nonce.len(), PeerInfo::NONCE_BYTES)));
+                    nonce.len(), PeerInfo::NONCE_BYTES)));
             }
         }
 
@@ -284,10 +284,10 @@ impl PeerInfo {
         extra: Option<Vec<u8>>
     ) -> Result<Self> {
         if self.sk.is_none() {
-            return Err(StateError::new("Not the owner of the peer info".into()));
+            return Err(StateError::new("Not the owner of the peer info"));
         }
         if endpoint.is_empty() {
-            return Err(StateError::new("Invalid endpoint".into()));
+            return Err(StateError::new("Invalid endpoint"));
         }
 
         let endpoint_nfc = endpoint.nfc().collect::<String>();
@@ -302,11 +302,11 @@ impl PeerInfo {
         // If current has an authenticating node, validate replacement
         if self.nodeid.is_some() {
             if node.is_none() {
-                return Err(StateError::new("Cannot authenticate peer info without owner node".into()));
+                return Err(StateError::new("Cannot authenticate peer info without owner node"));
             }
             let node_id = node.as_ref().unwrap().lock().unwrap().id().clone();
             if node_id != self.nodeid.clone().unwrap() {
-                return Err(StateError::new("Cannot authenticate peer info with a different node".into()));
+                return Err(StateError::new("Cannot authenticate peer info with a different node"));
             }
         }
 

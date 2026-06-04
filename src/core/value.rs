@@ -41,7 +41,7 @@ impl<'a> ValueBuilder<'a> {
 
     pub fn build(&self) -> Result<Value> {
         if self.data.is_empty() {
-            return Err(ArgumentError::new("Value data cannot be empty".into()));
+            return Err(ArgumentError::new("Value data cannot be empty"));
         }
         Ok(Value::new(self))
     }
@@ -95,7 +95,7 @@ impl<'a> SignedBuilder<'a> {
 
     pub fn build(&self) -> Result<Value> {
         if self.data.is_empty() {
-            return Err(ArgumentError::new("Value data cannot be empty".into()));
+            return Err(ArgumentError::new("Value data cannot be empty"));
         }
         Value::signed(self)
     }
@@ -129,7 +129,7 @@ impl<'a> EncryptedBuilder<'a> {
 
     pub fn build(&self) -> Result<Value> {
         if self.data.is_empty() {
-            return Err(ArgumentError::new("Value data cannot be empty".into()));
+            return Err(ArgumentError::new("Value data cannot be empty"));
         }
         Value::encrypted(self)
     }

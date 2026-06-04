@@ -32,7 +32,7 @@ impl CardBuilder {
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            Err(ArgumentError::new("Credential subject does not match identity".into()))?;
+            Err(ArgumentError::new("Credential subject does not match identity"))?;
         }
 
         self.credentials.insert(credential.id().to_string(), credential);
@@ -41,11 +41,11 @@ impl CardBuilder {
 
     pub fn with_credentials(&mut self, credentials: Vec<Credential>) -> Result<&mut Self> {
         if credentials.is_empty() {
-            Err(ArgumentError::new("Credentials cannot be empty".into()))?;
+            Err(ArgumentError::new("Credentials cannot be empty"))?;
         }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                Err(ArgumentError::new("The subject of one Credential does not match identity".into()))?;
+                Err(ArgumentError::new("The subject of one Credential does not match identity"))?;
             }
         }
 
@@ -63,7 +63,7 @@ impl CardBuilder {
     where T: serde::Serialize
     {
         if claims.is_empty() {
-            Err(ArgumentError::new("Claims cannot be empty".into()))?;
+            Err(ArgumentError::new("Claims cannot be empty"))?;
         }
         self.with_credential(
             Credential::builder(self.identity.clone())
@@ -83,7 +83,7 @@ impl CardBuilder {
         where T: serde::Serialize
     {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
-            Err(ArgumentError::new("Service id, type and endpoint cannot be empty".into()))?;
+            Err(ArgumentError::new("Service id, type and endpoint cannot be empty"))?;
         }
 
         let mut map = Map::new();

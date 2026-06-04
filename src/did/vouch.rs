@@ -130,12 +130,12 @@ impl Vouch {
 
     pub fn validate(&self) -> Result<()> {
         if self.signature.is_empty() {
-            return Err(ArgumentError::new("Vouch signature is empty".into()).into());
+            return Err(ArgumentError::new("Vouch signature is empty"));
         }
 
         match self.is_genuine() {
             true => Ok(()),
-            false => Err(SignatureError::new("Vouch signature is not valid".into()).into()),
+            false => Err(SignatureError::new("Vouch signature is not valid")),
         }
     }
 

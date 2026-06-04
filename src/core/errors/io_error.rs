@@ -10,8 +10,8 @@ pub struct IOError {
 }
 
 impl IOError {
-    pub fn new(message: String) -> Box<Self> {
-        Box::new(Self { message })
+    pub fn new(message: impl Into<String>) -> Box<Self> {
+         Box::new(Self { message: message.into() })
     }
 }
 
@@ -23,7 +23,7 @@ impl Error for IOError {
 
 impl From<io::Error> for Box<IOError> {
     fn from(err: io::Error) -> Box<IOError> {
-        IOError::new(format!("IO error: {}", err))
+        IOError::new(format!("native IO error: {}", err))
     }
 }
 

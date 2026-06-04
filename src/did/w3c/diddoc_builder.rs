@@ -67,7 +67,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_context(&mut self, context: &str) -> Result<&mut Self> {
         if context.is_empty() {
-            Err(ArgumentError::new("Context cannot be empty".into()))?;
+            Err(ArgumentError::new("Context cannot be empty"))?;
         }
         let normalized = context.nfc().collect::<String>();
         if !self.contexts.contains(&normalized) {
@@ -78,7 +78,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_contexts(&mut self, contexts: Vec<&str>) -> Result<&mut Self> {
         if contexts.is_empty() {
-            Err(ArgumentError::new("Contexts cannot be empty".into()))?;
+            Err(ArgumentError::new("Contexts cannot be empty"))?;
         }
         for context in contexts {
             if context.is_empty() {
@@ -127,7 +127,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_credential(&mut self, vc: VC) -> Result<&mut Self> {
         if vc.subject().id() != self.identity.id() {
-            Err(ArgumentError::new("VC subject does not match identity".into()))?;
+            Err(ArgumentError::new("VC subject does not match identity"))?;
         }
         self.credentials.push(vc);
         Ok(self)
@@ -136,7 +136,7 @@ impl DIDDocumentBuilder {
     pub fn with_credentials(&mut self, vcs: Vec<VC>) -> Result<&mut Self> {
         for vc in &vcs {
             if vc.subject().id() != self.identity.id() {
-                Err(ArgumentError::new("The subject of one VC does not match identity".into()))?;
+                Err(ArgumentError::new("The subject of one VC does not match identity"))?;
             }
             self.credentials.push(vc.clone());
         }
@@ -152,7 +152,7 @@ impl DIDDocumentBuilder {
         where T: Serialize {
 
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty".into()))?;
+            Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
 
         self.with_credential(VC::builder(self.identity.clone())
@@ -173,12 +173,12 @@ impl DIDDocumentBuilder {
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = id.parse::<DIDUrl>()
-                .map_err(|_| ArgumentError::new("Invalid DID URL format".into()))?;
+                .map_err(|_| ArgumentError::new("Invalid DID URL format"))?;
             if url.id() != Some(self.identity.id()) {
-                Err(ArgumentError::new("DID URL id does not match subject id".into()))?;
+                Err(ArgumentError::new("DID URL id does not match subject id"))?;
             }
             if url.fragment().is_none() {
-                Err(ArgumentError::new("DID URL must have a fragment part".into()))?;
+                Err(ArgumentError::new("DID URL must have a fragment part"))?;
             }
             url
         } else {
@@ -186,16 +186,16 @@ impl DIDDocumentBuilder {
         };
 
         if service_type.is_empty() {
-            Err(ArgumentError::new("Service type cannot be empty".into()))?;
+            Err(ArgumentError::new("Service type cannot be empty"))?;
         }
         if endpoint.is_empty() {
-            Err(ArgumentError::new("Service endpoint cannot be empty".into()))?;
+            Err(ArgumentError::new("Service endpoint cannot be empty"))?;
         }
 
         if properties.contains_key("id") ||
            properties.contains_key("type") ||
            properties.contains_key("serviceEndpoint") {
-            Err(ArgumentError::new("Service properties cannot contain 'id', 'type' or 'serviceEndpoint'".into()))?;
+            Err(ArgumentError::new("Service properties cannot contain 'id', 'type' or 'serviceEndpoint'"))?;
         }
 
         let properties = properties.iter().filter_map(|(k, v)| {

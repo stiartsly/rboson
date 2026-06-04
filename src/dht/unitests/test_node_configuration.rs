@@ -5,8 +5,8 @@ use crate::{
     signature::{KeyPair, PrivateKey},
 };
 use crate::dht::{
-    cfg::node_config::NodeConfig,
-    cfg::yaml_configuration::NodeConfiguration,
+    node_config::NodeConfig,
+    yaml_configuration::NodeConfiguration,
 };
 
 #[cfg(test)]

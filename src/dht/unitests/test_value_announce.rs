@@ -10,34 +10,17 @@ use crate::{
 
 use crate::dht::{
     dht::DHT,
-    token_manager::TokenManager,
     task::{
         task::{Task, State},
         closest_set::ClosestSet,
         candidate_node::CandidateNode,
         value_announce::ValueAnnounceTask,
     },
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    },
+    unitests::test_utils::make_test_dht,
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
-    let identity = Arc::new(CryptoIdentity::new());
-    let tokenman = Arc::new(TokenManager::new());
-    let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-
-    DHT::new(
-        identity,
-        Network::IPv4,
-        "127.0.0.1".to_string(),
-        0,
-        None,
-        Vec::new(),
-        storage,
-        tokenman,
-    ).unwrap()
+    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
 }
 
 fn make_value() -> Value {

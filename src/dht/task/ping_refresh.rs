@@ -88,10 +88,6 @@ impl Task for PingRefreshTask {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }

@@ -33,23 +33,7 @@ mod messaging {
 }
  */
 
-// helper functions
-fn local_addr(ipv4: bool) -> Option<std::net::IpAddr>{
-    let if_addrs = match get_if_addrs::get_if_addrs() {
-        Ok(v) => v,
-        Err(_) => return None
-    };
-
-    for iface in if_addrs {
-        let ip = iface.ip();
-        if !ip.is_loopback() &&
-            ((ipv4 && ip.is_ipv4()) ||
-            (!ipv4 && ip.is_ipv6())) {
-            return Some(ip)
-        }
-    }
-    None
-}
+// helper function
 
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     unsafe {

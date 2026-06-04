@@ -178,7 +178,7 @@ impl DHT {
         assert!(builder.storage.is_some());
         assert!(builder.timer_client.is_some());
         assert!(builder.tokenman.is_some());
-        assert!(builder.bootstrap_nodes.is_some());
+        //assert!(builder.bootstrap_nodes.is_some());
         assert!(builder.data_dir.is_some());
 
         let identity = builder.identity.as_ref().unwrap().clone();
@@ -501,7 +501,7 @@ impl DHT {
     }
 
     pub(crate) fn set_connection_status_listener(&mut self) {
-        unimplemented!();
+        // TODO: unimplemented!();
     }
 
     pub(crate) async fn start(&mut self) -> Result<()> {
@@ -1385,7 +1385,7 @@ impl DHT {
         task.with_want_target(true);
         task.with_listener(
             TaskListener::new().ended_fn(
-                move |t: &mut dyn Task| {
+                move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<NodeLookupTask>().unwrap();
                     promise.complete(Ok(task.result()));
@@ -1419,9 +1419,9 @@ impl DHT {
         task.with_name(format!("Lookup value: {value_id}"));
         task.with_listener(
             TaskListener::new().ended_fn(
-                move |t: &mut dyn Task| {
-                    let task = t.as_any_mut()
-                        .downcast_mut::<ValueLookupTask>().unwrap();
+                move |t: &dyn Task| {
+                    let task = t.as_any()
+                        .downcast_ref::<ValueLookupTask>().unwrap();
                     promise.complete(Ok(task.result()));
             })
         );
@@ -1466,14 +1466,14 @@ impl DHT {
         task.with_listener({
             TaskListener::new().ended_fn({
                 let taskman = taskman.clone();
-                move |t: &mut dyn Task| {
-                    let task = t.as_any_mut()
-                        .downcast_mut::<NodeLookupTask>().unwrap();
+                move |t: &dyn Task| {
+                    let task = t.as_any()
+                        .downcast_ref::<NodeLookupTask>().unwrap();
 
                     if task.task_state() != State::Completed {
                         return;
                     }
-                    let Some(mut nested) = task.nested_take() else {
+                    let Some(mut nested) = task.nested() else {
                         return;
                     };
 
@@ -1485,8 +1485,8 @@ impl DHT {
                         return;
                     }
 
-                    nested.as_any_mut()
-                        .downcast_mut::<ValueAnnounceTask>().unwrap()
+                    nested.as_any()
+                        .downcast_ref::<ValueAnnounceTask>().unwrap()
                         .with_closest(closest.clone());
 
                     taskman.add(nested);
@@ -1522,7 +1522,7 @@ impl DHT {
         task.with_name(format!("Lookup peer: {peerid}"));
         task.with_listener({
             TaskListener::new().ended_fn(
-                move |t: &mut dyn Task| {
+                move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<PeerLookupTask>().unwrap();
                     promise.complete(Ok(task.result()));
@@ -1569,14 +1569,14 @@ impl DHT {
         task.with_listener(
             TaskListener::new().ended_fn({
                 let taskman = taskman.clone();
-                move |t: &mut dyn Task| {
-                    let task = t.as_any_mut()
-                        .downcast_mut::<NodeLookupTask>().unwrap();
+                move |t: &dyn Task| {
+                    let task = t.as_any()
+                        .downcast_ref::<NodeLookupTask>().unwrap();
 
                     if task.task_state() != State::Completed {
                         return;
                     }
-                    let Some(mut nested) = task.nested_take() else {
+                    let Some(mut nested) = task.nested() else {
                         return;
                     };
 
@@ -1588,8 +1588,8 @@ impl DHT {
                         return;
                     }
 
-                    nested.as_any_mut()
-                        .downcast_mut::<PeerAnnounceTask>().unwrap()
+                    nested.as_any()
+                        .downcast_ref::<PeerAnnounceTask>().unwrap()
                         .with_closest(closest.clone());
 
                     taskman.add(nested);

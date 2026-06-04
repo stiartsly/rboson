@@ -45,7 +45,7 @@ impl ValueLookupTask {
         }
     }
 
-    pub(crate) fn result(&mut self) -> Option<Value> {
+    pub(crate) fn result(&self) -> Option<Value> {
         self.result.value()
     }
 }
@@ -78,10 +78,6 @@ impl Task for ValueLookupTask {
     }
 
     fn as_task(&self) -> &dyn Task {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

@@ -212,7 +212,7 @@ mod tests {
 
         let req3 = msg::ping_request();
         let mut failed = RpcCall::with_node(target2.clone(), req3);
-        failed.fail(ProtocolError::new("failed".into()));
+        failed.fail(ProtocolError::new("failed"));
         assert_eq!(failed.state(), State::Err);
         assert_eq!(failed.cause().is_none(), true);
 

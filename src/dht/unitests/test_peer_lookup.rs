@@ -11,28 +11,11 @@ use crate::dht::{
         LookupTask,
         PeerLookupTask,
     },
-    token_manager::TokenManager,
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    },
+    unitests::test_utils::make_test_dht,
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
-    let identity = Arc::new(CryptoIdentity::new());
-    let tokenman = Arc::new(TokenManager::new());
-    let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-
-    DHT::new_shared(
-        identity,
-        Network::IPv4,
-        "127.0.0.1".to_string(),
-        0,
-        None,
-        Vec::new(),
-        storage,
-        tokenman,
-    ).unwrap()
+    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
 }
 
 #[cfg(test)]

@@ -83,7 +83,7 @@ pub(crate) struct TaskData {
     listener    : Option<TaskListener>,
     end_handler : Option<Consumer<()>>,
 
-    nested      : Option<Box<dyn Task>>
+    nested      : Mutex<Option<Box<dyn Task>>>
 }
 
 impl TaskData {
@@ -99,7 +99,7 @@ impl TaskData {
             inflights   : HashSet::new(),
             listener    : None,
             end_handler : None,
-            nested      : None,
+            nested      : Mutex::new(None),
         }
     }
 
@@ -114,7 +114,6 @@ pub(crate) trait Task: Send + Sync {
 
     fn as_task(&self) -> &dyn Task;
     fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     fn dht(&self) -> Weak<Mutex<DHT>>;
 
@@ -134,7 +133,7 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn with_nested(&mut self, nested: Box<dyn Task>) {
-        self.data_mut().nested = Some(nested);
+        *self.data_mut().nested.lock().unwrap() = Some(nested);
     }
 
     fn set_state_if(&mut self, expected: &State, new_state: State) -> bool {
@@ -181,8 +180,8 @@ pub(crate) trait Task: Send + Sync {
         true
     }
 
-    fn nested_take(&mut self) -> Option<Box<dyn Task>> {
-        self.data_mut().nested.take()
+    fn nested(&self) -> Option<Box<dyn Task>> {
+        self.data().nested.lock().unwrap().take()
     }
 
     fn inflight_size(&self) -> usize {
@@ -194,6 +193,20 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn with_listener(&mut self, listener: TaskListener) {
+        self.data_mut().listener = Some(listener);
+
+        let Some(listener) = self.data_mut().listener.take() else {
+            return;
+        };
+
+        if self.is_canceled() {
+            listener.canceled(self.as_task());
+            listener.ended(self.as_task());
+        } else if self.is_completed() {
+            listener.completed(self.as_task());
+            listener.ended(self.as_task());
+        } else {}
+
         self.data_mut().listener = Some(listener);
     }
 
@@ -213,10 +226,11 @@ pub(crate) trait Task: Send + Sync {
                 listener.started(self.as_task());
                 self.data_mut().listener = Some(listener);
             }
+
             let _ = self.try_iterate().map_err(|e| {
                 warn!("Task {}#{} started failed {}",
                     self.task_name(), self.task_id(), e);
-            }).ok();
+            });
         }
     }
 
@@ -238,15 +252,17 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn cancel(&mut self) {
-        if !self.set_state_if_stateset(
-            &INCOMPLETED_STATES, State::Canceled
-        ) { return }
+        if !self.set_state_if_stateset(&INCOMPLETED_STATES, State::Canceled) {
+            return;
+        }
 
         self.data_mut().ended = SystemTime::now();
 
-        let nested = self.data_mut().nested.take();
-        if let Some(_) = nested {
-            //nested.lock().unwrap().cancel()
+        {
+            let mut nested = self.data_mut().nested.lock().unwrap();
+            if let Some(nested) = nested.as_mut() {
+                nested.cancel();
+            }
         }
 
         debug!("Task {}#{} canceled",
@@ -254,15 +270,14 @@ pub(crate) trait Task: Send + Sync {
             self.task_id()
         );
 
-        let end_handler = self.data_mut().end_handler.take();
-        if let Some(handler) = end_handler {
+        if let Some(handler) = self.data_mut().end_handler.as_mut() {
             handler.accept(());
-            self.data_mut().end_handler = Some(handler);
         }
 
         let listener = self.data_mut().listener.take();
         if let Some(listener) = listener {
             listener.canceled(self.as_task());
+            listener.ended(self.as_task());
             self.data_mut().listener = Some(listener);
         }
     }

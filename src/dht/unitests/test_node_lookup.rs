@@ -6,35 +6,14 @@ use crate::{
     NodeInfo,
     crypto_identity::CryptoIdentity,
 };
-
 use crate::dht::{
     dht::DHT,
-    token_manager::TokenManager,
-    task::{
-        node_lookup::NodeLookupTask,
-        lookup_task::LookupTask,
-    },
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    }
+    task::{NodeLookupTask, LookupTask},
+    unitests::test_utils::make_test_dht,
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
-    let identity = Arc::new(CryptoIdentity::new());
-    let tokenman = Arc::new(TokenManager::new());
-    let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-
-    DHT::new_shared(
-        identity,
-        Network::IPv4,
-        "127.0.0.1".to_string(),
-        0,
-        None,
-        Vec::new(),
-        storage,
-        tokenman,
-    ).unwrap()
+    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
 }
 
 #[cfg(test)]

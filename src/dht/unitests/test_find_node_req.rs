@@ -1,10 +1,5 @@
-use crate::{
-    Id,
-    dht::msg::{
-        lookup_req::LookupRequest,
-        find_node_req::FindNodeRequest,
-    }
-};
+use crate::Id;
+use crate::dht::msg::{LookupRequest,FindNodeRequest};
 
 #[cfg(test)]
 mod tests {

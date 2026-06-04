@@ -3,10 +3,7 @@ use crate::{
     Id,
     Network,
     NodeInfo,
-    dht::msg::{
-        lookup_rsp::LookupResponse,
-        find_node_rsp::FindNodeResponse,
-    }
+    dht::msg::{LookupResponse, FindNodeResponse}
 };
 
 #[cfg(test)]

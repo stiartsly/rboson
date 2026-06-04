@@ -82,10 +82,6 @@ impl Task for PeerLookupTask {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn dht(&self) -> Weak<Mutex<DHT>> {
         self.dht.clone()
     }

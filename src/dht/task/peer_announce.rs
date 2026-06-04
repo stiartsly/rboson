@@ -45,7 +45,7 @@ impl PeerAnnounceTask {
         }
     }
 
-    pub(crate) fn with_closest(&mut self, closest: ClosestSet) -> &mut Self {
+    pub(crate) fn with_closest(&self, closest: ClosestSet) -> &Self {
         let mut locked = self.todo.lock().unwrap();
         let mut entries = closest.entries();
 
@@ -80,10 +80,6 @@ impl Task for PeerAnnounceTask {
     }
 
     fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

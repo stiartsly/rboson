@@ -456,7 +456,6 @@ impl RpcServer {
         let server = rpc_server.clone();
         let socket = server.lock().unwrap().rx_socket_take();
         let quit = server.lock().unwrap().quit.clone();
-        let dht = dht.upgrade().expect("DHT instance has been dropped.");
 
         let task = tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];
@@ -476,9 +475,10 @@ impl RpcServer {
                             .parse_packet(&buf[..len], &from);
 
                         if let Some(msg) = msg {
-                            dht.lock().unwrap().on_message(&msg);
+                            if let Some(dht) = dht.upgrade() {
+                                dht.lock().unwrap().on_message(&msg);
+                            }
                         };
-
                     }
                     else => {},
                 }

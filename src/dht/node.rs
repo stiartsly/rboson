@@ -134,10 +134,10 @@ impl Node {
             return Err(ArgumentError::new(
                 "At least one host/address must be specified"));
         }
-        if cfg.bootstrap_nodes().is_empty() {
-            return Err(ArgumentError::new(
-                "At least one bootstrap node must be specified"));
-        }
+        //if cfg.bootstrap_nodes().is_empty() {
+        //    return Err(ArgumentError::new(
+        //        "At least one bootstrap node must be specified"));
+        //}
 
         let data_dir = cfg.data_dir();
         if data_dir.is_empty() {

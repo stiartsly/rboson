@@ -45,7 +45,7 @@ impl ValueAnnounceTask {
         }
     }
 
-    pub(crate) fn with_closest(&mut self, closest: ClosestSet) -> &mut Self {
+    pub(crate) fn with_closest(&self, closest: ClosestSet) -> &Self {
         let mut todo = self.todo.lock().unwrap();
         let mut entries = closest.entries();
 
@@ -80,10 +80,6 @@ impl Task for ValueAnnounceTask {
     }
 
     fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

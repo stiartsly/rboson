@@ -4,7 +4,7 @@ pub(crate) struct TaskListener {
     started_fn:    Option<Box<dyn Fn(&dyn Task) + Send>>,
     completed_fn:  Option<Box<dyn Fn(&dyn Task) + Send>>,
     canceled_fn:   Option<Box<dyn Fn(&dyn Task) + Send>>,
-    ended_fn:      Option<Box<dyn Fn(&mut dyn Task) + Send>>,
+    ended_fn:      Option<Box<dyn Fn(&dyn Task) + Send>>,
 }
 
 impl TaskListener {
@@ -36,7 +36,7 @@ impl TaskListener {
     }
 
     pub(crate) fn ended_fn<F>(mut self, f: F) -> Self
-    where F: Fn(&mut dyn Task) + Send + 'static {
+    where F: Fn(&dyn Task) + Send + 'static {
         self.ended_fn = Some(Box::new(f));
         self
     }
@@ -59,7 +59,7 @@ impl TaskListener {
         }
     }
 
-    pub(crate) fn ended(&self, task: &mut dyn Task) {
+    pub(crate) fn ended(&self, task: &dyn Task) {
         if let Some(f) = &self.ended_fn {
             f(task);
         }

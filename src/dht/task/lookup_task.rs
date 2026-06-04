@@ -67,12 +67,9 @@ pub(crate) trait LookupTask {
         &self.data().target
     }
 
+    #[cfg(test)]
     fn candidate_size(&self) -> usize {
         self.data().candidates.size()
-    }
-
-    fn candidate_node(&self, _: &Id) -> Option<CandidateNode> {
-        unimplemented!()
     }
 
     fn add_candidates_with_nodes(&mut self, mut nodes: Vec<NodeInfo>) {
@@ -144,10 +141,6 @@ pub(crate) trait LookupTask {
 
     fn next_candidate(&mut self) -> Option<Arc<Mutex<CandidateNode>>> {
        self.data_mut().candidates.next()
-    }
-
-    fn candidate_empty(&self) -> bool {
-        self.data().candidates.size() == 0
     }
 
     fn add_closest(&mut self, cn: Arc<Mutex<CandidateNode>>) {

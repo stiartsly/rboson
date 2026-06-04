@@ -7,32 +7,15 @@ use crate::{
 };
 use crate::dht::{
     dht::DHT,
-    token_manager::TokenManager,
     task::{
         lookup_task::LookupTask,
         value_lookup::ValueLookupTask,
     },
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    },
+    unitests::test_utils::make_test_dht,
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
-    let identity = Arc::new(CryptoIdentity::new());
-    let tokenman = Arc::new(TokenManager::new());
-    let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-
-    DHT::new_shared(
-        identity,
-        Network::IPv4,
-        "127.0.0.1".to_string(),
-        0,
-        None,
-        Vec::new(),
-        storage,
-        tokenman,
-    ).unwrap()
+    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
 }
 
 #[cfg(test)]
@@ -42,8 +25,8 @@ mod tests {
     #[test]
     fn test_default() {
         let target = Id::random();
-        let dht    = make_dht();
-        let mut task   = ValueLookupTask::new(Arc::downgrade(&dht), target.clone(), 7, true);
+        let dht = make_dht();
+        let mut task = ValueLookupTask::new(Arc::downgrade(&dht), target.clone(), 7, true);
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);

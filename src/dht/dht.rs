@@ -276,7 +276,7 @@ impl DHT {
         task.with_bootstrap(true);
         task.with_inject_candidates(nodes);
         task.with_listener(
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |_| promise.complete(Ok(()))
             )
         );
@@ -319,7 +319,7 @@ impl DHT {
             ));
             task.with_name(format!("Bootstrap: filling Bucket - {}", bucket_prefix));
             task.with_listener(
-                TaskListener::new().ended_fn(
+                TaskListener::default().ended_fn(
                     move |_| promise.complete(Ok(()))
                 )
             );
@@ -1267,7 +1267,7 @@ impl DHT {
             let promise = Promise::<Vec<NodeInfo>>::new();
             let future  = promise.future();
 
-            call.set_state_changed_cb(move |_call, _, cur| {
+            call.set_simple_listener(move |_call, _, cur| {
                 if cur.is_final() {
                     let mut nodes = None;
 
@@ -1384,7 +1384,7 @@ impl DHT {
         task.with_name(format!("Lookup node: {target}"));
         task.with_want_target(true);
         task.with_listener(
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<NodeLookupTask>().unwrap();
@@ -1418,7 +1418,7 @@ impl DHT {
         ));
         task.with_name(format!("Lookup value: {value_id}"));
         task.with_listener(
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<ValueLookupTask>().unwrap();
@@ -1450,7 +1450,7 @@ impl DHT {
         ));
         nested.with_name(format!("Store value:{valueid}"));
         nested.with_listener(
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |_| promise.complete(Ok(()))
             )
         );
@@ -1464,7 +1464,7 @@ impl DHT {
         task.with_want_token(true);
         task.with_nested(nested);
         task.with_listener({
-            TaskListener::new().ended_fn({
+            TaskListener::default().ended_fn({
                 let taskman = taskman.clone();
                 move |t: &dyn Task| {
                     let task = t.as_any()
@@ -1521,7 +1521,7 @@ impl DHT {
         ));
         task.with_name(format!("Lookup peer: {peerid}"));
         task.with_listener({
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<PeerLookupTask>().unwrap();
@@ -1553,7 +1553,7 @@ impl DHT {
         ));
         nested.with_name(format!("Announce peer: {}", peer.id()));
         nested.with_listener(
-            TaskListener::new().ended_fn(
+            TaskListener::default().ended_fn(
                 move |_| promise.complete(Ok(()))
             )
         );
@@ -1567,7 +1567,7 @@ impl DHT {
         task.with_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
         task.with_nested(nested);
         task.with_listener(
-            TaskListener::new().ended_fn({
+            TaskListener::default().ended_fn({
                 let taskman = taskman.clone();
                 move |t: &dyn Task| {
                     let task = t.as_any()

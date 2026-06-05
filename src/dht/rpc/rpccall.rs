@@ -63,7 +63,7 @@ pub(crate) struct RpcCall {
 impl RpcCall {
     pub(crate) fn new(
         target: Target,
-        mut req: Message,
+        mut req: Message
     ) -> Self
     {
         let target_reachable = target.is_reachable();
@@ -202,9 +202,12 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
-    pub(crate) fn set_state_changed_cb<F>(&mut self, f: F) -> &mut Self
+    pub(crate) fn set_simple_listener<F>(
+        &mut self,
+        state_changed_cb: F
+    ) -> &mut Self
     where F: Fn(&RpcCall, State, State) + Send + 'static {
-        self.set_listener(CallListener::new(f));
+        self.set_listener(CallListener::new(state_changed_cb));
         self
     }
 

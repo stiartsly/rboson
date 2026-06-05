@@ -58,17 +58,17 @@ mod tests {
 
         assert_eq!(closest.is_empty(), true);
         assert_eq!(closest.contains(&id), false);
-        assert_eq!(closest.get(&id).is_none(), true);
+        assert_eq!(closest.entry(&id).is_none(), true);
 
         closest.add(candidate.clone());
 
         assert_eq!(closest.contains(&id), true);
-        assert_eq!(closest.get(&id).is_some(), true);
+        assert_eq!(closest.entry(&id).is_some(), true);
 
         let removed = closest.remove(&id);
         assert_eq!(removed.is_some(), true);
         assert_eq!(closest.contains(&id), false);
-        assert_eq!(closest.get(&id).is_none(), true);
+        assert_eq!(closest.entry(&id).is_none(), true);
         assert_eq!(closest.is_empty(), true);
     }
 

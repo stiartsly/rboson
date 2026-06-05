@@ -38,7 +38,8 @@ impl ValueAnnounceTask {
     ) -> Self {
         Self {
             base_data: TaskData::new(),
-            todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
+            todo: Arc::new(Mutex::new(
+                VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             value,
             expected_seq,
             dht,
@@ -46,22 +47,21 @@ impl ValueAnnounceTask {
     }
 
     pub(crate) fn with_closest(&self, closest: ClosestSet) -> &Self {
-        let mut todo = self.todo.lock().unwrap();
+        let mut locked_todo = self.todo.lock().unwrap();
         let mut entries = closest.entries();
 
         while let Some(cn) = entries.pop() {
-            if todo.len() >= MAX_TODO_ENTRIES {
+            if locked_todo.len() >= MAX_TODO_ENTRIES {
                 break;
             }
-            todo.push_back(cn);
+            locked_todo.push_back(cn);
         }
         debug!(
             "{}#{} added {} nodes to announce queue",
             self.task_name(),
             self.task_id(),
-            todo.len()
+            locked_todo.len()
         );
-        drop(todo);
         self
     }
 }
@@ -105,19 +105,21 @@ impl Task for ValueAnnounceTask {
                 self.expected_seq,
             );
 
-            let todo = self.todo.clone();
+            let cloned_todo = self.todo.clone();
             let target = Target::from_candidate(cn);
             let handler = Consumer::new(move |_| {
-                todo.lock().unwrap().pop_front();
+                cloned_todo.lock().unwrap().pop_front();
             });
-             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
+
+            if let Err(e) = self.send_call(target, msg, Some(handler)) {
                 error!("Sending 'storeValue' request error: {}", e);
-             });
+            };
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() && self.data().is_done()
+        self.todo.lock().unwrap().is_empty() &&
+            self.data().is_done()
     }
 }
 

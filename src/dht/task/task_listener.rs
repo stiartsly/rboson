@@ -1,5 +1,6 @@
 use super::task::Task;
 
+#[derive(Default)]
 pub(crate) struct TaskListener {
     started_fn:    Option<Box<dyn Fn(&dyn Task) + Send>>,
     completed_fn:  Option<Box<dyn Fn(&dyn Task) + Send>>,
@@ -8,33 +9,28 @@ pub(crate) struct TaskListener {
 }
 
 impl TaskListener {
-    pub(crate) fn new() -> Self {
-        Self {
-            started_fn: None,
-            completed_fn: None,
-            canceled_fn: None,
-            ended_fn: None,
-        }
-    }
-
+    #[allow(unused)]
     pub(crate) fn started_fn<F>(mut self, f: F) -> Self
     where F: Fn(&dyn Task) + Send + 'static {
         self.started_fn = Some(Box::new(f));
         self
     }
 
+    #[allow(unused)]
     pub(crate) fn completed_fn<F>(mut self, f: F) -> Self
     where F: Fn(&dyn Task) + Send + 'static {
         self.completed_fn  = Some(Box::new(f));
         self
     }
 
+    #[allow(unused)]
     pub(crate) fn canceled_fn<F>(mut self, f: F) -> Self
     where F: Fn(&dyn Task) + Send + 'static {
         self.canceled_fn = Some(Box::new(f));
         self
     }
 
+    #[allow(unused)]
     pub(crate) fn ended_fn<F>(mut self, f: F) -> Self
     where F: Fn(&dyn Task) + Send + 'static {
         self.ended_fn = Some(Box::new(f));

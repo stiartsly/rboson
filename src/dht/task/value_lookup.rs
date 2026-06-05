@@ -1,8 +1,8 @@
 use std::{
     any::Any,
-    sync::{Weak, Mutex}
+    sync::{Mutex, Weak}
 };
-use log::{debug, error, warn};
+use log::{debug, error, warn, trace};
 
 use crate::{Id, Value};
 use crate::dht::{
@@ -126,6 +126,12 @@ impl Task for ValueLookupTask {
             .expect("panic: DHT instance dropped.");
         let network = dht.lock().unwrap().network();
 
+        trace!("{}#{} candidates.size={}",
+            self.task_name(),
+            self.task_id(),
+            LookupTask::candidate_size(self)
+        );
+
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
@@ -140,12 +146,13 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let handler = Consumer::new(move |_| {
+            let cb = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
-            let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
+
+            if let Err(e) = self.send_call(target, msg, Some(cb)) {
                 error!("Sending 'find_value' request error: {}", e);
-            });
+            };
         }
     }
 
@@ -155,9 +162,11 @@ impl Task for ValueLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let rsp = call.rsp().expect("no response set");
-        let Body::FindValueResponse(body) = rsp.body().expect("no message body") else {
-            return;
+        let rsp = call.rsp().expect("panic: should has response.");
+        let body = rsp.body().expect("panic: should contain body in the response.");
+
+        let Body::FindValueResponse(body) = body else {
+            panic!("panic: should be findValue response body.");
         };
 
         if let Some(value) = body.value() {
@@ -170,10 +179,13 @@ impl Task for ValueLookupTask {
                 );
                 return;
             }
-            if !self.result.is_empty() {
-                if LookupTask::data(self).done_on_eligible_result() {
-                    LookupTask::data_mut(self).done_lookup();
-                }
+
+            if self.result.is_empty() {
+                return;
+            }
+
+            if LookupTask::data(self).done_on_eligible_result() {
+                LookupTask::data_mut(self).done_lookup();
             }
         } else {
             let Some(strong_dht) = self.dht.upgrade() else {

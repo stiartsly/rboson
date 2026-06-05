@@ -1,6 +1,7 @@
-use std::time::SystemTime;
-use std::net::SocketAddr;
-
+use std::{
+    time::SystemTime,
+    net::SocketAddr
+};
 use crate::{Id, NodeInfo};
 use crate::dht::{
     rpc::Reachability,
@@ -22,18 +23,6 @@ pub(crate) struct CandidateNode {
 }
 
 impl CandidateNode {
-    fn new(ni: NodeInfo, reachable: bool) -> Self {
-        Self {
-            ni,
-            last_sent:      None,
-            last_replied:   None,
-            pinged: 0,
-            acked: false,
-            reachable,
-            token: 0,
-        }
-    }
-
     pub(crate) fn id(&self) -> &Id {
         self.ni.id()
     }
@@ -47,6 +36,7 @@ impl CandidateNode {
         self.last_sent = None;
     }
 
+    #[allow(unused)]
     pub(crate) fn is_sent(&self) -> bool {
         self.last_sent.is_some()
     }
@@ -59,6 +49,7 @@ impl CandidateNode {
         self.last_replied = Some(SystemTime::now());
     }
 
+    #[allow(unused)]
     pub(crate) fn is_replied(&self) -> bool {
         self.last_replied.is_some()
     }
@@ -71,10 +62,12 @@ impl CandidateNode {
         self.token
     }
 
+    #[allow(unused)]
     pub(crate) fn set_acked(&mut self) {
         self.acked = true;
     }
 
+    #[allow(unused)]
     pub(crate) fn is_acked(&self) -> bool {
         self.acked
     }
@@ -90,16 +83,29 @@ impl CandidateNode {
 
 impl From<NodeInfo> for CandidateNode {
     fn from(ni: NodeInfo) -> Self {
-        Self::new(ni, false)
+        Self {
+            ni,
+            last_sent   : None,
+            last_replied: None,
+            pinged: 0,
+            acked       : false,
+            reachable   : false,
+            token       : 0,
+        }
     }
 }
 
 impl From<KBucketEntry> for CandidateNode {
     fn from(entry: KBucketEntry) -> Self {
-        Self::new(
-            entry.as_ref().clone(),
-            entry.is_reachable()
-        )
+        Self {
+            ni          : entry.ni().clone(),
+            last_sent   : None,
+            last_replied: None,
+            pinged: 0,
+            acked       : false,
+            reachable   : entry.is_reachable(),
+            token       : 0,
+        }
     }
 }
 
@@ -123,12 +129,12 @@ impl Reachability for CandidateNode {
     }
 }
 
-pub(crate) trait AsCandidateNode: Into<CandidateNode> {
+pub(crate) trait NodeInfoLike: Into<CandidateNode> {
     fn id(&self) -> &Id;
     fn socket_addr(&self) -> &SocketAddr;
 }
 
-impl AsCandidateNode for NodeInfo {
+impl NodeInfoLike for NodeInfo {
     fn id(&self) -> &Id {
         self.id()
     }
@@ -138,7 +144,7 @@ impl AsCandidateNode for NodeInfo {
     }
 }
 
-impl AsCandidateNode for KBucketEntry {
+impl NodeInfoLike for KBucketEntry {
     fn id(&self) -> &Id {
         self.as_ref().id()
     }

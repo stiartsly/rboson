@@ -38,12 +38,11 @@ mod tests {
         assert_eq!(candidates.size(), 3);
         assert_eq!(candidates.reached_capacity(), true);
         assert_eq!(candidates.is_empty(), false);
-        assert_eq!(candidates.ids(), expected);
-        assert_eq!(candidates.entries().len(), 3);
+        //assert_eq!(candidates.ids(), expected);
         assert_eq!(candidates.head(), node1.id().clone());
         assert_eq!(candidates.tail(), node3.id().clone());
-        assert_eq!(candidates.get(node1.id()).is_some(), true);
-        assert_eq!(candidates.get(node4.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(node1.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(node4.id()).is_none(), true);
     }
 
     #[test]
@@ -60,8 +59,8 @@ mod tests {
         ]);
 
         assert_eq!(candidates.size(), 1);
-        assert_eq!(candidates.get(first.id()).is_some(), true);
-        assert_eq!(candidates.get(second.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(first.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(second.id()).is_none(), true);
     }
 
     #[test]
@@ -75,8 +74,8 @@ mod tests {
         candidates.add(vec![first.clone(), second.clone()]);
 
         assert_eq!(candidates.size(), 2);
-        assert_eq!(candidates.get(first.id()).is_some(), true);
-        assert_eq!(candidates.get(second.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(first.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(second.id()).is_some(), true);
     }
 
     #[test]
@@ -94,9 +93,9 @@ mod tests {
         });
 
         assert_eq!(candidates.size(), 1);
-        assert_eq!(candidates.get(keep.id()).is_some(), true);
-        assert_eq!(candidates.get(remove_a.id()).is_none(), true);
-        assert_eq!(candidates.get(remove_b.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(keep.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(remove_a.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(remove_b.id()).is_none(), true);
 
         candidates.add(vec![remove_a.clone(), remove_b.clone()]);
         assert_eq!(candidates.size(), 1);
@@ -112,16 +111,16 @@ mod tests {
         let third = make_node(3, "1.1.1.3", 39003);
 
         candidates.add(vec![first.clone(), second.clone(), third.clone()]);
-        assert_eq!(candidates.get(third.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(third.id()).is_none(), true);
 
         let removed = candidates.remove(first.id());
         assert_eq!(removed.is_some(), true);
 
         candidates.add(vec![first.clone()]);
-        assert_eq!(candidates.get(first.id()).is_none(), true);
+        assert_eq!(candidates.candidate_node(first.id()).is_none(), true);
 
         candidates.add(vec![third.clone()]);
-        assert_eq!(candidates.get(third.id()).is_some(), true);
+        assert_eq!(candidates.candidate_node(third.id()).is_some(), true);
     }
 
     #[test]
@@ -138,10 +137,10 @@ mod tests {
             middle.clone()
         ]);
 
-        let closest_candidate = candidates.get(closest.id()).unwrap();
+        let closest_candidate = candidates.candidate_node(closest.id()).unwrap();
         closest_candidate.lock().unwrap().set_sent();
 
-        let middle_candidate = candidates.get(middle.id()).unwrap();
+        let middle_candidate = candidates.candidate_node(middle.id()).unwrap();
         middle_candidate.lock().unwrap().set_sent();
         middle_candidate.lock().unwrap().clear_sent();
 

@@ -192,9 +192,10 @@ impl Task for NodeLookupTask {
             let handler = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
-            let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
+
+            if let Err(e) = self.send_call(target, msg, Some(handler)) {
                 error!("Sending 'findNode' request error: {}", e);
-            });
+            };
         }
     }
 
@@ -217,11 +218,11 @@ impl Task for NodeLookupTask {
         let network = strong_dht.lock().unwrap().network();
         drop(strong_dht);
 
-        let msg = call.rsp().expect("no response set");
+        let msg  = call.rsp().expect("panic: no response set");
+        let body = msg.body().expect("panic: no body contained in the response");
 
-        let Body::FindNodeResponse(body) = msg.body()
-            .expect("no message body") else {
-            return;
+        let Body::FindNodeResponse(body) = body else {
+            panic!("panic: the body should be findValue response.");
         };
 
         let nodes = body.nodes(network);

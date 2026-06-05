@@ -1,14 +1,13 @@
-use std::cmp::Ordering;
-use std::fmt;
-use std::sync::{Arc, Mutex};
-
+use std::{
+    fmt,
+    cmp::Ordering,
+    sync::{Arc, Mutex}
+};
 use indexmap::map::IndexMap;
 use log::debug;
 
 use crate::Id;
-use crate::dht::{
-    task::candidate_node::CandidateNode,
-};
+use crate::dht::task::candidate_node::CandidateNode;
 
 #[derive(Clone)]
 pub(crate) struct ClosestSet {
@@ -36,16 +35,13 @@ impl ClosestSet {
         self.closest.len() >= self.capacity
     }
 
+    #[cfg(test)]
     pub(crate) fn size(&self) -> usize {
         self.closest.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.closest.is_empty()
-    }
-
-    pub(crate) fn get(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
-        self.closest.get(id).cloned()
     }
 
     pub(crate) fn contains(&self, id: &Id) -> bool {
@@ -64,14 +60,13 @@ impl ClosestSet {
 
     pub(crate) fn add(&mut self, cn: Arc<Mutex<CandidateNode>>) {
         let id = cn.lock().unwrap().id().clone();
-        self.closest.insert_sorted_by(id.clone(), cn, |_, left, _, right|
+        self.closest.insert_sorted_by(id, cn, |_, left, _, right|
             Self::candidate_order(&self.target, left, right)
         );
 
         debug!("Added candidate {} to ClosestSet, size now {}", id, self.closest.len());
 
-        let exceeded = self.closest.len() > self.capacity;
-        if exceeded {
+        if self.closest.len() > self.capacity {
             let last_id = self.closest.last().unwrap().0.clone();
             _ = self.closest.shift_remove(&last_id);
 
@@ -95,10 +90,6 @@ impl ClosestSet {
         }
     }
 
-    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
-        self.closest.shift_remove(id)
-    }
-
     pub(crate) fn entries(&self) -> Vec<Arc<Mutex<CandidateNode>>> {
         self.closest.values().cloned().collect()
     }
@@ -117,21 +108,37 @@ impl ClosestSet {
         }
     }
 
-    pub(crate) fn insert_attempts_since_tail_modification(&self) -> usize {
-        self.insert_attempt_since_tail_modification
-    }
-
-    pub(crate) fn insert_attempts_since_head_modification(&self) -> usize {
-        self.insert_attempt_since_head_modification
-    }
-
     pub(crate) fn is_eligible(&self) -> bool {
         self.reached_capacity() &&
             self.insert_attempt_since_tail_modification > self.capacity
     }
 
+    #[cfg(test)]
+    pub(crate) fn entry(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+        self.closest.get(id).cloned()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+        if self.is_empty() {
+            return None
+        }
+        self.closest.shift_remove(id)
+    }
+
+    #[cfg(test)]
     pub(crate) fn is_head_stable(&self) -> bool {
         self.insert_attempt_since_head_modification > self.capacity
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_attempts_since_tail_modification(&self) -> usize {
+        self.insert_attempt_since_tail_modification
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_attempts_since_head_modification(&self) -> usize {
+        self.insert_attempt_since_head_modification
     }
 }
 

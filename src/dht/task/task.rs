@@ -78,7 +78,6 @@ pub(crate) struct TaskData {
     started     : SystemTime,
     ended       : SystemTime,
 
-    //inflights   : HashMap<TaskId, Arc<Mutex<RpcCall>>>,
     inflights   : HashSet<i32>,
     listener    : Option<TaskListener>,
     end_handler : Option<Consumer<()>>,
@@ -123,7 +122,6 @@ pub(crate) trait Task: Send + Sync {
     fn task_name(&self) -> &str {
         self.data().task_name.as_str()
     }
-
     fn task_state(&self) -> State {
         self.data().state
     }
@@ -195,19 +193,20 @@ pub(crate) trait Task: Send + Sync {
     fn with_listener(&mut self, listener: TaskListener) {
         self.data_mut().listener = Some(listener);
 
-        let Some(listener) = self.data_mut().listener.take() else {
+        let Some(l) = self.data_mut().listener.take() else {
             return;
         };
 
+        let task = self.as_task();
         if self.is_canceled() {
-            listener.canceled(self.as_task());
-            listener.ended(self.as_task());
+            l.canceled(task);
+            l.ended(task);
         } else if self.is_completed() {
-            listener.completed(self.as_task());
-            listener.ended(self.as_task());
+            l.completed(task    );
+            l.ended(task);
         } else {}
 
-        self.data_mut().listener = Some(listener);
+        self.data_mut().listener = Some(l);
     }
 
     fn cloned(&self) -> Arc<Mutex<Box<dyn Task>>> {
@@ -216,28 +215,28 @@ pub(crate) trait Task: Send + Sync {
 
     fn start(&mut self) {
         if self.set_state_if_stateset(&UNSTARTED_STATES, State::Running) {
-            debug!("{}#{} starting...", self.task_name(), self.task_id());
+            debug!("{}#{} starting...",
+                self.task_name(),
+                self.task_id()
+            );
             self.data_mut().started = SystemTime::now();
 
             self.prepare();
 
             let listener = self.data_mut().listener.take();
-            if let Some(listener) = listener {
-                listener.started(self.as_task());
-                self.data_mut().listener = Some(listener);
+            if let Some(l) = listener {
+                l.started(self.as_task());
+                self.data_mut().listener = Some(l);
             }
 
-            let _ = self.try_iterate().map_err(|e| {
-                warn!("Task {}#{} started failed {}",
-                    self.task_name(), self.task_id(), e);
-            });
+            self.try_iterate();
         }
     }
 
-    fn try_iterate(&mut self) -> Result<()> {
+    fn try_iterate(&mut self) {
         if self.is_done() {
             self.complete();
-            return Ok(());
+            return;
         }
 
         if self.can_dorequest() && !self.is_ended() {
@@ -248,7 +247,6 @@ pub(crate) trait Task: Send + Sync {
                 self.complete();
             }
         }
-        Ok(())
     }
 
     fn cancel(&mut self) {
@@ -256,8 +254,7 @@ pub(crate) trait Task: Send + Sync {
             return;
         }
 
-        self.data_mut().ended = SystemTime::now();
-
+        // Ended nested one.
         {
             let mut nested = self.data_mut().nested.lock().unwrap();
             if let Some(nested) = nested.as_mut() {
@@ -265,45 +262,45 @@ pub(crate) trait Task: Send + Sync {
             }
         }
 
+        self.data_mut().ended = SystemTime::now();
         debug!("Task {}#{} canceled",
             self.task_name(),
             self.task_id()
         );
 
-        if let Some(handler) = self.data_mut().end_handler.as_mut() {
-            handler.accept(());
+        let handler = self.data_mut().end_handler.as_mut();
+        if let Some(ended) = handler {
+            ended.accept(());
         }
 
         let listener = self.data_mut().listener.take();
-        if let Some(listener) = listener {
-            listener.canceled(self.as_task());
-            listener.ended(self.as_task());
-            self.data_mut().listener = Some(listener);
+        if let Some(l) = listener {
+            l.canceled(self.as_task());
+            l.ended(self.as_task());
+            self.data_mut().listener = Some(l);
         }
     }
 
     fn complete(&mut self) {
-        if !self.set_state_if_stateset(
-            &INCOMPLETED_STATES, State::Completed
-        ) { return }
+        if !self.set_state_if_stateset(&INCOMPLETED_STATES, State::Completed){
+            return;
+        }
 
         self.data_mut().ended = SystemTime::now();
-
         debug!("Task {}#{} completed",
             self.task_name(),
             self.task_id()
         );
 
-        let consumer = self.data_mut().end_handler.take();
-        if let Some(handler) = consumer {
-            handler.accept(());
-            self.data_mut().end_handler = Some(handler);
+        let handler = self.data_mut().end_handler.as_mut();
+        if let Some(ended) = handler {
+            ended.accept(());
         }
 
         let listener = self.data_mut().listener.take();
-        if let Some(listener) = listener {
-            listener.canceled(self.as_task());
-            self.data_mut().listener = Some(listener);
+        if let Some(l) = listener {
+            l.canceled(self.as_task());
+            self.data_mut().listener = Some(l);
         }
     }
 
@@ -355,12 +352,14 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn can_dorequest(&self) -> bool {
-        self.is_running() && self.inflight_size() <
-            if self.data().low_priori {
-                MAX_CONCURRENT_RPC_REQUESTS_LOW_PRIORITY
-            } else {
-                MAX_CONCURRENT_RPC_REQUESTS
-            }
+        let limit = if self.data().low_priori {
+            MAX_CONCURRENT_RPC_REQUESTS_LOW_PRIORITY
+        } else {
+            MAX_CONCURRENT_RPC_REQUESTS
+        };
+
+        self.is_running() &&
+            self.inflight_size() < limit
     }
 
     fn prepare(&mut self) {}
@@ -371,11 +370,8 @@ pub(crate) trait Task: Send + Sync {
     fn call_error(&mut self, _: &RpcCall) {}
     fn call_timeout(&mut self, _: &RpcCall) {}
 
-    fn send_call(&mut self,
-        target: Target,
-        msg: Message,
-        consumer: Option<Consumer<()>>)
-        -> Result<()> {
+    fn send_call(&mut self, target: Target, msg: Message,
+        consumer: Option<Consumer<()>>) -> Result<()> {
 
         if !self.can_dorequest() {
             return Ok(())
@@ -383,7 +379,7 @@ pub(crate) trait Task: Send + Sync {
 
         let mut call = RpcCall::new(target, msg);
         let task = self.cloned();
-        call.set_state_changed_cb(move |c, _, state| {
+        call.set_simple_listener(move |c, _, state| {
             if task.lock().unwrap().is_ended() {
                 debug!("{}#{} call to {} state changed ignored due to the task is terminated",
                     task.lock().unwrap().task_name(),
@@ -392,32 +388,32 @@ pub(crate) trait Task: Send + Sync {
                 return;
             }
 
-            let mut locked = task.lock().unwrap();
+            let mut task = task.lock().unwrap();
             match state {
-                CallState::Sent => locked.call_sent(c),
+                CallState::Sent => task.call_sent(c),
                 CallState::Responded => {
-                    locked.data_mut().inflights.remove(&c.txid());
-                    if !locked.is_ended() && c.rsp().is_some() {
-                        locked.call_responded(c);
+                    task.data_mut().inflights.remove(&c.txid());
+                    if !task.is_ended() && c.rsp().is_some() {
+                        task.call_responded(c);
                     }
                 },
                 CallState::Err => {
-                    locked.data_mut().inflights.remove(&c.txid());
-                    if !locked.is_ended() {
-                        locked.call_error(c);
+                    task.data_mut().inflights.remove(&c.txid());
+                    if !task.is_ended() {
+                        task.call_error(c);
                     }
                 },
                 CallState::Timeout => {
-                    locked.data_mut().inflights.remove(&c.txid());
-                    if !locked.is_ended() {
-                        locked.call_timeout(c);
+                    task.data_mut().inflights.remove(&c.txid());
+                    if !task.is_ended() {
+                        task.call_timeout(c);
                     }
                 },
                 _ => {},
             }
 
             if state >= CallState::Stalled {
-                locked.try_iterate().ok();
+                task.try_iterate();
             }
         });
 

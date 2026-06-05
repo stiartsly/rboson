@@ -15,33 +15,26 @@ use crate::dht::{
     }
 };
 
-const MAX_ITERATIONS: usize = 3*KBucket::MAX_ENTRIES;
+const MAX_ITERATIONS: usize = 3 * KBucket::MAX_ENTRIES;
 
 pub(crate) struct LookupTaskData {
-    target: Id,
-    closest: ClosestSet,
-    candidates: ClosestCandidates,
+    target      : Id,
+    closest     : ClosestSet,
+    candidates  : ClosestCandidates,
 
-    iteration_count: usize,
+    iteration_count : usize,
 
-    done_on_eligible_result: bool,
-    done_on_lookup: bool,
+    done_on_eligible_result : bool,
+    done_on_lookup          : bool,
 }
 
 impl LookupTaskData {
     pub(crate) fn new(target: Id, done_on_eligible_result: bool) -> Self {
         Self {
-            closest: ClosestSet::new(
-                target.clone(),
-                KBucket::MAX_ENTRIES
-            ),
-            candidates: ClosestCandidates::new(
-                target.clone(),
-                3 * KBucket::MAX_ENTRIES
-            ),
-
+            closest     : ClosestSet::new(target, KBucket::MAX_ENTRIES),
+            candidates  : ClosestCandidates::new(target, MAX_ITERATIONS),
+            iteration_count : 0,
             target,
-            iteration_count: 0,
             done_on_eligible_result,
             done_on_lookup: false,
         }
@@ -59,7 +52,6 @@ impl LookupTaskData {
 pub(crate) trait LookupTask {
     fn base_data(&self) -> &TaskData;
     fn dht(&self) -> Weak<Mutex<DHT>>;
-
     fn data(&self) -> &LookupTaskData;
     fn data_mut(&mut self) -> &mut LookupTaskData;
 
@@ -67,20 +59,17 @@ pub(crate) trait LookupTask {
         &self.data().target
     }
 
-    #[cfg(test)]
     fn candidate_size(&self) -> usize {
         self.data().candidates.size()
     }
 
     fn add_candidates_with_nodes(&mut self, mut nodes: Vec<NodeInfo>) {
-        let strong_dht = match self.dht().upgrade() {
-            Some(dht) => dht,
-            None => return,
-        };
+        let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
         let locked_dht = strong_dht.lock().unwrap();
         let local_id   = locked_dht.id().clone();
         let local_addr = locked_dht.addr().clone();
         drop(locked_dht);
+        drop(strong_dht);
 
         let mut todo: Vec<NodeInfo> = Vec::new();
         while let Some(ni) = nodes.pop() {
@@ -104,14 +93,12 @@ pub(crate) trait LookupTask {
     }
 
     fn add_candidates_with_kentries(&mut self, mut entries: Vec<KBucketEntry>) {
-        let strong_dht = match self.dht().upgrade() {
-            Some(dht) => dht,
-            None => return,
-        };
+        let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
         let locked_dht = strong_dht.lock().unwrap();
         let local_id   = locked_dht.id().clone();
         let local_addr = locked_dht.addr().clone();
         drop(locked_dht);
+        drop(strong_dht);
 
         let mut todo: Vec<KBucketEntry> = Vec::new();
         while let Some(entry) = entries.pop() {
@@ -203,20 +190,23 @@ pub(crate) trait LookupTask {
         let Some(cn) = self.remove_candidate(&target_id) else {
             return;
         };
+
         cn.lock().unwrap().set_replied();
 
         let Some(rsp) = call.rsp() else {
-            return;
+            panic!("panic: Call should has response.");
         };
         let Some(body) = rsp.body() else {
-            return;
+            panic!("panic: The response should contain body.");
         };
+
         let token = match body {
             Body::FindNodeResponse(body) => body.token(),
             Body::FindPeerResponse(body) => body.token(),
             Body::FindValueResponse(body) => body.token(),
             _ => return,
         };
+
         cn.lock().unwrap().set_token(token);
         self.add_closest(cn);
     }

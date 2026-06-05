@@ -29,16 +29,9 @@ mod tests {
             node3.clone()
         ]);
 
-        let expected = vec![
-            node1.id().clone(),
-            node2.id().clone(),
-            node3.id().clone()
-        ];
-
         assert_eq!(candidates.size(), 3);
         assert_eq!(candidates.reached_capacity(), true);
         assert_eq!(candidates.is_empty(), false);
-        //assert_eq!(candidates.ids(), expected);
         assert_eq!(candidates.head(), node1.id().clone());
         assert_eq!(candidates.tail(), node3.id().clone());
         assert_eq!(candidates.candidate_node(node1.id()).is_some(), true);

@@ -102,9 +102,9 @@ mod tests {
         let entry = make_reachable_entry(id, "127.0.0.1:32001");
         rt.put(entry);
 
-        rt.on_request_send(&id);
+        rt.on_request_sent(&id);
         let sent = rt.bucket_entry(Some(&id)).unwrap();
-        assert_eq!(*sent.last_sent() > SystemTime::UNIX_EPOCH, true);
+        assert_eq!(sent.last_sent() > &SystemTime::UNIX_EPOCH, true);
 
         rt.on_timeout(&id);
         assert_eq!(rt.bucket_entry(Some(&id)).unwrap().failed_requests(), 1);

@@ -1,9 +1,9 @@
 use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
     net::SocketAddr,
     sync::{Arc, Mutex, Weak},
-    time::{Duration, SystemTime},
-    future::Future,
-    collections::HashMap,
+    time::{Duration, SystemTime}
 };
 use indexmap::map::IndexMap;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -42,6 +42,7 @@ use crate::dht::{
         KClosestNodes,
         KBucketEntry,
         KBucket,
+        Prefix,
     },
     task::{
         task::{State, Task},
@@ -147,8 +148,10 @@ pub(crate) struct DHT {
     bootstrap_nodes : Vec<NodeInfo>,
     bootstrap_ids   : Vec<Id>,
     last_bootstrap  : SystemTime,
-    last_maintenance: SystemTime,
     bootstrapping   : bool,
+
+    last_maintenance: SystemTime,
+    maintenance_tasks: HashSet<Prefix>,
 
     timer_client    : Arc<TimerClient>,
 
@@ -213,6 +216,7 @@ impl DHT {
             bootstrap_ids   : Vec::new(),
             last_bootstrap  : SystemTime::UNIX_EPOCH,
             last_maintenance: SystemTime::UNIX_EPOCH,
+            maintenance_tasks: HashSet::new(),
             bootstrapping   : false,
             timer_client    : tclient,
             suspicious_detector: None,
@@ -346,28 +350,37 @@ impl DHT {
             return;
         }
 
-        // TODO: if maintenanceTask.
+        let (prefix, need_refresh, need_replacement) = {
+            let locked = bucket.lock().unwrap();
+            (
+                locked.prefix().clone(),
+                locked.needs_refreshing(),
+                locked.needs_replacement()
+            )
+        };
 
-        let refresh_needed = bucket.lock().unwrap().needs_refreshing();
-        let replacement_needed = bucket.lock().unwrap().needs_replacement_ping() ||
-            bucket.lock().unwrap().is_home_bucket() && bucket.lock().unwrap().find_pingable_replacement().is_some();
+        if self.maintenance_tasks.contains(&prefix) {
+            return;
+        }
 
-        if refresh_needed || replacement_needed /* TODO: maintenance_tasks */ {
+        if need_refresh || need_replacement  {
             let mut task = Box::new(PingRefreshTask::new(
                 self.weak_dht())
             );
             task.with_name(name);
             task.with_check_all(check_all);
             task.with_remove_on_timeout(remove_on_timeout);
-            // TODO: task.with_probe_replacement(probe_replacement);
             task.with_bucket(bucket);
 
-            //if (maintenanceTasks.putIfAbsent(bucket, task) == null) {
-			//	task.addListener(t -> maintenanceTasks.remove(bucket, task));
-			//	taskManager.add(task);
-			//}
-
-            self.taskman.add(task);
+            if self.maintenance_tasks.insert(prefix) {
+                let weak = self.weak_dht();
+                task.with_listener(TaskListener::default().ended_fn(move |_| {
+                    if let Some(dht) = weak.upgrade() {
+                        dht.lock().unwrap().maintenance_tasks.remove(&prefix);
+                    }
+                }));
+                self.taskman.add(task);
+            }
         }
     }
 
@@ -445,11 +458,9 @@ impl DHT {
     }
 
     fn rt_maintenance(&mut self) {
-        let elapsed = self.last_maintenance
-            .elapsed()
-            .unwrap_or(Duration::MAX)
-            .as_millis();
-        if elapsed < Self::ROUTING_TABLE_MAINTENANCE_INTERVAL {
+        if self.last_maintenance.elapsed().map_or(true, |v| {
+            v.as_millis() > Self::ROUTING_TABLE_MAINTENANCE_INTERVAL
+        }) {
             return;
         }
 
@@ -458,14 +469,15 @@ impl DHT {
 
         let weak = self.weak_dht();
         self.rt.maintenance(
-            self.bootstrap_ids.clone(),
+            self.bootstrap_ids.as_ref(),
             Consumer::new(move |bucket: Arc<Mutex<KBucket>>| {
                 let prefix = bucket.lock().unwrap().prefix().clone();
-                if let Some(dht) = weak.upgrade() {
-                    dht.lock().unwrap().try_ping_maintenance(bucket, false, false, false,
-                        format!("Routing table maintenance: refreshing bucket {}", prefix)
-                    );
-                }
+                let Some(dht) = weak.upgrade() else{
+                    panic!("DHT instance is dropped");
+                };
+                dht.lock().unwrap().try_ping_maintenance(bucket, false, false, false,
+                    format!("Routing table maintenance: refreshing bucket {}", prefix)
+                );
             })
         );
     }
@@ -1197,7 +1209,7 @@ impl DHT {
         }
 
         let nodeid = call.target_id();
-        self.rt.on_request_send(&nodeid);
+        self.rt.on_request_sent(&nodeid);
     }
 
     pub(crate) async fn bootstrap(

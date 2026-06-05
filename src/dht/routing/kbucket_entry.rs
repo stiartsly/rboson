@@ -81,10 +81,12 @@ impl KBucketEntry {
         &self.created
     }
 
+    #[cfg(test)]
     pub(crate) fn last_seen(&self) -> &SystemTime {
         &self.last_seen
     }
 
+    #[cfg(test)]
     pub(crate) fn set_last_seen(&mut self, last_seen: SystemTime) {
         self.last_seen = last_seen;
     }
@@ -93,10 +95,12 @@ impl KBucketEntry {
         self.last_sent == SystemTime::UNIX_EPOCH
     }
 
+    #[cfg(test)]
     pub(crate) fn last_sent(&self) -> &SystemTime {
         &self.last_sent
     }
 
+    #[cfg(test)]
     pub(crate) const fn failed_requests(&self) -> i32 {
         self.failed_requests
     }

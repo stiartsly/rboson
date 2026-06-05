@@ -51,21 +51,19 @@ impl PingRefreshTask {
     }
 
     pub(crate) fn with_bucket(&mut self, bucket: Arc<Mutex<KBucket>>) -> &mut Self {
-        let mut entries = {
-            let mut locked_bucket = bucket.lock().unwrap();
-            locked_bucket.update_refresh_time();
-            locked_bucket.entries()
-        };
+        let mut bucket = bucket.lock().unwrap();
+        let mut todo   = self.todo.lock().unwrap();
 
-        let mut todo = self.todo.lock().unwrap();
-        while let Some(entry) = entries.pop() {
-            if self.check_all || self.remove_on_timeout || entry.needs_ping() {
+        bucket.update_refresh_time();
+        for item in bucket.entries().iter() {
+            if self.check_all || self.remove_on_timeout || item.needs_ping() {
                 if todo.len() >= MAX_TODO_ENTRIES {
                     break;
                 }
-                todo.push_back(entry);
+                todo.push_back(item.clone());
             }
         }
+        drop(bucket);
         drop(todo);
         self
     }
@@ -134,18 +132,18 @@ impl Task for PingRefreshTask {
             let msg = msg::ping_request();
             let todo = self.todo.clone();
             let target = Target::from_bucket_entry(kentry);
-
-            let handler = Consumer::new(move |_| {
+            let cb = Consumer::new(move |_| {
                 todo.lock().unwrap().pop_front();
             });
-            self.send_call(target, msg, Some(handler)).map_err(|e| {
+            if let Err(e) = self.send_call(target, msg, Some(cb)) {
                error!("Error on sending 'PingRequest' message: {}", e);
-            }).ok();
+            }
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() && self.data().is_done()
+        self.todo.lock().unwrap().is_empty() &&
+            self.data().is_done()
     }
 }
 

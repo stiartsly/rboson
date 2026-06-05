@@ -143,10 +143,11 @@ impl KClosestNodes {
     }
 
     fn add_entries(&mut self, bucket: &Arc<Mutex<KBucket>>) {
-        let entries = bucket.lock().unwrap().entries();
+        let bucket  = bucket.lock().unwrap();
+        let entries = bucket.entries();
         for item in entries {
-            if (self.filter)(&item) {
-                self.entries.push(item)
+            if (self.filter)(item) {
+                self.entries.push(item.clone())
             }
         };
     }

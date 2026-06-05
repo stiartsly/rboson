@@ -58,6 +58,7 @@ impl Prefix {
         self.id.distance(&trailing_bits)
     }
 
+    #[allow(unused)]
     pub(crate) fn parent(&self) -> Prefix {
         let mut parent = self.clone();
         if self.depth == -1 {
@@ -86,6 +87,7 @@ impl Prefix {
         branch
     }
 
+    #[allow(unused)]
     pub(crate) fn is_sibling_of(&self, other: &Prefix) -> bool {
         self.depth == other.depth &&
             Id::bits_equal(&self.id, &other.id, self.depth - 1)

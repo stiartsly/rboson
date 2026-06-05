@@ -66,7 +66,7 @@ mod tests {
     fn test_task_with_closestset() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
         assert!(task.is_done());
 
         task.with_closest(make_closestset(42));

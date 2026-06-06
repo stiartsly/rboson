@@ -210,7 +210,7 @@ mod unitests {
 
     // routingtable
     mod test_prefix;
-   // mod test_kclosest_nodes;
+    mod test_kclosest_nodes;
     mod test_routing_table;
     mod test_kbucket_entry;
 

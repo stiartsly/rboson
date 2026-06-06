@@ -7,8 +7,8 @@ use log::{debug, error, warn, trace};
 use crate::{Id, Value};
 use crate::dht::{
     dht::DHT,
-    eligible_value::EligibleValue,
     consumer::Consumer,
+    eligible_value::EligibleValue,
     rpc::{RpcCall, Target},
     msg::{msg, LookupResponse, Body},
     routing::{
@@ -101,7 +101,7 @@ impl Task for ValueLookupTask {
         let entries:Vec<KBucketEntry> = {
             let locked_dht = strong_dht.lock().unwrap();
             let mut kns = KClosestNodes::new(
-                &locked_dht,
+                locked_dht.rt(),
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );

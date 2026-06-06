@@ -145,7 +145,7 @@ impl Task for NodeLookupTask {
         let kes:Vec<KBucketEntry> = {
             let locked_dht = strong_dht.lock().unwrap();
              let mut kns = KClosestNodes::new(
-                &locked_dht,
+                locked_dht.rt(),
                 target,
                 KBucket::MAX_ENTRIES *3
             );

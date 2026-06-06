@@ -12,6 +12,7 @@ use serde::{
     de::{self, MapAccess, Visitor},
     ser::SerializeStruct,
 };
+use log::debug;
 
 use crate::{Id};
 use crate::dht::{
@@ -239,47 +240,63 @@ impl RoutingTable {
         self.bucket(id).lock().unwrap().on_request_sent(id);
     }
 
+    //
+	// Attempts to merge adjacent sibling buckets when their combined size
+    // does not exceed the maximum allowed.
+	// This helps reduce fragmentation and maintain efficient bucket structure.
+	//
     fn _merge_buckets(&mut self) {
-        /*
-        let mut idx = 1;
-
+        debug!("Trying to merge buckets({})... ", self.buckets.len());
+        let mut idx = 0;
         while idx < self.buckets.len() {
-            let buckets = self.buckets.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>();
-            let left = buckets[idx - 1].clone();
-            let right = buckets[idx].clone();
+            let buckets = self.buckets.iter()
+                    .map(|(_, v)| v.clone())
+                    .collect::<Vec<_>>();
 
-            let (left_prefix, right_prefix, parent, can_merge) = {
-                let left_locked = left.lock().unwrap();
-                let right_locked = right.lock().unwrap();
-                let left_prefix = left_locked.prefix().clone();
-                let right_prefix = right_locked.prefix().clone();
-                let parent = left_prefix.parent();
-                let can_merge = left_prefix.is_sibling_of(&right_prefix)
-                    && left_locked.size() + right_locked.size() <= KBucket::MAX_ENTRIES;
-                (left_prefix, right_prefix, parent, can_merge)
-            };
-
-            if !can_merge {
-                idx += 1;
+            idx += 1;
+            if idx < 1 {
                 continue;
             }
-
-            let left_entries = left.lock().unwrap().entries().cloned().collect::<Vec<_>>();
-            let right_entries = right.lock().unwrap().entries().cloned().collect::<Vec<_>>() ;
-            let mut merged = KBucket::new(parent.clone(), self.is_home_bucket(&parent));
-            for entry in left_entries.into_iter().chain(right_entries.into_iter()) {
-                merged.put(entry.clone());
+            if idx >= buckets.len() {
+                break;
             }
 
-            self.buckets.remove(&left_prefix);
-            self.buckets.remove(&right_prefix);
-            self.buckets.insert(parent, Arc::new(Mutex::new(merged)));
+            let l = buckets[idx - 1].clone();
+            let r = buckets[idx].clone();
 
-            if idx > 1 {
-                idx -= 1;
+            let locked_l = l.lock().unwrap();
+            let locked_r = r.lock().unwrap();
+
+            if !locked_l.prefix().is_sibling_of(&locked_r.prefix()) {
+                let effective_sz1 = locked_l.filter(|e| e.removable_without_replacement());
+                let effective_sz2 = locked_r.filter(|e| e.removable_without_replacement());
+
+                if effective_sz1 + effective_sz2 <= KBucket::MAX_ENTRIES {
+                    debug!("Merging buckets {} and {}...",
+                        locked_l.prefix(),
+                        locked_r.prefix()
+                    );
+
+                    let prefix = locked_l.prefix().parent();
+                    let is_home_bucket = self.is_home_bucket(&prefix);
+                    let mut new_bucket = KBucket::new(prefix, is_home_bucket);
+
+                    for entry in locked_l.entries().iter().cloned() {
+                        new_bucket.put(entry);
+                    }
+                    for entry in locked_r.entries().iter().cloned() {
+                        new_bucket.put(entry);
+                    }
+
+                    let _ = self.buckets.remove(locked_l.prefix());
+                    let _ = self.buckets.remove(locked_r.prefix());
+                    let _ = self.buckets.insert(prefix, Arc::new(Mutex::new(new_bucket)));
+
+                    idx -= 2; // Adjust index to re-check after merge
+                }
             }
+            debug!("Finished merge buckets({})... ", self.buckets.len());
         }
-        */
     }
 
     pub(crate) fn maintenance(&mut self, bootstrap_ids: &[Id], consumer: Consumer<Arc<Mutex<KBucket>>>) {

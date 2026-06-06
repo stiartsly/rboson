@@ -1,16 +1,16 @@
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex},
 };
 
 use crate::{
     Id,
+    NodeInfo,
     dht::routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
         kclosest_nodes::KClosestNodes,
         routing_table::RoutingTable,
-    }
+    },
 };
 
 fn make_id(first_byte: u8, last_byte: u8) -> Id {
@@ -20,7 +20,7 @@ fn make_id(first_byte: u8, last_byte: u8) -> Id {
     Id::from_bytes(bytes)
 }
 
-fn make_reachable_entry(id: Id, port: u16) -> KBucketEntry {
+fn make_kentry(id: Id, port: u16) -> KBucketEntry {
     let mut entry = KBucketEntry::new(
         id,
         format!("127.0.0.1:{port}").parse::<SocketAddr>().unwrap(),
@@ -29,31 +29,38 @@ fn make_reachable_entry(id: Id, port: u16) -> KBucketEntry {
     entry
 }
 
-fn make_split_rt() -> Arc<Mutex<RoutingTable>> {
-    let mut rt = RoutingTable::new(Id::zero());
+fn make_rt(local_id: Id) -> RoutingTable {
+    RoutingTable::new(local_id)
+}
+
+fn make_split_rt() -> RoutingTable {
+    let mut rt = make_rt(Id::zero());
     for i in 0..KBucket::MAX_ENTRIES {
-        rt.put(make_reachable_entry(make_id(0x00, i as u8 + 1), 33000 + i as u16));
+        rt.put(make_kentry(make_id(0x00, i as u8 + 1), 33000 + i as u16));
     }
-    rt.put(make_reachable_entry(make_id(0x80, 1), 34000));
-    Arc::new(Mutex::new(rt))
+    rt.put(make_kentry(make_id(0x80, 1), 34000));
+    rt
 }
 
-fn build_table_with_local_entry() -> Arc<Mutex<RoutingTable>> {
+fn build_rt_with_local_entry() -> RoutingTable {
     let local_id = make_id(0x00, 1);
-    let mut rt = RoutingTable::new(local_id);
-    rt.put(make_reachable_entry(local_id, 35000));
-    rt.put(make_reachable_entry(make_id(0x00, 2), 35001));
-    rt.put(make_reachable_entry(make_id(0x80, 1), 35002));
-    Arc::new(Mutex::new(rt))
+    let mut rt = make_rt(local_id);
+    rt.put(make_kentry(local_id, 35000));
+    rt.put(make_kentry(make_id(0x00, 2), 35001));
+    rt.put(make_kentry(make_id(0x80, 1), 35002));
+    rt
 }
 
-fn make_small_rt() -> Arc<Mutex<RoutingTable>> {
-    let mut rt = RoutingTable::new(Id::zero());
-    rt.put(make_reachable_entry(make_id(0x00, 1), 36000));
-    rt.put(make_reachable_entry(make_id(0x80, 1), 36001));
-    Arc::new(Mutex::new(rt))
+fn make_small_rt() -> RoutingTable {
+    let mut rt = make_rt(Id::zero());
+    rt.put(make_kentry(make_id(0x00, 1), 36000));
+    rt.put(make_kentry(make_id(0x80, 1), 36001));
+    rt
 }
 
+fn make_closest(rt: &RoutingTable, target: Id, capacity: usize) -> KClosestNodes {
+    KClosestNodes::new(rt, target, capacity)
+}
 
 #[cfg(test)]
 mod tests {
@@ -61,13 +68,12 @@ mod tests {
 
     #[test]
     fn test_fill() {
-
-        let rt = make_split_rt();
         let target = make_id(0x80, 1);
         let capacity = 4;
-        let mut closest = KClosestNodes::new(rt, target, capacity);
+        let rt = make_split_rt();
+        let mut closest = make_closest(&rt, target.clone(), capacity);
 
-        assert_eq!(closest.target(), &make_id(0x80, 1));
+        assert_eq!(closest.target(), &target);
         assert_eq!(closest.size(), 0);
         assert!(!closest.is_full());
 
@@ -86,10 +92,10 @@ mod tests {
     fn test_fill_orders_by_distance() {
         let rt = make_split_rt();
         let target = make_id(0x00, 2);
-        let mut closest = KClosestNodes::new(rt.clone(), target, 5);
+        let mut closest = make_closest(&rt, target, 5);
         closest.fill();
 
-        let local_id = *rt.lock().unwrap().local_nodeid();
+        let local_id = rt.local_nodeid().clone();
         assert!(!closest.entries()
             .iter()
             .any(|entry| entry.id() == &local_id));
@@ -104,10 +110,10 @@ mod tests {
     }
 
     #[test]
-    fn test_set_filter1() {
+    fn test_set_filter() {
         let rt = make_split_rt();
         let target = make_id(0x00, 3);
-        let mut closest = KClosestNodes::new(rt.clone(), target, 8);
+        let mut closest = make_closest(&rt, target, 8);
 
         closest.set_filter(|entry| entry.socket_addr().port() % 2 == 0);
         closest.fill();
@@ -117,13 +123,10 @@ mod tests {
         assert!(closest.entries().iter().all(
             |entry| entry.socket_addr().port() % 2 == 0
         ));
-    }
 
-    #[test]
-    fn test_set_filter2() {
         let rt = make_split_rt();
         let target = make_id(0x80, 1);
-        let mut closest = KClosestNodes::new(rt.clone(), target, 8);
+        let mut closest = make_closest(&rt, target, 8);
 
         closest.set_filter(|entry| entry.id().as_bytes()[0] == 0x80);
         closest.fill();
@@ -134,9 +137,9 @@ mod tests {
 
     #[test]
     fn test_set_filter_excludes_local_nodeid() {
-        let rt = build_table_with_local_entry();
-        let local_id = *rt.lock().unwrap().local_nodeid();
-        let mut closest = KClosestNodes::new(rt, make_id(0x00, 1), 4);
+        let rt = build_rt_with_local_entry();
+        let local_id = rt.local_nodeid().clone();
+        let mut closest = make_closest(&rt, make_id(0x00, 1), 4);
 
         closest.set_filter(|_| true);
         closest.fill();
@@ -147,8 +150,8 @@ mod tests {
 
     #[test]
     fn test_fill_with_empty_rt(){
-        let rt = Arc::new(Mutex::new(RoutingTable::new(Id::zero())));
-        let mut closest = KClosestNodes::new(rt, make_id(0x40, 1), 4);
+        let rt = make_rt(Id::zero());
+        let mut closest = make_closest(&rt, make_id(0x40, 1), 4);
         closest.fill();
 
         assert!(closest.entries().is_empty());
@@ -157,7 +160,7 @@ mod tests {
     #[test]
     fn test_fill_with_zero_capacity() {
         let rt = make_split_rt();
-        let mut closest = KClosestNodes::new(rt, make_id(0x40, 1), 0);
+        let mut closest = make_closest(&rt, make_id(0x40, 1), 0);
 
         closest.fill();
 
@@ -169,12 +172,52 @@ mod tests {
     #[test]
     fn test_fill_twice() {
         let rt = make_small_rt();
-        let mut closest = KClosestNodes::new(rt, make_id(0x40, 1), 4);
+        let mut closest = make_closest(&rt, make_id(0x40, 1), 4);
 
         closest.fill();
         assert_eq!(closest.size(), 2);
 
         closest.fill();
         assert_eq!(closest.size(), 4);
+    }
+
+    #[test]
+    fn test_into_vec_kbucket_entry() {
+        let rt = make_split_rt();
+        let target = make_id(0x00, 4);
+        let mut closest = make_closest(&rt, target.clone(), 3);
+
+        closest.fill();
+
+        let expected_ids: Vec<Id> = closest
+            .entries()
+            .iter()
+            .map(|entry| entry.id().clone())
+            .collect();
+        let entries: Vec<KBucketEntry> = closest.into();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(
+            entries.iter().map(|entry| entry.id().clone()).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(entries.iter().all(|entry| entry.id() != rt.local_nodeid()));
+    }
+
+    #[test]
+    fn test_into_vec_node_info() {
+        let rt = make_split_rt();
+        let mut closest = make_closest(&rt, make_id(0x80, 1), 4);
+
+        closest.fill();
+
+        let expected: Vec<NodeInfo> = closest
+            .entries()
+            .iter()
+            .map(|entry| entry.as_ref().clone())
+            .collect();
+        let nodes: Vec<NodeInfo> = closest.into();
+
+        assert_eq!(nodes, expected);
     }
 }

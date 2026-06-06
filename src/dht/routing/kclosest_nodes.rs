@@ -4,13 +4,10 @@ use std::{
 };
 
 use crate::{Id, NodeInfo};
-use crate::dht::{
-    dht::DHT,
-    routing::{
-        KBucket,
-        KBucketEntry,
-        RoutingTable
-    }
+use crate::dht::routing::{
+    KBucket,
+    KBucketEntry,
+    RoutingTable
 };
 
 pub(crate) struct KClosestNodes {
@@ -24,12 +21,12 @@ pub(crate) struct KClosestNodes {
 
 impl KClosestNodes {
     pub(crate) fn new(
-        dht: &DHT,
+        rt: &RoutingTable,
         target: Id,
         capacity: usize
     ) -> Self {
-        let local_id = dht.rt().local_nodeid().clone();
-        let buckets  = dht.rt().buckets();
+        let local_id = rt.local_nodeid().clone();
+        let buckets  = rt.buckets();
         Self {
             filter: Self::default_filter(local_id.clone()),
             local_id,

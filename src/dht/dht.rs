@@ -911,7 +911,7 @@ impl DHT {
 
     fn fill_closest_nodes(&self, target: Id) -> Vec<NodeInfo> {
         let mut kns = KClosestNodes::new(
-            self,
+            self.rt(),
             target,
             KBucket::MAX_ENTRIES
         );

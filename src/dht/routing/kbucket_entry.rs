@@ -5,7 +5,6 @@ use std::{
     result::Result as SResult,
     time::{Duration, SystemTime}
 };
-
 use serde::{
     Deserialize, Deserializer,
     Serialize, Serializer,
@@ -17,10 +16,7 @@ use crate::{
     Id,
     NodeInfo,
     core::version,
-    dht::rpc::{
-        Reachability,
-        rpc_server::RpcServer,
-    }
+    dht::rpc::Reachability
 };
 
 /**
@@ -57,7 +53,7 @@ impl KBucketEntry {
             last_sent   : SystemTime::UNIX_EPOCH,
             reachable   : false,
             failed_requests: 0,
-            avg_rtt: None,
+            avg_rtt     : None,
         }
     }
 
@@ -89,10 +85,6 @@ impl KBucketEntry {
     #[cfg(test)]
     pub(crate) fn set_last_seen(&mut self, last_seen: SystemTime) {
         self.last_seen = last_seen;
-    }
-
-    pub(crate) fn is_never_contacted(&self) -> bool {
-        self.last_sent == SystemTime::UNIX_EPOCH
     }
 
     #[cfg(test)]
@@ -129,10 +121,7 @@ impl KBucketEntry {
         self.failed_requests != 0 && crate::elapsed_ms!(&self.last_sent) < self.backoff() as u128
     }
 
-    pub(crate) fn within_backoff_window(&self) -> bool {
-        self.within_backoff_window_at(&SystemTime::now())
-    }
-
+    #[allow(unused)]
     pub(crate) fn backoff_window_end(&self) -> Option<SystemTime> {
         if self.failed_requests == 0 || self.last_sent == SystemTime::UNIX_EPOCH {
             return None;
@@ -189,13 +178,15 @@ impl KBucketEntry {
 
     ///
 	/// Determines if this entry needs to be replaced in the routing table.
-	/// Replacement is needed if the node is unreachable with more than one failed request,
-	/// if it exceeds maximum allowed timeouts, or if it is old and stale.
+	/// Replacement is needed:
+    /// - if the node is unreachable with more than one failed request,
+	/// - if it exceeds maximum allowed timeouts, or
+    /// - if it is old and stale.
 	///
 	/// `true` if replacement is needed; `false` otherwise.
     ///
     pub(crate) fn needs_replacement(&self) -> bool {
-        self.failed_requests > 1 && !self.is_reachable() ||
+        (self.failed_requests > 1 && !self.is_reachable()) ||
             self.failed_requests > Self::MAX_FAILURES ||
             self.old_and_stale()
     }
@@ -222,14 +213,11 @@ impl KBucketEntry {
     }
 
     pub(crate) fn rtt(&self) -> u64 {
-        self.rtt_with(RpcServer::RPC_CALL_TIMEOUT_MAX)
+        0
     }
 
     pub(crate) fn rtt_with(&self, default_rtt: u64) -> u64 {
-        match self.avg_rtt {
-            Some(avg_rtt) if avg_rtt.is_finite() => avg_rtt.clamp(0.0, default_rtt as f64).round() as u64,
-            _ => default_rtt,
-        }
+        default_rtt
     }
 
     pub(crate) fn on_request_sent(&mut self) {

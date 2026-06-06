@@ -98,7 +98,7 @@ impl Task for PeerLookupTask {
         let entries: Vec<KBucketEntry> = {
             let locked = strong_dht.lock().unwrap();
             let mut kns = KClosestNodes::new(
-                &locked,
+                locked.rt(),
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );

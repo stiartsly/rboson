@@ -219,6 +219,12 @@ impl KBucket {
         }
     }
 
+    pub(crate) fn filter<F>(&self, test: F) -> usize
+    where F: Fn(&KBucketEntry) -> bool,
+    {
+        self.entries.iter().filter(|entry| test(entry)).count()
+    }
+
     pub(crate) fn cleanup(&mut self,
         _local_id: &Id,
         _bootstrap_ids: &[Id],

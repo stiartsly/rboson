@@ -140,7 +140,7 @@ fn test_retain() {
     let mut s = open_storage(&path);
     let rc = s.initialize(Duration::from_secs(3600), Duration::from_secs(7200));
     assert!(rc.is_ok());
-    let rc = s.put_value(value.clone(), None);
+    let rc = s.put_value(value.clone(), false);
     assert!(rc.is_ok());
     let rc = s.close();
     assert!(rc.is_ok());
@@ -173,9 +173,9 @@ fn test_value() {
     let expected_seq2 = 99;
     let encrypted = make_encrypted_value(keypair, expected_seq2);
 
-    assert!(s.put_value(immutable.clone(), None).is_ok());
-    assert!(s.put_value(signed.clone(), Some(true)).is_ok());
-    assert!(s.put_value(encrypted.clone(), None).is_ok());
+    assert!(s.put_value(immutable.clone(), false).is_ok());
+    assert!(s.put_value(signed.clone(), true).is_ok());
+    assert!(s.put_value(encrypted.clone(), false).is_ok());
 
     let rc = s.get_value(&immutable.id());
     assert!(rc.is_ok());
@@ -234,7 +234,7 @@ fn test_values() {
     ];
 
     for value in &values {
-        let rc = s.put_value(value.clone(), None);
+        let rc = s.put_value(value.clone(), false);
         assert!(rc.is_ok());
     }
 
@@ -284,9 +284,9 @@ fn test_values_with_expected_seq() {
         "same keypair must produce same value id"
     );
 
-    let rc = s.put_value(low_seq, None);
+    let rc = s.put_value(low_seq, false);
     assert!(rc.is_ok());
-    let rc = s.put_value(high_seq.clone(), None);
+    let rc = s.put_value(high_seq.clone(), false);
     assert!(rc.is_ok());
 
     let rc = s.get_value(&high_seq.id());
@@ -315,8 +315,8 @@ fn test_peer() {
     let peer = make_peer("10.0.0.1:9000", 100);
     let (authenticated_peer, node_id) = make_authenticated_peer("10.0.0.2:9000", 200);
 
-    assert!(s.put_peer(peer.clone(), None).is_ok());
-    assert!(s.put_peer(authenticated_peer.clone(), Some(true)).is_ok());
+    assert!(s.put_peer(peer.clone(), false).is_ok());
+    assert!(s.put_peer(authenticated_peer.clone(), true).is_ok());
 
     let rc = s.get_peer(peer.id(), peer.fingerprint());
     assert!(rc.is_ok());
@@ -410,9 +410,9 @@ fn test_peers_with_expected_seq() {
 
     assert_eq!(low_seq.id(), high_seq.id(), "same keypair must produce same peer id");
 
-    let rc = s.put_peer(low_seq, None);
+    let rc = s.put_peer(low_seq, false);
     assert!(rc.is_ok());
-    let rc = s.put_peer(high_seq.clone(), None);
+    let rc = s.put_peer(high_seq.clone(), false);
     assert!(rc.is_ok());
 
     let rc = s.get_peers_with_expected_seq(high_seq.id(), 10, 10);
@@ -440,13 +440,13 @@ fn test_purge() {
     let volatile_peer = make_peer("10.0.2.1:9300", 31);
     let persistent_peer = make_peer("10.0.2.2:9300", 32);
 
-    let rc = s.put_value(volatile_value.clone(), None);
+    let rc = s.put_value(volatile_value.clone(), false);
     assert!(rc.is_ok());
-    let rc = s.put_value(persistent_value.clone(), Some(true));
+    let rc = s.put_value(persistent_value.clone(), true);
     assert!(rc.is_ok());
-    let rc = s.put_peer(volatile_peer.clone(), None);
+    let rc = s.put_peer(volatile_peer.clone(), false);
     assert!(rc.is_ok());
-    let rc = s.put_peer(persistent_peer.clone(), Some(true));
+    let rc = s.put_peer(persistent_peer.clone(), true);
     assert!(rc.is_ok());
 
     assert!(s.purge().is_ok());

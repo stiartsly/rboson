@@ -1,7 +1,6 @@
 diesel::table! {
     valores (id) {
         id -> Binary,
-        persistent -> Bool,
         publicKey -> Nullable<Binary>,
         privateKey -> Nullable<Binary>,
         recipient -> Nullable<Binary>,
@@ -9,8 +8,8 @@ diesel::table! {
         signature -> Nullable<Binary>,
         sequenceNumber -> Integer,
         data -> Binary,
-        timestamp -> BigInt,
-        announced -> BigInt,
+        persistent -> Bool,
+        updated -> BigInt,
     }
 }
 
@@ -18,7 +17,6 @@ diesel::table! {
     peers (id, fingerprint) {
         id -> Binary,
         fingerprint -> BigInt,
-        persistent -> Bool,
         privateKey -> Nullable<Binary>,
         nonce -> Binary,
         sequenceNumber -> Integer,
@@ -27,7 +25,7 @@ diesel::table! {
         signature -> Binary,
         endpoint -> Text,
         extra -> Nullable<Binary>,
-        timestamp -> BigInt,
-        announced -> BigInt,
+        persistent -> Bool,
+        updated -> BigInt,
     }
 }

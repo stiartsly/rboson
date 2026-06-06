@@ -10,7 +10,10 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
 use crate::{
-    Id, Network, NodeInfo, PeerInfo, Value, crypto_identity::CryptoIdentity, dht::{msg, rpc::rpc_target::NodeInfoLike}, errors::Result
+    Id, Network,
+    NodeInfo, PeerInfo, Value,
+    crypto_identity::CryptoIdentity,
+    errors::Result
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -25,11 +28,12 @@ use crate::dht::{
         Reachability,
         RpcCall, rpccall::State as CallState,
         rpc_server::{RpcServer},
+        rpc_target::NodeInfoLike,
     },
     msg::{
         Message,
         LookupRequest, LookupResponse,
-        msg::{Kind, Method, Body},
+        msg::{*,    Kind, Method, Body},
     },
     suspicious_node_detector::{
         SuspiciousNodeDetector,
@@ -442,7 +446,7 @@ impl DHT {
 
         info!("Periodic: random ping ...");
 
-        let call = RpcCall::new(entry, msg::ping_request());
+        let call = RpcCall::new(entry, ping_request());
         let _ = self.send_call(call);
     }
 
@@ -842,13 +846,13 @@ impl DHT {
 
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
-            let call = RpcCall::new(entry, msg::ping_request());
+            let call = RpcCall::new(entry, ping_request());
             let _ = self.send_call(call);
         }
     }
 
     fn send_err(&mut self, method: Method, code: i32, str: &str) {
-        let mut msg = msg::error(method, 0, code, str.into());
+        let mut msg = error_msg(method, 0, code, str.into());
         // TODO: set remote id and addr
         self.send_msg(&mut msg);
     }
@@ -924,7 +928,7 @@ impl DHT {
         let remote_id   = req.remote_id().clone();
         let remote_addr = req.remote_addr().clone();
 
-        let mut msg = msg::ping_response(txid);
+        let mut msg = ping_response(txid);
         msg.set_remote(remote_id, remote_addr);
 
         self.send_msg(&mut msg);
@@ -970,7 +974,7 @@ impl DHT {
         }
 
         let txid = req.txid();
-        let mut rsp = msg::find_node_response(txid, nodes4, nodes6, token);
+        let mut rsp = find_node_response(txid, nodes4, nodes6, token);
         rsp.set_remote(
             req.remote_id().clone(),
             req.remote_addr().clone()
@@ -1019,9 +1023,9 @@ impl DHT {
             if body.want6() && use_ipv6 {
                 nodes6 = Some(self.fill_closest_nodes(target));
             }
-            msg::find_value_response_with_nodes(txid, nodes4, nodes6)
+            find_value_response_with_nodes(txid, nodes4, nodes6)
         } else {
-            msg::find_value_response(txid, value.unwrap())
+            find_value_response(txid, value.unwrap())
         };
         rsp.set_remote(
             req.remote_id().clone(),
@@ -1090,10 +1094,10 @@ impl DHT {
             }
         }
 
-        _ = self.storage.lock().unwrap().put_value(value.clone(), None);
+        _ = self.storage.lock().unwrap().put_value(value.clone(), false);
 
         let txid = req.txid();
-        let mut msg = msg::store_value_response(txid);
+        let mut msg = store_value_response(txid);
         msg.set_remote(
             req.remote_id().clone(),
             remote_addr
@@ -1136,9 +1140,9 @@ impl DHT {
             if body.want6() && use_ipv6 {
                 nodes6 = Some(self.fill_closest_nodes(target));
             }
-            msg::find_peer_response_with_nodes(txid, nodes4, nodes6)
+            find_peer_response_with_nodes(txid, nodes4, nodes6)
         } else {
-            msg::find_peer_response(txid, peers)
+            find_peer_response(txid, peers)
         };
 
         rsp.set_remote(
@@ -1203,10 +1207,10 @@ impl DHT {
                 return;
             }
         }
-        _ = self.storage.lock().unwrap().put_peer(peer.clone(), None);
+        _ = self.storage.lock().unwrap().put_peer(peer.clone(), false);
 
         let txid = req.txid();
-        let mut msg = msg::announce_peer_response(txid);
+        let mut msg = announce_peer_response(txid);
         msg.set_remote(
             req.remote_id().clone(),
             remote_addr
@@ -1290,7 +1294,7 @@ impl DHT {
         let mut futures = FuturesUnordered::new();
 
         for item in bootstrap_nodes.into_iter() {
-            let msg = msg::find_node_request(
+            let msg = find_node_request(
                 Id::random(),
                 network.is_ipv4(),
                 network.is_ipv6(),

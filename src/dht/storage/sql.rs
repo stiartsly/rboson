@@ -1,4 +1,4 @@
-pub(crate) const CURRENT_VERSION: i32 = 5;
+// pub(crate) const CURRENT_VERSION: i32 = 5;
 pub(crate) const SET_USER_VERSION: &str = "PRAGMA user_version = 5";
 pub(crate) const GET_USER_VERSION: &str = "PRAGMA user_version";
 
@@ -13,13 +13,12 @@ pub(crate) const CREATE_VALUES_TABLE: &str = "
         signature BLOB, \
         sequenceNumber INTEGER NOT NULL DEFAULT 0, \
         data BLOB NOT NULL, \
-        timestamp INTEGER NOT NULL, \
-        announced INTEGER NOT NULL DEFAULT 0\
+        updated INTEGER NOT NULL DEFAULT 0\
         ) WITHOUT ROWID
     ";
 
 pub(crate) const CREATE_VALUES_INDEX: &str = "
-        CREATE INDEX IF NOT EXISTS idx_valores_timestamp ON valores(timestamp)
+        CREATE INDEX IF NOT EXISTS idx_valores_updated ON valores(updated)
     ";
 
 pub(crate) const CREATE_PEERS_TABLE: &str = "
@@ -35,14 +34,13 @@ pub(crate) const CREATE_PEERS_TABLE: &str = "
         signature BLOB NOT NULL, \
         endpoint TEXT NOT NULL, \
         extra BLOB, \
-        timestamp INTEGER NOT NULL, \
-        announced INTEGER NOT NULL DEFAULT 0, \
+        updated INTEGER NOT NULL DEFAULT 0, \
         PRIMARY KEY(id, fingerprint)\
         ) WITHOUT ROWID
     ";
 
 pub(crate) const CREATE_PEERS_INDEX: &str = "
-        CREATE INDEX IF NOT EXISTS idx_peers_timestamp ON peers(timestamp)
+        CREATE INDEX IF NOT EXISTS idx_peers_updated ON peers(updated)
     ";
 
 pub(crate) const CREATE_PEERS_ID_INDEX: &str = "

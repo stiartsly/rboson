@@ -32,7 +32,7 @@ use crate::dht::{
     timer_client::TimerClient,
     timer_queue::{TimerQueue, Command},
     storage::{
-        data_storage::DataStorage,
+        data_storage::{self, DataStorage},
         sqlite_storage::SqliteStorage,
     },
     errors::{
@@ -85,7 +85,7 @@ impl Node {
         let database_uri = {
             let mut path = PathBuf::new();
             path.push(cfg.data_dir());
-            path.push(SqliteStorage::remove_prefix(cfg.database_uri()));
+            path.push(data_storage::database_name(cfg.database_uri()));
             path
         };
         let storage_db = {
@@ -164,7 +164,7 @@ impl Node {
             return Err(ArgumentError::new(
                 "Database URI cannot contain path separator '/'"));
         }
-        if !SqliteStorage::supports(database_uri) {
+        if !data_storage::supports(database_uri) {
             return Err(ArgumentError::new(
                 format!("Unsupported database URI: {}", database_uri)));
         }
@@ -529,7 +529,7 @@ impl Node {
 
         if !eligible.is_empty() && eligible.is_latest() {
             let _ = crate::locked!(self.storage).put_value(
-                eligible.value().unwrap(), None
+                eligible.value().unwrap(), false
             );
         }
 
@@ -621,8 +621,7 @@ impl Node {
 
         // store the value in local node.
         let _ = self.storage.lock().unwrap().put_value(
-            value.clone(),
-            Some(persistent)
+            value.clone(), persistent
         )?;
 
         // store the value to the network.
@@ -682,7 +681,7 @@ impl Node {
 
         // store the new peer locally.
         let _ = crate::locked!(self.storage).put_peer(
-            peer.clone(), Some(persistent)
+            peer.clone(), persistent
         );
 
         // announce the peer to the network.

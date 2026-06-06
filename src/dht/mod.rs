@@ -13,7 +13,6 @@ mod msg {
     pub(crate) mod store_value_req;
 
     pub(crate) use {
-        msg::{*, Message, Body},
         lookup_req::LookupRequest,
         lookup_rsp::LookupResponse,
         find_node_req::FindNodeRequest,
@@ -25,6 +24,7 @@ mod msg {
         announce_peer_req::AnnouncePeerRequest,
         store_value_req::StoreValueRequest,
         error::Error as ErrorBody,
+        msg::{Message, Body},
     };
 }
 

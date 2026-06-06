@@ -156,7 +156,7 @@ mod tests {
         let error_call = Arc::new(Mutex::new(RpcCall::new(target.clone(), req)));
        // error_call.lock().unwrap().set_cloned(error_call.clone());
 
-        let mut err = msg::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
+        let mut err = msg::error_msg(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
         err.set_nodeid(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
         error_call.lock().unwrap().respond(&err);

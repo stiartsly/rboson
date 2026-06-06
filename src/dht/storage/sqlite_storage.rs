@@ -17,18 +17,23 @@ use crate::dht::storage::{
     user_version,
     drop_tbs,
     create_tbs,
+    put_value,
     get_value,
     get_values,
-    put_value,
+    //get_values_announced_before,
+    //get_values_paginated,
     update_value_announced_time,
     remove_value,
     remove_expired_values,
+    put_peer,
     get_peer,
     get_peers_by_id,
-    get_peers_with_seq,
+    get_peers_with_expected_seq,
     get_peers_authenticated_by,
+    //get_peers_announced_before,
+    //get_peers_paginated,
+    //get_peers_paginated_and_announced_before,
     get_peers_all,
-    put_peer,
     update_peer_announced_time,
     remove_peer,
     remove_peers_by_id,
@@ -65,13 +70,6 @@ impl SqliteStorage {
     // the unsafe impl Send/Sync below reflects that guarantee.
     fn conn(&self) -> &mut SqliteConnection {
         unsafe { (*self.connection.get()).as_mut().unwrap() }
-    }
-
-    pub(crate) fn supports(database_uri: &str) -> bool {
-        database_uri.starts_with("jdbc:sqlite:")
-    }
-    pub(crate) fn remove_prefix(database_uri: &str) -> &str {
-        database_uri.trim_start_matches("jdbc:sqlite:")
     }
 }
 
@@ -148,7 +146,7 @@ impl DataStorage for SqliteStorage {
 
     // ── values ───────────────────────────────────────────────────────────────
 
-    fn put_value(&mut self, value: Value, persistent: Option<bool>) -> Result<()> {
+    fn put_value(&mut self, value: Value, persistent: bool) -> Result<()> {
         let now      = as_ms!(SystemTime::now()) as i64;
         let value_id = value.id();
         let v = NewValore {
@@ -160,9 +158,8 @@ impl DataStorage for SqliteStorage {
             signature:      value.signature(),
             data:           value.data(),
             sequenceNumber: value.sequence_number(),
-            persistent:     persistent.unwrap_or(false),
-            timestamp:      now,
-            announced:      now,
+            persistent,
+            updated:        now,
         };
         put_value(self.conn(), v)
             .map(|_| ())
@@ -181,6 +178,22 @@ impl DataStorage for SqliteStorage {
             .map_err(db_err)
     }
 
+    fn get_values_announced_before(
+        &self,
+        _persistent: bool,
+        _announced_before: u64
+    ) -> Result<Vec<Value>> {
+        unimplemented!()
+    }
+
+    fn get_values_paginated(
+        &self,
+        _offset: usize,
+        _limit: usize
+    ) -> Result<Vec<Value>> {
+        unimplemented!()
+    }
+
     fn update_value_announced_time(&mut self, id: &Id) -> Result<()> {
         let now = as_ms!(SystemTime::now()) as i64;
         update_value_announced_time(self.conn(), id.as_bytes(), now)
@@ -196,7 +209,7 @@ impl DataStorage for SqliteStorage {
 
     // ── peers ────────────────────────────────────────────────────────────────
 
-    fn put_peer(&mut self, peer: PeerInfo, persistent: Option<bool>) -> Result<()> {
+    fn put_peer(&mut self, peer: PeerInfo, persistent: bool) -> Result<()> {
         if !peer.is_valid() {
             return Err(ArgumentError::new("peer signature validation failed"));
         }
@@ -204,7 +217,6 @@ impl DataStorage for SqliteStorage {
         let p = NewPeer {
             id:             peer.id().as_bytes(),
             fingerprint:    peer.fingerprint() as i64,
-            persistent:     persistent.unwrap_or(false),
             privateKey:     peer.private_key().map(|sk| sk.as_bytes()),
             nonce:          peer.nonce(),
             sequenceNumber: peer.sequence_number(),
@@ -213,8 +225,8 @@ impl DataStorage for SqliteStorage {
             signature:      peer.signature(),
             endpoint:       peer.endpoint(),
             extra:          peer.extra_data(),
-            timestamp:      now,
-            announced:      now,
+            persistent,
+            updated:        now,
         };
         put_peer(self.conn(), p)
             .map(|_| ())
@@ -223,7 +235,7 @@ impl DataStorage for SqliteStorage {
 
     fn put_peers(&mut self, peers_in: Vec<PeerInfo>) -> Result<()> {
         for peer in peers_in {
-            self.put_peer(peer, None)?;
+            self.put_peer(peer, false)?;
         }
         Ok(())
     }
@@ -241,7 +253,7 @@ impl DataStorage for SqliteStorage {
     }
 
     fn get_peers_with_expected_seq(&self, id: &Id, expected_seq: i32, limit: i32) -> Result<Vec<PeerInfo>> {
-        get_peers_with_seq(self.conn(), id.as_bytes(), expected_seq, limit as i64)
+        get_peers_with_expected_seq(self.conn(), id.as_bytes(), expected_seq, limit as i64)
             .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
             .map_err(db_err)
     }
@@ -250,6 +262,29 @@ impl DataStorage for SqliteStorage {
         get_peers_authenticated_by(self.conn(), id.as_bytes(), node_id.as_bytes())
             .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
             .map_err(db_err)
+    }
+
+    fn get_peers_announced_before(&self,
+        _persistent: bool,
+        _announced_before: u64
+    ) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers_paginated(&self,
+        _offset: usize,
+        _limit: usize
+    ) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
+    }
+
+    fn get_peers_paginated_and_announced_before(&self,
+        _offset: usize,
+        _limit: usize,
+        _persistent: bool,
+        _announced_before: u64
+    ) -> Result<Vec<PeerInfo>> {
+        unimplemented!()
     }
 
     fn get_peers_all(&self) -> Result<Vec<PeerInfo>> {

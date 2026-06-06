@@ -579,7 +579,7 @@ pub(crate) fn announce_peer_response(txid: i32) -> Message {
     Message::new(Kind::Response, Method::AnnouncePeer, txid, None)
 }
 
-pub(crate) fn error(method: Method, txid: i32, code: i32, description: String) -> Message {
+pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: String) -> Message {
     let body = Body::Error(
         ErrorBody::new(code, description)
     );

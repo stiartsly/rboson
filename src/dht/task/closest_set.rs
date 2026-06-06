@@ -114,19 +114,6 @@ impl ClosestSet {
     }
 
     #[cfg(test)]
-    pub(crate) fn entry(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
-        self.closest.get(id).cloned()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
-        if self.is_empty() {
-            return None
-        }
-        self.closest.shift_remove(id)
-    }
-
-    #[cfg(test)]
     pub(crate) fn is_head_stable(&self) -> bool {
         self.insert_attempt_since_head_modification > self.capacity
     }
@@ -139,6 +126,19 @@ impl ClosestSet {
     #[cfg(test)]
     pub(crate) fn insert_attempts_since_head_modification(&self) -> usize {
         self.insert_attempt_since_head_modification
+    }
+
+    #[cfg(test)]
+    pub(crate) fn entry(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+        self.closest.get(id).cloned()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+        if self.is_empty() {
+            return None
+        }
+        self.closest.shift_remove(id)
     }
 }
 

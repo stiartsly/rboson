@@ -29,7 +29,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_no_token() {
+    fn test_serde_without_token() {
         let nodeid = Id::random();
         let req = FindNodeRequest::new(
             nodeid.clone(),

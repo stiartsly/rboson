@@ -3,6 +3,7 @@ use crate::{
     Id,
     Network,
     NodeInfo,
+    PeerInfo,
     PeerBuilder,
     signature,
     dht::msg::{
@@ -11,19 +12,34 @@ use crate::{
     }
 };
 
+fn make_node_info4() -> NodeInfo {
+    let addr = format!("127.0.0.1:{}", 39001).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_node_info6() -> NodeInfo {
+    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_peer(port: u16) -> PeerInfo {
+    let keypair = signature::KeyPair::random();
+    let endpoint = format!("tcp://192.168.1.1:{}", port);
+    PeerBuilder::new(&endpoint)
+        .with_key(keypair.clone())
+        .with_fingerprint(port as u64)
+        .build()
+        .expect("Failed to build peer")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_with_nodes() {
-        let nodeid = Id::random();
-        let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node4 = NodeInfo::new(nodeid, addr4);
-
-        let nodeid = Id::random();
-        let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let node6 = NodeInfo::new(nodeid, addr6);
+        let node4 = make_node_info4();
+        let node6 = make_node_info6();
 
         let rsp = FindPeerResponse::with_nodes(
             Some(vec![node4.clone()]),
@@ -46,18 +62,8 @@ mod tests {
 
     #[test]
     fn test_with_peers() {
-        let keypair = signature::KeyPair::random();
-        let peer1 = PeerBuilder::new("tcp://192.168.1.1:8080")
-            .with_key(keypair.clone())
-            .with_fingerprint(1)
-            .build()
-            .expect("Failed to build peer");
-
-        let peer2 = PeerBuilder::new("tcp://192.168.1.1:8081")
-            .with_key(keypair.clone())
-            .with_fingerprint(2)
-            .build()
-            .expect("Failed to build peer");
+        let peer1 = make_peer(8080);
+        let peer2 = make_peer(8081);
 
         let peers = vec![peer1.clone(), peer2.clone()];
         let rsp = FindPeerResponse::with_peers(peers.clone());
@@ -74,13 +80,8 @@ mod tests {
 
     #[test]
     fn test_serde_with_nodes() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let ni4 = NodeInfo::new(nodeid.clone(), addr);
-
-        let nodeid = Id::random();
-        let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let ni6 = NodeInfo::new(nodeid.clone(), addr);
+        let ni4 = make_node_info4();
+        let ni6 = make_node_info6();
 
         let rsp = FindPeerResponse::with_nodes(
             Some(vec![ni4.clone()]),
@@ -114,14 +115,8 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_apeer() {
-        let keypair = signature::KeyPair::random();
-        let endpoint = "tcp://192.168.1.1:8080";
-        let peer = PeerBuilder::new(endpoint)
-            .with_key(keypair.clone())
-            .build()
-            .expect("Failed to build peer");
-
+    fn test_serde_with_peer() {
+        let peer = make_peer(8080);
         let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
 
         assert!(rsp.nodes4().is_none());
@@ -153,18 +148,8 @@ mod tests {
 
     #[test]
     fn test_serde_with_peers() {
-        let keypair = signature::KeyPair::random();
-        let peer1 = PeerBuilder::new("tcp://192.168.1.1:8080")
-            .with_key(keypair.clone())
-            .build()
-            .expect("Failed to build peer1");
-
-        let peer2 = PeerBuilder::new("tcp://192.168.1.2:9090")
-            .with_key(keypair.clone())
-            .with_extra(&[5, 6, 7])
-            .build()
-            .expect("Failed to build peer2");
-
+        let peer1 = make_peer(8080);
+        let peer2 = make_peer(8081);
         let rsp = FindPeerResponse::with_peers(
             vec![peer1.clone(), peer2.clone()]
         );

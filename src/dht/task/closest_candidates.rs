@@ -109,7 +109,7 @@ impl ClosestCandidates {
                 self.dedups_ids.remove(id);
 
                 let locked_cn = removed_cn.lock().unwrap();
-                let addr = locked_cn.as_ref().socket_addr();
+                let addr = locked_cn.ni().socket_addr();
                 let key = self.dedup_key(addr);
                 self.dedups_addrs.remove(&key);
 

@@ -14,8 +14,8 @@ pub(crate) struct Error {
 }
 
 impl Error {
-    pub(crate) fn new(code: i32, description: String) -> Self {
-        Self { code, description }
+    pub(crate) fn new(code: i32, description: impl Into<String>) -> Self {
+        Self { code, description: description.into() }
     }
 
     pub(crate) fn code(&self) -> i32 {

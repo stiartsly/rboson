@@ -1,9 +1,7 @@
-use crate::{
-    Id,
-    dht::msg::{
-        find_value_req::FindValueRequest,
-        lookup_req::LookupRequest,
-    }
+use crate::Id;
+use crate::dht::msg::{
+    FindValueRequest,
+    LookupRequest,
 };
 
 #[cfg(test)]
@@ -43,7 +41,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_no_expected_seq() {
+    fn test_serde_without_expected_seq() {
         let value_id = Id::random();
 
         let msg = FindValueRequest::new(
@@ -71,6 +69,5 @@ mod tests {
         assert!(!decoded.want4());
         assert!(decoded.want6());
         assert!(!decoded.want_token());
-
     }
 }

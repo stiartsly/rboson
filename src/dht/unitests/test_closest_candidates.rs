@@ -82,7 +82,7 @@ mod tests {
 
         candidates.add(vec![keep.clone(), remove_a.clone(), remove_b.clone()]);
         candidates.remove_if(|cn| {
-            cn.lock().unwrap().as_ref().socket_addr().port() != 39001
+            cn.lock().unwrap().ni().socket_addr().port() != 39001
         });
 
         assert_eq!(candidates.size(), 1);

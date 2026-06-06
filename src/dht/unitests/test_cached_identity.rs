@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::{
     Identity,
-    core::crypto_identity::CryptoIdentity,
+    core::CryptoIdentity,
     dht::cached_identity::CachedIdentity,
 };
 

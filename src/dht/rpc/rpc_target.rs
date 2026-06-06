@@ -32,7 +32,7 @@ impl Target {
 
     pub(crate) fn node_info(&self) -> NodeInfo {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().as_ref().clone(),
+            Target::Candidate(v) => v.lock().unwrap().ni().clone(),
             Target::KBucketEntry(v) => v.as_ref().clone(),
             Target::NodeInfo(v) => v.clone(),
         }

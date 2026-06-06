@@ -6,16 +6,27 @@ use crate::{
     dht::msg::{LookupResponse, FindNodeResponse}
 };
 
+fn make_node_info4_with_port(port: u16) -> NodeInfo {
+    let addr = format!("127.0.0.1:{}", port).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_node_info4() -> NodeInfo {
+    make_node_info4_with_port(39001)
+}
+
+fn make_node_info6() -> NodeInfo {
+    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_with_nodes() {
-        let nodeid = Id::random();
-        let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node4 = NodeInfo::new(nodeid, addr4);
-
+        let node4 = make_node_info4();
         let rsp = FindNodeResponse::new(
             Some(vec![node4.clone()]),
             None,
@@ -28,10 +39,7 @@ mod tests {
         assert_eq!(rsp.nodes6(), None);
         assert_eq!(rsp.token(), 0);
 
-        let nodeid = Id::random();
-        let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let node6 = NodeInfo::new(nodeid, addr6);
-
+        let node6 = make_node_info6();
         let rsp = FindNodeResponse::new(
             None,
             Some(vec![node6.clone()]),
@@ -43,6 +51,9 @@ mod tests {
         assert_eq!(rsp.nodes4(), None);
         assert_eq!(rsp.token(), 0);
 
+
+        let node4 = make_node_info4();
+        let node6 = make_node_info6();
         let rsp = FindNodeResponse::new(
             Some(vec![node4.clone()]),
             Some(vec![node6.clone()]),
@@ -58,13 +69,8 @@ mod tests {
 
     #[test]
     fn test_serde() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node4 = NodeInfo::new(nodeid.clone(), addr);
-
-        let nodeid = Id::random();
-        let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let node6 = NodeInfo::new(nodeid.clone(), addr);
+        let node4 = make_node_info4();
+        let node6 = make_node_info6();
         let token = 12345;
 
         let rsp = FindNodeResponse::new(
@@ -92,16 +98,10 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_nodes4() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node1 = NodeInfo::new(nodeid.clone(), addr);
-
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29002".parse::<SocketAddr>().unwrap();
-        let node2 = NodeInfo::new(nodeid.clone(), addr);
+    fn test_serde_with_nodes() {
+        let node1 = make_node_info4_with_port(29001);
+        let node2 = make_node_info4_with_port(29002);
         let token = 12345;
-
         let rsp = FindNodeResponse::new(
             Some(vec![node1.clone(), node2.clone()]),
             None,

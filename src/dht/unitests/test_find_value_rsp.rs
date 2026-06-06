@@ -1,14 +1,27 @@
 use std::net::SocketAddr;
 use crate::{
-    Id,
-    Network,
-    NodeInfo,
-    Value,
-    dht::msg::{
+    Id, Network, NodeInfo, Value, ValueBuilder, dht::{msg::{
         find_value_rsp::FindValueResponse,
         lookup_rsp::LookupResponse,
-    }
+    }, storage::data_storage}
 };
+
+fn make_node_info4() -> NodeInfo {
+    let addr = format!("127.0.0.1:{}", 39001).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_node_info6() -> NodeInfo {
+    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_value() -> Value {
+    let data = vec![1, 2, 3, 4, 5];
+    ValueBuilder::new(&data)
+        .build()
+        .expect("Failed to build value")
+}
 
 #[cfg(test)]
 mod tests {
@@ -16,20 +29,13 @@ mod tests {
 
     #[test]
     fn test_with_nodes() {
-        let nodeid = Id::random();
-        let addr4 = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let node4 = NodeInfo::new(nodeid, addr4);
-
-        let nodeid = Id::random();
-        let addr6 = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let node6 = NodeInfo::new(nodeid, addr6);
+        let node4 = make_node_info4();
+        let node6 = make_node_info6();
 
         let rsp = FindValueResponse::with_nodes(
             Some(vec![node4.clone()]),
             Some(vec![node6.clone()])
         );
-
-        //println!("FindValueResponse with nodes:\n\t{}", rsp);
 
         assert!(rsp.nodes4().is_some());
         assert!(rsp.nodes6().is_some());
@@ -47,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_with_value() {
-        let value = Value::packed(None, None, None, None, vec![1, 2, 3], 0);
+        let value = make_value();
         let rsp = FindValueResponse::with_value(value.clone());
 
         assert!(rsp.nodes4().is_none());
@@ -59,14 +65,8 @@ mod tests {
 
     #[test]
     fn test_serde_with_nodes() {
-        let nodeid = Id::random();
-        let addr = "127.0.0.1:29001".parse::<SocketAddr>().unwrap();
-        let ni4 = NodeInfo::new(nodeid.clone(), addr);
-
-        let nodeid = Id::random();
-        let addr = "[::1]:29001".parse::<SocketAddr>().unwrap();
-        let ni6 = NodeInfo::new(nodeid.clone(), addr);
-
+        let ni4 = make_node_info4();
+        let ni6 = make_node_info6();
         let rsp = FindValueResponse::with_nodes(
             Some(vec![ni4.clone()]),
             Some(vec![ni6.clone()])
@@ -84,8 +84,6 @@ mod tests {
         let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
-        // println!("Encoded FindValueResponse:\n\t{:?}", encoded);
-
         assert_eq!(decoded.token(), 0);
         assert!(decoded.nodes4().is_some());
         assert!(decoded.nodes6().is_some());
@@ -102,9 +100,7 @@ mod tests {
 
     #[test]
     fn test_serde_with_value() {
-        let data = vec![1, 2, 3, 4, 5];
-        let value = Value::packed(None, None, None, None, data.clone(), 0);
-
+        let value = make_value();
         let rsp = FindValueResponse::with_value(value.clone());
 
         assert!(rsp.nodes4().is_none());

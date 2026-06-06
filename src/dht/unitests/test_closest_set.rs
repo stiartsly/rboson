@@ -22,7 +22,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_add() {
+    fn test_reached_capacity() {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
 
@@ -42,34 +42,37 @@ mod tests {
             .map(|distance| make_candidate(distance).lock().unwrap().id().clone())
             .collect::<Vec<_>>();
 
+        assert!(closest.reached_capacity());
+
         assert_eq!(closest.size(), 4);
-        assert_eq!(closest.reached_capacity(), true);
         assert_eq!(ids, expected);
         assert_eq!(closest.head(), expected[0]);
         assert_eq!(closest.tail(), expected[3]);
     }
 
     #[test]
-    fn test_contains() {
+    fn test_closest() {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
         let candidate = make_candidate(2);
         let id = candidate.lock().unwrap().id().clone();
 
-        assert_eq!(closest.is_empty(), true);
-        assert_eq!(closest.contains(&id), false);
-        assert_eq!(closest.entry(&id).is_none(), true);
+        assert!(closest.is_empty());
+        assert!(closest.entry(&id).is_none());
+        assert!(!closest.contains(&id));
 
         closest.add(candidate.clone());
 
-        assert_eq!(closest.contains(&id), true);
-        assert_eq!(closest.entry(&id).is_some(), true);
+        assert!(closest.contains(&id));
+        assert!(closest.entry(&id).is_some());
 
         let removed = closest.remove(&id);
-        assert_eq!(removed.is_some(), true);
-        assert_eq!(closest.contains(&id), false);
-        assert_eq!(closest.entry(&id).is_none(), true);
-        assert_eq!(closest.is_empty(), true);
+
+        assert!(closest.is_empty());
+        assert!(removed.is_some());
+        assert!(closest.entry(&id).is_none());
+        assert!(!closest.contains(&id));
+
     }
 
     #[test]
@@ -83,38 +86,38 @@ mod tests {
     }
 
     #[test]
-    fn test_is_eligible() {
+    fn test_eligible() {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
 
         for distance in 1..=4 {
             closest.add(make_candidate(distance));
         }
-        assert_eq!(closest.is_eligible(), false);
+        assert!(!closest.is_eligible());
 
         for distance in 5..=9 {
             closest.add(make_candidate(distance));
         }
 
-        assert_eq!(closest.insert_attempts_since_tail_modification(), 5);
-        assert_eq!(closest.is_eligible(), true);
+        assert!(closest.insert_attempts_since_tail_modification() == 5);
+        assert!(closest.is_eligible());
     }
 
     #[test]
-    fn test_is_head_stable() {
+    fn test_head_stable() {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
 
         for distance in (1..=4).rev() {
             closest.add(make_candidate(distance));
         }
-        assert_eq!(closest.is_head_stable(), false);
+        assert!(!closest.is_head_stable());
 
         for distance in 5..=9 {
             closest.add(make_candidate(distance));
         }
 
-        assert_eq!(closest.insert_attempts_since_head_modification(), 5);
-        assert_eq!(closest.is_head_stable(), true);
+        assert!(closest.insert_attempts_since_head_modification() == 5);
+        assert!(closest.is_head_stable());
     }
 }

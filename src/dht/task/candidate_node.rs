@@ -8,6 +8,8 @@ use crate::dht::{
     routing::KBucketEntry
 };
 
+const MAX_PINGS: i32 = 3;
+
 #[derive(Clone)]
 pub(crate) struct CandidateNode {
     ni: NodeInfo,
@@ -23,8 +25,24 @@ pub(crate) struct CandidateNode {
 }
 
 impl CandidateNode {
+    fn new(ni: NodeInfo, reachable: bool) -> Self {
+        Self {
+            ni,
+            last_sent: None,
+            last_replied: None,
+            acked: false,
+            pinged: 0,
+            reachable,
+            token: 0,
+        }
+    }
+
     pub(crate) fn id(&self) -> &Id {
         self.ni.id()
+    }
+
+    pub(crate) fn ni(&self) -> &NodeInfo {
+        &self.ni
     }
 
     pub(crate) fn set_sent(&mut self) {
@@ -46,6 +64,7 @@ impl CandidateNode {
     }
 
     pub(crate) fn set_replied(&mut self) {
+        self.last_sent = None;
         self.last_replied = Some(SystemTime::now());
     }
 
@@ -77,41 +96,19 @@ impl CandidateNode {
     }
 
     pub(crate) fn is_eligible(&self) -> bool {
-        self.last_sent.is_none() && self.pinged < 3
+        self.last_sent.is_none() && self.pinged < MAX_PINGS
     }
 }
 
 impl From<NodeInfo> for CandidateNode {
     fn from(ni: NodeInfo) -> Self {
-        Self {
-            ni,
-            last_sent   : None,
-            last_replied: None,
-            pinged: 0,
-            acked       : false,
-            reachable   : false,
-            token       : 0,
-        }
+        Self::new(ni, false)
     }
 }
 
 impl From<KBucketEntry> for CandidateNode {
     fn from(entry: KBucketEntry) -> Self {
-        Self {
-            ni          : entry.ni().clone(),
-            last_sent   : None,
-            last_replied: None,
-            pinged: 0,
-            acked       : false,
-            reachable   : entry.is_reachable(),
-            token       : 0,
-        }
-    }
-}
-
-impl AsRef<NodeInfo> for CandidateNode {
-    fn as_ref(&self) -> &NodeInfo {
-        &self.ni
+        Self::new(entry.ni().clone(), entry.is_reachable())
     }
 }
 
@@ -121,7 +118,7 @@ impl Reachability for CandidateNode {
     }
 
     fn is_unreachable(&self) -> bool {
-        self.pinged >= 3
+        self.pinged >= MAX_PINGS
     }
 
     fn set_reachable(&mut self, reachable: bool) {

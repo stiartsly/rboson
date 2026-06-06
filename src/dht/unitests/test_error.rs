@@ -6,28 +6,28 @@ mod tests {
 
     #[test]
     fn test_serde() {
-        let err = Error::new(500, "boom".to_string());
+        let err = Error::new(500, "example error");
         assert_eq!(err.code(), 500);
-        assert_eq!(err.description(), "boom");
+        assert_eq!(err.description(), "example error");
 
         let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
-        let decoded: Error = serde_cbor::from_slice(&encoded)
+        let decoded = serde_cbor::from_slice::<Error>(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 500);
-        assert_eq!(decoded.description(), "boom");
+        assert_eq!(decoded.description(), "example error");
     }
 
     #[test]
-    fn test_serde_with_empty_msg() {
-        let err = Error::new(404, String::new());
+    fn test_serde_with_empty_description() {
+        let err = Error::new(404, "");
         assert_eq!(err.code(), 404);
         assert_eq!(err.description(), "");
 
         let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
-        let decoded: Error = serde_cbor::from_slice(&encoded)
+        let decoded = serde_cbor::from_slice::<Error>(&encoded)
             .expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 404);

@@ -1,9 +1,6 @@
 use crate::{
     Id,
-    dht::msg::{
-        lookup_req::LookupRequest,
-        find_peer_req::FindPeerRequest,
-    }
+    dht::msg::{LookupRequest, FindPeerRequest},
 };
 
 #[cfg(test)]
@@ -28,9 +25,10 @@ mod tests {
         let decoded: FindPeerRequest = serde_cbor::from_slice(&encoded)
             .expect("Deserialization failed");
 
-        assert_eq!(decoded.target(), &peerid);
         assert_eq!(decoded.want4(), true);
         assert_eq!(decoded.want6(), false);
+        assert_eq!(decoded.target(), &peerid);
+
         assert_eq!(decoded.want_token(), false);
         assert_eq!(decoded.expected_seq(), expected_seq);
         assert_eq!(decoded.expected_count(), expected_count);

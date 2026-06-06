@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Weak, Mutex},
     time::{Duration, SystemTime},
     collections::HashMap,
+    net::UdpSocket as StdUdpSocket,
 };
 use log::{info, warn, error, trace};
 use tokio::{
@@ -56,8 +57,8 @@ pub(crate) struct RpcServer {
     is_running          : bool,
     reachable_check_task: Option<JoinHandle<()>>,
 
-    tx_socket           : Option<Arc<UdpSocket>>,
-    rx_socket           : Option<Arc<UdpSocket>>,
+    tx_socket           : Option<Arc<StdUdpSocket>>,
+    rx_socket           : Option<Arc<StdUdpSocket>>,
 
     task                : Option<JoinHandle<()>>,
     quit                : Arc<Mutex<bool>>,
@@ -104,11 +105,11 @@ impl RpcServer {
         self.identity.clone()
     }
 
-    fn tx_socket(&self) -> &Arc<UdpSocket> {
+    fn tx_socket(&self) -> &Arc<StdUdpSocket> {
         self.tx_socket.as_ref().expect("socket should be initialized")
     }
 
-    fn rx_socket_take(&mut self) -> Arc<UdpSocket> {
+    fn rx_socket_take(&mut self) -> Arc<StdUdpSocket> {
         self.rx_socket.take().expect("socket should be initialized")
     }
 
@@ -213,7 +214,8 @@ impl RpcServer {
 
     pub(crate) async fn start(&mut self) -> Result<()> {
         let socket_addr = self.ni.socket_addr();
-        let socket = match UdpSocket::bind(socket_addr).await {
+        //let socket = match UdpSocket::bind(socket_addr).await {
+        let socket = match StdUdpSocket::bind(socket_addr) {
             Ok(socket) => Arc::new(socket),
             Err(e) => {
                 error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
@@ -260,7 +262,7 @@ impl RpcServer {
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
 
-    pub(crate) async fn send_call(&mut self, call: RpcCall) -> Result<()>{
+    pub(crate) fn send_call(&mut self, call: RpcCall) -> Result<()>{
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
             return Err(StateError::new(format!("Too many active calls pending in the queue.")) as Error);
         }
@@ -271,9 +273,9 @@ impl RpcServer {
 
         let mut locked = crate::locked!(call);
         let mut msg = locked.req_mut();
-        msg.set_associated_call(call.clone());
+        msg.set_associated_call(Arc::downgrade(&call));
 
-        match self.send_msg(&mut msg).await {
+        match self.send_msg(&mut msg) {
             Ok(_) => {
                 locked.sent();
                 if let Some(handler) = self.callsent_handler.as_ref() {
@@ -289,7 +291,7 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(crate) async fn send_msg(&self, msg: &mut Message) -> Result<usize> {
+    pub(crate) fn send_msg(&self, msg: &mut Message) -> Result<usize> {
         let nodeid = self.ni.id().clone();
         msg.set_nodeid(nodeid);
 
@@ -312,7 +314,7 @@ impl RpcServer {
 
         let sent_len = self.tx_socket().send_to(
             &buf[..len + Id::BYTES], msg.remote_addr()
-        ).await.map_err(|e| -> crate::errors::Error {
+        ).map_err(|e| -> crate::errors::Error {
             NetworkError::new(format!("Failed to send message: {e}"))
         })?;
         if sent_len != len + Id::BYTES {
@@ -425,7 +427,7 @@ impl RpcServer {
                 return None;
             }
 
-            msg.set_associated_call(call.clone());
+            msg.set_associated_call(Arc::downgrade(&call));
             // locked.respond(&msg);
             // if !locked.is_reachable_at_creation() {
                 // TODO:
@@ -458,6 +460,10 @@ impl RpcServer {
         let server = rpc_server.clone();
         let socket = server.lock().unwrap().rx_socket_take();
         let quit = server.lock().unwrap().quit.clone();
+
+        let std_socket = socket.try_clone().expect("Failed to clone UDP socket");
+        std_socket.set_nonblocking(true).expect("Failed to set non-blocking mode");
+        let socket = UdpSocket::from_std(std_socket).expect("Failed to create async UDP socket");
 
         let task = tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];

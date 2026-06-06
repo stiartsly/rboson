@@ -2,12 +2,10 @@ use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
-
 use crate::Id;
 use crate::dht::{
     rpc::{
         rpc_target::Reachability,
-        rpc_server::RpcServer,
         rpc_target::NodeInfoLike,
     },
     routing::kbucket_entry::KBucketEntry,

@@ -10,7 +10,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
 use crate::{
-    Id, Network, NodeInfo, PeerInfo, Value, crypto_identity::CryptoIdentity, dht::rpc::rpc_target::NodeInfoLike, errors::Result
+    Id, Network, NodeInfo, PeerInfo, Value, crypto_identity::CryptoIdentity, dht::{msg, rpc::rpc_target::NodeInfoLike}, errors::Result
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -29,7 +29,7 @@ use crate::dht::{
     msg::{
         Message,
         LookupRequest, LookupResponse,
-        msg::{self, Kind, Method, Body},
+        msg::{Kind, Method, Body},
     },
     suspicious_node_detector::{
         SuspiciousNodeDetector,
@@ -243,6 +243,26 @@ impl DHT {
             .clone()
     }
 
+    fn send_msg(&self, msg: &mut Message) {
+        let Some(server) = self.server.as_ref() else {
+            error!("RpcServer not initialized, can not send message");
+            return;
+        };
+
+        let _ = server.lock().unwrap().send_msg(msg).map_err(|e| {
+            error!("Failed to send message: {:?}", e);
+        });
+    }
+
+    fn send_call(&self, call: RpcCall) -> Result<()> {
+        let Some(server) = self.server.as_ref() else {
+            error!("RpcServer not initialized, can not send call");
+            return Ok(());
+        };
+
+        server.lock().unwrap().send_call(call)
+    }
+
     fn weak_dht(&self) -> Weak<Mutex<DHT>> {
         self.weak_cloned.clone()
     }
@@ -423,8 +443,7 @@ impl DHT {
         info!("Periodic: random ping ...");
 
         let call = RpcCall::new(entry, msg::ping_request());
-        let _ = self.server().lock().unwrap()
-            .send_call(call);
+        let _ = self.send_call(call);
     }
 
     fn update(&mut self) {
@@ -530,6 +549,7 @@ impl DHT {
         let mut server = RpcServer::new(
             self.ni(), identity, self.suspicious_detector.clone()
         );
+
         server.message_handler({
             let dht = self.weak_dht();
             move |msg| {
@@ -554,6 +574,7 @@ impl DHT {
                 }
             }
         });
+
         server.reachable_handler({
             let dht = self.weak_dht();
             move |reachable| {
@@ -696,10 +717,14 @@ impl DHT {
         let remote_port = msg.remote_addr().port();
 
         let call = msg.associated_call();
+
         if let Some(call) = call.as_ref() {
+            let Some(strong_call) = call.upgrade() else {
+                return;
+            };
             // we only want remote nodes with stable ports in our routing table,
             // so apply a stricter check here
-            let mut locked_call = call.lock().unwrap();
+            let mut locked_call = strong_call.lock().unwrap();
             if locked_call.nodeid_mismatched() || locked_call.addr_mismatched() {
                 warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
 					msg.remote_id(), msg.remote_addr());
@@ -802,8 +827,10 @@ impl DHT {
         entry.set_ver(msg.ver());
 
         if let Some(_call) = call {
-            entry.on_responded(0); // TOOD: RTT.
-            entry.update_last_sent(_call.lock().unwrap().sent_time());
+            if let Some(strong_call) = _call.upgrade() {
+                entry.on_responded(0); // TOOD: RTT.
+                entry.update_last_sent(strong_call.lock().unwrap().sent_time());
+            }
         }
 
         self.rt.put(entry.clone());
@@ -816,14 +843,14 @@ impl DHT {
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
             let call = RpcCall::new(entry, msg::ping_request());
-            let _ = self.server().lock().unwrap().send_call(call);
+            let _ = self.send_call(call);
         }
     }
 
     fn send_err(&mut self, method: Method, code: i32, str: &str) {
         let mut msg = msg::error(method, 0, code, str.into());
         // TODO: set remote id and addr
-        let _ = self.server().lock().unwrap().send_msg(&mut msg);
+        self.send_msg(&mut msg);
     }
 
     pub(crate) fn on_message(&mut self, msg: &Message) {
@@ -900,7 +927,7 @@ impl DHT {
         let mut msg = msg::ping_response(txid);
         msg.set_remote(remote_id, remote_addr);
 
-        let _ = self.server().lock().unwrap().send_msg(&mut msg);
+        self.send_msg(&mut msg);
     }
 
     fn fill_closest_nodes(&self, target: Id) -> Vec<NodeInfo> {
@@ -948,8 +975,9 @@ impl DHT {
             req.remote_id().clone(),
             req.remote_addr().clone()
         );
+        rsp.set_nodeid(self.id().clone());
 
-        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
+        self.send_msg(&mut rsp);
     }
 
     fn on_find_value(&mut self, req: &Message) {
@@ -1000,7 +1028,7 @@ impl DHT {
             req.remote_addr().clone()
         );
 
-        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
+        self.send_msg(&mut rsp);
     }
 
     fn on_store_value(&mut self, req: &Message) {
@@ -1071,7 +1099,7 @@ impl DHT {
             remote_addr
         );
 
-        let _ = self.server().lock().unwrap().send_msg(&mut msg);
+        self.send_msg(&mut msg);
     }
 
     fn on_find_peer(&mut self, req: &Message) {
@@ -1117,7 +1145,7 @@ impl DHT {
             req.remote_id().clone(),
             req.remote_addr().clone()
         );
-        let _ = self.server().lock().unwrap().send_msg(&mut rsp);
+        self.send_msg(&mut rsp);
     }
 
     fn on_announce_peer(&mut self, req: &Message) {
@@ -1184,7 +1212,7 @@ impl DHT {
             remote_addr
         );
 
-        let _ = self.server().lock().unwrap().send_msg(&mut msg);
+        self.send_msg(&mut msg);
     }
 
     pub(crate) fn on_timeout(&mut self, call: &RpcCall) {

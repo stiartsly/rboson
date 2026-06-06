@@ -2,7 +2,10 @@ use std::{
     fmt,
     net::SocketAddr,
     result::Result as SResult,
-    sync::{Arc, Mutex, atomic::{AtomicI32, Ordering}}
+    sync::{
+        Weak, Mutex,
+        atomic::{AtomicI32, Ordering}
+    }
 };
 use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{
@@ -218,7 +221,7 @@ pub(crate) struct Message {
 
     body    : Option<Body>,
 
-    associated_call : Option<Arc<Mutex<RpcCall>>>,
+    associated_call : Option<Weak<Mutex<RpcCall>>>,
     remote_addr     : Option<SocketAddr>,
     remote_id       : Option<Id>,
 }
@@ -290,12 +293,12 @@ impl Message {
         version::format_version(self.ver)
     }
 
-    pub(crate) fn associated_call(&self) -> Option<Arc<Mutex<RpcCall>>> {
+    pub(crate) fn associated_call(&self) -> Option<Weak<Mutex<RpcCall>>> {
         self.associated_call.clone()
     }
 
-    pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {
-        self.associated_call = Some(call);
+    pub(crate) fn set_associated_call(&mut self, call: Weak<Mutex<RpcCall>>) {
+        self.associated_call = Some(call.clone());
     }
 
     pub(crate) fn remote_id(&self) -> &Id {

@@ -1,5 +1,4 @@
 use std::{
-    sync::{Arc, Mutex},
     time::{SystemTime, Duration},
     error::Error as StdError,
 };
@@ -10,8 +9,6 @@ use crate::{
 };
 use crate::dht::{
     msg::{Body, Message, msg::Kind},
-    task::CandidateNode,
-    routing::KBucketEntry,
     rpc::{
         rpc_server::RpcServer,
         Target, Reachability,
@@ -83,34 +80,6 @@ impl RpcCall {
         }
     }
 
-    pub(crate) fn with_entry1(target: KBucketEntry, msg: Message) -> Self {
-        Self::new(target, msg)
-    }
-
-    #[allow(unused)]
-    pub(crate) fn with_candidate(
-        target: Arc<Mutex<CandidateNode>>,
-        msg: Message
-    ) -> Self {
-        Self::new(Target::Candidate(target), msg)
-    }
-
-    pub(crate) fn txid(&self) -> i32 {
-        self.req.txid()
-    }
-
-    pub(crate) fn set_local_nodeid(&mut self, id: Id) {
-        self.req.set_nodeid(id);
-    }
-
-    // pub(crate) fn set_cloned(&mut self, cloned: Arc<Mutex<RpcCall>>) {
-    //     self.cloned = Some(cloned);
-    // }
-
-    pub(crate) fn is_reachable_at_creation(&self) -> bool {
-        self.target_reachable
-    }
-
     pub(crate) fn target_id(&self) -> Id {
         self.target.id()
     }
@@ -119,6 +88,15 @@ impl RpcCall {
         &self.target
     }
 
+    pub(crate) fn is_reachable_at_creation(&self) -> bool {
+        self.target_reachable
+    }
+
+    pub(crate) fn txid(&self) -> i32 {
+        self.req.txid()
+    }
+
+    /*
     pub(crate) fn set_expected_rtt(&mut self, expected_rtt: u64) -> &mut Self {
         self.expected_rtt = expected_rtt;
         self
@@ -138,6 +116,7 @@ impl RpcCall {
     pub(crate) fn expected_rtt(&self) -> u64 {
         self.expected_rtt
     }
+    */
 
     pub(crate) fn req(&self) -> &Message {
         &self.req
@@ -151,10 +130,12 @@ impl RpcCall {
         self.rsp.as_ref()
     }
 
+    #[cfg(test)]
     pub(crate) fn state(&self) -> State {
         self.state
     }
 
+    #[cfg(test)]
     pub(crate) fn is_pending(&self) -> bool {
         self.state < State::Timeout
     }
@@ -175,13 +156,16 @@ impl RpcCall {
         self.sent_time
     }
 
+    #[allow(unused)]
     pub(crate) fn resp_time(&self) -> SystemTime {
         self.resp_time
     }
 
+    /*
     pub(crate) fn rtt(&self) -> Option<Duration> {
         self.resp_time.duration_since(self.sent_time()).ok()
     }
+    */
 
     pub(crate) fn cause(&self) -> Option<&(dyn StdError + Send)> {
         self.cause.as_deref()
@@ -261,7 +245,7 @@ impl RpcCall {
 
     pub(crate) fn respond(&mut self, rsp: &Message) {
         self.resp_time = SystemTime::now();
-       // rsp.set_associated_call(self.cloned.clone());
+        // rsp.set_associated_call(self.weak.clone());
 
         self.cancel_timeout_timer();
         // self.rsp = Some(rsp.clone());
@@ -282,7 +266,8 @@ impl RpcCall {
     }
 
 
-    // Handles a response received from an inconsistent socket (e.g., due to port-mangling NAT).
+    // Handles a response received from an inconsistent socket
+    // (e.g., due to port-mangling NAT).
 	// Transitions to STALLED state to allow retry without treating as an error.
     pub(crate) fn respond_inconsistent_socket(&mut self, _: Message) {
         if self.state != State::Sent {

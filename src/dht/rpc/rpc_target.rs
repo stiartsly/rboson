@@ -62,6 +62,15 @@ impl Target {
             Target::NodeInfo(v) => *v.id()
         }
     }
+
+    #[allow(unused)]
+    pub(crate) fn socket_addr(&self) -> SocketAddr {
+        match self {
+            Target::Candidate(v) => *v.lock().unwrap().socket_addr(),
+            Target::KBucketEntry(v) => *v.socket_addr(),
+            Target::NodeInfo(v) => *v.socket_addr()
+        }
+    }
 }
 
 impl Reachability for Target {

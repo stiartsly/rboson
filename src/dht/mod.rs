@@ -13,7 +13,7 @@ mod msg {
     pub(crate) mod store_value_req;
 
     pub(crate) use {
-        msg::{Message, Body},
+        msg::{*, Message, Body},
         lookup_req::LookupRequest,
         lookup_rsp::LookupResponse,
         find_node_req::FindNodeRequest,

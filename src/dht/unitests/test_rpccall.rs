@@ -47,7 +47,7 @@ mod tests {
         let target = make_nodeinfo("127.0.0.1:40001");
         let req = msg::ping_request();
         let txid = req.txid();
-        let mut call = RpcCall::with_node(target.clone(), req);
+        let mut call = RpcCall::new(target.clone(), req);
 
         let local_nodeid = Id::random();
         call.set_local_nodeid(local_nodeid);
@@ -56,7 +56,6 @@ mod tests {
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-        assert_eq!(call.target().socket_addr(), target.socket_addr().clone());
         assert_eq!(call.is_reachable_at_creation(), false);
         assert_eq!(call.expected_rtt(), 40);
         assert_eq!(call.state(), State::Unsent);
@@ -73,7 +72,7 @@ mod tests {
         let target = make_entry("127.0.0.1:40002");
         let req = msg::ping_request();
         let txid = req.txid();
-        let mut call = RpcCall::with_entry(target.clone(), req);
+        let mut call = RpcCall::new(target.clone(), req);
 
         let local_nodeid = Id::random();
         call.set_local_nodeid(local_nodeid);
@@ -82,7 +81,6 @@ mod tests {
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-        assert_eq!(call.target().socket_addr(), target.socket_addr().clone());
         assert_eq!(call.is_reachable_at_creation(), true);
         assert_eq!(call.expected_rtt(), 42);
         assert_eq!(call.state(), State::Unsent);
@@ -100,7 +98,7 @@ mod tests {
         entry.set_reachable(true);
 
         let req = msg::ping_request();
-        let call = RpcCall::with_entry(entry.clone(), req);
+        let call = RpcCall::new(entry.clone(), req);
         let call = Arc::new(Mutex::new(call));
        // call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(50);
@@ -156,7 +154,7 @@ mod tests {
         // test error response
         let target = make_nodeinfo("127.0.0.1:40003");
         let req = msg::ping_request();
-        let error_call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
+        let error_call = Arc::new(Mutex::new(RpcCall::new(target.clone(), req)));
        // error_call.lock().unwrap().set_cloned(error_call.clone());
 
         let mut err = msg::error(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
@@ -173,7 +171,7 @@ mod tests {
     fn test_stall_timeout_cancel() {
         let target = make_nodeinfo("127.0.0.1:40004");
         let req = msg::ping_request();
-        let call = Arc::new(Mutex::new(RpcCall::with_node(target.clone(), req)));
+        let call = Arc::new(Mutex::new(RpcCall::new(target.clone(), req)));
        // call.lock().unwrap().set_cloned(call.clone());
         call.lock().unwrap().set_expected_rtt(25);
 
@@ -202,7 +200,7 @@ mod tests {
 
         let target2 = make_nodeinfo("127.0.0.1:40005");
         let req2 = msg::ping_request();
-        let mut wrong_method = RpcCall::with_node(target2.clone(), req2);
+        let mut wrong_method = RpcCall::new(target2.clone(), req2);
         let mut rsp = msg::store_value_response(wrong_method.txid());
         rsp.set_nodeid(target2.id().clone());
         rsp.set_remote(target2.id().clone(), *target2.socket_addr());
@@ -211,13 +209,13 @@ mod tests {
         assert_eq!(wrong_method.cause().unwrap().to_string().contains("wrong method"), true);
 
         let req3 = msg::ping_request();
-        let mut failed = RpcCall::with_node(target2.clone(), req3);
+        let mut failed = RpcCall::new(target2.clone(), req3);
         failed.fail(ProtocolError::new("failed"));
         assert_eq!(failed.state(), State::Err);
         assert_eq!(failed.cause().is_none(), true);
 
         let req4 = msg::ping_request();
-        let mut canceled = RpcCall::with_node(target2, req4);
+        let mut canceled = RpcCall::new(target2, req4);
         canceled.cancel();
         assert_eq!(canceled.state(), State::Canceled);
         assert_eq!(canceled.is_pending(), false);

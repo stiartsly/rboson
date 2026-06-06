@@ -10,7 +10,7 @@ use crate::dht::{
     consumer::Consumer,
     msg::msg,
     task::{Task, TaskData},
-    rpc::{RpcCall, Target},
+    rpc::RpcCall,
     routing::{KBucket, KBucketEntry}
 };
 
@@ -129,13 +129,12 @@ impl Task for PingRefreshTask {
                 continue;
             }
 
-            let msg = msg::ping_request();
+            let msg  = msg::ping_request();
             let todo = self.todo.clone();
-            let target = Target::from_bucket_entry(kentry);
             let cb = Consumer::new(move |_| {
                 todo.lock().unwrap().pop_front();
             });
-            if let Err(e) = self.send_call(target, msg, Some(cb)) {
+            if let Err(e) = self.send_call(kentry.into(), msg, Some(cb)) {
                error!("Error on sending 'PingRequest' message: {}", e);
             }
         }

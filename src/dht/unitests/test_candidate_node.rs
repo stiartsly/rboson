@@ -1,6 +1,6 @@
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::Reachability,
+    rpc::{rpc_target::NodeInfoLike, Reachability},
     routing::KBucketEntry,
     task::CandidateNode,
 };
@@ -28,12 +28,12 @@ mod tests {
     #[test]
     fn test_from_node() {
         let node = make_node();
-        let mut cn = CandidateNode::from(node.clone());
+        let mut cn: CandidateNode = node.clone().into();
 
         assert_eq!(cn.id(), node.id());
         assert_eq!(cn.pinged(), 0);
         assert_eq!(cn.token(), 0);
-        assert_eq!(cn.ni().socket_addr(), node.socket_addr());
+        assert_eq!(cn.socket_addr(), node.socket_addr());
 
         assert!(!cn.is_sent());
         assert!(!cn.is_replied());
@@ -74,12 +74,12 @@ mod tests {
     #[test]
     fn test_from_bucket_entry() {
         let entry = make_bucket_entry();
-        let cn = CandidateNode::from(entry.clone());
+        let cn: CandidateNode = entry.clone().into();
 
         assert_eq!(cn.id(), entry.id());
         assert_eq!(cn.pinged(), 0);
         assert_eq!(cn.token(), 0);
-        assert_eq!(cn.ni().socket_addr(), entry.socket_addr());
+        assert_eq!(cn.socket_addr(), entry.socket_addr());
 
         assert!(!cn.is_sent());
         assert!(!cn.is_replied());
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_replied_and_acked() {
         let node = make_node();
-        let mut cn = CandidateNode::from(node);
+        let mut cn: CandidateNode = node.clone().into();
 
         assert_eq!(cn.is_replied(), false);
         assert_eq!(cn.is_acked(), false);
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn test_reachability() {
         let node = make_node();
-        let mut cn = CandidateNode::from(node);
+        let mut cn: CandidateNode = node.clone().into();
 
         assert_eq!(cn.is_reachable(), false);
         assert_eq!(cn.is_unreachable(), false);

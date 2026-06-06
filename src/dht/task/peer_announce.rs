@@ -9,7 +9,6 @@ use crate::PeerInfo;
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    rpc::Target,
     consumer::Consumer,
     task::{ClosestSet, CandidateNode,Task, TaskData}
 };
@@ -106,13 +105,12 @@ impl Task for PeerAnnounceTask {
                 self.peer.clone(), token, self.expected_seq,
             );
 
-            let target = Target::from_candidate(cn);
             let cloned_todo = self.todo.clone();
             let cb = Consumer::new(move |_| {
                 cloned_todo.lock().unwrap().pop_front();
             });
 
-            if let Err(e) = self.send_call(target, msg, Some(cb)) {
+            if let Err(e) = self.send_call(cn.into(), msg, Some(cb)) {
                 error!("Sending 'announcePeer' request error: {}", e);
              };
         }

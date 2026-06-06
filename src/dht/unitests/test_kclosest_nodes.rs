@@ -5,6 +5,7 @@ use std::{
 use crate::{
     Id,
     NodeInfo,
+    dht::rpc::rpc_target::NodeInfoLike,
     dht::routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,
@@ -214,7 +215,7 @@ mod tests {
         let expected: Vec<NodeInfo> = closest
             .entries()
             .iter()
-            .map(|entry| entry.as_ref().clone())
+            .map(|entry| entry.ni())
             .collect();
         let nodes: Vec<NodeInfo> = closest.into();
 

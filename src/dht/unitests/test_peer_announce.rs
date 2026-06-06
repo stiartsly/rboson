@@ -43,7 +43,7 @@ fn make_closestset(token: i32) -> ClosestSet {
         Id::random(),
         "1.1.1.1:39001".parse().unwrap(),
     );
-    let mut cn = CandidateNode::from(candidate);
+    let mut cn: CandidateNode = candidate.into();
     cn.set_token(token);
 
     let mut closest = ClosestSet::new(target, 8);

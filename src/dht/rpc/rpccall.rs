@@ -6,9 +6,7 @@ use std::{
 use log::error;
 
 use crate::{
-    Id,
-    NodeInfo,
-    errors::ProtocolError,
+    Id, errors::ProtocolError
 };
 use crate::dht::{
     msg::{Body, Message, msg::Kind},
@@ -57,22 +55,21 @@ pub(crate) struct RpcCall {
     cause: Option<Box<dyn std::error::Error + Send>>,
 
     //TODO： timeout_task: Option<TimerId>,
-    cloned      : Option<Arc<Mutex<RpcCall>>>,
 }
 
 impl RpcCall {
-    pub(crate) fn new(
-        target: Target,
-        mut req: Message
-    ) -> Self
-    {
-        let target_reachable = target.is_reachable();
+    pub(crate) fn new(target: impl Into<Target>, mut req: Message) -> Self {
+        let target: Target = target.into();
+        let reachable = target.is_reachable();
+        let ni = target.ni();
+
         req.set_remote(
-            target.id(),
-            target.socket_addr()
+            ni.id().clone(),
+            ni.socket_addr().clone()
         );
+
         Self {
-            target_reachable,
+            target_reachable:   reachable,
             target,
             req,
             rsp         : None,
@@ -83,16 +80,11 @@ impl RpcCall {
             cause       : None,
             // TODO:timeout_task: None,
             expected_rtt: 0,
-            cloned      : None,
         }
     }
 
-    pub(crate) fn with_node(target: NodeInfo, msg: Message) -> Self {
-        Self::new( Target::NodeInfo(target), msg)
-    }
-
-    pub(crate) fn with_entry(target: KBucketEntry, msg: Message) -> Self {
-        Self::new(Target::KBucketEntry(target), msg)
+    pub(crate) fn with_entry1(target: KBucketEntry, msg: Message) -> Self {
+        Self::new(target, msg)
     }
 
     #[allow(unused)]

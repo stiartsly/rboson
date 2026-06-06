@@ -1,12 +1,16 @@
 use std::sync::{Arc, Weak, Mutex};
 
-use crate::{Id, NodeInfo};
+use crate::Id;
 use crate::dht::{
     dht::DHT,
     utils::{is_any_unicast, is_bogon},
-    rpc::{Target, Reachability, RpcCall},
+    rpc::{
+        Target, rpc_target::NodeInfoLike,
+        Reachability,
+        RpcCall
+    },
     msg::{Body,LookupResponse},
-    routing::{ KBucket, KBucketEntry},
+    routing::KBucket,
     task::{
         ClosestSet,
         ClosestCandidates,
@@ -63,58 +67,30 @@ pub(crate) trait LookupTask {
         self.data().candidates.size()
     }
 
-    fn add_candidates_with_nodes(&mut self, mut nodes: Vec<NodeInfo>) {
+    fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
         let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
+
         let locked_dht = strong_dht.lock().unwrap();
-        let local_id   = locked_dht.id().clone();
-        let local_addr = locked_dht.addr().clone();
+        let id   = locked_dht.id().clone();
+        let addr = locked_dht.addr().clone();
         drop(locked_dht);
         drop(strong_dht);
 
-        let mut todo: Vec<NodeInfo> = Vec::new();
-        while let Some(ni) = nodes.pop() {
-            let bogon = if cfg!(feature = "devp") {
-                !is_any_unicast(&ni.ip())
-            } else {
-                is_bogon(&ni.socket_addr())
-            };
-
-            if bogon ||self.data().closest.contains(ni.id()) ||
-                &local_id == ni.id() ||
-                &local_addr == ni.socket_addr() {
-                continue;
-            }
-            todo.push(ni);
-        }
-
-        if !todo.is_empty() {
-            self.data_mut().candidates.add(todo)
-        }
-    }
-
-    fn add_candidates_with_kentries(&mut self, mut entries: Vec<KBucketEntry>) {
-        let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
-        let locked_dht = strong_dht.lock().unwrap();
-        let local_id   = locked_dht.id().clone();
-        let local_addr = locked_dht.addr().clone();
-        drop(locked_dht);
-        drop(strong_dht);
-
-        let mut todo: Vec<KBucketEntry> = Vec::new();
+        let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
-            let ni = entry.as_ref();
+            let candidate: CandidateNode = entry.into();
             let bogon = if cfg!(feature = "devp") {
-                !is_any_unicast(&ni.ip())
+                !is_any_unicast(&candidate.socket_addr().ip())
             } else {
-                is_bogon(&ni.socket_addr())
+                is_bogon(candidate.socket_addr())
             };
 
-            if bogon ||self.data().closest.contains(ni.id()) ||
-                &local_id == ni.id() ||
-                &local_addr == ni.socket_addr() {
+            if bogon ||self.data().closest.contains(candidate.id()) ||
+                &id == candidate.id() ||
+                &addr == candidate.socket_addr() {
                 continue;
             }
-            todo.push(entry);
+            todo.push(candidate);
         }
 
         if !todo.is_empty() {

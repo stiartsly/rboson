@@ -10,6 +10,7 @@ use crate::dht::{
     dht::DHT,
     task::{NodeLookupTask, LookupTask},
     unitests::test_utils::make_test_dht,
+    rpc::rpc_target::NodeInfoLike,
 };
 
 fn make_dht() -> Arc<Mutex<DHT>> {
@@ -57,6 +58,6 @@ mod tests {
         let next = task.next_candidate().expect("candidate should be present");
         let locked_next = next.lock().unwrap();
         assert_eq!(locked_next.id(), candidate.id());
-        assert_eq!(locked_next.ni(), &candidate);
+        assert_eq!(locked_next.ni(), candidate);
     }
 }

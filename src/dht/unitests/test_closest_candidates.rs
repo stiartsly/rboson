@@ -1,5 +1,8 @@
 use crate::{Id, NodeInfo};
-use crate::dht::task::closest_candidates::ClosestCandidates;
+use crate::dht::{
+    rpc::rpc_target::NodeInfoLike,
+    task::closest_candidates::ClosestCandidates
+};
 
 fn make_node(distance: usize, host: &str, port: u16) -> NodeInfo {
     NodeInfo::new(
@@ -23,10 +26,10 @@ mod tests {
         let node3 = make_node(3, "1.1.1.3", 39003);
 
         candidates.add(vec![
-            node4.clone(),
-            node2.clone(),
-            node1.clone(),
-            node3.clone()
+            node4.clone().into(),
+            node2.clone().into()    ,
+            node1.clone().into(),
+            node3.clone().into()
         ]);
 
         assert_eq!(candidates.size(), 3);
@@ -47,8 +50,8 @@ mod tests {
         let second = make_node(1, "1.1.1.1", 39002);
 
         candidates.add(vec![
-            first.clone(),
-            second.clone()
+            first.clone().into(),
+            second.clone().into()
         ]);
 
         assert_eq!(candidates.size(), 1);
@@ -64,7 +67,7 @@ mod tests {
         let first = make_node(3, "1.1.1.1", 39001);
         let second = make_node(1, "1.1.1.1", 39002);
 
-        candidates.add(vec![first.clone(), second.clone()]);
+        candidates.add(vec![first.clone().into(), second.clone().into()]);
 
         assert_eq!(candidates.size(), 2);
         assert_eq!(candidates.candidate_node(first.id()).is_some(), true);
@@ -80,9 +83,9 @@ mod tests {
         let remove_a = make_node(2, "1.1.1.2", 39002);
         let remove_b = make_node(3, "1.1.1.3", 39003);
 
-        candidates.add(vec![keep.clone(), remove_a.clone(), remove_b.clone()]);
+        candidates.add(vec![keep.clone().into(), remove_a.clone().into(), remove_b.clone().into()]);
         candidates.remove_if(|cn| {
-            cn.lock().unwrap().ni().socket_addr().port() != 39001
+            cn.lock().unwrap().socket_addr().port() != 39001
         });
 
         assert_eq!(candidates.size(), 1);
@@ -90,7 +93,7 @@ mod tests {
         assert_eq!(candidates.candidate_node(remove_a.id()).is_none(), true);
         assert_eq!(candidates.candidate_node(remove_b.id()).is_none(), true);
 
-        candidates.add(vec![remove_a.clone(), remove_b.clone()]);
+        candidates.add(vec![remove_a.clone().into(), remove_b.clone().into()]);
         assert_eq!(candidates.size(), 1);
     }
 
@@ -103,16 +106,16 @@ mod tests {
         let second = make_node(2, "1.1.1.2", 39002);
         let third = make_node(3, "1.1.1.3", 39003);
 
-        candidates.add(vec![first.clone(), second.clone(), third.clone()]);
+        candidates.add(vec![first.clone().into(), second.clone().into(), third.clone().into()]);
         assert_eq!(candidates.candidate_node(third.id()).is_none(), true);
 
         let removed = candidates.remove(first.id());
         assert_eq!(removed.is_some(), true);
 
-        candidates.add(vec![first.clone()]);
+        candidates.add(vec![first.clone().into()]);
         assert_eq!(candidates.candidate_node(first.id()).is_none(), true);
 
-        candidates.add(vec![third.clone()]);
+        candidates.add(vec![third.clone().into()]);
         assert_eq!(candidates.candidate_node(third.id()).is_some(), true);
     }
 
@@ -125,9 +128,9 @@ mod tests {
         let middle = make_node(2, "1.1.1.2", 39002);
         let farthest = make_node(3, "1.1.1.3", 39003);
         candidates.add(vec![
-            farthest.clone(),
-            closest.clone(),
-            middle.clone()
+            farthest.clone().into(),
+            closest.clone().into(),
+            middle.clone().into()
         ]);
 
         let closest_candidate = candidates.candidate_node(closest.id()).unwrap();

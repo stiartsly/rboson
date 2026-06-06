@@ -10,10 +10,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
 use crate::{
-    Id, Network,
-    NodeInfo, PeerInfo, Value,
-    errors::Result,
-    crypto_identity::CryptoIdentity
+    Id, Network, NodeInfo, PeerInfo, Value, crypto_identity::CryptoIdentity, dht::rpc::rpc_target::NodeInfoLike, errors::Result
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
@@ -425,7 +422,7 @@ impl DHT {
 
         info!("Periodic: random ping ...");
 
-        let call = RpcCall::with_entry(entry, msg::ping_request());
+        let call = RpcCall::new(entry, msg::ping_request());
         let _ = self.server().lock().unwrap()
             .send_call(call);
     }
@@ -818,10 +815,7 @@ impl DHT {
 
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
-            let call = RpcCall::with_entry(
-                entry,
-                msg::ping_request()
-            );
+            let call = RpcCall::new(entry, msg::ping_request());
             let _ = self.server().lock().unwrap().send_call(call);
         }
     }
@@ -1275,7 +1269,7 @@ impl DHT {
                 Some(true)
             );
 
-            let mut call = RpcCall::with_node(item, msg);
+            let mut call = RpcCall::new(item, msg);
             let promise = Promise::<Vec<NodeInfo>>::new();
             let future  = promise.future();
 
@@ -1377,7 +1371,7 @@ impl DHT {
         option: LookupOption
     ) -> Result<Option<NodeInfo>> {
 
-        let node = self.rt.bucket_entry(Some(target)).map(|v| v.into());
+        let node = self.rt.bucket_entry(Some(target)).map(|v| v.ni());
         if option == LookupOption::Local {
             return Ok(node);
         }

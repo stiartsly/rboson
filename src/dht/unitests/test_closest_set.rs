@@ -14,7 +14,7 @@ fn make_candidate(distance: usize) -> Arc<Mutex<CandidateNode>> {
         id,
         format!("1.1.1.{}:39001", distance).parse().unwrap(),
     );
-    Arc::new(Mutex::new(CandidateNode::from(node)))
+    Arc::new(Mutex::new(node.into()))
 }
 
 #[cfg(test)]

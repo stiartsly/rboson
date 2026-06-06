@@ -271,6 +271,8 @@ impl RpcServer {
 
         let mut locked = crate::locked!(call);
         let mut msg = locked.req_mut();
+        msg.set_associated_call(call.clone());
+
         match self.send_msg(&mut msg).await {
             Ok(_) => {
                 locked.sent();

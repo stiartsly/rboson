@@ -4,7 +4,7 @@ use std::{
 };
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::Reachability,
+    rpc::{Reachability, rpc_target::NodeInfoLike},
     routing::KBucketEntry
 };
 
@@ -39,10 +39,6 @@ impl CandidateNode {
 
     pub(crate) fn id(&self) -> &Id {
         self.ni.id()
-    }
-
-    pub(crate) fn ni(&self) -> &NodeInfo {
-        &self.ni
     }
 
     pub(crate) fn set_sent(&mut self) {
@@ -100,15 +96,15 @@ impl CandidateNode {
     }
 }
 
-impl From<NodeInfo> for CandidateNode {
-    fn from(ni: NodeInfo) -> Self {
-        Self::new(ni, false)
+impl Into<CandidateNode> for NodeInfo {
+    fn into(self) -> CandidateNode {
+        CandidateNode::new(self, false)
     }
 }
 
-impl From<KBucketEntry> for CandidateNode {
-    fn from(entry: KBucketEntry) -> Self {
-        Self::new(entry.ni().clone(), entry.is_reachable())
+impl Into<CandidateNode> for KBucketEntry {
+    fn into(self) -> CandidateNode {
+        CandidateNode::new(self.ni(), self.is_reachable())
     }
 }
 
@@ -126,27 +122,16 @@ impl Reachability for CandidateNode {
     }
 }
 
-pub(crate) trait NodeInfoLike: Into<CandidateNode> {
-    fn id(&self) -> &Id;
-    fn socket_addr(&self) -> &SocketAddr;
-}
+impl NodeInfoLike for CandidateNode {
+    fn ni(&self) -> NodeInfo {
+        self.ni.clone()
+    }
 
-impl NodeInfoLike for NodeInfo {
     fn id(&self) -> &Id {
-        self.id()
+        self.ni.id()
     }
 
     fn socket_addr(&self) -> &SocketAddr {
-        self.socket_addr()
-    }
-}
-
-impl NodeInfoLike for KBucketEntry {
-    fn id(&self) -> &Id {
-        self.as_ref().id()
-    }
-
-    fn socket_addr(&self) -> &SocketAddr {
-        self.as_ref().socket_addr()
+        self.ni.socket_addr()
     }
 }

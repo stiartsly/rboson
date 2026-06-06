@@ -8,7 +8,7 @@ use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
-    rpc::{RpcCall, Target},
+    rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
     routing::{
         KBucket,
@@ -68,7 +68,7 @@ impl NodeLookupTask {
     }
 
     pub(crate) fn with_inject_candidates(&mut self, nodes: Vec<NodeInfo>) {
-        self.add_candidates_with_nodes(nodes);
+        self.add(nodes);
     }
 
     pub(crate) fn result(&self) -> Option<NodeInfo> {
@@ -160,7 +160,7 @@ impl Task for NodeLookupTask {
             kes.len(),
             target,
         );
-        self.add_candidates_with_kentries(kes);
+        self.add(kes);
     }
 
     fn iterate(&mut self) {
@@ -182,18 +182,19 @@ impl Task for NodeLookupTask {
                 None => break
             };
 
-            let target = Target::from_candidate(next.clone());
+
+            let target = next.clone().into();
             let msg = msg::find_node_request(
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
                 Some(self.want_token)
             );
-            let handler = Consumer::new(move |_| {
+            let cb = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
 
-            if let Err(e) = self.send_call(target, msg, Some(handler)) {
+            if let Err(e) = self.send_call(target, msg, Some(cb)) {
                 error!("Sending 'findNode' request error: {}", e);
             };
         }
@@ -230,7 +231,7 @@ impl Task for NodeLookupTask {
             return;
         };
 
-        self.add_candidates_with_nodes(nodes.to_vec());
+        self.add(nodes.to_vec());
 
         debug!("{}#{} adding {} candidates from response by target {}",
             self.task_name(),

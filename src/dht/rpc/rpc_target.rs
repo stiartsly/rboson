@@ -9,10 +9,35 @@ use crate::dht::{
     task::CandidateNode,
 };
 
+impl Into<Target> for NodeInfo {
+    fn into(self) -> Target {
+        Target::NodeInfo(self)
+    }
+}
+
+impl Into<Target> for KBucketEntry {
+    fn into(self) -> Target {
+        Target::KBucketEntry(self)
+    }
+}
+
+impl Into<Target> for Arc<Mutex<CandidateNode>> {
+    fn into(self) -> Target {
+        Target::Candidate(self)
+    }
+}
+
 pub(crate) trait Reachability {
     fn is_reachable(&self) -> bool { false }
     fn is_unreachable(&self) -> bool { false }
     fn set_reachable(&mut self, _: bool) {}
+}
+
+#[allow(unused)]
+pub(crate) trait NodeInfoLike {
+    fn ni(&self) -> NodeInfo;
+    fn id(&self) -> &Id;
+    fn socket_addr(&self) -> &SocketAddr;
 }
 
 pub(crate) enum Target {
@@ -22,28 +47,20 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    pub(crate) fn from_candidate(candidate: Arc<Mutex<CandidateNode>>) -> Self {
-        Self::Candidate(candidate)
-    }
-
-    pub(crate) fn from_bucket_entry(entry: KBucketEntry) -> Self {
-        Self::KBucketEntry(entry)
-    }
-
-    pub(crate) fn node_info(&self) -> NodeInfo {
+    pub(crate) fn ni(&self) -> NodeInfo {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().ni().clone(),
-            Target::KBucketEntry(v) => v.as_ref().clone(),
-            Target::NodeInfo(v) => v.clone(),
+            Target::Candidate(v) => v.lock().unwrap().ni(),
+            Target::KBucketEntry(v) => v.ni(),
+            Target::NodeInfo(v) => v.ni()
         }
     }
 
     pub(crate) fn id(&self) -> Id {
-        self.node_info().id().clone()
-    }
-
-    pub(crate) fn socket_addr(&self) -> SocketAddr {
-        *self.node_info().socket_addr()
+        match self {
+            Target::Candidate(v) => *v.lock().unwrap().id(),
+            Target::KBucketEntry(v) => *v.id(),
+            Target::NodeInfo(v) => *v.id()
+        }
     }
 }
 
@@ -73,3 +90,18 @@ impl Reachability for Target {
     }
 }
 
+impl Reachability for NodeInfo {}
+
+impl NodeInfoLike for NodeInfo {
+    fn ni(&self) -> NodeInfo {
+        self.clone()
+    }
+
+    fn id(&self) -> &Id {
+        self.id()
+    }
+
+    fn socket_addr(&self) -> &SocketAddr {
+        self.socket_addr()
+    }
+}

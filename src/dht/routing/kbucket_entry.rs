@@ -16,7 +16,7 @@ use crate::{
     Id,
     NodeInfo,
     core::version,
-    dht::rpc::Reachability
+    dht::rpc::{Reachability, rpc_target::NodeInfoLike}
 };
 
 /**
@@ -63,10 +63,6 @@ impl KBucketEntry {
 
     pub(crate) fn id(&self) -> &Id {
         &self.ni.id()
-    }
-
-    pub(crate) fn ni(&self) -> &NodeInfo {
-        &self.ni
     }
 
     pub(crate) fn socket_addr(&self) -> &SocketAddr {
@@ -211,7 +207,7 @@ impl KBucketEntry {
         self.last_seen  = self.last_seen.max(entry.last_seen);
         self.last_sent  = self.last_sent.max(entry.last_sent);
     }
-
+/*
     pub(crate) fn rtt(&self) -> u64 {
         0
     }
@@ -219,7 +215,7 @@ impl KBucketEntry {
     pub(crate) fn rtt_with(&self, default_rtt: u64) -> u64 {
         default_rtt
     }
-
+*/
     pub(crate) fn on_request_sent(&mut self) {
         self.last_sent = SystemTime::now();
     }
@@ -258,6 +254,7 @@ impl KBucketEntry {
     }
 }
 
+/*
 impl AsRef<NodeInfo> for KBucketEntry {
     fn as_ref(&self) -> &NodeInfo {
         &self.ni
@@ -268,6 +265,7 @@ impl Into<NodeInfo> for KBucketEntry {
         self.ni
     }
 }
+*/
 
 impl Eq for KBucketEntry {}
 impl PartialEq for KBucketEntry {
@@ -287,6 +285,20 @@ impl Reachability for KBucketEntry {
 
     fn set_reachable(&mut self, reachable: bool) {
         self.reachable = reachable
+    }
+}
+
+impl NodeInfoLike for KBucketEntry {
+    fn ni(&self) -> NodeInfo {
+        self.ni.clone()
+    }
+
+    fn id(&self) -> &Id {
+        self.ni.id()
+    }
+
+    fn socket_addr(&self) -> &SocketAddr {
+        self.ni.socket_addr()
     }
 }
 

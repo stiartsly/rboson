@@ -4,10 +4,13 @@ use std::{
 };
 
 use crate::{Id, NodeInfo};
-use crate::dht::routing::{
-    KBucket,
-    KBucketEntry,
-    RoutingTable
+use crate::dht::{
+    routing::{
+        KBucket,
+        KBucketEntry,
+        RoutingTable
+    },
+    rpc::rpc_target::NodeInfoLike,
 };
 
 pub(crate) struct KClosestNodes {
@@ -172,7 +175,7 @@ impl Into<Vec<KBucketEntry>> for KClosestNodes {
 impl Into<Vec<NodeInfo>> for KClosestNodes {
     fn into(self) -> Vec<NodeInfo> {
         self.entries.into_iter()
-            .map(|v| v.as_ref().clone())
+            .map(|v| v.ni())
             .collect()
     }
 }

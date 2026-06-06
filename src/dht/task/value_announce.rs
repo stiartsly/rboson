@@ -10,7 +10,6 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     msg::msg,
-    rpc::Target,
     task::{
         Task, TaskData,
         ClosestSet,
@@ -106,12 +105,11 @@ impl Task for ValueAnnounceTask {
             );
 
             let cloned_todo = self.todo.clone();
-            let target = Target::from_candidate(cn);
             let handler = Consumer::new(move |_| {
                 cloned_todo.lock().unwrap().pop_front();
             });
 
-            if let Err(e) = self.send_call(target, msg, Some(handler)) {
+            if let Err(e) = self.send_call(cn.into(), msg, Some(handler)) {
                 error!("Sending 'storeValue' request error: {}", e);
             };
         }

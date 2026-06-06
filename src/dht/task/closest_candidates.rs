@@ -8,9 +8,9 @@ use std::{
 use indexmap::map::IndexMap;
 
 use crate::Id;
-use crate::dht::task::candidate_node::{
-    CandidateNode,
-    NodeInfoLike,
+use crate::dht::{
+    task::candidate_node::CandidateNode,
+    rpc::rpc_target::NodeInfoLike,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -65,8 +65,7 @@ impl ClosestCandidates {
         }
     }
 
-    pub(crate) fn add<T>(&mut self, entries: Vec<T>)
-    where T: NodeInfoLike
+    pub(crate) fn add(&mut self, entries: Vec<CandidateNode>)
     {
         for item in entries {
             let id = item.id().clone();
@@ -109,7 +108,7 @@ impl ClosestCandidates {
                 self.dedups_ids.remove(id);
 
                 let locked_cn = removed_cn.lock().unwrap();
-                let addr = locked_cn.ni().socket_addr();
+                let addr = locked_cn.socket_addr();
                 let key = self.dedup_key(addr);
                 self.dedups_addrs.remove(&key);
 

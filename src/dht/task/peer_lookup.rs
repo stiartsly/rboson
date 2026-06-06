@@ -9,7 +9,7 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     eligible_peers::EligiblePeers,
-    rpc::{RpcCall,Target},
+    rpc::RpcCall,
     routing::{KBucket, KBucketEntry, KClosestNodes},
     msg::{msg, Body, LookupResponse},
     task::{
@@ -113,7 +113,7 @@ impl Task for PeerLookupTask {
             entries.len(),
             self.target()
         );
-        self.add_candidates_with_kentries(entries);
+        self.add(entries);
     }
 
     fn iterate(&mut self) {
@@ -135,7 +135,7 @@ impl Task for PeerLookupTask {
                 None => break,
             };
 
-            let target = Target::from_candidate(next.clone());
+            let target = next.clone().into();
             let msg = msg::find_peer_request(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -144,12 +144,13 @@ impl Task for PeerLookupTask {
                 self.result.expected_count() as i32,
             );
 
-            let handler = Consumer::new(move |_| {
+            let cb = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });
-             let _ = self.send_call(target, msg, Some(handler)).map_err(|e| {
+
+            if let Err(e) = self.send_call(target, msg, Some(cb)) {
                 error!("Sending 'findPeer' request error: {}", e);
-             });
+            };
         }
     }
 
@@ -222,7 +223,7 @@ impl Task for PeerLookupTask {
                 return;
             };
 
-            self.add_candidates_with_nodes(nodes.to_vec());
+            self.add(nodes.to_vec());
 
             debug!("{}#{} added {} candidates from response by {}",
                 self.task_name(),

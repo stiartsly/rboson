@@ -9,7 +9,7 @@ use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     eligible_value::EligibleValue,
-    rpc::{RpcCall, Target},
+    rpc::RpcCall,
     msg::{msg, LookupResponse, Body},
     routing::{
         KBucket,
@@ -116,7 +116,7 @@ impl Task for ValueLookupTask {
             entries.len(),
             self.target()
         );
-        self.add_candidates_with_kentries(entries);
+        self.add(entries);
     }
 
     fn iterate(&mut self) {
@@ -138,7 +138,7 @@ impl Task for ValueLookupTask {
                 None => break,
             };
 
-            let target = Target::from_candidate(next.clone());
+            let target = next.clone().into();
             let msg = msg::find_value_request(
                 self.target().clone(),
                 network.is_ipv4(),
@@ -209,7 +209,7 @@ impl Task for ValueLookupTask {
                 return;
             };
 
-            self.add_candidates_with_nodes(nodes.to_vec());
+            self.add(nodes.to_vec());
 
             debug!("{}#{} added {} additional candidates from response by target {}",
                 self.task_name(),

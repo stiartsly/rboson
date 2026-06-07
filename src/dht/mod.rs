@@ -12,6 +12,20 @@ mod msg {
     pub(crate) mod announce_peer_req;
     pub(crate) mod store_value_req;
 
+    #[cfg(test)]
+    mod unitests {
+        mod test_find_node_req;
+        mod test_find_node_rsp;
+        mod test_announce_peer_req;
+        mod test_find_peer_req;
+        mod test_find_peer_rsp;
+        mod test_find_value_req;
+        mod test_find_value_rsp;
+        mod test_message;
+        mod test_store_value_req;
+        mod test_error;
+    }
+
     pub(crate) use {
         lookup_req::LookupRequest,
         lookup_rsp::LookupResponse,
@@ -44,6 +58,19 @@ mod task {
     pub(crate) mod peer_announce;
     pub(crate) mod value_lookup;
     pub(crate) mod value_announce;
+
+    #[cfg(test)]
+    mod unitests {
+        mod test_utils;
+        mod test_closest_candidates;
+        mod test_closest_set;
+        mod test_candidate_node;
+        mod test_node_lookup;
+        mod test_peer_lookup;
+        mod test_peer_announce;
+        mod test_value_lookup;
+        mod test_value_announce;
+    }
 
     pub(crate) use {
         task::{Task, TaskData},
@@ -204,7 +231,6 @@ pub(crate) mod utils {
 
 #[cfg(test)]
 mod unitests {
-    mod test_utils;
     mod test_addr;
     mod test_node_configuration;
 
@@ -218,28 +244,6 @@ mod unitests {
     mod test_token_manager;
     mod test_dht;
     mod test_cached_identity;
-
-    // msg
-    mod test_find_node_req;
-    mod test_find_node_rsp;
-    mod test_announce_peer_req;
-    mod test_find_peer_req;
-    mod test_find_peer_rsp;
-    mod test_find_value_req;
-    mod test_find_value_rsp;
-    mod test_message;
-    mod test_store_value_req;
-    mod test_error;
-
-    // task
-    mod test_candidate_node;
-    mod test_closest_candidates;
-    mod test_closest_set;
-    mod test_node_lookup;
-    mod test_peer_lookup;
-    mod test_value_lookup;
-    mod test_peer_announce;
-    mod test_value_announce;
 
     // storage
     mod test_storage;

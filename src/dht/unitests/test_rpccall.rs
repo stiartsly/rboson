@@ -45,11 +45,13 @@ mod tests {
     #[test]
     fn test_with_node() {
         let target = make_nodeinfo("127.0.0.1:40001");
-        let req = msg::ping_request();
+        let local_nodeid = Id::random();
+        let mut req = msg::ping_request();
+        req.set_nodeid(local_nodeid.clone());
+
         let txid = req.txid();
         let call = RpcCall::new(target.clone(), req);
 
-        let local_nodeid = Id::random();
         //call.set_local_id(local_nodeid);
         // call.set_expected_rtt_if_absent(40);
 
@@ -70,13 +72,14 @@ mod tests {
     #[test]
     fn test_with_entry() {
         let target = make_entry("127.0.0.1:40002");
-        let req = msg::ping_request();
+        let local_nodeid = Id::random();
+        let mut req = msg::ping_request();
+        req.set_nodeid(local_nodeid.clone());
         let txid = req.txid();
         let call = RpcCall::new(target.clone(), req);
 
-        let local_nodeid = Id::random();
-       // call.set_local_id(local_nodeid);
-       // call.set_expected_rtt_if_absent(42);
+        //  call.set_local_id(local_nodeid);
+        //  call.set_expected_rtt_if_absent(42);
 
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);

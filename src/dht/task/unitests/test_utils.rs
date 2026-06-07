@@ -1,10 +1,5 @@
 use std::sync::{Arc, Mutex};
-
-use tokio::{
-    runtime,
-    sync::mpsc,
-};
-
+use tokio::sync::mpsc;
 use crate::{
     crypto_identity::CryptoIdentity,
     Network,
@@ -17,7 +12,7 @@ use crate::dht::{
         sqlite_storage::SqliteStorage,
     },
     timer_client::TimerClient,
-    timer_queue::{Command, TimerQueue},
+    timer_queue::{Command},
     token_manager::TokenManager,
 };
 
@@ -28,12 +23,12 @@ pub(super) fn make_test_dht(
 ) -> Arc<Mutex<DHT>> {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-    let (tx, rx) = mpsc::channel::<Command>(64);
+    let (tx, _rx) = mpsc::channel::<Command>(64);
     let timer_client = Arc::new(TimerClient::new(tx));
     let bootstrap_nodes: Vec<NodeInfo> = Vec::new();
     let data_dir = ".";
 
-    std::thread::spawn(move || {
+   /*  std::thread::spawn(move || {
         let runtime = runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -43,6 +38,7 @@ pub(super) fn make_test_dht(
             TimerQueue::new(rx).run().await;
         });
     });
+    */
 
     let mut builder = Builder::new();
     builder

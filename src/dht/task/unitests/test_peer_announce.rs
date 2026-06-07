@@ -4,33 +4,36 @@ use crate::{
     Id,
     Network,
     NodeInfo,
-    Value,
+    PeerInfo,
     crypto_identity::CryptoIdentity,
 };
 
 use crate::dht::{
     dht::DHT,
     task::{
-        task::{Task, State},
-        closest_set::ClosestSet,
         candidate_node::CandidateNode,
-        value_announce::ValueAnnounceTask,
+        closest_set::ClosestSet,
+        peer_announce::PeerAnnounceTask,
+        task::{Task, State},
     },
-    unitests::test_utils::make_test_dht,
 };
+use super::test_utils::make_test_dht;
 
 fn make_dht() -> Arc<Mutex<DHT>> {
     make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
 }
 
-fn make_value() -> Value {
-    Value::packed(
-        Some(Id::random()),
-        None,
-        None,
-        None,
-        vec![1, 2, 3, 4],
+fn make_peer() -> PeerInfo {
+    PeerInfo::packed(
+        Id::random(),
+        vec![7; PeerInfo::NONCE_BYTES],
         5,
+        None,
+        None,
+        vec![9; 64],
+        123456,
+        "127.0.0.1:39001".to_string(),
+        Some(vec![1, 2, 3]),
     )
 }
 
@@ -54,9 +57,9 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let value = make_value();
-        let dht   = make_dht();
-        let task = ValueAnnounceTask::new(Arc::downgrade(&dht), value.clone(), 7);
+        let peer = make_peer();
+        let dht  = make_dht();
+        let task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer.clone(), 7);
 
         assert!(task.data().is_done());
         assert!(task.is_done());
@@ -64,9 +67,9 @@ mod tests {
 
     #[test]
     fn test_task_with_closestset() {
-        let value = make_value();
+        let peer = make_peer();
         let dht = make_dht();
-        let task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_done());
 
         task.with_closest(make_closestset(42));
@@ -75,21 +78,25 @@ mod tests {
 
     #[test]
     fn test_cancel() {
-        let value = make_value();
-        let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        println!(">>>> test_cancel line:{}", line!());
+        let peer = make_peer();
+        let dht  = make_dht();
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
+        println!(">>>> test_cancel line:{}", line!());
         task.with_closest(make_closestset(0));
         assert!(task.is_unstarted());
         assert!(!task.is_done());
 
+        println!(">>>> test_cancel line:{}", line!());
         task.set_state_if(&State::Initialized, State::Running);
         task.iterate();
         assert!(task.is_done());
         assert!(task.is_running());
 
+        println!(">>>> test_cancel line:{}", line!());
         task.cancel();
         assert!(task.is_done());
         assert!(task.is_canceled());
@@ -97,9 +104,9 @@ mod tests {
 
     #[test]
     fn test_complete() {
-        let value = make_value();
+        let peer = make_peer();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -119,9 +126,9 @@ mod tests {
 
     #[test]
     fn test_start() {
-        let value = make_value();
+        let peer = make_peer();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let mut task = PeerAnnounceTask::new(Arc::downgrade(&dht), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 

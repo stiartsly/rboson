@@ -9,9 +9,9 @@ use crate::{
 use crate::dht::{
     dht::DHT,
     task::{NodeLookupTask, LookupTask},
-    unitests::test_utils::make_test_dht,
     rpc::rpc_target::NodeInfoLike,
 };
+use super::test_utils::make_test_dht;
 
 fn make_dht() -> Arc<Mutex<DHT>> {
     make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")

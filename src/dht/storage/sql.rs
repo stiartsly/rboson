@@ -5,7 +5,6 @@ pub(crate) const GET_USER_VERSION: &str = "PRAGMA user_version";
 pub(crate) const CREATE_VALUES_TABLE: &str = "
         CREATE TABLE IF NOT EXISTS valores(\
         id BLOB NOT NULL PRIMARY KEY, \
-        persistent BOOLEAN NOT NULL DEFAULT FALSE, \
         publicKey BLOB, \
         privateKey BLOB, \
         recipient BLOB, \
@@ -13,6 +12,7 @@ pub(crate) const CREATE_VALUES_TABLE: &str = "
         signature BLOB, \
         sequenceNumber INTEGER NOT NULL DEFAULT 0, \
         data BLOB NOT NULL, \
+        persistent BOOLEAN NOT NULL DEFAULT FALSE, \
         updated INTEGER NOT NULL DEFAULT 0\
         ) WITHOUT ROWID
     ";

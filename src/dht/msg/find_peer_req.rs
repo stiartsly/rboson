@@ -1,15 +1,10 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use serde::{
-    Deserialize, Serialize,
-    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{SerializeMap, Serializer}
-};
+use std::fmt;
+use std::result::Result as SResult;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     Id,
+    errors::{Error, Result},
     dht::msg::lookup_req::{
         LookupRequest,
         Data as LookupData,
@@ -17,6 +12,9 @@ use crate::{
     }
 };
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeFindPeerRequest", try_from = "SerdeFindPeerRequest")]
 pub(crate) struct FindPeerRequest {
     data: LookupData,
     expected_seq: i32,
@@ -51,122 +49,50 @@ impl LookupRequest for FindPeerRequest {
     }
 }
 
-impl Serialize for FindPeerRequest {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer
-    {
-        let mut s = se.serialize_map(None)?;
-        s.serialize_entry("t", self.target())?;
-        s.serialize_entry("w", &self.want())?;
-        if self.expected_seq >= 0 {
-            s.serialize_entry("cas", &self.expected_seq)?;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeFindPeerRequest {
+    #[serde(rename = "t")]
+    target: Id,
+    #[serde(rename = "w")]
+    want: i32,
+    #[serde(
+        rename = "cas",
+        skip_serializing_if = "is_default_expected_seq",
+        default = "default_expected_seq",
+        deserialize_with = "deserialize_expected_seq"
+    )]
+    expected_seq: i32,
+    #[serde(
+        rename = "e",
+        skip_serializing_if = "crate::is_default",
+        default,
+        deserialize_with = "deserialize_expected_count"
+    )]
+    expected_count: i32,
+}
+
+impl Into<SerdeFindPeerRequest> for FindPeerRequest {
+    fn into(self) -> SerdeFindPeerRequest {
+        SerdeFindPeerRequest {
+            target: self.target().clone(),
+            want: self.want(),
+            expected_seq: self.expected_seq,
+            expected_count: self.expected_count,
         }
-        if self.expected_count > 0 {
-            s.serialize_entry("e", &self.expected_count)?;
-        }
-        s.end()
     }
 }
 
-impl<'de> Deserialize<'de> for FindPeerRequest {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        enum Field {
-            Want,           // "w"
-            Target,         // "t"
-            ExpectedSeq,    // "cas"
-            ExpectedCount,  // "e"
-            Ignore          // Ignore unknown fields
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "t"     => Ok(Field::Target),
-                    "w"     => Ok(Field::Want),
-                    "cas"   => Ok(Field::ExpectedSeq),
-                    "e"     => Ok(Field::ExpectedCount),
-                    _       => Ok(Field::Ignore)
-                }
-            }
-        }
-
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = FindPeerRequest;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a FindPeerRequest struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut target  : Option<Id>  = None;
-                let mut want    : Option<i32> = None;
-                let mut seq     : Option<i32> = None;
-                let mut count   : Option<i32> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Target => {
-                            if target.is_some() {
-                                return Err(de::Error::duplicate_field("t"));
-                            } else {
-                                target = Some(map.next_value::<Id>()?);
-                            }
-                        }
-                        Field::Want => {
-                            if want.is_some() {
-                                return Err(de::Error::duplicate_field("w"));
-                            } else {
-                                want = Some(map.next_value()?);
-                            }
-                        }
-                        Field::ExpectedSeq => {
-                            if seq.is_some() {
-                                return Err(de::Error::duplicate_field("cas"));
-                            } else {
-                                seq = Some(map.next_value()?);
-                            }
-                        }
-                        Field::ExpectedCount => {
-                            if count.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            } else {
-                                count = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let want = want.unwrap_or(0);
-                let expected_seq = seq.unwrap_or(-1);
-                if expected_seq < -1 {
-                    return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
-                }
-                let expected_count = count.unwrap_or_default();
-                if expected_count <= 0 {
-                    return Err(de::Error::custom("expected_count must be at least larger than 0"));
-                }
-
-                Ok(FindPeerRequest::new(
-                    target.ok_or_else(|| de::Error::missing_field("t"))?,
-                    (want & WANT4_MASK) != 0,
-                    (want & WANT6_MASK) != 0,
-                    expected_seq,
-                    expected_count
-                ))
-            }
-        }
-        de.deserialize_map(FieldVisitor)
+impl TryFrom<SerdeFindPeerRequest> for FindPeerRequest {
+    type Error = Error;
+    fn try_from(s: SerdeFindPeerRequest) -> Result<Self> {
+        Ok(FindPeerRequest::new(
+            s.target,
+            s.want & WANT4_MASK != 0,
+            s.want & WANT6_MASK != 0,
+            s.expected_seq,
+            s.expected_count
+        ))
     }
 }
 
@@ -183,4 +109,30 @@ impl fmt::Display for FindPeerRequest {
         }
         write!(f, ",e:{}", self.expected_count)
     }
+}
+
+fn is_default_expected_seq(v: &i32) -> bool {
+     *v < 0
+}
+
+fn default_expected_seq() -> i32 { -1 }
+
+fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+where  D: Deserializer<'de>,
+{
+    let seq = i32::deserialize(de)?;
+    if seq < -1 {
+        return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
+    }
+    Ok(seq)
+}
+
+fn deserialize_expected_count<'de, D>(de: D) -> SResult<i32, D::Error>
+where D: Deserializer<'de>,
+{
+    let count = i32::deserialize(de)?;
+    if count <= 0 {
+        return Err(serde::de::Error::custom("expected_count must be at least larger than 0"));
+    }
+    Ok(count)
 }

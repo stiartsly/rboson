@@ -4,7 +4,7 @@ use boson::{
     Id,
     value,
     Value,
-    ValueBuilder,
+    ImmutableBuilder,
     SignedBuilder,
     EncryptedBuilder
 };
@@ -33,7 +33,7 @@ use crate::create_random_bytes;
 #[test]
 fn test_immutable() {
     let data = create_random_bytes(32);
-    let rc = ValueBuilder::new(&data).build();
+    let rc = ImmutableBuilder::new(&data).build();
     assert_eq!(rc.is_ok(), true);
 
     let val: Value = rc.unwrap();

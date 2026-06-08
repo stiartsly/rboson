@@ -288,7 +288,8 @@ impl NodeInfoLike for KBucketEntry {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SerializableKbucketEntry {
+#[serde(deny_unknown_fields)]
+struct SerializableKbucketEntry {
     id: Id,
     addr: Vec<u8>,
     port: u16,

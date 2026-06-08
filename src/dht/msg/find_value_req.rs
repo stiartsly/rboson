@@ -4,12 +4,12 @@ use std::{
 };
 use serde::{
     Deserialize, Serialize,
-    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{SerializeMap, Serializer}
+    de::Deserializer
 };
 
 use crate::{
     Id,
+    errors::{Error, Result},
     dht::msg::lookup_req::{
         LookupRequest,
         Data as LookupData,
@@ -17,6 +17,9 @@ use crate::{
     }
 };
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeFindValueRequest", try_from = "SerdeFindValueRequest")]
 pub(crate) struct FindValueRequest {
     data: LookupData,
     expected_seq: i32,
@@ -45,104 +48,41 @@ impl LookupRequest for FindValueRequest {
     }
 }
 
-impl Serialize for FindValueRequest {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer
-    {
-        let mut s = se.serialize_map(None)?;
-        s.serialize_entry("t", self.target())?;
-        s.serialize_entry("w", &self.want())?;
-        if self.expected_seq >= 0 {
-            s.serialize_entry("cas", &self.expected_seq)?;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeFindValueRequest {
+    #[serde(rename = "t")]
+    target: Id,
+    #[serde(rename = "w")]
+    want: i32,
+    #[serde(
+        rename = "cas",
+        skip_serializing_if = "is_default_expected_seq",
+        default = "default_expected_seq",
+        deserialize_with = "deserialize_expected_seq"
+    )]
+    expected_seq: i32
+}
+
+impl Into<SerdeFindValueRequest> for FindValueRequest {
+    fn into(self) -> SerdeFindValueRequest {
+        SerdeFindValueRequest {
+            target: self.target().clone(),
+            want: self.want(),
+            expected_seq: self.expected_seq,
         }
-        s.end()
     }
 }
 
-impl<'de> Deserialize<'de> for FindValueRequest {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        enum Field {
-            Want,           // "w"
-            Target,         // "t"
-            ExpectedSeq,    // "cas"
-            Ignore          // Ignore unknown fields
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "w"     => Ok(Field::Want),
-                    "t"     => Ok(Field::Target),
-                    "cas"   => Ok(Field::ExpectedSeq),
-                    _       => Ok(Field::Ignore)
-                }
-            }
-        }
-
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = FindValueRequest;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a FindValueRequest struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut target : Option<Id>  = None;
-                let mut want   : Option<i32> = None;
-                let mut seq    : Option<i32> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Target => {
-                            if target.is_some() {
-                                return Err(de::Error::duplicate_field("t"));
-                            } else {
-                                target = Some(map.next_value::<Id>()?);
-                            }
-                        }
-                        Field::Want => {
-                            if want.is_some() {
-                                return Err(de::Error::duplicate_field("w"));
-                            } else {
-                                want = Some(map.next_value()?);
-                            }
-                        }
-                        Field::ExpectedSeq => {
-                            if seq.is_some() {
-                                return Err(de::Error::duplicate_field("cas"));
-                            } else {
-                                seq = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let want = want.unwrap_or(0);
-                let expected_seq = seq.unwrap_or(-1);
-                if expected_seq < -1 {
-                    return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
-                }
-
-                Ok(FindValueRequest::new(
-                    target.ok_or_else(|| de::Error::missing_field("t"))?,
-                    want & WANT4_MASK != 0,
-                    want & WANT6_MASK != 0,
-                    expected_seq
-                ))
-            }
-        }
-        de.deserialize_map(FieldVisitor)
+impl TryFrom<SerdeFindValueRequest> for FindValueRequest {
+    type Error = Error;
+    fn try_from(s: SerdeFindValueRequest) -> Result<Self> {
+        Ok(FindValueRequest::new(
+            s.target,
+            s.want & WANT4_MASK != 0,
+            s.want & WANT6_MASK != 0,
+            s.expected_seq,
+        ))
     }
 }
 
@@ -155,3 +95,19 @@ impl fmt::Display for FindValueRequest {
         Ok(())
     }
 }
+
+fn is_default_expected_seq(v: &i32) -> bool {
+     *v < 0
+}
+
+fn default_expected_seq() -> i32 { -1 }
+fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+where  D: Deserializer<'de>,
+{
+    let seq = i32::deserialize(de)?;
+    if seq < -1 {
+        return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
+    }
+    Ok(seq)
+}
+

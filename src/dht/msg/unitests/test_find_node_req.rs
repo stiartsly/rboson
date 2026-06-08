@@ -17,6 +17,8 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
+
+        println!("11encoded (hex): 0x{}", hex::encode(&encoded));
         let decoded = serde_cbor::from_slice::<FindNodeRequest>(&encoded)
             .expect("Deserialization failed");
 
@@ -30,7 +32,8 @@ mod tests {
 
     #[test]
     fn test_serde_without_token() {
-        let nodeid = Id::random();
+        let nodeid = Id::try_from("GfVNV6f5U2fnp6yZS7FjNLGkheyfDSpufK3uQaofJyab").unwrap();
+        println!(">> nodeid: {}", nodeid);
         let req = FindNodeRequest::new(
             nodeid.clone(),
             true,
@@ -40,6 +43,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&req)
             .expect("Serialization failed");
+        println!("22encoded (hex): 0x{}", hex::encode(&encoded));
         let decoded = serde_cbor::from_slice::<FindNodeRequest>(&encoded)
             .expect("Deserialization failed");
 

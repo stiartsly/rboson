@@ -32,13 +32,13 @@ pub struct Card {
     #[serde(rename = "id")]
     id: Id,
 
-    #[serde(rename = "c", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "c", skip_serializing_if = "crate::is_default")]
     credentials: Option<Vec<Credential>>,
 
-    #[serde(rename = "s", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "s", skip_serializing_if = "crate::is_default")]
     services: Option<Vec<Service>>,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
     signed_at: Option<u64>,
 
     #[serde(rename = "sig")]

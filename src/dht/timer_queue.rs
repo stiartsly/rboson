@@ -1,8 +1,10 @@
 use std::{
+    fmt,
     collections::HashMap,
     sync::Arc,
     time::Duration,
 };
+use log::info;
 
 use futures::StreamExt;
 use tokio::{
@@ -41,9 +43,19 @@ pub enum Command {
     Cancel {
         id: TimerId,
     },
-    StopAll {
+    Stop {
         complete: oneshot::Sender<()>,
     },
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Command::Add { delay, timer } => write!(f, "Add Timer {{ id: {}, delay: {:?} }}", timer.id, delay),
+            Command::Cancel { id } => write!(f, "Cancel Timer {{ id: {} }}", id),
+            Command::Stop { .. } => write!(f, "Stop timer task"),
+        }
+    }
 }
 
 struct TimerEntry {
@@ -113,6 +125,7 @@ impl TimerQueue {
     }
 
     pub async fn run(mut self) {
+        info!("The task managing timer-queue started");
         loop {
             tokio::select! {
                 Some(cmd) = self.receiver.recv() => {
@@ -123,7 +136,7 @@ impl TimerQueue {
                         Command::Cancel { id } => {
                             self.cancel_timer(id);
                         }
-                        Command::StopAll { complete } => {
+                        Command::Stop { complete } => {
                             self.stop_all();
                             let _ = complete.send(());
                             break;

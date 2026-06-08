@@ -18,23 +18,12 @@ use super::{
     errors::ArgumentError
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Value {
-    pk: Option<Id>,
-    sk: Option<PrivateKey>,
-    recipient: Option<Id>,
-    nonce: Option<Nonce>,
-    sig: Option<Vec<u8>>,
-    data: Vec<u8>,
-    seq: i32,
-}
-
 #[derive(Clone)]
-pub struct ValueBuilder<'a> {
+pub struct ImmutableBuilder<'a> {
     data: &'a [u8],
 }
 
-impl<'a> ValueBuilder<'a> {
+impl<'a> ImmutableBuilder<'a> {
     pub fn new(data: &'a [u8]) -> Self {
         Self { data }
     }
@@ -55,18 +44,6 @@ pub struct SignedBuilder<'a> {
     data: &'a [u8],
     seq: i32,
 }
-
-#[derive(Clone)]
-pub struct EncryptedBuilder<'a> {
-    keypair: Option<&'a KeyPair>,
-    nonce: Option<&'a Nonce>,
-
-    rec: &'a Id,
-    data: &'a [u8],
-    seq: i32,
-}
-
-
 
 impl<'a> SignedBuilder<'a> {
     pub fn new(data: &'a [u8]) -> Self {
@@ -99,6 +76,16 @@ impl<'a> SignedBuilder<'a> {
         }
         Value::signed(self)
     }
+}
+
+#[derive(Clone)]
+pub struct EncryptedBuilder<'a> {
+    keypair: Option<&'a KeyPair>,
+    nonce: Option<&'a Nonce>,
+
+    rec: &'a Id,
+    data: &'a [u8],
+    seq: i32,
 }
 
 impl<'a> EncryptedBuilder<'a> {
@@ -135,8 +122,19 @@ impl<'a> EncryptedBuilder<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Value {
+    pk: Option<Id>,
+    sk: Option<PrivateKey>,
+    recipient: Option<Id>,
+    nonce: Option<Nonce>,
+    sig: Option<Vec<u8>>,
+    data: Vec<u8>,
+    seq: i32,
+}
+
 impl Value {
-    fn new(b: &ValueBuilder) -> Value {
+    fn new(b: &ImmutableBuilder) -> Value {
         assert!(!b.data.is_empty());
 
         Self {

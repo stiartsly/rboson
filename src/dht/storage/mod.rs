@@ -37,14 +37,14 @@ struct UserVersion {
     user_version: i32,
 }
 
-pub(crate) fn user_version(conn: &mut SqliteConnection) -> i32 {
+fn user_version(conn: &mut SqliteConnection) -> i32 {
     diesel::sql_query(sql::GET_USER_VERSION)
         .load::<UserVersion>(conn)
         .map(|rows| rows.first().map_or(0, |r| r.user_version))
         .unwrap_or(0)
 }
 
-pub(crate) fn drop_tbs(conn: &mut SqliteConnection) -> bool {
+fn drop_tbs(conn: &mut SqliteConnection) -> bool {
     diesel::sql_query(sql::DROP_VALUES_TABLE).execute(conn).is_ok()     &&
     diesel::sql_query(sql::DROP_VALUES_INDEX).execute(conn).is_ok()     &&
     diesel::sql_query(sql::DROP_PEERS_TABLE).execute(conn).is_ok()      &&
@@ -52,7 +52,7 @@ pub(crate) fn drop_tbs(conn: &mut SqliteConnection) -> bool {
     diesel::sql_query(sql::DROP_PEERS_ID_INDEX).execute(conn).is_ok()
 }
 
-pub(crate) fn create_tbs(conn: &mut SqliteConnection) -> bool {
+fn create_tbs(conn: &mut SqliteConnection) -> bool {
     diesel::sql_query(sql::SET_USER_VERSION).execute(conn).is_ok()      &&
     diesel::sql_query(sql::CREATE_VALUES_TABLE).execute(conn).is_ok()   &&
     diesel::sql_query(sql::CREATE_VALUES_INDEX).execute(conn).is_ok()   &&

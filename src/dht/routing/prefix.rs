@@ -18,7 +18,6 @@ impl Prefix {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn from(src: &Id, depth: i32) -> Self {
        assert!(depth < Id::BITS as i32);
 

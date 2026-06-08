@@ -2,7 +2,8 @@ use std::{
     fmt,
     result::Result as SResult,
     sync::{Arc, Mutex},
-    cmp::Ordering
+    cmp::Ordering,
+    path::Path,
 };
 use rbtree::RBTree;
 use libsodium_sys::randombytes_uniform;
@@ -80,13 +81,11 @@ impl RoutingTable {
         self.buckets.values().cloned().collect()
     }
 
-    fn bucket_take(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
-        let key = self.buckets.iter()
+    fn bucket_of(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
+        self.buckets.iter()
             .find(|(k,_v)| k.is_prefix_of(target))
-            .map(|(k, _)| k.clone())
-            .expect("panic: no bucket found, this should never happen");
-
-        self.buckets.remove(&key).unwrap()
+            .map(|(_,v)| v.clone())
+            .expect("panic: no bucket found, this should never happen")
     }
 
     pub(crate) fn bucket_entry(&self, id: Option<&Id>) -> Option<KBucketEntry> {
@@ -192,31 +191,27 @@ impl RoutingTable {
 
     fn _put(&mut self, entry: KBucketEntry) {
         let entry_id = entry.id();
-        let mut bucket = self.bucket_take(entry_id);
+        let mut bucket = self.bucket_of(entry_id);
 
-        while Self::needs_split(bucket.clone(), &entry) {
+        while Self::needs_split(&bucket, &entry) {
             self._split(bucket);
-            bucket = self.bucket_take(entry_id);
+            bucket = self.bucket_of(entry_id);
         }
 
-        let prefix = {
-            let mut locked_bucket = bucket.lock().unwrap();
-            locked_bucket.put(entry);
-            locked_bucket.prefix().clone()
-        };
+        let prefix = bucket.lock().unwrap().prefix().clone();
         self.buckets.insert(prefix, bucket);
     }
 
-    fn needs_split(bucket: Arc<Mutex<KBucket>>, entry: &KBucketEntry) -> bool {
-        let locked_bucket = bucket.lock().unwrap();
-        if !locked_bucket.prefix().is_splittable() ||
-            !locked_bucket.is_full() ||
+    fn needs_split(bucket: &Arc<Mutex<KBucket>>, entry: &KBucketEntry) -> bool {
+        let locked = bucket.lock().unwrap();
+        if !locked.prefix().is_splittable() ||
+            !locked.is_full() ||
             !entry.is_reachable() ||
-            locked_bucket.contains(entry.id()) {
+            locked.contains(entry.id()) {
             return false;
         }
 
-        locked_bucket.prefix()
+        locked.prefix()
             .split_branch(true)
             .is_prefix_of(entry.id())
     }
@@ -354,7 +349,7 @@ impl RoutingTable {
         Ok(())
     }
 
-    pub(crate) fn load(&mut self, _path: &str) -> crate::Result<()> {
+    pub(crate) fn load(&mut self, _path: &Path) -> crate::Result<()> {
         /*
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,

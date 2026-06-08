@@ -31,10 +31,9 @@ mod did {
 mod messaging {
     mod client;
 }
- */
+*/
 
 // helper function
-
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     unsafe {
         libsodium_sys::randombytes_buf(
@@ -55,8 +54,6 @@ fn create_random_bytes(len: usize) -> Vec<u8> {
     }
     bytes
 }
-
-
 
 fn remove_working_path(input: &str) {
     if std::fs::metadata(&input).is_ok() {

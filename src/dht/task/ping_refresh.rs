@@ -14,6 +14,7 @@ use crate::dht::{
     routing::{KBucket, KBucketEntry}
 };
 
+#[allow(unused)]
 pub(crate) struct PingRefreshTask {
     base_data: TaskData,
 
@@ -28,6 +29,7 @@ pub(crate) struct PingRefreshTask {
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
+#[allow(unused)]
 impl PingRefreshTask {
     pub(crate) fn new(dht: Weak<Mutex<DHT>>) -> Self {
         Self {
@@ -112,8 +114,9 @@ impl Task for PingRefreshTask {
         );
 
         if let Some(strong_dht) = self.dht.upgrade() {
-            let mut locked = strong_dht.lock().unwrap();
-            locked.rt_mut().remove(&target_id);
+            let rt = strong_dht.lock().unwrap().rt();
+            let mut locked_rt = rt.lock().unwrap();
+            locked_rt.remove(&target_id);
         }
     }
 

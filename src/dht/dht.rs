@@ -3,7 +3,8 @@ use std::{
     future::Future,
     net::SocketAddr,
     sync::{Arc, Mutex, Weak},
-    time::{Duration, SystemTime}
+    time::{Duration, SystemTime},
+    path::Path
 };
 use indexmap::map::IndexMap;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -33,7 +34,7 @@ use crate::dht::{
     msg::{
         Message,
         LookupRequest, LookupResponse,
-        msg::{*,    Kind, Method, Body},
+        msg::{*, Kind, Method, Body},
     },
     suspicious_node_detector::{
         SuspiciousNodeDetector,
@@ -59,28 +60,17 @@ use crate::dht::{
     }
 };
 
+#[derive(Default)]
 pub(crate) struct Builder<'a> {
-    identity    : Option<Arc<CryptoIdentity>>,
-    storage     : Option<Arc<Mutex<Box<dyn DataStorage>>>>,
-    tokenman    : Option<Arc<TokenManager>>,
-    timer_client: Option<Arc<TimerClient>>,
-    data_dir    : Option<&'a str>,
-
-    bootstrap_nodes: Option<&'a[NodeInfo]>,
+    identity        : Option<Arc<CryptoIdentity>>,
+    storage         : Option<Arc<Mutex<Box<dyn DataStorage>>>>,
+    tokenman        : Option<Arc<TokenManager>>,
+    timer_client    : Option<Arc<TimerClient>>,
+    data_dir        : Option<&'a Path>,
+    bootstrap_nodes : Option<&'a[NodeInfo]>,
 }
 
 impl<'a> Builder<'a> {
-    pub(crate) fn new() -> Self {
-        Self {
-            identity: None,
-            storage : None,
-            tokenman: None,
-            data_dir: None,
-            bootstrap_nodes : None,
-            timer_client    : None,
-        }
-    }
-
     pub(crate) fn with_identity(&mut self, identity: Arc<CryptoIdentity>) -> &mut Self {
         self.identity = Some(identity);
         self
@@ -106,25 +96,27 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub(crate) fn with_datadir(&mut self, datadir: &'a str) -> &mut Self {
+    pub(crate) fn with_datadir(&mut self, datadir: &'a Path) -> &mut Self {
         self.data_dir = Some(datadir);
         self
     }
 
     pub(crate) fn build_dht4(&self, host: &str, port: u16) -> Result<DHT> {
-        let data_dir = format!(
-            "{}/dht4.cache",
-            self.data_dir.as_ref().unwrap()
-        );
-        DHT::new(self, Network::IPv4, host, port, data_dir)
+        let persist_file = self.data_dir
+            .as_ref()
+            .expect("No data directory specified")
+            .join("dht4.cache");
+
+        DHT::new(self, Network::IPv4, host, port, persist_file.as_path())
     }
 
     pub(crate) fn build_dht6(&self, host: &str, port: u16) -> Result<DHT> {
-         let data_dir = format!(
-            "{}/dht6.cache",
-            self.data_dir.as_ref().unwrap()
-        );
-        DHT::new(self, Network::IPv4, host, port, data_dir)
+        let persist_file = self.data_dir
+            .as_ref()
+            .expect("No data directory specified")
+            .join("dht6.cache");
+
+        DHT::new(self, Network::IPv6, host, port, persist_file.as_path())
     }
 }
 
@@ -144,7 +136,7 @@ pub(crate) struct DHT {
 
     persist_file    : String,
     last_saved      : Option<SystemTime>,
-    rt              : RoutingTable,
+    rt              : Arc<Mutex<RoutingTable>>,
 
     bootstrap_nodes : Vec<NodeInfo>,
     bootstrap_ids   : Vec<Id>,
@@ -157,7 +149,7 @@ pub(crate) struct DHT {
     timer_client    : Arc<TimerClient>,
 
     suspicious_detector         : Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
-    pub(crate) weak_cloned      : Weak<Mutex<DHT>>
+    pub(crate) weak : Weak<Mutex<DHT>>
 }
 
 impl DHT {
@@ -176,7 +168,7 @@ impl DHT {
         network : Network,
         host    : &str,
         port    : u16,
-        persist_file: String,
+        persist_file: &Path,
     ) -> Result<Self> {
         assert!(builder.identity.is_some());
         assert!(builder.storage.is_some());
@@ -210,8 +202,8 @@ impl DHT {
             tokenman,
             taskman         : Arc::new(TaskManager::new()),
             server          : None,
-            rt              : RoutingTable::new(nodeid),
-            persist_file,
+            rt              : Arc::new(Mutex::new(RoutingTable::new(nodeid))),
+            persist_file    : persist_file.to_str().unwrap().to_string(),
             last_saved      : None,
             bootstrap_nodes,
             bootstrap_ids   : Vec::new(),
@@ -221,7 +213,7 @@ impl DHT {
             bootstrapping   : false,
             timer_client    : tclient,
             suspicious_detector: None,
-            weak_cloned      : Weak::new(), // will be set later
+            weak            : Weak::new(), // will be set later
         })
     }
 
@@ -268,15 +260,11 @@ impl DHT {
     }
 
     fn weak_dht(&self) -> Weak<Mutex<DHT>> {
-        self.weak_cloned.clone()
+        self.weak.clone()
     }
 
-    pub(crate) fn rt(&self) -> &RoutingTable {
-        &self.rt
-    }
-
-    pub(crate) fn rt_mut(&mut self) -> &mut RoutingTable {
-        &mut self.rt
+    pub(crate) fn rt(&self) -> Arc<Mutex<RoutingTable>> {
+        self.rt.clone()
     }
 
     fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
@@ -312,12 +300,13 @@ impl DHT {
 
     fn fill_buckets(dht: Arc<Mutex<DHT>>) -> impl Future<Output = Result<()>> {
         let (number_of_entries, buckets, weak_dht, taskman) = {
-            let locked = dht.lock().unwrap();
+            let dht = dht.lock().unwrap();
+            let rt  = dht.rt.lock().unwrap();
             (
-                locked.rt.number_of_entries(),
-                locked.rt.buckets(),
-                locked.weak_dht(),
-                locked.taskman.clone(),
+                rt.number_of_entries(),
+                rt.buckets(),
+                dht.weak_dht(),
+                dht.taskman.clone(),
             )
         };
 
@@ -412,7 +401,7 @@ impl DHT {
         }
 
         let mut task = Box::new(NodeLookupTask::new(
-            self.weak_cloned.clone(),
+            self.weak_dht(),
             Id::random(),
             false,
         ));
@@ -440,7 +429,11 @@ impl DHT {
             return;
         }
 
-        let Some(entry) = self.rt.bucket_entry(None) else {
+
+        let Some(entry) = ({
+            let locked_rt = self.rt.lock().unwrap();
+            locked_rt.bucket_entry(None)
+        }) else {
             return;
         };
 
@@ -458,7 +451,7 @@ impl DHT {
         info!("Periodic: DHT update...");
         self.rt_maintenance();
 
-        let entries = self.rt.number_of_entries();
+        let entries = self.rt.lock().unwrap().number_of_entries();
         if entries < Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES ||
             crate::elapsed_ms!(self.last_bootstrap) > Self::SELF_LOOKUP_INTERVAL {
 
@@ -487,14 +480,15 @@ impl DHT {
         info!("Routing table maintenance ...");
         self.last_maintenance = SystemTime::now();
 
-        let weak = self.weak_dht();
-        self.rt.maintenance(
+        let weak_dht = self.weak_dht();
+        self.rt.lock().unwrap().maintenance(
             self.bootstrap_ids.as_ref(),
             Consumer::new(move |bucket: Arc<Mutex<KBucket>>| {
-                let prefix = bucket.lock().unwrap().prefix().clone();
-                let Some(dht) = weak.upgrade() else{
+                let Some(dht) = weak_dht.upgrade() else{
                     panic!("DHT instance is dropped");
                 };
+
+                let prefix = bucket.lock().unwrap().prefix().clone();
                 dht.lock().unwrap().try_ping_maintenance(bucket, false, false, false,
                     format!("Routing table maintenance: refreshing bucket {}", prefix)
                 );
@@ -504,7 +498,7 @@ impl DHT {
 
     fn persist_routing_table(&mut self) {
         info!("Periodic: persisting routing table ...");
-        match self.rt.save(&self.persist_file) {
+        match self.rt.lock().unwrap().save(&self.persist_file) {
             Ok(()) => self.last_saved = Some(SystemTime::now()),
             Err(err) => error!("Can not save the routing table: {}", err),
         }
@@ -540,77 +534,89 @@ impl DHT {
         if self.is_running {
             return Ok(());
         }
+
         info!("Starting DHT/{}:{} on {} ...", self.network, self.id(), self.addr());
 
-        // initialize routing table
-        let mut rt = RoutingTable::new(self.id().clone());
-        if let Err(e) = rt.load(&self.persist_file) {
-            warn!("Failed to load routing table from {}:{}.", self.persist_file, e);
-        };
+        let path = Path::new(self.persist_file.as_str());
+        if path.exists() || path.is_file() {
+            info!("Loading routing table from {}.", path.display());
+            let _ = self.rt.lock().unwrap().load(&path).map_err(|e| {
+                warn!("Failed to load routing table from {}: {}", path.display(), e);
+            });
+            info!("Routing table loaded from {}.", path.display());
+        }
 
         // initialize RPC server
-        let identity = self.identity.clone();
-        let mut server = RpcServer::new(
-            self.ni(), identity, self.suspicious_detector.clone()
+        let mut s = RpcServer::new(
+            self.ni(),
+            self.identity.clone(),
+            self.suspicious_detector.clone()
         );
-
-        server.message_handler({
-            let dht = self.weak_dht();
+        s.message_handler({
+            let weak = self.weak_dht();
             move |msg| {
-                if let Some(dht) = dht.upgrade() {
+                if let Some(dht) = weak.upgrade() {
                     dht.lock().unwrap().on_message(msg)
+                } else {
+                    panic!("DHT instance is dropped");
                 }
             }
         });
-        server.callsent_handler({
-            let dht = self.weak_dht();
+        s.callsent_handler({
+            //let weak = self.weak_dht();
+            let rt = self.rt();
             move |call| {
-                if let Some(dht) = dht.upgrade() {
-                    dht.lock().unwrap().on_send(call)
-                }
+                let nodeid = call.target_id();
+                rt.lock().unwrap().on_request_sent(&nodeid);
             }
         });
-        server.calltimeout_handler({
-            let dht = self.weak_dht();
+        s.calltimeout_handler({
+            let weak = self.weak_dht();
             move |call| {
-                if let Some(dht) = dht.upgrade() {
+                if let Some(dht) = weak.upgrade() {
                     dht.lock().unwrap().on_timeout(call)
+                } else {
+                    panic!("DHT instance is dropped");
                 }
             }
         });
-
-        server.reachable_handler({
-            let dht = self.weak_dht();
+        s.reachable_handler({
+            let weak = self.weak_dht();
             move |reachable| {
-                let Some(dht) = dht.upgrade() else {
-                    return;
+                let Some(dht) = weak.upgrade() else {
+                    panic!("DHT instance is dropped");
                 };
 
-                let mut locked_dht = dht.lock().unwrap();
+                let mut locked = dht.lock().unwrap();
                 if reachable {
-                    locked_dht.set_status(ConnectionStatus::Connected);
+                    locked.set_status(ConnectionStatus::Connected);
                 } else {
-                    locked_dht.random_ping();
-                    locked_dht.set_status(ConnectionStatus::Disconnected);
+                    locked.random_ping();
+                    locked.set_status(ConnectionStatus::Disconnected);
                 }
             }
         });
+        s.start().await?;
 
-        server.start().await?;
-
-        let server = Arc::new(Mutex::new(server));
-        let weak = self.weak_dht();
-
-        println!("dht >>>> line: {}", line!());
-        let _ = RpcServer::run_loop(server.clone(), weak);
-
-        self.server = Some(server);
+        self.server = Some(Arc::new(Mutex::new(s)));
         self.set_status(ConnectionStatus::Connecting);
 
-        self.setup_periodic_tasks().await?;
+        let server = self.server();
+        let dht = self.weak_dht();
+        _ = tokio::task::spawn_blocking(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .enable_io()
+                .build().expect("rpc server engine runtime should build")
+                .block_on(async move {
+                    RpcServer::run_loop(server, dht).await;
+                }
+            );
+        });
+       // self.setup_periodic_tasks().await?;
         self.is_running = true;
 
-        info!("Started DHT {}:{} on {}:{}.", self.network, self.id(), self.host, self.port);
+        info!("Started DHT/{}:{} on {}:{}", self.network, self.id(), self.host, self.port);
         Ok(())
     }
 
@@ -633,7 +639,7 @@ impl DHT {
 
         self.taskman.cancel_all();
 
-        _ = self.rt.save(&self.persist_file).map_err(|err| {
+        _ = self.rt.lock().unwrap().save(&self.persist_file).map_err(|err| {
             warn!("Failed to persist routing table to {}: {}", self.persist_file, err);
         });
         self.last_saved = Some(SystemTime::now());
@@ -702,151 +708,155 @@ impl DHT {
     }
 
     fn received(&mut self, msg: &Message) {
-        let from_addr  = msg.remote_addr().clone();
-
-        let bogon_addr = if cfg!(feature = "devp") {
-            !is_any_unicast(&from_addr.ip())
-        } else {
-            is_bogon(&from_addr)
+        let allowed = match cfg!(feature = "devp") {
+            true => is_any_unicast(&msg.remote_addr().ip()),
+            false => !is_bogon(msg.remote_addr()),
         };
-
-        if bogon_addr {
-            info!("Received a message from bogon address {}, ignored the potential
-                  routing table operation", from_addr);
+        if !allowed {
+            info!("Received a message from spoofed address {}, ignored the potential
+                  routing table operation", msg.remote_addr());
             return;
         }
 
-        let remote_id   = msg.nodeid();
-        let remote_addr = msg.remote_addr();
-        let remote_port = msg.remote_addr().port();
+        let (remote_id, remote_addr, remote_port) = (
+            msg.remote_id().clone(),
+            msg.remote_addr().clone(),
+            msg.remote_addr().port()
+        );
 
-        let call = msg.associated_call();
-
-        if let Some(call) = call.as_ref() {
-            let Some(strong_call) = call.upgrade() else {
-                return;
-            };
+        let call_opt = msg.associated_call();
+        if let Some(call) = call_opt.as_ref() {
             // we only want remote nodes with stable ports in our routing table,
             // so apply a stricter check here
-            let mut locked_call = strong_call.lock().unwrap();
-            if locked_call.nodeid_mismatched() || locked_call.addr_mismatched() {
+            let mut locked = call.lock().unwrap();
+            if locked.nodeid_mismatched() || locked.addr_mismatched() {
                 warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
 					msg.remote_id(), msg.remote_addr());
 
-                if let Some(detector) = self.suspicious_detector.as_ref() {
-                    detector.lock().unwrap().inconsistent(
-                        remote_addr.clone(),
-                        Some(remote_id.clone())
-                    );
-                };
+                self.suspicious_detector.as_ref().map(|v|
+                    v.lock().unwrap().inconsistent(remote_addr, Some(remote_id))
+                );
                 return;
             }
 
-            locked_call.respond(msg);
-            if locked_call.is_reachable_at_creation() {
+            locked.respond(msg);
+            if locked.is_reachable_at_creation() {
                 // TODO: If the call is reachable at creation, it means the remote node is reachable and has a stable port.
                 // We can trust the remote address in this case.
                 return;
             }
         }
 
-        let last_known_id = self.suspicious_detector.as_ref()
-            .and_then(|detector| detector.lock().unwrap().last_known_id(remote_addr).cloned());
-
-        if let Some(known_id) = last_known_id.as_ref() {
+        let known_id_opt = self.suspicious_detector.as_ref().and_then(|v| {
+            v.lock().unwrap().last_known_id(&remote_addr).cloned()
+        });
+        if let Some(known_id) = known_id_opt {
             if known_id != remote_id {
 
                 // We already know a node with that address but with a different ID.
                 // This might happen if one node changes its ID.
                 // Force remove from the routing table to prevent suspicious behavior
                 warn!("Received a message from suspicious node {}@{}, force-removing routing table entries because ID-change was detected; new ID {}",
-                    msg.remote_id(), msg.remote_addr(), known_id);
+                    remote_id, remote_addr, known_id);
 
-
-                let removed = self.rt.remove(known_id);
-                if let Some(_) = removed {
+                let mut locked_rt = self.rt.lock().unwrap();
+                let removed = locked_rt.remove(&known_id).is_some();
+                if  removed {
                     // Might be a pollution attack, check other entries in the same bucket too.
                     // In case the random pings can't keep up with scrubbing.
-                    let bucket = self.rt.bucket(known_id);
-                    info!("Checking bucket {} after ID change was detected", bucket.lock().unwrap().prefix());
+                    let bucket = locked_rt.bucket(&known_id);
+                    let prefix = {
+                        let locked = bucket.lock().unwrap();
+                        let prefix = locked.prefix().clone();
+                        let expected_prefix = Prefix::from(&known_id, prefix.depth());
 
-                    let prefix = bucket.lock().unwrap().prefix().clone();
-                    self.try_ping_maintenance(bucket.clone(), true, false, false,
-                        format!("Checking bucket {} after ID change was detected", prefix));
+                        // Checking the prefix is expected prefix given known ID.
+                        if expected_prefix != prefix {
+                            error!("The prefix {} of the known ID {} is expected to be {},
+                                but the bucket prefix is {}, this might indicate a routing table corruption",
+                                prefix, known_id, expected_prefix, prefix);
+                        }
+                        prefix
+                    };
+
+                    info!("Checking bucket {} after ID change was detected", prefix);
+                    //TODO: self.try_ping_maintenance(bucket.clone(), true, false, false,
+                    //     format!("Checking bucket {} after ID change was detected", prefix));
                 }
 
-                let removed = self.rt.remove(msg.nodeid());
-                if let Some(_) = removed {
+                let msgid = msg.nodeid();
+                let removed = locked_rt.remove(msgid).is_some();
+                if  removed {
                     // Might be a pollution attack, check other entries in the same bucket too.
                     // In case the random pings can't keep up with scrubbing.
-                    let bucket = self.rt.bucket(remote_id);
-                    // noinspection LoggingSimilarMessage
-                    info!("Checking bucket {} after ID change was detected", bucket.lock().unwrap().prefix());
+                    let bucket = locked_rt.bucket(msgid);
+                    let prefix = {
+                        let locked = bucket.lock().unwrap();
+                        let prefix = locked.prefix().clone();
+                        let expected_prefix = Prefix::from(&known_id, prefix.depth());
 
-                    let prefix = bucket.lock().unwrap().prefix().clone();
-                    self.try_ping_maintenance(bucket, true, false, false,
-                        format!("Checking bucket {} after ID change was detected", prefix));
+                        // Checking the prefix is expected prefix given known ID.
+                        if expected_prefix != prefix {
+                            error!("The prefix {} of the known ID {} is expected to be {},
+                                but the bucket prefix is {}, this might indicate a routing table corruption",
+                                prefix, known_id, expected_prefix, prefix);
+                        }
+                        prefix
+                    };
+
+                    info!("Checking bucket {} after ID change was detected", prefix);
+                    //TODO: self.try_ping_maintenance(bucket, true, false, false,
+                    //  format!("Checking bucket {} after ID change was detected", prefix));
                 }
 
-                if let Some(detector) = self.suspicious_detector.as_ref() {
-                    detector.lock().unwrap().inconsistent(
-                        remote_addr.clone(),
-                        Some(remote_id.clone())
-                    );
-                };
+                self.suspicious_detector.as_ref().map(|v| {
+                    v.lock().unwrap().inconsistent(remote_addr, Some(remote_id));
+                });
                 return;
             }
         }
 
-        let mut existed = false;
-        let result = self.rt.bucket_entry(Some(remote_id));
-        if let Some(existing) = result {
-            if existing.socket_addr() != remote_addr ||
+        let existing_opt = {
+            let locked = self.rt.lock().unwrap();
+            locked.bucket_entry(Some(&remote_id))
+        };
+
+        if let Some(existing) = existing_opt.as_ref() {
+            if existing.socket_addr() != &remote_addr ||
                 existing.socket_addr().port() != remote_port {
-                warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
-					msg.remote_id(), msg.remote_addr());
+                warn!("Received a message from inconsistent node {}@{}, ignored the potential
+                     routing table update", remote_id, remote_addr);
 
-                if let Some(detector) = self.suspicious_detector.as_ref() {
-                    detector.lock().unwrap().inconsistent(
-                        remote_addr.clone(),
-                        Some(remote_id.clone())
-                    );
-                };
+                self.suspicious_detector.as_ref().map(|v| {
+                    v.lock().unwrap().inconsistent(remote_addr, Some(remote_id));
+                });
                 return;
             }
-            existed = true;
         }
 
-        if let Some(detector) = self.suspicious_detector.as_ref() {
-            detector.lock().unwrap().observe(
-                remote_addr.clone(),
-                remote_id.clone()
-            );
+        self.suspicious_detector.as_ref().map(|v| {
+            v.lock().unwrap().observe(remote_addr, remote_id);
+        });
+
+        let mut new_entry = KBucketEntry::new(remote_id, remote_addr);
+        new_entry.set_ver(msg.ver());
+
+        if let Some(_call) = call_opt {
+            let locked = _call.lock().unwrap();
+            new_entry.on_responded(0); // TOOD: RTT.
+            new_entry.update_last_sent(locked.sent_time());
         }
 
-        let mut entry = KBucketEntry::new(
-            remote_id.clone(),
-            remote_addr.clone()
-        );
-        entry.set_ver(msg.ver());
-
-        if let Some(_call) = call {
-            if let Some(strong_call) = _call.upgrade() {
-                entry.on_responded(0); // TOOD: RTT.
-                entry.update_last_sent(strong_call.lock().unwrap().sent_time());
-            }
-        }
-
-        self.rt.put(entry.clone());
+        self.rt.lock().unwrap().put(new_entry.clone());
 
         // Optimize: not the standard Kademlia behavior
 		// incoming request && the new entry is unreachable && the target bucket not full,
 		// then try to do a ping request to the new entry check its availability.
-        if !existed && !entry.is_reachable(){
+        if existing_opt.is_none() && !new_entry.is_reachable(){
 
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
-            let call = RpcCall::new(entry, ping_request());
+            let call = RpcCall::new(new_entry, ping_request());
             let _ = self.send_call(call);
         }
     }
@@ -861,6 +871,7 @@ impl DHT {
         if !self.is_running {
             return;
         }
+
         // ignore the messages from myself
         if self.id() == msg.nodeid() {
             return;
@@ -871,6 +882,7 @@ impl DHT {
             Kind::Request  => self.on_request(&msg),
             Kind::Response => self.on_response(&msg),
         };
+
         self.received(msg);
     }
 
@@ -935,8 +947,9 @@ impl DHT {
     }
 
     fn fill_closest_nodes(&self, target: Id) -> Vec<NodeInfo> {
+        let locked = self.rt.lock().unwrap();
         let mut kns = KClosestNodes::new(
-            self.rt(),
+            &locked,
             target,
             KBucket::MAX_ENTRIES
         );
@@ -1226,7 +1239,7 @@ impl DHT {
         }
 
         let nodeid = call.target_id();
-        self.rt.on_timeout(&nodeid);
+        self.rt.lock().unwrap().on_timeout(&nodeid);
     }
 
     pub(crate) fn on_send(&mut self, call: &RpcCall) {
@@ -1235,7 +1248,7 @@ impl DHT {
         }
 
         let nodeid = call.target_id();
-        self.rt.on_request_sent(&nodeid);
+        self.rt.lock().unwrap().on_request_sent(&nodeid);
     }
 
     pub(crate) async fn bootstrap(
@@ -1244,17 +1257,17 @@ impl DHT {
     ) {
         let mut locked = dht.lock().unwrap();
         if !locked.is_running {
-            warn!("Bootstrap failed: DHT is not running.");
+            warn!("Bootstrapping skipped: the DHT/{} instance is not running.", locked.network);
             return;
         }
         if nodes.is_empty() {
-            warn!("Bootstrap failed: no bootstrap nodes provided.");
+            warn!("Bootstrapping skipped: no bootstrapping nodes provided.");
             return;
         }
 
         locked.add_bootstrap_nodes(&nodes);
         if locked.bootstrapping {
-            warn!("Bootstrap failed: DHT is already bootstrapping.");
+            warn!("The DHT/{} instance is already bootstrapping.", locked.network);
             return;
         }
 
@@ -1270,6 +1283,10 @@ impl DHT {
         dht: Arc<Mutex<Self>>,
         bootstrap_nodes: Vec<NodeInfo>,
     ) {
+        if bootstrap_nodes.is_empty() {
+            return;
+        }
+
         let (network, server) = {
             let mut locked = dht.lock().unwrap();
             if locked.bootstrapping {
@@ -1278,7 +1295,7 @@ impl DHT {
             if crate::elapsed_ms!(locked.last_bootstrap) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
                 return;
             }
-            if bootstrap_nodes.is_empty() && locked.rt.is_empty() {
+            if bootstrap_nodes.is_empty() && locked.rt.lock().unwrap().is_empty() {
                 warn!("no bootstrap nodes provided and routing table is empty.");
                 return;
             }
@@ -1286,7 +1303,7 @@ impl DHT {
             locked.bootstrapping = true;
 
             let network = locked.network();
-            info!("DHT {}:{} bootstrapping ...", network, locked.id());
+            info!("DHT/{}:{} bootstrapping ...", network, locked.id());
 
             (network, locked.server())
         };
@@ -1331,7 +1348,10 @@ impl DHT {
                 }
             });
 
-            let _ = server.lock().unwrap().send_call(call);
+            let _ = server.lock().unwrap().send_call(call).map_err(|e| {
+                warn!("{}", e);
+            });
+
             futures.push(async move {
                 match future.clone().await {
                     Ok(_) => future.result(),
@@ -1353,7 +1373,8 @@ impl DHT {
 
         let (has_rt_entries, rt_size) = {
             let locked = dht.lock().unwrap();
-            (!locked.rt.is_empty(), locked.rt.size())
+            let locked_rt = locked.rt.lock().unwrap();
+            (!locked_rt.is_empty(), locked_rt.size())
         };
 
         if !nodes.is_empty() && has_rt_entries {
@@ -1403,7 +1424,7 @@ impl DHT {
         option: LookupOption
     ) -> Result<Option<NodeInfo>> {
 
-        let node = self.rt.bucket_entry(Some(target)).map(|v| v.ni());
+        let node = self.rt.lock().unwrap().bucket_entry(Some(target)).map(|v| v.ni());
         if option == LookupOption::Local {
             return Ok(node);
         }

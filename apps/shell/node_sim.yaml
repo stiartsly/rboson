@@ -33,7 +33,7 @@ ipv4: true
 
 # Port number for DHT UDP traffic.
 # The default port is 39001. Ensure this port is open in your firewall (UDP).
-port: 39001
+port: 39008
 
 # Node private key
 # This key defines your node's long-term identity on the network.
@@ -45,7 +45,7 @@ port: 39001
 #
 # CAUTION: Keep this key secret. Never share it.
 #
-privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
+privateKey: 4h6M3ySLfG3VDLsYdCshDyLzb9547HMEJg6JqCmk3DymmwX4p3jRGXZ5bU87NY6Qhv3bV4pyCJRGTiCStyp2fpFY
 
 # Root directory for persistent data.
 # Stores routing tables, caches, and database files.
@@ -70,7 +70,7 @@ privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd26
 #  # Database connection URI.
 #  uri: jdbc:sqlite:node.db
 
-dataDir: .shell_data
+dataDir: .shell_sim_data
 databaseUri: jdbc:sqlite:node.db
 
   # Connection pool size. 0 uses the default for the specific driver.
@@ -82,10 +82,10 @@ databaseUri: jdbc:sqlite:node.db
 # Initial entry points to the DHT network.
 # These nodes are contacted during startup to discover other peers.
 # Format: [ NodeID (Base58), IPAddress, Port ]
-#bootstraps:
-#  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k
-#    - 203.0.113.5
-#    - 39001
+bootstraps:
+  - - 3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
+    - 172.20.10.3
+    - 39001
 #  - - 7jFV8w7eivjGEpaDu4V38EZ16CDhn4JutEdtGBWC67rF
 #    - 198.51.100.8
 #    - 39001

@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex}
+};
 use tokio::sync::mpsc;
 use crate::{
     crypto_identity::CryptoIdentity,
@@ -26,7 +29,7 @@ pub(super) fn make_test_dht(
     let (tx, _rx) = mpsc::channel::<Command>(64);
     let timer_client = Arc::new(TimerClient::new(tx));
     let bootstrap_nodes: Vec<NodeInfo> = Vec::new();
-    let data_dir = ".";
+    let data_dir = PathBuf::from(".");
 
    /*  std::thread::spawn(move || {
         let runtime = runtime::Builder::new_current_thread()
@@ -40,14 +43,14 @@ pub(super) fn make_test_dht(
     });
     */
 
-    let mut builder = Builder::new();
+    let mut builder = Builder::default();
     builder
         .with_identity(identity)
         .with_storage(storage)
         .with_tokenman(tokenman)
         .with_timer_client(timer_client)
         .with_bootstrap_nodes(&bootstrap_nodes)
-        .with_datadir(data_dir);
+        .with_datadir(data_dir.as_path());
 
     let dht = match network {
         Network::IPv4 => builder.build_dht4(host, 0),
@@ -56,6 +59,6 @@ pub(super) fn make_test_dht(
     .expect("test DHT should build");
 
     let dht = Arc::new(Mutex::new(dht));
-    dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+    dht.lock().unwrap().weak = Arc::downgrade(&dht);
     dht
 }

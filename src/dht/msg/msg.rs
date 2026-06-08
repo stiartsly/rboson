@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
     result::Result as SResult,
     sync::{
-        Weak, Mutex,
+        Arc, Mutex,
         atomic::{AtomicI32, Ordering}
     }
 };
@@ -184,6 +184,22 @@ impl Body {
     }
 }
 
+impl fmt::Display for Body {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Body::FindNodeRequest(body)   => write!(f, "{}", body),
+            Body::FindNodeResponse(body)  => write!(f, "{}", body),
+            Body::FindPeerRequest(body)   => write!(f, "{}", body),
+            Body::FindPeerResponse(body)  => write!(f, "{}", body),
+            Body::FindValueRequest(body)  => write!(f, "{}", body),
+            Body::FindValueResponse(body) => write!(f, "{}", body),
+            Body::AnnouncePeerRequest(body) => write!(f, "{}", body),
+            Body::StoreValueRequest(body) => write!(f, "{}", body),
+            Body::Error(body)             => write!(f, "{}", body),
+        }
+    }
+}
+
 impl Serialize for Body {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
     where S: Serializer
@@ -221,7 +237,7 @@ pub(crate) struct Message {
 
     body    : Option<Body>,
 
-    associated_call : Option<Weak<Mutex<RpcCall>>>,
+    associated_call : Option<Arc<Mutex<RpcCall>>>,
     remote_addr     : Option<SocketAddr>,
     remote_id       : Option<Id>,
 }
@@ -293,11 +309,11 @@ impl Message {
         version::format_version(self.ver)
     }
 
-    pub(crate) fn associated_call(&self) -> Option<Weak<Mutex<RpcCall>>> {
+    pub(crate) fn associated_call(&self) -> Option<Arc<Mutex<RpcCall>>> {
         self.associated_call.clone()
     }
 
-    pub(crate) fn set_associated_call(&mut self, call: Weak<Mutex<RpcCall>>) {
+    pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {
         self.associated_call = Some(call.clone());
     }
 
@@ -587,7 +603,25 @@ pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: Strin
 }
 
 impl fmt::Display for Message {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[{}/{}]", self.method, self.kind)?;
+        if let Some(id) = self.nodeid.as_ref() {
+            write!(f, " id:{}", id)?;
+        }
+        write!(f, ", txid: {}", self.txid)?;
+        if let Some(body) = self.body.as_ref() {
+            write!(f, ", body: {}", body)?;
+        }
+        if self.ver != 0 {
+            write!(f, ", version: {}", version::format_version(self.ver))?;
+        }
+        if let (Some(remote_id), Some(remote_addr)) = (self.remote_id.as_ref(), self.remote_addr.as_ref()) {
+            if self.nodeid.as_ref().map_or(false, |id| id == remote_id) {
+                write!(f, ", from: {}", remote_addr)?;
+            } else {
+                write!(f, ", to: {}@{}", remote_id, remote_addr)?;
+            }
+        }
+        Ok(())
     }
 }

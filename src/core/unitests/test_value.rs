@@ -1,7 +1,7 @@
 use crate::core::{
     Id,
     Value,
-    ValueBuilder,
+    ImmutableBuilder as ValueBuilder,
     SignedBuilder,
     EncryptedBuilder,
     signature,

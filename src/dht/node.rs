@@ -7,8 +7,10 @@ use std::{
 };
 use log::{warn, info};
 use tokio::{
+    task,
     task::JoinHandle,
-    sync::mpsc
+    sync::mpsc,
+    runtime,
 };
 
 use crate::{
@@ -55,7 +57,8 @@ pub struct Node {
 
     lookup_option  : Mutex<LookupOption>,
     status      : Mutex<NodeStatus>,
-    data_dir    : String,
+    data_dir    : PathBuf,
+    database_uri: PathBuf,
 
     dht4        : Mutex<Option<Arc<Mutex<DHT>>>>,
     dht6        : Mutex<Option<Arc<Mutex<DHT>>>>,
@@ -81,18 +84,15 @@ impl Node {
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
 
-        let data_dir = cfg.data_dir().into();
-        let database_uri = {
+        let data_dir = {
             let mut path = PathBuf::new();
             path.push(cfg.data_dir());
-            path.push(data_storage::database_name(cfg.database_uri()));
             path
         };
-        let storage_db = {
-            let mut storage = SqliteStorage::new();
-            storage.open(database_uri.to_str().unwrap())?;
-            storage.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
-            storage
+        let database_uri = {
+            let mut path = PathBuf::from(&data_dir);
+            path.push(data_storage::database_name(cfg.database_uri()));
+            path
         };
 
         let identity = CachedIdentity::new({
@@ -103,13 +103,13 @@ impl Node {
         // Cache the node id to a file for quick access in the future.
         let bs58 = identity.id().to_base58();
         File::create({
-            let mut path = PathBuf::new();
-            path.push(cfg.data_dir());
+            let mut path = data_dir.clone();
             path.push("id");
             path
-        }).map_err(|e| IOError::new(
+        })
+        .map_err(|e| IOError::new(
                 format!("Creating node id cache file error: {e}")))?
-            .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
+        .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
                 format!("Writing node id cache file error: {e}")))?;
 
         info!("Current Node id: {}", identity.id());
@@ -118,13 +118,14 @@ impl Node {
             cfg,
             identity,
             data_dir,
+            database_uri,
             lookup_option   : Mutex::new(LookupOption::Conservative),
             status          : Mutex::new(NodeStatus::Stopped),
             dht4            : Mutex::new(None),
             dht6            : Mutex::new(None),
             timer_client    : Mutex::new(None),
             timer_task      : Mutex::new(None),
-            storage         : Arc::new(Mutex::new(Box::new(storage_db))),
+            storage         : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
             tokenman        : Arc::new(TokenManager::new())
         }))
     }
@@ -190,34 +191,38 @@ impl Node {
     fn check_running(&self) -> Result<()> {
         match self.is_running() {
             true => Ok(()),
-            false => Err(StateError::new("Node is not running".to_string()))
+            false => Err(StateError::new("kadNode is not running".to_string()))
         }
     }
 
-    #[inline(always)]
-    async fn start_timer_runtime(&self) {
-        let (tx, rx) = mpsc::channel::<Command>(64);
-        let timer_queue = TimerQueue::new(rx);
-        let timer_client = Arc::new(TimerClient::new(tx));
-
-        let timer_task = tokio::spawn(async move {
-            timer_queue.run().await;
+    async fn start_timer_task(&self) -> Result<()> {
+        let (tx, rx) = mpsc::channel::<Command>(128);
+        let timer_queue  = TimerQueue::new(rx);
+        let timer_client = TimerClient::new(tx);
+        let timer_task   = task::spawn_blocking(move || {
+            runtime::Builder::new_current_thread()
+                .enable_time()
+                .build().expect("timer runtime should build")
+                .block_on(async move {
+                    timer_queue.run().await;
+                }
+            );
         });
 
-        *self.timer_task.lock().unwrap() = Some(timer_task);
-        *self.timer_client.lock().unwrap() = Some(timer_client);
+        *self.timer_task.lock().unwrap()   = Some(timer_task);
+        *self.timer_client.lock().unwrap() = Some(Arc::new(timer_client));
+        Ok(())
     }
 
-    #[inline(always)]
-    async fn stop_timer_runtime(&self) {
+    async fn stop_timer_task(&self) {
         let timer_client = self.timer_client.lock().unwrap().take();
-        let timer_task = self.timer_task.lock().unwrap().take();
+        let timer_task   = self.timer_task.lock().unwrap().take();
 
-        if let Some(timer_client) = timer_client {
-            let _ = timer_client.stop_all().await;
+        if let Some(client) = timer_client {
+            let _ = client.stop_all().await;
         }
-        if let Some(timer_task) = timer_task {
-            let _ = timer_task.await;
+        if let Some(task) = timer_task {
+            let _ = task.await;
         }
     }
 
@@ -228,78 +233,96 @@ impl Node {
             .clone()
     }
 
+    async fn setup_periodic_tasks(&self) -> Result<()> {
+        let client  = self.timer_client();
+        let _ = client.add_timer(
+            Duration::from_millis(30*1000),
+            Some(STORAGE_EXPIRE_INTERVAL),
+            {
+                // let storage = self.storage.clone();
+                move || {
+                    //_ = storage.lock().unwrap().purge();
+                    println!("purging storage ...");
+                }
+            }
+        ).await?;
+
+        let _ = client.add_timer(
+            Duration::from_millis(5*60*1000),
+            Some(RE_ANNOUNCE_INTERVAL),
+            {
+                let storage = self.storage.clone();
+                move || {
+                    // TODO:
+                    let _ = storage.clone();
+                    unimplemented!();
+                }
+            }
+        ).await?;
+
+        let _ = client.add_timer(
+            TokenManager::TOKEN_TIMEOUT,
+            Some(TokenManager::TOKEN_TIMEOUT),
+            {
+                let tokenman = self.tokenman.clone();
+                move || {
+                    tokenman.update_token_timestamp();
+                }
+            }
+        ).await?;
+        Ok(())
+    }
+
     pub async fn start(&self) -> Result<()> {
-        if *self.status.lock().unwrap() != NodeStatus::Stopped {
-            return Ok(());
-        }
+        if !self.is_stopped() {
+            return Err(StateError::new(
+                format!("kadNode is not being stopped: {}", *self.status.lock().unwrap())));
+        };
+
         *self.status.lock().unwrap() = NodeStatus::Initializing;
 
-        self.start_timer_runtime().await;
-        if let Err(err) = self.setup_periodic_tasks().await {
-            self.stop_timer_runtime().await;
-            *self.status.lock().unwrap() = NodeStatus::Stopped;
-            return Err(err);
+        {
+            let mut locked = self.storage.lock().unwrap();
+            let db_path = self.database_uri.to_str().unwrap();
+            locked.open(db_path)?;
+            locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
         }
 
+        self.start_timer_task().await?;
+        self.setup_periodic_tasks().await?;
+
+        let builder = {
+            let mut b = dht::Builder::default();
+            b.with_timer_client(self.timer_client())
+             .with_identity(self.identity.identity())
+             .with_storage(self.storage.clone())
+             .with_tokenman(self.tokenman.clone())
+             .with_bootstrap_nodes(self.cfg.bootstrap_nodes())
+             .with_datadir(self.data_dir.as_path());
+            b
+        };
+
         let port = self.cfg.port();
-        let mut builder = dht::Builder::new();
-        builder.with_timer_client(self.timer_client())
-            .with_identity(self.identity.identity())
-            .with_storage(self.storage.clone())
-            .with_tokenman(self.tokenman.clone())
-            .with_bootstrap_nodes(self.cfg.bootstrap_nodes())
-            .with_datadir(self.data_dir.as_str());
-
         if let Some(host4) = self.cfg.host4() {
-            let rc = builder.build_dht4(host4, port);
-            if let Err(err) = rc {
-                self.stop_timer_runtime().await;
-                *self.status.lock().unwrap() = NodeStatus::Stopped;
-                return Err(err);
-            }
-
-            let mut dht4 = rc.unwrap();
-            dht4.set_connection_status_listener();
-
-            if let Err(err) = dht4.start().await {
-                self.stop_timer_runtime().await;
-                *self.status.lock().unwrap() = NodeStatus::Stopped;
-                return Err(err);
-            }
+            let mut dht = builder.build_dht4(host4, port)?;
+            dht.set_connection_status_listener();
 
             *self.dht4.lock().unwrap() = Some({
-                let dht = Arc::new(Mutex::new(dht4));
-                dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+                let dht = Arc::new(Mutex::new(dht));
+                dht.lock().unwrap().weak = Arc::downgrade(&dht);
+                dht.lock().unwrap().start().await?;
                 dht
             });
         }
 
         if let Some(host6) = self.cfg.host6() {
-            let rc = builder.build_dht6(host6, port);
-            if let Err(err) = rc {
-                if let Some(dht4) = self.dht4.lock().unwrap().take() {
-                    dht4.lock().unwrap().stop().await;
-                }
-                self.stop_timer_runtime().await;
-                *self.status.lock().unwrap() = NodeStatus::Stopped;
-                return Err(err);
-            }
-
-            let mut dht6 = rc.unwrap();
-            dht6.set_connection_status_listener();
-
-            if let Err(err) = dht6.start().await {
-                if let Some(dht4) = self.dht4.lock().unwrap().take() {
-                    dht4.lock().unwrap().stop().await;
-                }
-                self.stop_timer_runtime().await;
-                *self.status.lock().unwrap() = NodeStatus::Stopped;
-                return Err(err);
-            }
+            let mut dht = builder.build_dht6(host6, port)?;
+            dht.set_connection_status_listener();
 
             *self.dht6.lock().unwrap() = Some({
-                let dht = Arc::new(Mutex::new(dht6));
-                dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+                let dht = Arc::new(Mutex::new(dht));
+                dht.lock().unwrap().weak = Arc::downgrade(&dht);
+                dht.lock().unwrap().start().await?;
                 dht
             });
         }
@@ -310,63 +333,27 @@ impl Node {
     }
 
     pub async fn stop(&self) -> Result<()> {
+        if self.is_stopped() {
+            return Ok(());
+        }
         if *self.status.lock().unwrap() == NodeStatus::Stopped {
             return Ok(());
         }
         *self.status.lock().unwrap() = NodeStatus::Stopped;
 
-        let dht4 = self.dht4.lock().unwrap().take();
-        let dht6 = self.dht6.lock().unwrap().take();
-
-        if let Some(dht) = dht4 {
-            dht.lock().unwrap().stop().await;
+        if let Some(dht4) = self.dht4.lock().unwrap().take() {
+            dht4.lock().unwrap().stop().await;
         }
-        if let Some(dht) = dht6 {
-            dht.lock().unwrap().stop().await;
+        if let Some(dht6) = self.dht6.lock().unwrap().take() {
+            dht6.lock().unwrap().stop().await;
         }
 
-        self.stop_timer_runtime().await;
-        self.storage.lock().unwrap().close()?;
+        self.stop_timer_task().await;
+        self.storage.lock().unwrap().close();
 
         info!("Kademlia node stopped.");
         logger::teardown();
 
-        Ok(())
-    }
-
-    async fn setup_periodic_tasks(&self) -> Result<()> {
-        let timer_client = self.timer_client.lock().unwrap()
-            .as_ref().expect("Timer client is not initalized")
-            .clone();
-
-        let storage = self.storage.clone();
-        let _ = timer_client.add_timer(
-            Duration::from_millis(30*1000),
-            Some(STORAGE_EXPIRE_INTERVAL),
-            move || {
-                _ = storage.lock().unwrap().purge();
-            }
-        ).await?;
-
-        let storage = self.storage.clone();
-        let _ = timer_client.add_timer(
-            Duration::from_millis(5*60*1000),
-            Some(RE_ANNOUNCE_INTERVAL),
-            move || {
-                // TODO:
-                let _ = storage.clone();
-                unimplemented!();
-            }
-        ).await?;
-
-        let tokenman = self.tokenman.clone();
-        let _ = timer_client.add_timer(
-            TokenManager::TOKEN_TIMEOUT,
-            Some(TokenManager::TOKEN_TIMEOUT),
-            move || {
-                tokenman.update_token_timestamp();
-            }
-        ).await?;
         Ok(())
     }
 
@@ -401,6 +388,10 @@ impl Node {
 
     pub fn is_running(&self) -> bool {
         *self.status.lock().unwrap() == NodeStatus::Running
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        *self.status.lock().unwrap() == NodeStatus::Stopped
     }
 
     pub async fn bootstrap_one(&self,  node: &NodeInfo) -> Result<()> {

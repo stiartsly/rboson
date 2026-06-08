@@ -22,8 +22,9 @@ impl log::Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
+            let record_target = record.target().rsplit("::").next().unwrap_or("N/A");
             let log = format!("[{}] [{}] {}",
-                record.target(),
+                record_target,
                 record.level(),
                 record.args()
             );

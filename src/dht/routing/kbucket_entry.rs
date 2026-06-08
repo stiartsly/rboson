@@ -2,16 +2,9 @@ use std::{
     fmt,
     cmp::{min, max},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    result::Result as SResult,
     time::{Duration, SystemTime}
 };
-use serde::{
-    Deserialize, Deserializer,
-    Serialize, Serializer,
-    de::{self, MapAccess, Visitor},
-    ser::SerializeStruct,
-};
-
+use serde::{Serialize, Deserialize};
 use crate::{
     Id,
     NodeInfo,
@@ -24,6 +17,8 @@ use crate::{
  * the UDP port of the node and a node id.
  */
 #[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerializableKbucketEntry", from = "SerializableKbucketEntry")]
 pub(crate) struct KBucketEntry {
     ni          : NodeInfo,
 
@@ -32,7 +27,7 @@ pub(crate) struct KBucketEntry {
     last_sent   : SystemTime,
 
     reachable   : bool,
-    failed_requests: i32,
+    failed_reqs : i32,
     avg_rtt     : Option<f64>,
 }
 
@@ -52,7 +47,7 @@ impl KBucketEntry {
             last_seen   : now,
             last_sent   : SystemTime::UNIX_EPOCH,
             reachable   : false,
-            failed_requests: 0,
+            failed_reqs: 0,
             avg_rtt     : None,
         }
     }
@@ -89,37 +84,38 @@ impl KBucketEntry {
     }
 
     #[cfg(test)]
-    pub(crate) const fn failed_requests(&self) -> i32 {
-        self.failed_requests
+    pub(crate) const fn failed_reqs(&self) -> i32 {
+        self.failed_reqs
     }
 
     pub(crate) const fn eligible_for_nodes_list(&self) -> bool {
         // 1 timeout can occasionally happen. should be fine to hand it out
         // as long as we've verified it at least once
-        self.reachable && self.failed_requests < 3
+        self.reachable && self.failed_reqs < 3
     }
 
     pub(crate) const fn eligible_for_local_lookup(&self) -> bool {
         // allow implicit initial ping during lookups
         // TO~DO: make this work now that we don't keep unverified entries
         // in the main bucket
-        (self.reachable && self.failed_requests <= 3) ||
-            self.failed_requests <= 0
+        (self.reachable && self.failed_reqs <= 3) ||
+            self.failed_reqs <= 0
     }
 
     fn backoff(&self) -> u64 {
         // Assertion in test case will guard the MAX_FAILURES not causing overflow
         Self::PING_BACKOFF_BASE_INTERVAL
-            << min(Self::MAX_FAILURES, max(0, self.failed_requests - 1))
+            << min(Self::MAX_FAILURES, max(0, self.failed_reqs - 1))
     }
 
+    #[allow(unused)]
     fn within_backoff_window_at(&self, _: &SystemTime) -> bool {
-        self.failed_requests != 0 && crate::elapsed_ms!(&self.last_sent) < self.backoff() as u128
+        self.failed_reqs != 0 && crate::elapsed_ms!(&self.last_sent) < self.backoff() as u128
     }
 
     #[allow(unused)]
     pub(crate) fn backoff_window_end(&self) -> Option<SystemTime> {
-        if self.failed_requests == 0 || self.last_sent == SystemTime::UNIX_EPOCH {
+        if self.failed_reqs == 0 || self.last_sent == SystemTime::UNIX_EPOCH {
             return None;
         }
 
@@ -147,12 +143,12 @@ impl KBucketEntry {
             return false;
         }
 
-        self.failed_requests != 0
+        self.failed_reqs != 0
             || crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
     pub(crate) fn old_and_stale(&self) -> bool {
-        self.failed_requests > Self::OLD_AND_STALE_FAILURES
+        self.failed_reqs > Self::OLD_AND_STALE_FAILURES
             && crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
@@ -169,7 +165,7 @@ impl KBucketEntry {
 		// backoff interval to not waste pings on them
 		// but things we haven't heard from in a while can be discarded
         let seen_since_last_sent = self.last_seen > self.last_sent;
-        self.failed_requests > Self::MAX_FAILURES && !seen_since_last_sent
+        self.failed_reqs > Self::MAX_FAILURES && !seen_since_last_sent
     }
 
     ///
@@ -182,8 +178,8 @@ impl KBucketEntry {
 	/// `true` if replacement is needed; `false` otherwise.
     ///
     pub(crate) fn needs_replacement(&self) -> bool {
-        (self.failed_requests > 1 && !self.is_reachable()) ||
-            self.failed_requests > Self::MAX_FAILURES ||
+        (self.failed_reqs > 1 && !self.is_reachable()) ||
+            self.failed_reqs > Self::MAX_FAILURES ||
             self.old_and_stale()
     }
 
@@ -193,7 +189,7 @@ impl KBucketEntry {
         }
 
         if entry.last_seen > self.last_seen {
-            self.failed_requests = entry.failed_requests;
+            self.failed_reqs = entry.failed_reqs;
         }
         if entry.is_reachable() {
             self.set_reachable(true);
@@ -207,15 +203,17 @@ impl KBucketEntry {
         self.last_seen  = self.last_seen.max(entry.last_seen);
         self.last_sent  = self.last_sent.max(entry.last_sent);
     }
-/*
+
+    #[allow(unused)]
     pub(crate) fn rtt(&self) -> u64 {
-        0
+        0 // TODO: u
     }
 
+    #[allow(unused)]
     pub(crate) fn rtt_with(&self, default_rtt: u64) -> u64 {
-        default_rtt
+        unimplemented!()
     }
-*/
+
     pub(crate) fn on_request_sent(&mut self) {
         self.last_sent = SystemTime::now();
     }
@@ -226,7 +224,7 @@ impl KBucketEntry {
 
     pub(crate) fn on_responded(&mut self, rtt: u64) {
         self.last_seen = SystemTime::now();
-        self.failed_requests = 0;
+        self.failed_reqs = 0;
         self.reachable = true;
 
         if rtt > 0 {
@@ -235,7 +233,7 @@ impl KBucketEntry {
     }
 
     pub(crate) fn on_timeout(&mut self) {
-        self.failed_requests += 1;
+        self.failed_reqs += 1;
     }
 
     pub(crate) fn matches(&self, other: &Self) -> bool {
@@ -253,19 +251,6 @@ impl KBucketEntry {
         });
     }
 }
-
-/*
-impl AsRef<NodeInfo> for KBucketEntry {
-    fn as_ref(&self) -> &NodeInfo {
-        &self.ni
-    }
-}
-impl Into<NodeInfo> for KBucketEntry {
-    fn into(self) -> NodeInfo {
-        self.ni
-    }
-}
-*/
 
 impl Eq for KBucketEntry {}
 impl PartialEq for KBucketEntry {
@@ -302,158 +287,78 @@ impl NodeInfoLike for KBucketEntry {
     }
 }
 
-impl Serialize for KBucketEntry {
-    fn serialize<S>(&self, ser: S) -> SResult<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut len = 7; // id, addr, port, created, last_seen, last_sent, failed_requests
-        if self.ni.version() != 0 { len += 1; }
-        if self.reachable { len += 1; }
-        if self.avg_rtt.is_some() { len += 1; }
+#[derive(Serialize, Deserialize)]
+pub(crate) struct SerializableKbucketEntry {
+    id: Id,
+    addr: Vec<u8>,
+    port: u16,
+    #[serde(rename="created", skip_serializing_if = "crate::is_default")]
+    created: u64,
+    #[serde(rename="lastSeen", skip_serializing_if = "crate::is_default")]
+    last_seen: u64,
+    #[serde(rename="lastSent", skip_serializing_if = "crate::is_default")]
+    last_sent: u64,
+    #[serde(rename="reachable", skip_serializing_if = "crate::is_default")]
+    reachable: bool,
+   // #[serde(rename="failedRequests", skip_serializing_if = "crate::is_default")]
+   // failed_reqs: i32,
+    #[serde(rename="avgRtt", skip_serializing_if = "crate::is_default")]
+    avg_rtt: Option<f64>,
+    #[serde(rename="version", skip_serializing_if = "crate::is_default")]
+    ver: i32,
+}
 
-        let mut state = ser.serialize_struct("KBucketEntry", len)?;
+impl Into<SerializableKbucketEntry> for KBucketEntry {
+    fn into(self) -> SerializableKbucketEntry {
         let addr = match self.socket_addr().ip() {
             IpAddr::V4(addr4) => addr4.octets().to_vec(),
             IpAddr::V6(addr6) => addr6.octets().to_vec(),
         };
 
-        state.serialize_field("id", self.id())?;
-        state.serialize_field("addr", &addr)?;
-        state.serialize_field("port", &self.socket_addr().port())?;
-        state.serialize_field("c", &(crate::as_ms!(self.created) as u64))?;
-        state.serialize_field("ls", &(crate::as_ms!(self.last_seen) as u64))?;
-        state.serialize_field("lt", &(crate::as_ms!(self.last_sent) as u64))?;
-        state.serialize_field("f", &self.failed_requests)?;
-
-        if self.ni.version() != 0 {
-            state.serialize_field("ver", &self.ni.version())?;
+        SerializableKbucketEntry {
+            id: self.id().clone(),
+            addr,
+            port        : self.socket_addr().port(),
+            created     : crate::as_ms!(self.created) as u64,
+            last_seen   : crate::as_ms!(self.last_seen) as u64,
+            last_sent   : crate::as_ms!(self.last_sent) as u64,
+            reachable   : self.reachable,
+            // failed_reqs: self.failed_reqs,
+            avg_rtt     : self.avg_rtt,
+            ver         : self.ni.version(),
         }
-        if self.reachable {
-            state.serialize_field("r", &self.reachable)?;
-        }
-        if let Some(avg_rtt) = self.avg_rtt {
-            state.serialize_field("rt", &avg_rtt)?;
-        }
-
-        state.end()
     }
 }
 
-impl<'de> Deserialize<'de> for KBucketEntry {
-    fn deserialize<D>(des: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Debug)]
-        enum Field {
-            Id,
-            Addr,
-            Port,
-            Version,
-            Created,
-            LastSeen,
-            LastSent,
-            Reachable,
-            FailedRequests,
-            AvgRtt,
-        }
+impl From<SerializableKbucketEntry> for KBucketEntry {
+    fn from(ser: SerializableKbucketEntry) -> Self {
+        let convert_cb = |ms | -> SystemTime {
+            SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+        };
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(des: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let key = String::deserialize(des)?;
-                match key.as_str() {
-                    "id" => Ok(Field::Id),
-                    "addr" => Ok(Field::Addr),
-                    "port" => Ok(Field::Port),
-                    "ver" => Ok(Field::Version),
-                    "c" => Ok(Field::Created),
-                    "ls" => Ok(Field::LastSeen),
-                    "lt" => Ok(Field::LastSent),
-                    "r" => Ok(Field::Reachable),
-                    "f" => Ok(Field::FailedRequests),
-                    "rt" => Ok(Field::AvgRtt),
-                    _ => Err(de::Error::unknown_field(&key, &["id", "addr", "port", "ver", "c", "ls", "lt", "r", "f", "rt"])),
-                }
-            }
-        }
+        let ip = match ser.addr.len() {
+            4 => {
+                let bytes: [u8; 4] = ser.addr.as_slice().try_into()
+                    .expect("invalid IPv4 address length");
+                IpAddr::V4(Ipv4Addr::from(bytes))
+            },
+            16 => {
+                let bytes: [u8; 16] = ser.addr.as_slice().try_into()
+                    .expect("invalid IPv6 address length");
+                IpAddr::V6(Ipv6Addr::from(bytes))
+            },
+            _ => panic!("invalid IP address byte length"),
+        };
 
-        struct KBucketEntryVisitor;
-
-        impl<'de> Visitor<'de> for KBucketEntryVisitor {
-            type Value = KBucketEntry;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct KBucketEntry")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut id: Option<Id> = None;
-                let mut addr: Option<Vec<u8>> = None;
-                let mut port: Option<u16> = None;
-                let mut version = 0;
-                let mut created_ms: Option<u64> = None;
-                let mut last_seen_ms: Option<u64> = None;
-                let mut last_sent_ms: Option<u64> = None;
-                let mut reachable = false;
-                let mut failed_requests = 0;
-                let mut avg_rtt: Option<f64> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Id => id = Some(map.next_value()?),
-                        Field::Addr => addr = Some(map.next_value()?),
-                        Field::Port => port = Some(map.next_value()?),
-                        Field::Version => version = map.next_value()?,
-                        Field::Created => created_ms = Some(map.next_value()?),
-                        Field::LastSeen => last_seen_ms = Some(map.next_value()?),
-                        Field::LastSent => last_sent_ms = Some(map.next_value()?),
-                        Field::Reachable => reachable = map.next_value()?,
-                        Field::FailedRequests => failed_requests = map.next_value()?,
-                        Field::AvgRtt => avg_rtt = Some(map.next_value()?),
-                    }
-                }
-
-                let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
-                let addr = addr.ok_or_else(|| de::Error::missing_field("addr"))?;
-                let port = port.ok_or_else(|| de::Error::missing_field("port"))?;
-                let created_ms = created_ms.ok_or_else(|| de::Error::missing_field("c"))?;
-                let last_seen_ms = last_seen_ms.ok_or_else(|| de::Error::missing_field("ls"))?;
-                let last_sent_ms = last_sent_ms.ok_or_else(|| de::Error::missing_field("lt"))?;
-
-                let ip = match addr.len() {
-                    4 => {
-                        let bytes: [u8; 4] = addr.as_slice().try_into()
-                            .map_err(|_| de::Error::custom("invalid IPv4 address length"))?;
-                        IpAddr::V4(Ipv4Addr::from(bytes))
-                    },
-                    16 => {
-                        let bytes: [u8; 16] = addr.as_slice().try_into()
-                            .map_err(|_| de::Error::custom("invalid IPv6 address length"))?;
-                        IpAddr::V6(Ipv6Addr::from(bytes))
-                    },
-                    _ => return Err(de::Error::custom("invalid IP address byte length")),
-                };
-
-                let mut entry = KBucketEntry::new(id, SocketAddr::new(ip, port));
-                entry.set_ver(version);
-                entry.created = ms_to_system_time(created_ms);
-                entry.last_seen = ms_to_system_time(last_seen_ms);
-                entry.last_sent = ms_to_system_time(last_sent_ms);
-                entry.reachable = reachable;
-                entry.failed_requests = failed_requests;
-                entry.avg_rtt = avg_rtt.filter(|rtt| rtt.is_finite() && *rtt >= 0.0);
-                Ok(entry)
-            }
-        }
-
-        des.deserialize_map(KBucketEntryVisitor)
+        let mut entry = KBucketEntry::new(ser.id, SocketAddr::new(ip, ser.port));
+        entry.set_ver(ser.ver);
+        entry.created = convert_cb(ser.created);
+        entry.last_seen = convert_cb(ser.last_seen);
+        entry.last_sent = convert_cb(ser.last_sent);
+        entry.reachable = ser.reachable;
+        // entry.failed_reqs = ser.failed_reqs;
+        entry.avg_rtt = ser.avg_rtt.filter(|rtt| rtt.is_finite() && *rtt >= 0.0);
+        entry
     }
 }
 
@@ -470,8 +375,8 @@ impl fmt::Display for KBucketEntry {
         if self.last_sent.elapsed().is_ok() {
             write!(f, "; sent:{}", crate::as_secs!(self.last_sent))?;
         }
-        if self.failed_requests > 0 {
-            write!(f, "; fail: {}", self.failed_requests - 0)?;
+        if self.failed_reqs > 0 {
+            write!(f, "; fail: {}", self.failed_reqs - 0)?;
         }
         if self.reachable {
             write!(f, "; reachable")?;
@@ -484,9 +389,4 @@ impl fmt::Display for KBucketEntry {
         }
         Ok(())
     }
-}
-
-#[inline(always)]
-fn ms_to_system_time(ms: u64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
 }

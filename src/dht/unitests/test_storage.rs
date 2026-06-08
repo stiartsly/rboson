@@ -9,7 +9,7 @@ use crate::{
     Id,
     PeerInfo,
     Value,
-    ValueBuilder,
+    ImmutableBuilder as ValueBuilder,
     SignedBuilder,
     EncryptedBuilder,
     signature::KeyPair,
@@ -125,8 +125,8 @@ fn test_open_and_close() {
     let mut s = SqliteStorage::new();
     assert!(s.open(&path).is_ok());
     assert!(s.initialize(Duration::from_secs(3600), Duration::from_secs(7200)).is_ok());
-    assert!(s.close().is_ok());
 
+    s.close();
     remove_db(&path);
 }
 
@@ -142,16 +142,15 @@ fn test_retain() {
     assert!(rc.is_ok());
     let rc = s.put_value(value.clone(), false);
     assert!(rc.is_ok());
-    let rc = s.close();
-    assert!(rc.is_ok());
 
-    let s = open_storage(&path);
+    let mut s = open_storage(&path);
     let rc = s.get_value(&value.id());
     assert!(rc.is_ok());
     let fetched = rc.unwrap();
     assert!(fetched.is_some());
     assert_eq!(fetched.unwrap(), value);
 
+    s.close();
     remove_db(&path);
 }
 
@@ -449,7 +448,7 @@ fn test_purge() {
     let rc = s.put_peer(persistent_peer.clone(), true);
     assert!(rc.is_ok());
 
-    assert!(s.purge().is_ok());
+    s.purge();
 
     let rc = s.get_value(&volatile_value.id());
     assert!(rc.is_ok());

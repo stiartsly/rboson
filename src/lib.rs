@@ -19,7 +19,7 @@ pub use crate::core::{
     value::{
         self,
         Value,
-        ValueBuilder,
+        ImmutableBuilder,
         SignedBuilder,
         EncryptedBuilder
     },
@@ -141,39 +141,53 @@ fn random_bytes(len: usize) -> Vec<u8> {
     bytes
 }
 
-pub(crate) fn is_none_or_empty<T: IsEmpty>(v: &Option<T>) -> bool {
-    v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-}
-
 #[allow(unused)]
-pub(crate) fn is_empty<T: IsEmpty>(v: &T) -> bool {
-    v.is_empty()
+pub(crate) fn is_default<T: IsDefault>(v: &T) -> bool {
+    v.is_default()
 }
 
-trait IsEmpty {
-    fn is_empty(&self) -> bool;
+trait IsDefault {
+    fn is_default(&self) -> bool;
 }
 
-impl IsEmpty for String {
-    fn is_empty(&self) -> bool {
+impl<T> IsDefault for Option<T> {
+    fn is_default(&self) -> bool {
+        self.is_none()
+    }
+}
+
+impl IsDefault for String {
+    fn is_default(&self) -> bool {
         self.is_empty()
     }
 }
 
-impl<T> IsEmpty for Vec<T> {
-    fn is_empty(&self) -> bool {
+impl<T> IsDefault for Vec<T> {
+    fn is_default(&self) -> bool {
         self.is_empty()
     }
 }
 
-impl IsEmpty for u64 {
-    fn is_empty(&self) -> bool {
+impl IsDefault for i32 {
+    fn is_default(&self) -> bool {
         *self == 0
     }
 }
 
-impl IsEmpty for bool {
-    fn is_empty(&self) -> bool {
+impl IsDefault for u64 {
+    fn is_default(&self) -> bool {
+        *self == 0
+    }
+}
+
+impl IsDefault for f64 {
+    fn is_default(&self) -> bool {
+        *self == 0.0
+    }
+}
+
+impl IsDefault for bool {
+    fn is_default(&self) -> bool {
         !*self
     }
 }

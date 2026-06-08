@@ -16,10 +16,8 @@ pub(crate) trait DataStorage: Send + Sync {
         _: Duration
     ) -> Result<()>;
 
-    fn close(&mut self) -> Result<()>;
-
-    #[allow(unused)]
-    fn purge(&mut self) -> Result<()>;
+    fn close(&mut self);
+    fn purge(&mut self);
 
     // parameters listed:
     // - value: Value;

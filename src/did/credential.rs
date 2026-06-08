@@ -24,31 +24,31 @@ pub struct Credential {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "t", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "t", skip_serializing_if = "crate::is_default")]
     types: Option<Vec<String>>,
 
-    #[serde(rename = "n", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "n", skip_serializing_if = "crate::is_default")]
     name: Option<String>,
 
-    #[serde(rename = "d", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "d", skip_serializing_if = "crate::is_default")]
     description: Option<String>,
 
     #[serde(rename = "i")]
     issuer: Id,
 
-    #[serde(rename = "v", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "v", skip_serializing_if = "crate::is_default")]
     valid_from: Option<u64>,
 
-    #[serde(rename = "e", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "e", skip_serializing_if = "crate::is_default")]
     valid_until: Option<u64>,
 
     #[serde(rename = "s")]
     subject: Subject,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
     signed_at: Option<u64>,
 
-    #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "sig", skip_serializing_if = "crate::is_default")]
     #[serde(with="crate::serde_bytes_base64")]
     signature: Vec<u8>,
 

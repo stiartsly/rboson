@@ -43,10 +43,6 @@ use crate::dht::storage::{
     models::{Valore, NewValore, Peer as DbPeer, NewPeer}
 };
 
-// 2 hours in milliseconds (mirrors constants::MAX_VALUE_AGE / MAX_PEER_AGE)
-const DEFAULT_EXPIRY: Duration = Duration::from_secs(2 * 60 * 60);
-
-// Convert a Diesel / Display error into a boxed crate error.
 fn db_err(e: impl std::fmt::Display) -> Error {
     StateError::new(e.to_string())
 }
@@ -61,15 +57,19 @@ impl SqliteStorage {
     pub(crate) fn new() -> Self {
         Self {
             connection: UnsafeCell::new(None),
-            value_expiry: DEFAULT_EXPIRY,
-            peer_expiry:  DEFAULT_EXPIRY,
+            value_expiry: Duration::MAX,
+            peer_expiry:  Duration::MAX,
         }
     }
 
-    // SAFETY: SqliteStorage is used through a single-threaded NodeRunner;
-    // the unsafe impl Send/Sync below reflects that guarantee.
     fn conn(&self) -> &mut SqliteConnection {
         unsafe { (*self.connection.get()).as_mut().unwrap() }
+    }
+}
+
+impl Drop for SqliteStorage {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -104,8 +104,8 @@ fn db_peer_to_info(p: DbPeer) -> PeerInfo {
 impl DataStorage for SqliteStorage {
     fn open(&mut self, path: &str) -> Result<()> {
         let conn = SqliteConnection::establish(path)
-            .map_err(|e| db_err(format!("Failed to open SQLite at '{}': {}", path, e)))?;
-        // SAFETY: exclusive access via &mut self
+            .map_err(|e| StateError::new(format!("Failed to open SQLite at '{}': {}", path, e)))?;
+
         unsafe { *self.connection.get() = Some(conn); }
 
         let ver = user_version(self.conn());
@@ -118,36 +118,34 @@ impl DataStorage for SqliteStorage {
         Ok(())
     }
 
-    fn initialize(&mut self, value_expiry: Duration, peer_expiry: Duration) -> Result<()> {
+    fn initialize(&mut self,
+        value_expiry: Duration,
+        peer_expiry: Duration
+    ) -> Result<()> {
         self.value_expiry = value_expiry;
         self.peer_expiry  = peer_expiry;
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
-        // SAFETY: exclusive access via &mut self
+    fn close(&mut self) {
         unsafe { *self.connection.get() = None; }
-        Ok(())
     }
 
-    fn purge(&mut self) -> Result<()> {
+    fn purge(&mut self) {
         let now          = as_ms!(SystemTime::now()) as i64;
         let value_cutoff = now - self.value_expiry.as_millis() as i64;
         let peer_cutoff  = now - self.peer_expiry.as_millis() as i64;
 
-        if let Err(e) = remove_expired_values(self.conn(), value_cutoff) {
-            warn!("Purging expired values failed: {}", e);
-        }
-        if let Err(e) = remove_expired_peers(self.conn(), peer_cutoff) {
-            warn!("Purging expired peers failed: {}", e);
-        }
-        Ok(())
+        let _ = remove_expired_values(self.conn(), value_cutoff)
+            .map_err(|e| warn!("Purging expired values failed: {}", e));
+
+        let _ = remove_expired_peers(self.conn(), peer_cutoff)
+            .map_err(|e| warn!("Purging expired peers failed: {}", e));
     }
 
-    // ── values ───────────────────────────────────────────────────────────────
-
+    // ── values ────
     fn put_value(&mut self, value: Value, persistent: bool) -> Result<()> {
-        let now      = as_ms!(SystemTime::now()) as i64;
+        let now = as_ms!(SystemTime::now()) as i64;
         let value_id = value.id();
         let v = NewValore {
             id:             value_id.as_bytes(),

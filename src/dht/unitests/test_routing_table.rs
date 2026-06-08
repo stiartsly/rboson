@@ -107,12 +107,12 @@ mod tests {
         assert_eq!(sent.last_sent() > &SystemTime::UNIX_EPOCH, true);
 
         rt.on_timeout(&id);
-        assert_eq!(rt.bucket_entry(Some(&id)).unwrap().failed_requests(), 1);
+        assert_eq!(rt.bucket_entry(Some(&id)).unwrap().failed_reqs(), 1);
 
         rt.on_responded(&id, 55);
         let responsed = rt.bucket_entry(Some(&id)).unwrap();
         assert_eq!(responsed.is_reachable(), true);
-        assert_eq!(responsed.failed_requests(), 0);
+        assert_eq!(responsed.failed_reqs(), 0);
         //assert_eq!(responsed.rtt(), 31);
     }
 }

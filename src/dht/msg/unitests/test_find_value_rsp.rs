@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use crate::{
     Id, Network, NodeInfo,
-    Value, ValueBuilder,
+    Value, core::ImmutableBuilder as ValueBuilder,
     dht::msg::{
         find_value_rsp::FindValueResponse,
         lookup_rsp::LookupResponse,

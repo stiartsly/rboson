@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tokio::{sync::mpsc, runtime};
 use crate::{
     Network,
@@ -26,7 +29,7 @@ pub(super) fn make_dht(
     let (tx, rx) = mpsc::channel::<Command>(64);
     let timer_client = Arc::new(TimerClient::new(tx));
     let bootstrap_nodes: Vec<NodeInfo> = Vec::new();
-    let data_dir = ".";
+    let data_dir = PathBuf::from(".");
 
     std::thread::spawn(move || {
         let runtime = runtime::Builder::new_current_thread()
@@ -39,14 +42,14 @@ pub(super) fn make_dht(
         });
     });
 
-    let mut builder = Builder::new();
+    let mut builder = Builder::default();
     builder
         .with_identity(identity)
         .with_storage(storage)
         .with_tokenman(tokenman)
         .with_timer_client(timer_client)
         .with_bootstrap_nodes(&bootstrap_nodes)
-        .with_datadir(data_dir);
+        .with_datadir(data_dir.as_path());
 
     let dht = match network {
         Network::IPv4 => builder.build_dht4(host, 0),
@@ -55,7 +58,7 @@ pub(super) fn make_dht(
     .expect("test DHT should build");
 
     let dht = Arc::new(Mutex::new(dht));
-    dht.lock().unwrap().weak_cloned = Arc::downgrade(&dht);
+    dht.lock().unwrap().weak = Arc::downgrade(&dht);
     dht
 }
 
@@ -74,7 +77,7 @@ mod tests {
         assert_eq!(locked_dht.network().is_ipv4(), true);
         assert_eq!(locked_dht.id(), identity.id());
         assert_eq!(locked_dht.addr().ip().to_string(), "127.0.0.1");
-        assert_eq!(locked_dht.rt().size(), 1);
+        assert_eq!(locked_dht.rt().lock().unwrap().size(), 1);
 
         locked_dht.stop().await;
         locked_dht.start().await.expect("Failed to restart DHT");
@@ -82,7 +85,7 @@ mod tests {
         assert_eq!(locked_dht.network().is_ipv4(), true);
         assert_eq!(locked_dht.id(), identity.id());
         assert_eq!(locked_dht.addr().ip().to_string(), "127.0.0.1");
-        assert_eq!(locked_dht.rt().size(), 1);
+        assert_eq!(locked_dht.rt().lock().unwrap().size(), 1);
 
         locked_dht.stop().await;
     }

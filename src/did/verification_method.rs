@@ -177,7 +177,7 @@ pub struct Entity {
     #[serde(with="crate::serde_option_id_as_base58")]
     controller: Option<Id>,
 
-    #[serde(rename = "publicKeyMultibase", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "publicKeyMultibase", skip_serializing_if = "crate::is_default")]
     public_key_multibase: Option<String>
 }
 

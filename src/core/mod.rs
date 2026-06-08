@@ -29,7 +29,7 @@ pub use crate::core::{
     network::Network,
     node_info::NodeInfo,
     peer_info::{PeerInfo, PeerBuilder},
-    value::{Value, ValueBuilder, SignedBuilder, EncryptedBuilder},
+    value::{Value, ImmutableBuilder, SignedBuilder, EncryptedBuilder},
 };
 
 #[cfg(test)]

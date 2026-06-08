@@ -27,22 +27,22 @@ use crate::did::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiablePresentation {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_default")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_default")]
     id: Option<String>,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(skip_serializing_if = "crate::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "holder")]
     holder: Id,
 
     #[serde(rename = "verifiableCredential")]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "crate::is_default")]
     credentials: Vec<VC>,
 
     #[serde(rename = "proof", skip_serializing_if = "Option::is_none")]

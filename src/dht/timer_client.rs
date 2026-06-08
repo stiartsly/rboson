@@ -96,7 +96,7 @@ impl TimerClient {
         let (tx, rx) = oneshot::channel();
 
         self.sender.send(
-            Command::StopAll {
+            Command::Stop {
                 complete: tx,
             }
         ).await.map_err(|_| {

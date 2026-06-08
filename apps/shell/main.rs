@@ -20,6 +20,9 @@ struct Options {
     /// The configuration file
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
+
+    #[arg(short='S', long)]
+    simulate: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -28,17 +31,23 @@ async fn main() {
     local.run_until(async {
         let opts = Options::parse();
         let config = NodeConfiguration::load(
-            opts.config.as_deref().unwrap_or("default.conf")
+            opts.config.as_deref().unwrap_or("node.yaml")
         ).unwrap();
 
         #[cfg(feature = "inspect")] {
             config.dump();
         }
 
+        let bootstrap_nodes = config.bootstrap_nodes().to_vec();
+
         let node = Node::new(Box::new(config)).unwrap();
         let _ = node.start().await;
 
-        thread::sleep(Duration::from_secs(1));
+        if opts.simulate {
+            let _ = node.bootstrap_one(&bootstrap_nodes[0]).await;
+        }
+
+        thread::sleep(Duration::from_secs(10*60));
 
         let target: Id = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ".try_into().unwrap();
         println!("Attemp finding node with id: {} ...", target);

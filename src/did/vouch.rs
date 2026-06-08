@@ -24,10 +24,10 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
-    #[serde(rename = "id", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "id", skip_serializing_if = "crate::is_default")]
     id: Option<String>,
 
-    #[serde(rename = "t", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "t", skip_serializing_if = "crate::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
@@ -36,7 +36,7 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
     signed_at: Option<u64>,
 
     #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]

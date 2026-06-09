@@ -1,25 +1,20 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use serde_cbor::value::to_value;
-use serde::{
-    Deserialize, Serialize,
-    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{SerializeMap, Serializer}
-};
-
+use std::fmt;
+use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     Value,
     NodeInfo,
     cryptobox::Nonce,
+    errors::{Error, Result, ProtocolError},
     dht::msg::lookup_rsp::{
         LookupResponse,
         Data
     }
 };
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeFindValueResponse", try_from = "SerdeFindValueResponse")]
 pub(crate) struct FindValueResponse {
     data: Data,
     value: Option<Value>,
@@ -54,248 +49,115 @@ impl LookupResponse for FindValueResponse {
     }
 }
 
-impl Serialize for FindValueResponse {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let mut s = se.serialize_map(None)?;
-        if let Some(value) = self.value.as_ref() {
-            if let Some(pk) = value.public_key() {
-                s.serialize_entry("k", pk)?;
-            }
-            if let Some(rec) = value.recipient() {
-                s.serialize_entry("rec", rec)?;
-            }
-            if let Some(n) = value.nonce() {
-                s.serialize_entry("n", n.as_ref())?;
-            }
-            if value.sequence_number() >= 0 {
-                s.serialize_entry("seq", &value.sequence_number())?;
-            }
-            if let Some(sig) = value.signature() {
-                s.serialize_entry("sig", sig)?;
-            }
-            s.serialize_entry("v", value.data())?;
-        } else {
-            if let Some(ns4) = self.nodes4() {
-                let value = to_value(&ns4).map_err(|_| serde::ser::Error::custom(
-                    "Failed to convert nodes4 to CBOR Value"
-                ))?;
-                s.serialize_entry("n4", &value)?;
-            }
-            if let Some(ns6) = self.nodes6() {
-                let value = to_value(&ns6).map_err(|_| serde::ser::Error::custom(
-                    "Failed to convert nodes6 to CBOR Value"
-                ))?;
-                s.serialize_entry("n6", &value)?;
-            }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeFindValueResponse {
+    #[serde(rename = "n4", skip_serializing_if = "crate::is_default")]
+    nodes4: Option<Vec<NodeInfo>>,
+    #[serde(rename = "n6", skip_serializing_if = "crate::is_default")]
+    nodes6: Option<Vec<NodeInfo>>,
+    #[serde(rename = "tok")]
+    token: i32,
+    #[serde(rename = "k", skip_serializing_if = "crate::is_default")]
+    pk: Option<Id>,
+    #[serde(rename = "rec", skip_serializing_if = "crate::is_default")]
+    rec: Option<Id>,
+    #[serde(rename = "n", skip_serializing_if = "crate::is_default")]
+    nonce: Option<Vec<u8>>,
+    #[serde(
+        rename = "seq",
+        skip_serializing_if = "utils::is_default_seq",
+        default = "utils::default_seq",
+        deserialize_with = "utils::deserialize_seq"
+    )]
+    expected_seq: i32,
+    #[serde(rename = "sig", skip_serializing_if = "crate::is_default")]
+    sig: Option<Vec<u8>>,
+    #[serde(rename = "v", skip_serializing_if = "crate::is_default")]
+    value: Option<Vec<u8>>,
+}
+
+impl Into<SerdeFindValueResponse> for FindValueResponse {
+    fn into(self) -> SerdeFindValueResponse {
+        SerdeFindValueResponse {
+            nodes4  : self.nodes4().map(|v| v.to_vec()),
+            nodes6  : self.nodes6().map(|v| v.to_vec()),
+            token   : self.token(),
+            pk      : self.value.as_ref().and_then(|v| v.public_key().cloned()),
+            rec     : self.value.as_ref().and_then(|v| v.recipient().cloned()),
+            nonce   : self.value.as_ref().and_then(|v| v.nonce().map(|n| n.as_ref().to_vec())),
+            expected_seq: self.value.as_ref().map(|v| v.sequence_number()).unwrap_or(-1),
+            sig     : self.value.as_ref().and_then(|v| v.signature().map(|s| s.to_vec())),
+            value   : self.value.as_ref().map(|v| v.data().to_vec()),
         }
-        s.end()
     }
 }
 
-impl<'de> Deserialize<'de> for FindValueResponse {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        #[derive(Debug)]
-        enum Field {
-            Nodes4,         // "n4"
-            Nodes6,         // "n6"
-            Token,          // "tok"
-            Key,            // "k"
-            Recipient,      // "rec"
-            Nonce,          // "n"
-            Signature,      // "sig"
-            SequenceNumber, // "seq"
-            Data,           // "v"
-            Ignore          // Ignore unknown fields
+impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
+    type Error = Error;
+    fn try_from(s: SerdeFindValueResponse) -> Result<Self> {
+        if s.value.is_none() &&
+            s.nodes4.is_none() &&
+            s.nodes6.is_none() {
+            return Err(ProtocolError::new("either \"n4\", \"n6\" or \"v\" must be present"));
         }
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "n4"    => Ok(Field::Nodes4),
-                    "n6"    => Ok(Field::Nodes6),
-                    "tok"   => Ok(Field::Token),
-                    "k"     => Ok(Field::Key),
-                    "rec"   => Ok(Field::Recipient),
-                    "n"     => Ok(Field::Nonce),
-                    "sig"   => Ok(Field::Signature),
-                    "seq"   => Ok(Field::SequenceNumber),
-                    "v"     => Ok(Field::Data),
-                    _       => Ok(Field::Ignore)
-                }
-            }
+        if s.value.is_some() && (
+            s.nodes4.is_some() ||
+            s.nodes6.is_some()
+        ) {
+            return Err(ProtocolError::new("\"v\" cannot be combined with \"n4\" or \"n6\""));
         }
 
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = FindValueResponse;
+        if let Some(data) = s.value {
+            if data.is_empty() {
+                return Err(ProtocolError::new("data field \"v\" cannot be empty"));
+            }
+            let expected_seq = s.expected_seq;
+            if expected_seq < -1 {
+                return Err(ProtocolError::new("sequence number must be larger than or equal to -1"));
+            }
+            let nonce = s.nonce.map(|v| {
+                Nonce::try_from(v.as_slice())
+                    .map_err(|_| ProtocolError::new("invalid nonce length"))
+            }).transpose()?;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a FindValueResponse struct")
+            let value = Value::packed(s.pk, s.rec, nonce, s.sig, data, expected_seq);
+            if !value.is_valid() {
+                return Err(ProtocolError::new("invalid value"));
             }
 
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut nodes4  : Option<Vec<NodeInfo>> = None;
-                let mut nodes6  : Option<Vec<NodeInfo>> = None;
-                let mut pk      : Option<Id> = None;
-                let mut rec     : Option<Id> = None;
-                let mut nonce   : Option<Vec<u8>> = None;
-                let mut sig     : Option<Vec<u8>> = None;
-                let mut seq     : Option<i32> = None;
-                let mut data    : Option<Vec<u8>> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Nodes4 => {
-                            if nodes4.is_some() {
-                                return Err(de::Error::duplicate_field("n4"));
-                            } else {
-                                nodes4 = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Nodes6 => {
-                            if nodes6.is_some() {
-                                return Err(de::Error::duplicate_field("n6"));
-                            } else {
-                                nodes6 = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Key => {
-                            if pk.is_some() {
-                                return Err(de::Error::duplicate_field("k"));
-                            } else {
-                                pk = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Recipient => {
-                            if rec.is_some() {
-                                return Err(de::Error::duplicate_field("rec"));
-                            } else {
-                                rec = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Nonce => {
-                            if nonce.is_some() {
-                                return Err(de::Error::duplicate_field("n"));
-                            } else {
-                                nonce = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Signature => {
-                            if sig.is_some() {
-                                return Err(de::Error::duplicate_field("sig"));
-                            } else {
-                                sig = Some(map.next_value()?);
-                            }
-                        }
-                        Field::SequenceNumber => {
-                            if seq.is_some() {
-                                return Err(de::Error::duplicate_field("seq"));
-                            } else {
-                                seq = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Data => {
-                            if data.is_some() {
-                                return Err(de::Error::duplicate_field("v"));
-                            } else {
-                                data = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Token |
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                if data.is_none() &&
-                    nodes4.is_none() &&
-                    nodes6.is_none() {
-                    return Err(de::Error::custom("either \"n4\", \"n6\" or \"v\" must be present"));
-                }
-                if data.is_some() && (
-                    nodes4.is_some() ||
-                    nodes6.is_some()
-                ) {
-                    return Err(de::Error::custom("\"v\" cannot be combined with \"n4\" or \"n6\""));
-                }
-
-                if let Some(data) = data {
-                    if data.is_empty() {
-                        return Err(de::Error::custom("data field \"v\" cannot be empty"));
-                    }
-
-                    let expected_seq = seq.unwrap_or(-1);
-                    if expected_seq < -1 {
-                        return Err(de::Error::custom("sequence number must be larger than or equal to -1"));
-                    }
-
-                    let nonce = nonce.map(|v| {
-                        Nonce::try_from(v.as_slice())
-                            .map_err(|_| de::Error::custom("invalid nonce length"))
-                    }).transpose()?;
-
-                    let value = Value::packed(pk, rec, nonce, sig, data, expected_seq);
-                    if !value.is_valid() {
-                        return Err(de::Error::custom("invalid value"));
-                    }
-                    Ok(FindValueResponse::with_value(value))
-                } else {
-                    Ok(FindValueResponse::with_nodes(nodes4, nodes6))
-                }
-            }
+            Ok(Self::with_value(value))
+        } else {
+            Ok(Self::with_nodes(s.nodes4, s.nodes6))
         }
-        de.deserialize_map(FieldVisitor)
     }
 }
 
 impl fmt::Display for FindValueResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut has_sep = false;
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
 
-        if let Some(nodes4) = self.nodes4() {
-            if !nodes4.is_empty() {
-                write!(f, "n4:")?;
-                for (index, item) in nodes4.iter().enumerate() {
-                    if index > 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, "[{}]", item)?;
-                }
-                has_sep = true;
-            }
-        }
-        if let Some(nodes6) = self.nodes6() {
-            if !nodes6.is_empty() {
-                if has_sep {
-                    write!(f, ",")?;
-                }
-                write!(f, "n6:")?;
-                for (index, item) in nodes6.iter().enumerate() {
-                    if index > 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, "[{}]", item)?;
-                }
-                has_sep = true;
-            }
-        }
+mod utils {
+    use serde::{Deserialize, de::Deserializer};
+    use std::result::Result as SResult;
 
-        if let Some(value) = self.value() {
-            if has_sep {
-                write!(f, ",")?;
-            }
-            write!(f, "v:[{}]", value)?;
+    pub(crate) fn is_default_seq(v: &i32) -> bool {
+        *v < 0
+    }
+
+    pub(crate) fn default_seq() -> i32 { -1 }
+    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < -1 {
+            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
         }
-        Ok(())
+        Ok(seq)
     }
 }

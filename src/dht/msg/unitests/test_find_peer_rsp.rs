@@ -75,7 +75,6 @@ mod tests {
         assert_eq!(rsp.peers().unwrap().len(), peers.len());
         assert_eq!(rsp.peers(), Some(peers.as_slice()));
         assert_eq!(rsp.token(), 0);
-
     }
 
     #[test]
@@ -97,6 +96,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
@@ -129,6 +129,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
@@ -163,6 +164,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 

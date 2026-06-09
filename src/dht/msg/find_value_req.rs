@@ -1,12 +1,5 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use serde::{
-    Deserialize, Serialize,
-    de::Deserializer
-};
-
+use std::fmt;
+use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     errors::{Error, Result},
@@ -57,9 +50,9 @@ struct SerdeFindValueRequest {
     want: i32,
     #[serde(
         rename = "cas",
-        skip_serializing_if = "is_default_expected_seq",
-        default = "default_expected_seq",
-        deserialize_with = "deserialize_expected_seq"
+        skip_serializing_if = "utils::is_default_seq",
+        default = "utils::default_seq",
+        deserialize_with = "utils::deserialize_seq"
     )]
     expected_seq: i32
 }
@@ -88,26 +81,28 @@ impl TryFrom<SerdeFindValueRequest> for FindValueRequest {
 
 impl fmt::Display for FindValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "t:{},w:{}", self.target(), self.want())?;
-        if self.expected_seq >= 0 {
-            write!(f, ",cas:{}", self.expected_seq)?;
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
+mod utils {
+    use serde::{Deserialize, de::Deserializer};
+    use std::result::Result as SResult;
+
+    pub(crate) fn is_default_seq(v: &i32) -> bool {
+        *v < 0
+    }
+
+    pub(crate) fn default_seq() -> i32 { -1 }
+    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < -1 {
+            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
         }
-        Ok(())
+        Ok(seq)
     }
 }
-
-fn is_default_expected_seq(v: &i32) -> bool {
-     *v < 0
-}
-
-fn default_expected_seq() -> i32 { -1 }
-fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
-where  D: Deserializer<'de>,
-{
-    let seq = i32::deserialize(de)?;
-    if seq < -1 {
-        return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
-    }
-    Ok(seq)
-}
-

@@ -1,22 +1,18 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use serde_cbor::value::to_value;
-use serde::{
-    Deserialize, Serialize,
-    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{self, SerializeMap, Serializer}
-};
+use std::fmt;
+use serde::{Deserialize, Serialize};
 use crate::{
     NodeInfo,
     PeerInfo,
+    errors::{Error, Result, ProtocolError},
     dht::msg::lookup_rsp::{
         LookupResponse,
         Data
     }
 };
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeFindPeerResponse", try_from = "SerdeFindPeerResponse")]
 pub(crate) struct FindPeerResponse {
     data: Data,
     peers: Option<Vec<PeerInfo>>,
@@ -51,178 +47,58 @@ impl LookupResponse for FindPeerResponse {
     }
 }
 
-impl Serialize for FindPeerResponse {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let mut s = se.serialize_map(None)?;
-        if let Some(peers) = self.peers.as_ref() {
-            let value = to_value(&peers).map_err(|e| ser::Error::custom(
-                format!("Convert peers to CBOR error: {}", e)
-            ))?;
-            s.serialize_entry("p", &value)?;
-        }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeFindPeerResponse {
+    #[serde(rename = "n4", skip_serializing_if = "crate::is_default")]
+    nodes4: Option<Vec<NodeInfo>>,
+    #[serde(rename = "n6", skip_serializing_if = "crate::is_default")]
+    nodes6: Option<Vec<NodeInfo>>,
+    #[serde(rename = "tok")]
+    token: i32,
+    #[serde(rename = "p", skip_serializing_if = "crate::is_default")]
+    peers: Option<Vec<PeerInfo>>,
+}
 
-        if let Some(ns) = self.nodes4() {
-            let value = to_value(&ns).map_err(|e| ser::Error::custom(
-                format!("Convert nodes4 to CBOR error: {}", e)
-            ))?;
-            s.serialize_entry("n4", &value)?;
+impl Into<SerdeFindPeerResponse> for FindPeerResponse {
+    fn into(self) -> SerdeFindPeerResponse {
+        SerdeFindPeerResponse {
+            nodes4: self.nodes4().map(|v| v.to_vec()),
+            nodes6: self.nodes6().map(|v| v.to_vec()),
+            token: self.token(),
+            peers: self.peers().map(|v| v.to_vec()),
         }
-        if let Some(ns) = self.nodes6() {
-            let value = to_value(&ns).map_err(|e| ser::Error::custom(
-                format!("Convert nodes6 to CBOR error: {}", e)
-            ))?;
-            s.serialize_entry("n6", &value)?;
-        }
-        s.end()
     }
 }
 
-impl<'de> Deserialize<'de> for FindPeerResponse {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        enum Field {
-            Nodes4,         // "n4"
-            Nodes6,         // "n6"
-            Token,          // "tok"
-            Peers,          // "p"
-            Ignore          // Ignore unknown fields
+impl TryFrom<SerdeFindPeerResponse> for FindPeerResponse {
+    type Error = Error;
+
+    fn try_from(s: SerdeFindPeerResponse) -> Result<Self> {
+        if s.peers.is_none() &&
+            s.nodes4.is_none() &&
+            s.nodes6.is_none() {
+            return Err(ProtocolError::new("either \"n4\", \"n6\" or \"p\" must be present"));
         }
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "n4"    => Ok(Field::Nodes4),
-                    "n6"    => Ok(Field::Nodes6),
-                    "p"     => Ok(Field::Peers),
-                    "tok"   => Ok(Field::Token),
-                    _       => Ok(Field::Ignore),
-                }
-            }
+        if s.peers.is_some() && (
+            s.nodes4.is_some() ||
+            s.nodes6.is_some()
+        ) {
+            return Err(ProtocolError::new("\"p\" cannot be combined with \"n4\" or \"n6\""));
         }
 
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = FindPeerResponse;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a FindPeerResponse struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut nodes4: Option<Vec<NodeInfo>> = None;
-                let mut nodes6: Option<Vec<NodeInfo>> = None;
-                let mut peers : Option<Vec<PeerInfo>> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Nodes4 => {
-                            if nodes4.is_some() {
-                                return Err(de::Error::duplicate_field("n4"));
-                            } else {
-                                nodes4 = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Nodes6 => {
-                            if nodes6.is_some() {
-                                return Err(de::Error::duplicate_field("n6"));
-                            } else {
-                                nodes6 = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Peers => {
-                            if peers.is_some() {
-                                return Err(de::Error::duplicate_field("p"));
-                            } else {
-                                peers = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Token |
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                if peers.is_none() &&
-                    nodes4.is_none() &&
-                    nodes6.is_none() {
-                    return Err(de::Error::custom("either \"n4\", \"n6\" or \"p\" must be present"));
-                }
-                if peers.is_some() && (
-                    nodes4.is_some() ||
-                    nodes6.is_some()
-                ) {
-                    return Err(de::Error::custom("\"p\" cannot be combined with \"n4\" or \"n6\""));
-                }
-
-                Ok(match peers {
-                    Some(peers) => FindPeerResponse::with_peers(peers),
-                    None => FindPeerResponse::with_nodes(nodes4, nodes6)
-                })
-            }
-        }
-        de.deserialize_map(FieldVisitor)
+        Ok(match s.peers {
+            Some(peers) => FindPeerResponse::with_peers(peers),
+            None => FindPeerResponse::with_nodes(s.nodes4, s.nodes6)
+        })
     }
 }
 
 impl fmt::Display for FindPeerResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut has_sep = false;
-
-        if let Some(nodes4) = self.nodes4() {
-            if !nodes4.is_empty() {
-                write!(f, "n4:")?;
-                for (index, item) in nodes4.iter().enumerate() {
-                    if index > 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, "[{}]", item)?;
-                }
-                has_sep = true;
-            }
-        }
-
-        if let Some(nodes6) = self.nodes6() {
-            if !nodes6.is_empty() {
-                if has_sep {
-                    write!(f, ",")?;
-                }
-                write!(f, "n6:")?;
-                for (index, item) in nodes6.iter().enumerate() {
-                    if index > 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, "[{}]", item)?;
-                }
-                has_sep = true;
-            }
-        }
-
-        if let Some(peers) = self.peers.as_ref() {
-            if peers.is_empty() {
-                return Ok(());
-            }
-
-            if has_sep {
-                write!(f, ",")?;
-            }
-            write!(f, "p:")?;
-            for (index, item) in peers.iter().enumerate() {
-                if index > 0 {
-                    write!(f, ",")?;
-                }
-                write!(f, "[{}]", item)?;
-            }
-        }
-        Ok(())
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
     }
 }

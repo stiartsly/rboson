@@ -1,25 +1,20 @@
 use std::{
     fmt,
     net::SocketAddr,
-    result::Result as SResult,
     sync::{
         Arc, Mutex,
         atomic::{AtomicI32, Ordering}
     }
 };
 use serde_cbor::value::{Value as CborValue, from_value};
-use serde::{
-    Deserialize,
-    Serialize,
-    de::{self, Deserializer, MapAccess, Visitor, IgnoredAny},
-    ser::{SerializeMap, Serializer}
-};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Id,
     Value,
     NodeInfo,
     PeerInfo,
+    errors::{Error, Result, ProtocolError},
     core::version,
     dht::rpc::RpcCall,
     dht::msg::{
@@ -121,6 +116,8 @@ impl fmt::Display for Method {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub(crate) enum Body {
     FindNodeRequest(FindNodeRequest),
     FindNodeResponse(FindNodeResponse),
@@ -134,53 +131,60 @@ pub(crate) enum Body {
 }
 
 impl Body {
-    fn from_value(kind: Kind, method: Method, value: CborValue) -> Result<Option<Self>, String> {
-        match kind {
-            Kind::Error => from_value::<ErrorBody>(value)
-                .map(Body::Error)
+    fn from_err(value: CborValue) -> Result<Option<Self>> {
+        let err_cb = |e| ProtocolError::new(format!("Decoding error body failed: {}", e));
+        Ok(from_value::<ErrorBody>(value)
+            .map(Body::Error)
+            .map(Some)
+            .map_err(err_cb)?)
+    }
+
+    fn from_req(method: Method, value: CborValue) -> Result<Option<Self>> {
+        let err_cb = |e| ProtocolError::new(format!("Decoding {} request error: {}", method, e));
+        Ok(match method {
+            Method::Ping => None,
+            Method::FindNode => from_value::<FindNodeRequest>(value)
+                .map(Body::FindNodeRequest)
                 .map(Some)
-                .map_err(|e| format!("failed to decode error body: {}", e)),
-            Kind::Request => match method {
-                Method::Ping => Ok(None),
-                Method::FindNode => from_value::<FindNodeRequest>(value)
-                    .map(Body::FindNodeRequest)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_node request: {}", e)),
-                Method::AnnouncePeer => from_value::<AnnouncePeerRequest>(value)
-                    .map(Body::AnnouncePeerRequest)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode announce_peer request: {}", e)),
-                Method::FindPeer => from_value::<FindPeerRequest>(value)
-                    .map(Body::FindPeerRequest)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_peer request: {}", e)),
-                Method::StoreValue => from_value::<StoreValueRequest>(value)
-                    .map(Body::StoreValueRequest)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode store_value request: {}", e)),
-                Method::FindValue => from_value::<FindValueRequest>(value)
-                    .map(Body::FindValueRequest)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_value request: {}", e)),
-                Method::Unknown => Err("invalid unknown request".into()),
-            },
-            Kind::Response => match method {
-                Method::Ping | Method::AnnouncePeer | Method::StoreValue => Ok(None),
-                Method::FindNode => from_value::<FindNodeResponse>(value)
-                    .map(Body::FindNodeResponse)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_node response: {}", e)),
-                Method::FindPeer => from_value::<FindPeerResponse>(value)
-                    .map(Body::FindPeerResponse)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_peer response: {}", e)),
-                Method::FindValue => from_value::<FindValueResponse>(value)
-                    .map(Body::FindValueResponse)
-                    .map(Some)
-                    .map_err(|e| format!("failed to decode find_value response: {}", e)),
-                Method::Unknown => Err("invalid unknown response".into()),
-            },
-        }
+                .map_err(err_cb)?,
+            Method::AnnouncePeer => from_value::<AnnouncePeerRequest>(value)
+                .map(Body::AnnouncePeerRequest)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::FindPeer => from_value::<FindPeerRequest>(value)
+                .map(Body::FindPeerRequest)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::StoreValue => from_value::<StoreValueRequest>(value)
+                .map(Body::StoreValueRequest)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::FindValue => from_value::<FindValueRequest>(value)
+                .map(Body::FindValueRequest)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::Unknown => return Err(ProtocolError::new("invalid unknown request".to_string())),
+        })
+    }
+
+    fn from_rsp(method: Method, value: CborValue) -> Result<Option<Self>> {
+        let err_cb = |e| ProtocolError::new(format!("Decoding {} response error: {}", method, e));
+        Ok(match method {
+            Method::Ping | Method::AnnouncePeer | Method::StoreValue => None,
+            Method::FindNode => from_value::<FindNodeResponse>(value)
+                .map(Body::FindNodeResponse)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::FindPeer => from_value::<FindPeerResponse>(value)
+                .map(Body::FindPeerResponse)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::FindValue => from_value::<FindValueResponse>(value)
+                .map(Body::FindValueResponse)
+                .map(Some)
+                .map_err(err_cb)?,
+            Method::Unknown => return Err(ProtocolError::new("invalid unknown response".to_string())),
+        })
     }
 }
 
@@ -200,24 +204,6 @@ impl fmt::Display for Body {
     }
 }
 
-impl Serialize for Body {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer
-    {
-        match self {
-            Body::FindNodeRequest(body) => body.serialize(se),
-            Body::FindNodeResponse(body) => body.serialize(se),
-            Body::FindPeerRequest(body) => body.serialize(se),
-            Body::FindPeerResponse(body) => body.serialize(se),
-            Body::FindValueRequest(body) => body.serialize(se),
-            Body::FindValueResponse(body) => body.serialize(se),
-            Body::AnnouncePeerRequest(body) => body.serialize(se),
-            Body::StoreValueRequest(body) => body.serialize(se),
-            Body::Error(body) => body.serialize(se),
-        }
-    }
-}
-
 static NEXT_TXID: AtomicI32 = AtomicI32::new(0);
 fn next_txid() -> i32 {
     let id = NEXT_TXID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
@@ -228,8 +214,12 @@ fn next_txid() -> i32 {
     }
 }
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeMessage", try_from = "SerdeMessage")]
 pub(crate) struct Message {
     nodeid  : Option<Id>,        // The DHT node Id of the message sender.
+
     kind    : Kind,
     method  : Method,
     txid    : i32,
@@ -320,14 +310,14 @@ impl Message {
     pub(crate) fn remote_id(&self) -> &Id {
         match self.remote_id.as_ref() {
             Some(id) => id,
-            None => panic!("no remote ID associated with this message")
+            None => panic!("remote ID not set")
         }
     }
 
     pub(crate) fn remote_addr(&self) -> &SocketAddr {
         match self.remote_addr.as_ref() {
             Some(addr) => addr,
-            None => panic!("no remote address associated with this message")
+            None => panic!("remote address not set")
         }
     }
 
@@ -338,168 +328,104 @@ impl Message {
     }
 }
 
-impl Serialize for Message {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer
-    {
-        let mut s = se.serialize_map(None)?;
-        s.serialize_entry("y", &(self.composite_type()))?;
-        s.serialize_entry("t", &self.txid)?;
-        s.serialize_entry("v", &self.ver)?;
-        if let Some(body) = self.body.as_ref() {
-            match self.kind() {
-                Kind::Request => s.serialize_entry("q", body)?,
-                Kind::Response => s.serialize_entry("r", body)?,
-                Kind::Error => s.serialize_entry("e", body)?,
-            }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeMessage {
+    #[serde(rename = "y")]
+    type_: i32,
+    #[serde(rename = "t")]
+    txid: i32,
+    #[serde(rename = "v")]
+    ver: i32,
+
+    #[serde(rename = "q")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    req: Option<CborValue>,
+
+    #[serde(rename = "r")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    rsp: Option<CborValue>,
+
+    #[serde(rename = "e")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    err: Option<CborValue>,
+}
+
+impl Into<SerdeMessage> for Message {
+    fn into(self) -> SerdeMessage {
+        let type_ = self.composite_type();
+        let txid = self.txid;
+        let ver = self.ver;
+        let body = self.body();
+
+        let req = if self.kind() == Kind::Request {
+            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+        } else {
+            None
+        };
+        let rsp = if self.kind() == Kind::Response {
+            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+        } else {
+            None
+        };
+        let err = if self.kind() == Kind::Error {
+            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+        } else {
+            None
+        };
+
+        SerdeMessage {
+            type_,
+            txid,
+            ver,
+            req,
+            rsp,
+            err
         }
-        s.end()
     }
 }
 
-impl<'de> Deserialize<'de> for Message {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>
-    {
-        enum Field {
-            Type,               // "y"  - i32
-            TransactionId,      // "t"  - i32
-            Version,            // "v"  - i32
-            Request,            // "q"  - Request.
-            Response,           // "r"  - Response,
-            Error,              // "e"  - Error
-            Ignore              // Ignore unknown fields
+impl TryFrom<SerdeMessage> for Message {
+    type Error = Error;
+    fn try_from(s: SerdeMessage) -> Result<Self> {
+        let type_ = s.type_;
+        if !Kind::is_valid(type_) {
+            return Err(ProtocolError::new(
+                format!("Invalid message kind: {}", type_ & Kind::MASK)));
+        }
+        if !Method::is_valid(type_) {
+            return Err(ProtocolError::new(
+                format!("Invalid message method: {}", type_ & Method::MASK)));
         }
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "y"     => Ok(Field::Type),
-                    "t"     => Ok(Field::TransactionId),
-                    "v"     => Ok(Field::Version),
-                    "q"     => Ok(Field::Request),
-                    "r"     => Ok(Field::Response),
-                    "e"     => Ok(Field::Error),
-                    _       => Ok(Field::Ignore),
-                }
-            }
-        }
+        let kind  = Kind::from(type_);
+        let method = Method::from(type_);
 
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = Message;
+        let err =  if kind == Kind::Error {
+            s.err.and_then(|v| Body::from_err(v).ok().flatten())
+        } else {
+            None
+        };
+        let req = if kind == Kind::Request {
+            s.req.and_then(|v| Body::from_req(method, v).ok().flatten())
+        } else {
+            None
+        };
+        let rsp = if kind == Kind::Response {
+            s.rsp.and_then(|v| Body::from_rsp(method, v).ok().flatten())
+        } else {
+            None
+        };
+        let body = match type_ & Kind::MASK {
+            0x00 => err,
+            0x20 => req,
+            0x40 => rsp,
+            _ => None,
+        };
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a Message struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>
-            {
-                let mut kind: Option<Kind> = None;
-                let mut method: Option<Method> = None;
-                let mut txid: Option<i32> = None;
-                let mut ver: Option<i32> = None;
-                let mut body: Option<Body> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Type => {
-                            if kind.is_some() || method.is_some() {
-                                return Err(de::Error::duplicate_field("y"));
-                            }
-                            let type_ = map.next_value::<i32>()?;
-                            if !Kind::is_valid(type_) || !Method::is_valid(type_) {
-                                return Err(de::Error::custom(format!(
-                                    "invalid message kind/method composite type: {}", type_
-                                )));
-                            }
-                            kind = Some(Kind::from(type_));
-                            method = Some(Method::from(type_));
-                        },
-                        Field::TransactionId => {
-                            if txid.is_some() {
-                                return Err(de::Error::duplicate_field("t"));
-                            }
-                            let current_txid = map.next_value::<i32>()?;
-                            if current_txid == 0 {
-                                return Err(de::Error::custom("invalid '[t]xid' field: should be non-zero integer"));
-                            }
-                            txid = Some(current_txid);
-                        }
-                        Field::Version => {
-                            if ver.is_some() {
-                                return Err(de::Error::duplicate_field("v"));
-                            }
-                            ver = Some(map.next_value::<i32>()?);
-                        }
-                        Field::Request => {
-                            let Some(kind) = kind else {
-                                return Err(de::Error::custom("Field 'q' must come after field 'y'"));
-                            };
-                            let Some(method) = method else {
-                                return Err(de::Error::custom("Field 'q' must come after field 'y'"));
-                            };
-                            if kind != Kind::Request {
-                                return Err(de::Error::custom("Field 'q' is only valid for request messages"));
-                            }
-                            if body.is_some() {
-                                return Err(de::Error::duplicate_field("q"));
-                            }
-                            let value = map.next_value::<CborValue>()?;
-                            body = Body::from_value(kind, method, value)
-                                .map_err(de::Error::custom)?;
-
-                        },
-                        Field::Response => {
-                            let Some(kind) = kind else {
-                                return Err(de::Error::custom("Field 'r' must come after field 'y'"));
-                            };
-                            let Some(method) = method else {
-                                return Err(de::Error::custom("Field 'r' must come after field 'y'"));
-                            };
-                            if kind != Kind::Response {
-                                return Err(de::Error::custom("Field 'r' is only valid for response messages"));
-                            }
-                            if body.is_some() {
-                                return Err(de::Error::duplicate_field("r"));
-                            }
-                            let value = map.next_value::<CborValue>()?;
-                            body = Body::from_value(kind, method, value)
-                                .map_err(de::Error::custom)?;
-                        },
-                        Field::Error => {
-                            let Some(kind) = kind else {
-                                return Err(de::Error::custom("Field 'e' must come after field 'y'"));
-                            };
-                            if kind != Kind::Error {
-                                return Err(de::Error::custom("Field 'e' is only valid for error messages"));
-                            };
-                            if body.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            }
-                            let value = map.next_value::<CborValue>()?;
-                            body = Body::from_value(kind, Method::Unknown, value)
-                                .map_err(de::Error::custom)?;
-                        },
-                        _ => _ = map.next_value::<IgnoredAny>()?,
-                    }
-                }
-
-                let mut msg = Message::new(
-                    kind.ok_or_else(|| de::Error::missing_field("y"))?,
-                    method.ok_or_else(|| de::Error::missing_field("y"))?,
-                    txid.ok_or_else(|| de::Error::missing_field("t"))?,
-                    body
-                );
-                msg.ver = ver.ok_or_else(|| de::Error::missing_field("v"))?;
-                Ok(msg)
-            }
-        }
-        de.deserialize_map(FieldVisitor)
+        let mut msg = Message::new(kind, method, s.txid, body);
+        msg.ver = s.ver;
+        Ok(msg)
     }
 }
 
@@ -604,24 +530,8 @@ pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: Strin
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}/{}]", self.method, self.kind)?;
-        if let Some(id) = self.nodeid.as_ref() {
-            write!(f, " id:{}", id)?;
-        }
-        write!(f, ", txid: {}", self.txid)?;
-        if let Some(body) = self.body.as_ref() {
-            write!(f, ", body: {}", body)?;
-        }
-        if self.ver != 0 {
-            write!(f, ", version: {}", version::format_version(self.ver))?;
-        }
-        if let (Some(remote_id), Some(remote_addr)) = (self.remote_id.as_ref(), self.remote_addr.as_ref()) {
-            if self.nodeid.as_ref().map_or(false, |id| id == remote_id) {
-                write!(f, ", from: {}", remote_addr)?;
-            } else {
-                write!(f, ", to: {}@{}", remote_id, remote_addr)?;
-            }
-        }
-        Ok(())
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
     }
 }

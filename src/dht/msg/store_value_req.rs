@@ -1,20 +1,15 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use hex;
-use serde::{
-    Serialize, Deserialize, Serializer, Deserializer,
-    de::{self, Visitor, MapAccess, IgnoredAny},
-    ser::SerializeMap,
-};
-
+use std::fmt;
+use serde::{Serialize, Deserialize};
 use crate::{
     Id,
     Value,
-    cryptobox::Nonce
+    cryptobox::Nonce,
+    errors::{Error, Result, ProtocolError},
 };
 
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeStoreValueRequest", try_from = "SerdeStoreValueRequest")]
 pub(crate) struct StoreValueRequest {
     token: i32,
     expected_seq: i32,
@@ -41,213 +36,116 @@ impl StoreValueRequest {
     }
 }
 
-impl Serialize for StoreValueRequest {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let value = &self.value;
-        let mut map = se.serialize_map(None)?;
+#[derive(Serialize, Deserialize)]
+struct SerdeStoreValueRequest {
+    #[serde(rename = "tok")]
+    token: i32,
+    #[serde(rename = "cas")]
+    #[serde(skip_serializing_if = "utils::is_default_expected_seq")]
+    #[serde(default = "utils::default_expected_seq")]
+    #[serde(deserialize_with = "utils::deserialize_expected_seq")]
+    expected_seq: i32,
+    #[serde(rename = "seq")]
+    #[serde(default = "utils::default_seq")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(deserialize_with = "utils::deserialize_seq")]
+    seq: i32,
+    #[serde(rename = "k", skip_serializing_if = "crate::is_default")]
+    public_key: Option<Id>,
+    #[serde(rename = "rec", skip_serializing_if = "crate::is_default")]
+    recipient: Option<Id>,
+    #[serde(rename = "n", skip_serializing_if = "crate::is_default")]
+    nonce: Option<Vec<u8>>,
+    #[serde(rename = "sig", skip_serializing_if = "crate::is_default")]
+    signature: Option<Vec<u8>>,
+    #[serde(rename = "v")]
+    data: Vec<u8>,
+}
 
-        map.serialize_entry("tok", &self.token)?;
-        if self.expected_seq >= 0 {
-            map.serialize_entry("cas", &self.expected_seq)?;
+impl Into<SerdeStoreValueRequest> for StoreValueRequest {
+    fn into(self) -> SerdeStoreValueRequest {
+        let value = self.value;
+        SerdeStoreValueRequest {
+            token       : self.token,
+            expected_seq: self.expected_seq,
+            seq         : value.sequence_number(),
+            public_key  : value.public_key().cloned(),
+            recipient   : value.recipient().cloned(),
+            nonce       : value.nonce().map(|n| n.as_bytes().to_vec()),
+            signature   : value.signature().map(|v| v.to_vec()),
+            data        : value.data().to_vec(),
         }
-        if value.sequence_number() > 0 {
-            map.serialize_entry("seq", &value.sequence_number())?;
-        }
-        if let Some(pk) = value.public_key() {
-            map.serialize_entry("k", &pk)?;
-        }
-        if let Some(rec) = value.recipient() {
-            map.serialize_entry("rec", &rec)?;
-        }
-        if let Some(nonce) = value.nonce() {
-            map.serialize_entry("n", nonce.as_bytes())?;
-        }
-        if let Some(sig) = value.signature() {
-            map.serialize_entry("sig", &sig)?;
-        }
-        map.serialize_entry("v", value.data())?;
-        map.end()
     }
 }
 
-impl<'de> Deserialize<'de> for StoreValueRequest {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        enum Field {
-            Token,          // "tok"
-            Cas,            // "cas"
-            PublicKey,      // "k"
-            Recipient,      // "rec"
-            Nonce,          // "n"
-            Seq,            // "seq"
-            Signature,      // "sig"
-            Data,           // "v"
-            Ignore
+impl TryFrom<SerdeStoreValueRequest> for StoreValueRequest {
+    type Error = Error;
+
+    fn try_from(s: SerdeStoreValueRequest) -> Result<Self> {
+        if s.data.is_empty() {
+            return Err(ProtocolError::new("data field \"v\" cannot be empty"));
         }
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "tok"   => Ok(Field::Token),
-                    "cas"   => Ok(Field::Cas),
-                    "k"     => Ok(Field::PublicKey),
-                    "rec"   => Ok(Field::Recipient),
-                    "n"     => Ok(Field::Nonce),
-                    "seq"   => Ok(Field::Seq),
-                    "sig"   => Ok(Field::Signature),
-                    "v"     => Ok(Field::Data),
-                    _       => Ok(Field::Ignore),
-                }
-            }
-        }
+        let nonce = s.nonce.map(|v| {
+            Nonce::try_from(v.as_slice())
+                .map_err(|_| ProtocolError::new("invalid nonce length"))
+        }).transpose()?;
 
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = StoreValueRequest;
+        let value = Value::packed(
+            s.public_key,
+            s.recipient,
+            nonce,
+            s.signature,
+            s.data,
+            s.seq
+        );
+        // if !value.is_valid() {
+        //     return Err(ProtocolError::new("The value is invalid"));
+        // }
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a StoreValueRequest struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut token: Option<i32>  = None;
-                let mut cas  : Option<i32>  = None;
-                let mut pk   : Option<Id>   = None;
-                let mut rec  : Option<Id>   = None;
-                let mut nonce: Option<Vec<u8>> = None;
-                let mut seq  : Option<i32>  = None;
-                let mut sig  : Option<Vec<u8>> = None;
-                let mut data : Option<Vec<u8>> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Token => {
-                            if token.is_some() {
-                                return Err(de::Error::duplicate_field("tok"));
-                            } else {
-                                token = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Cas => {
-                            if cas.is_some() {
-                                return Err(de::Error::duplicate_field("cas"));
-                            } else {
-                                cas = Some(map.next_value()?);
-                            }
-                        }
-                        Field::PublicKey => {
-                            if pk.is_some() {
-                                return Err(de::Error::duplicate_field("k"));
-                            } else {
-                                pk = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Recipient => {
-                            if rec.is_some() {
-                                return Err(de::Error::duplicate_field("rec"));
-                            } else {
-                                rec = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Nonce => {
-                            if nonce.is_some() {
-                                return Err(de::Error::duplicate_field("n"));
-                            } else {
-                                nonce = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Seq => {
-                            if seq.is_some() {
-                                return Err(de::Error::duplicate_field("seq"));
-                            } else {
-                                seq = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Signature => {
-                            if sig.is_some() {
-                                return Err(de::Error::duplicate_field("sig"));
-                            } else {
-                                sig = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Data => {
-                            if data.is_some() {
-                                return Err(de::Error::duplicate_field("v"));
-                            } else {
-                                data = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let expected_seq = cas.unwrap_or(-1);
-                if expected_seq < -1 {
-                    return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
-                }
-                let seq = seq.unwrap_or(0);
-                if seq < 0 {
-                    return Err(de::Error::custom("sequence number must be larger than or equal to 0"));
-                }
-
-                let Some(data) = data else {
-                    return Err(de::Error::missing_field("v"));
-                };
-                if data.is_empty() {
-                    return Err(de::Error::custom("data field \"v\" cannot be empty"));
-                }
-
-                let nonce = nonce.map(|v| {
-                    Nonce::try_from(v.as_slice())
-                        .map_err(|_| de::Error::custom("invalid nonce length"))
-                }).transpose()?;
-
-                let value = Value::packed(pk, rec, nonce, sig, data, seq);
-                Ok(StoreValueRequest::new(
-                    value,
-                    token.ok_or_else(|| de::Error::missing_field("tok"))?,
-                    expected_seq
-                ))
-            }
-        }
-
-        de.deserialize_map(FieldVisitor)
+        Ok(StoreValueRequest::new(
+            value,
+            s.token,
+            s.expected_seq
+        ))
     }
 }
 
 impl fmt::Display for StoreValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = &self.value;
-        write!(f, "tok:{}", self.token)?;
-        if self.expected_seq >= 0 {
-            write!(f, ",cas:{}", self.expected_seq)?;
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
+mod utils {
+    use serde::{Deserialize, Deserializer};
+    use std::result::Result as SResult;
+
+    pub(crate) fn is_default_expected_seq(v: &i32) -> bool {
+        *v < 0
+    }
+
+    pub(crate) fn default_expected_seq() -> i32 { -1 }
+    pub(crate) fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < -1 {
+            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
         }
-        if value.sequence_number() > 0 {
-            write!(f, ",seq:{}", value.sequence_number())?;
+        Ok(seq)
+    }
+
+    pub(crate) fn default_seq() -> i32 { 0 }
+    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < 0 {
+            return Err(serde::de::Error::custom("seq must be non-negative"));
         }
-        if let Some(pk) = value.public_key() {
-            write!(f, ",k:{}", pk)?;
-        }
-        if let Some(rec) = value.recipient() {
-            write!(f, ",rec:{}", rec)?;
-        }
-        if let Some(nonce) = value.nonce() {
-            write!(f, ",n:{}", hex::encode(nonce.as_bytes()))?;
-        }
-        if let Some(sig) = value.signature() {
-            write!(f, ",sig:{}", hex::encode(sig))?;
-        }
-        write!(f, ",v:{}", hex::encode(value.data()))?;
-        Ok(())
+        Ok(seq)
     }
 }

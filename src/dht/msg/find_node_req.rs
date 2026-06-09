@@ -1,6 +1,5 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
-
 use crate::{
     Id,
     dht::msg::lookup_req::{
@@ -66,11 +65,8 @@ impl From<SerdeFindNodeRequest> for FindNodeRequest {
 
 impl fmt::Display for FindNodeRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "t:{},w:{}",
-            self.target(),
-            self.want()
-        )?;
-        Ok(())
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
     }
 }

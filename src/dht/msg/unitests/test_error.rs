@@ -12,6 +12,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded = serde_cbor::from_slice::<Error>(&encoded)
             .expect("Deserialization failed");
 
@@ -27,6 +28,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&err)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded = serde_cbor::from_slice::<Error>(&encoded)
             .expect("Deserialization failed");
 

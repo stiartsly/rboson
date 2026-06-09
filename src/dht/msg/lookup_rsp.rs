@@ -3,6 +3,7 @@ use crate::{
     NodeInfo,
 };
 
+#[derive(Clone)]
 pub(crate) struct Data {
     pub(crate) nodes4  : Option<Vec<NodeInfo>>,
     pub(crate) nodes6  : Option<Vec<NodeInfo>>,

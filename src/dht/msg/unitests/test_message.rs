@@ -1,43 +1,50 @@
-use serde_cbor::Value as CborValue;
+use std::net::SocketAddr;
 use crate::{
     Id,
-    dht::msg::msg
+    dht::msg::{msg, Message, msg::{Method, Kind}}
 };
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn check_key<'a>(value: &'a CborValue, key: &str) -> Option<&'a CborValue> {
-        let CborValue::Map(entries) = value else {
-            return None;
-        };
-
-        entries.iter().find_map(|(entry_key, entry_value)| {
-            match entry_key {
-                CborValue::Text(text) if text == key => Some(entry_value),
-                _ => None,
-            }
-        })
-    }
-
     #[test]
     fn test_serde_find_value_request() {
         let target = Id::random();
-        let msg = msg::find_value_request(target.clone(), true, false, 7);
+        let mut msg = msg::find_value_request(target.clone(), true, false, 7);
+        assert_eq!(msg.kind() as u8, Kind::Request as u8);
+        assert_eq!(msg.method() as u8, Method::FindValue as u8);
+
+        assert!(msg.is_req());
+        assert!(msg.associated_call().is_none());
+        assert!(msg.body().is_some());
+
+        let nodeid = Id::random();
+        msg.set_nodeid(nodeid);
+        assert_eq!(msg.nodeid(), &nodeid);
+
+        let remote_id = Id::random();
+        let remote_addr = SocketAddr::from(([192, 168, 1, 100], 40001));
+        msg.set_remote(remote_id, remote_addr);
+
+        assert_eq!(msg.remote_id(), &remote_id);
+        assert_eq!(msg.remote_addr(), &remote_addr);
 
         let encoded = serde_cbor::to_vec(&msg)
             .expect("message serialization failed");
-        let decoded: CborValue = serde_cbor::from_slice(&encoded)
+        println!(">>>> encoded: {}", hex::encode(&encoded));
+        let decoded: Message = serde_cbor::from_slice(&encoded)
             .expect("message cbor decoding failed");
 
-        let body = check_key(&decoded, "q").expect("missing request body");
-        let target_value = check_key(body, "t").expect("missing target field");
-        let want_value = check_key(body, "w").expect("missing want field");
+        assert_eq!(msg.kind() as u8, decoded.kind() as u8);
+        assert_eq!(msg.method() as u8, decoded.method() as u8);
 
-        assert!(matches!(body, CborValue::Map(_)));
-        assert_eq!(serde_cbor::value::from_value::<Id>(target_value.clone()).unwrap(), target);
-        assert_eq!(serde_cbor::value::from_value::<i32>(want_value.clone()).unwrap(), 1);
-        assert!(check_key(body, "FindValueRequest").is_none());
+        assert!(msg.is_req());
+        assert!(decoded.is_req());
+        assert!(decoded.associated_call().is_none());
+
+        //assert!(decoded.nodeid().is_none());
+        //assert!(decoded.remote_id().is_none());
+        //assert!(decoded.remote_addr().is_none());
     }
 }

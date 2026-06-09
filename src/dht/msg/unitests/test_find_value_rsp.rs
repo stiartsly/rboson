@@ -51,6 +51,8 @@ mod tests {
         assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
         assert_eq!(rsp.nodes4(), rsp.nodes(Network::IPv4));
         assert_eq!(rsp.nodes6(), rsp.nodes(Network::IPv6));
+
+        // println!("nodes4: {}", rsp);
     }
 
     #[test]
@@ -83,6 +85,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 
@@ -114,6 +117,7 @@ mod tests {
 
         let encoded = serde_cbor::to_vec(&rsp)
             .expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
         let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
             .expect("Deserialization failed");
 

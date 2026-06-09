@@ -1,16 +1,13 @@
-use std::{
-    fmt,
-    result::Result as SResult
-};
-use hex;
-use serde::{
-    Serialize, Deserialize, Serializer, Deserializer,
-    de::{self, Visitor, MapAccess, IgnoredAny},
-    ser::SerializeMap,
+use std::fmt;
+use serde::{Serialize, Deserialize};
+use crate::{
+    Id, PeerInfo,
+    errors::{Error, Result},
 };
 
-use crate::{Id, PeerInfo};
-
+#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeAnnouncePeerRequest", try_from = "SerdeAnnouncePeerRequest")]
 pub(crate) struct AnnouncePeerRequest {
     token:  i32,
     peer:   PeerInfo,
@@ -43,244 +40,125 @@ impl AnnouncePeerRequest {
     }
 }
 
-impl Serialize for AnnouncePeerRequest {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let peer = &self.peer;
-        let mut map = se.serialize_map(None)?;
+#[derive(Serialize, Deserialize)]
+struct SerdeAnnouncePeerRequest {
+    #[serde(rename = "tok")]
+    token: i32,
+    #[serde(rename = "cas")]
+    #[serde(skip_serializing_if = "utils::is_default_expected_seq")]
+    #[serde(default = "utils::default_expected_seq")]
+    #[serde(deserialize_with = "utils::deserialize_expected_seq")]
+    expected_seq: i32,
+    #[serde(rename = "k")]
+    id: Id,
+    #[serde(rename = "n")]
+    nonce: Vec<u8>,
+    #[serde(rename = "seq")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(default = "utils::default_seq")]
+    #[serde(deserialize_with = "utils::deserialize_seq")]
+    seq: i32,
+    #[serde(rename = "o")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    node_id: Option<Id>,
+    #[serde(rename = "os")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    node_sig: Option<Vec<u8>>,
+    #[serde(rename = "sig")]
+    sig: Vec<u8>,
+    #[serde(rename = "f")]
+    fingerprint: u64,
+    #[serde(rename = "e")]
+    endpoint: String,
+    #[serde(rename = "ex")]
+    #[serde(skip_serializing_if = "crate::is_default")]
+    extra: Option<Vec<u8>>,
+}
 
-        map.serialize_entry("tok", &self.token)?;
-        if self.expected_seq >= 0 {
-            map.serialize_entry("cas", &self.expected_seq)?;
+impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
+    fn into(self) -> SerdeAnnouncePeerRequest {
+        let peer = self.peer;
+        SerdeAnnouncePeerRequest {
+            token   : self.token,
+            expected_seq: self.expected_seq,
+            id      : peer.id().clone(),
+            nonce   : peer.nonce().to_vec(),
+            seq     : peer.sequence_number(),
+            node_id : if peer.is_authenticated() {
+                peer.nodeid().cloned()
+            } else {
+                None
+            },
+            node_sig: if peer.is_authenticated() {
+                peer.node_signature().map(|v| v.to_vec())
+            } else {
+                None
+            },
+            sig     : peer.signature().to_vec(),
+            fingerprint: peer.fingerprint(),
+            endpoint: peer.endpoint().to_string(),
+            extra   : peer.extra_data().map(|v| v.to_vec()),
         }
-        map.serialize_entry("k", peer.id())?;
-        map.serialize_entry("n", peer.nonce())?;
-        if peer.sequence_number() > 0 {
-            map.serialize_entry("seq", &peer.sequence_number())?;
-        }
-        if peer.is_authenticated() {
-            map.serialize_key("o")?;
-            map.serialize_value(peer.nodeid().unwrap())?;
-            map.serialize_key("os")?;
-            map.serialize_value(peer.node_signature().unwrap())?;
-        }
-        map.serialize_key("sig")?;
-        map.serialize_value(peer.signature())?;
-        map.serialize_entry("f", &peer.fingerprint())?;
-        map.serialize_entry("e", peer.endpoint())?;
-        if let Some(extra) = peer.extra_data() {
-            map.serialize_key("ex")?;
-            map.serialize_value(extra)?;
-        }
-        map.end()
     }
 }
 
-impl<'de> Deserialize<'de> for AnnouncePeerRequest {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        enum Field {
-            Token,          // "tok"
-            Cas,            // "cas"
-            PeerId,         // "k"
-            Nonce,          // "n"
-            Seq,            // "seq"
-            NodeId,         // "o"
-            NodeSig,        // "os"
-            Signature,      // "sig"
-            Fingerprint,    // "f"
-            Endpoint,       // "e"
-            Extra,          // "ex"
-            Ignore          // Ignore unknown fields
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(de: D) -> SResult<Field, D::Error>
-            where D: Deserializer<'de>,
-            {
-                let key = String::deserialize(de)?;
-                match key.as_str() {
-                    "tok"   => Ok(Field::Token),
-                    "cas"   => Ok(Field::Cas),
-                    "k"     => Ok(Field::PeerId),
-                    "n"     => Ok(Field::Nonce),
-                    "seq"   => Ok(Field::Seq),
-                    "o"     => Ok(Field::NodeId),
-                    "os"    => Ok(Field::NodeSig),
-                    "sig"   => Ok(Field::Signature),
-                    "f"     => Ok(Field::Fingerprint),
-                    "e"     => Ok(Field::Endpoint),
-                    "ex"    => Ok(Field::Extra),
-                    _       => Ok(Field::Ignore),
-                }
-            }
-        }
-
-        struct FieldVisitor;
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = AnnouncePeerRequest;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("an AnnouncePeerRequest struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut token   : Option<i32>       = None;
-                let mut cas     : Option<i32>       = None;
-                let mut peer_id : Option<Id>        = None;
-                let mut seq     : Option<i32>       = None;
-                let mut node_id : Option<Id>        = None;
-                let mut nonce   : Option<Vec<u8>>   = None;
-                let mut node_sig: Option<Vec<u8>>   = None;
-                let mut sig     : Option<Vec<u8>>   = None;
-                let mut fingerprint: Option<u64>    = None;
-                let mut endpoint: Option<String>    = None;
-                let mut extra   : Option<Vec<u8>>   = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Token => {
-                            if token.is_some() {
-                                return Err(de::Error::duplicate_field("tok"));
-                            } else {
-                                token = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Cas => {
-                            if cas.is_some() {
-                                return Err(de::Error::duplicate_field("cas"));
-                            } else {
-                                cas = Some(map.next_value()?);
-                            }
-                        }
-                        Field::PeerId => {
-                            if peer_id.is_some() {
-                                return Err(de::Error::duplicate_field("k"));
-                            } else {
-                                peer_id = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Nonce => {
-                            if nonce.is_some() {
-                                return Err(de::Error::duplicate_field("n"));
-                            } else {
-                                nonce = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Seq => {
-                            if seq.is_some() {
-                                return Err(de::Error::duplicate_field("seq"));
-                            } else {
-                                seq = Some(map.next_value()?);
-                            }
-                        }
-                        Field::NodeId => {
-                            if node_id.is_some() {
-                                return Err(de::Error::duplicate_field("o"));
-                            } else {
-                                node_id = Some(map.next_value()?);
-                            }
-                        }
-                        Field::NodeSig => {
-                            if node_sig.is_some() {
-                                return Err(de::Error::duplicate_field("os"));
-                            } else {
-                                node_sig = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Signature => {
-                            if sig.is_some() {
-                                return Err(de::Error::duplicate_field("sig"));
-                            } else {
-                                sig = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Fingerprint => {
-                            if fingerprint.is_some() {
-                                return Err(de::Error::duplicate_field("f"));
-                            } else {
-                                fingerprint = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Endpoint => {
-                            if endpoint.is_some() {
-                                return Err(de::Error::duplicate_field("e"));
-                            } else {
-                                endpoint = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Extra => {
-                            if extra.is_some() {
-                                return Err(de::Error::duplicate_field("ex"));
-                            } else {
-                                extra = Some(map.next_value()?);
-                            }
-                        }
-                        Field::Ignore => {
-                            let _ = map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let expected_seq = cas.unwrap_or(-1);
-                if expected_seq < -1 {
-                    return Err(de::Error::custom("expected_seq must be larger than or equal to -1"));
-                }
-                let seq = seq.unwrap_or(0);
-                if seq < 0 {
-                    return Err(de::Error::custom("seq must be non-negative"));
-                }
-
-                let peer = PeerInfo::packed(
-                    peer_id.ok_or_else(|| de::Error::missing_field("k"))?,
-                    nonce.ok_or_else(|| de::Error::missing_field("n"))?,
-                    seq,
-                    node_id,
-                    node_sig,
-                    sig.ok_or_else(|| de::Error::missing_field("sig"))?,
-                    fingerprint.ok_or_else(|| de::Error::missing_field("f"))?,
-                    endpoint.ok_or_else(|| de::Error::missing_field("e"))?,
-                    extra,
-                );
-
-                Ok(AnnouncePeerRequest::new(
-                    peer,
-                    token.ok_or_else(|| de::Error::missing_field("tok"))?,
-                    Some(expected_seq)
-                ))
-            }
-        }
-
-        de.deserialize_map(FieldVisitor)
+impl TryFrom<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
+    type Error = Error;
+    fn try_from(s: SerdeAnnouncePeerRequest) -> Result<Self> {
+        let peer = PeerInfo::packed(
+            s.id,
+            s.nonce,
+            s.seq,
+            s.node_id,
+            s.node_sig,
+            s.sig,
+            s.fingerprint,
+            s.endpoint,
+            s.extra
+        );
+        Ok(AnnouncePeerRequest {
+            token: s.token,
+            peer,
+            expected_seq: s.expected_seq,
+        })
     }
 }
 
 impl fmt::Display for AnnouncePeerRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let peer = &self.peer;
-        write!(f, "tok:{}", self.token)?;
-        if self.expected_seq >= 0 {
-            write!(f, ",cas:{}", self.expected_seq)?;
+        let json = serde_json::to_string(&self)
+            .map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
+mod utils {
+    use serde::{Deserialize, Deserializer};
+    use std::result::Result as SResult;
+
+    pub(crate) fn is_default_expected_seq(v: &i32) -> bool {
+        *v < 0
+    }
+
+    pub(crate) fn default_expected_seq() -> i32 { -1 }
+    pub(crate) fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < -1 {
+            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
         }
-        write!(f, ",k:{}", peer.id())?;
-        write!(f, ",n:{}", hex::encode(peer.nonce()))?;
-        if peer.sequence_number() > 0 {
-            write!(f, ",seq:{}", peer.sequence_number())?;
+        Ok(seq)
+    }
+
+    pub(crate) fn default_seq() -> i32 { 0 }
+    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+    where  D: Deserializer<'de>,
+    {
+        let seq = i32::deserialize(de)?;
+        if seq < 0 {
+            return Err(serde::de::Error::custom("seq must be non-negative"));
         }
-        if peer.is_authenticated() {
-            write!(f, ",o:{}", peer.nodeid().unwrap())?;
-            write!(f, ",os:{}", hex::encode(peer.node_signature().unwrap()))?;
-        }
-        write!(f, ",sig:{}", hex::encode(peer.signature()))?;
-        write!(f, ",f:{}", peer.fingerprint())?;
-        write!(f, ",e:{}", peer.endpoint())?;
-        if let Some(extra) = peer.extra_data() {
-            write!(f, ",ex:{}", hex::encode(extra))?;
-        }
-        Ok(())
+        Ok(seq)
     }
 }

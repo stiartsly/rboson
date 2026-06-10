@@ -5,7 +5,8 @@ use std::{
 use log::error;
 
 use crate::{
-    Id, errors::ProtocolError
+    Id,
+    errors::{ProtocolError},
 };
 use crate::dht::{
     msg::{Body, Message, msg::Kind},
@@ -285,7 +286,7 @@ impl RpcCall {
         self.update_state(State::Err);
     }
 
-    pub(crate) fn fail(&mut self, _err: Box<dyn StdError + Send>) {
+    pub(crate) fn fail(&mut self, _err: &Box<dyn StdError + Send + Sync>) {
         if self.state.is_final() {
             return;
         }

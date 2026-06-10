@@ -91,7 +91,7 @@ impl TaskManager {
         }
     }
 
-    pub(crate) fn cancel_all(&self) {
+    pub(crate) fn stop(&self) {
         self.canceling.store(true, Ordering::SeqCst);
 
         let _ = locked!(self.running).drain();

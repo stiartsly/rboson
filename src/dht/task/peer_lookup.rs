@@ -1,16 +1,20 @@
 use std::{
     any::Any,
-    sync::{Mutex, Weak}
+    sync::{Arc, Mutex, Weak}
 };
 use log::{debug, error, warn};
 
-use crate::{Id, PeerInfo};
+use crate::{Id, Network, PeerInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
     eligible_peers::EligiblePeers,
     rpc::RpcCall,
-    routing::{KBucket, KBucketEntry, KClosestNodes},
+    routing::{
+        KBucket, KBucketEntry,
+        KClosestNodes,
+        RoutingTable
+    },
     msg::{msg, Body, LookupResponse},
     task::{
         Task, TaskData,
@@ -23,7 +27,9 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Weak<Mutex<DHT>>
+    dht: Weak<Mutex<DHT>>,
+    rt : Arc<Mutex<RoutingTable>>,
+    network: Network,
 }
 
 impl PeerLookupTask {
@@ -34,11 +40,15 @@ impl PeerLookupTask {
         expected_count: usize,
         done_on_eligible_result: bool
     ) -> Self {
+        let strong = dht.upgrade().expect("DHT instance dropped");
+        let locked = strong.lock().unwrap();
         Self {
-            base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
-            result: EligiblePeers::new(target, expected_seq, expected_count),
-            dht,
+            base_data   : TaskData::new(),
+            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
+            result      : EligiblePeers::new(target, expected_seq, expected_count),
+            dht         : dht.clone(),
+            rt          : locked.rt(),
+            network     : locked.network()
         }
     }
 
@@ -87,18 +97,8 @@ impl Task for PeerLookupTask {
     }
 
     fn prepare(&mut self) {
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to prepare: DHT instance dropped",
-                self.task_name(),
-                self.task_id()
-            );
-            return;
-        };
-
         let entries: Vec<KBucketEntry> = {
-            let locked_dht = strong_dht.lock().unwrap();
-            let cloned_rt = locked_dht.rt();
-            let locked_rt = cloned_rt.lock().unwrap();
+            let locked_rt = self.rt.lock().unwrap();
             let mut kns = KClosestNodes::new(
                 &locked_rt,
                 self.target().clone(),
@@ -119,16 +119,6 @@ impl Task for PeerLookupTask {
     }
 
     fn iterate(&mut self) {
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to iterate: DHT instance dropped",
-                    self.task_name(),
-                    self.task_id()
-            );
-            return;
-        };
-        let network = strong_dht.lock().unwrap().network();
-        drop(strong_dht);
-
         LookupTask::iterate(self);
 
         while self.can_dorequest() {
@@ -140,8 +130,8 @@ impl Task for PeerLookupTask {
             let target = next.clone().into();
             let msg = msg::find_peer_request(
                 self.target().clone(),
-                network.is_ipv4(),
-                network.is_ipv6(),
+                self.network.is_ipv4(),
+                self.network.is_ipv6(),
                 self.result.expected_seq(),
                 self.result.expected_count() as i32,
             );
@@ -204,18 +194,7 @@ impl Task for PeerLookupTask {
                 self.result.prune();
             }
         } else {
-            let Some(strong_dht) = self.dht.upgrade() else {
-                error!("{}#{} failed to iterate: DHT instance dropped",
-                        self.task_name(),
-                        self.task_id()
-                );
-                return;
-            };
-
-            let network = strong_dht.lock().unwrap().network();
-            let nodes = body.nodes(network);
-            drop(strong_dht);
-
+            let nodes = body.nodes(self.network);
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",
                     self.task_name(),

@@ -94,6 +94,15 @@ mod routing {
     pub(crate) mod kclosest_nodes;
     pub(crate) mod routing_table;
 
+    #[cfg(test)]
+    mod unitests {
+        mod test_prefix;
+        mod test_kclosest_nodes;
+        mod test_routing_table;
+        mod test_kbucket_entry;
+        mod test_kbucket;
+    }
+
     pub(crate) use {
         prefix::Prefix,
         kbucket::KBucket,
@@ -233,12 +242,6 @@ pub(crate) mod utils {
 mod unitests {
     mod test_addr;
     mod test_node_configuration;
-
-    // routingtable
-    mod test_prefix;
-    mod test_kclosest_nodes;
-    mod test_routing_table;
-    mod test_kbucket_entry;
 
     mod test_rpccall;
     mod test_token_manager;

@@ -66,8 +66,8 @@ impl KBucket {
         self.entries.len()
     }
 
-    pub(crate) fn entries(&self) -> Vec<KBucketEntry> {
-        self.entries.values().cloned().collect()
+    pub(crate) fn entries(&self) -> &Vec<KBucketEntry> {
+        &self.entries
     }
 
     #[allow(unused)]
@@ -80,7 +80,7 @@ impl KBucket {
     }
 
     pub(crate) fn contains(&self, id: &Id) -> bool {
-        self.entries.iter().any(|(_, entry)| entry.id() == id)
+        self.entries.iter().position(|entry| entry.id() == id).is_some()
     }
 
     // bucket.entry(id)     : return the entry for the id;
@@ -92,14 +92,13 @@ impl KBucket {
 
         if let Some(id) = id {
             return self.entries.iter()
-                .find(|(_, entry)| entry.id() == id)
-                .map(|(_, v)| v.clone());
+                .find(|entry| entry.id() == id).cloned();
         }
 
-        let pos = unsafe {
+        let rand_idx = unsafe {
             randombytes_uniform(self.entries.len() as u32)
         } as usize;
-        self.entries.values().nth(pos).cloned()
+        self.entries.get(rand_idx).cloned()
     }
 
     pub(crate) fn update_refresh_time(&mut self) {
@@ -107,38 +106,41 @@ impl KBucket {
     }
 
     pub(crate) fn needs_refreshing(&self) -> bool {
-        self.last_refreshed.map_or(true, |v| {
-            crate::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL
-        }) && self.entries.iter().any(|(_, v)| v.needs_ping())
+        let outdated = self.last_refreshed.map_or(true, |v| {
+            v.elapsed().unwrap().as_millis() > KBucket::REFRESH_INTERVAL
+        });
+        outdated && self.entries.iter().any(|v| v.needs_ping())
     }
 
-    // General DHT node does not support replacement
-    pub(crate) fn needs_replacement_ping(&self) -> bool { false }
+    pub(crate) fn needs_replacement_ping(&self) -> bool {
+        // General DHT node does not support replacement
+        false
+    }
 
     pub(crate) fn needs_replacement(&self) -> bool {
-        self.entries.iter().any(|(_, v)| v.needs_replacement())
+        self.entries.iter().any(|v| v.needs_replacement())
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<KBucketEntry> {
+        self.entries.pop()
     }
 
     pub(crate) fn put(&mut self, new: KBucketEntry) {
-        println!(">>>####### kbucket >>line: {}", line!());
-        for (_, v) in self.entries.iter_mut() {
-            if v.equals(&new) {
-                v.merge(new);
+        for item in self.entries.iter_mut() {
+            if item.equals(&new) {
+                item.merge(new);
                 return;
             }
-            if v.matches(&new) {
+            if item.matches(&new) {
                 info!("New node {} claims same ID or IP as {}, might be impersonation attack or IP change.
-                    ignoring until old entry times out", new, v);
+                    ignoring until old entry times out", new, item);
                 return;
             }
         }
-        println!(">>>####### kbucket >>line: {} reachable: {}",
-             line!(), new.is_reachable());
 
         if new.is_reachable() {
             // insert to the list if it still has room
             if self.entries.len() < KBucket::MAX_ENTRIES {
-                println!(">>>####### kbucket >>line: {}", line!());
                 self._put_as_main_entry(new);
                 return;
             }
@@ -156,64 +158,72 @@ impl KBucket {
     }
 
     fn _put_as_main_entry(&mut self, _entry: KBucketEntry) {
+        let youngest = match !self.entries.is_empty() {
+            true => self.entries.last().cloned(),
+            false => None,
+        };
         let created_time = _entry.created_time().clone();
-        self.entries.insert(created_time, _entry);
-    }
+        self.entries.push(_entry);
 
-    fn _replace_bad_entry(&mut self, entry: KBucketEntry) {
-        let key = self.entries.iter().find(|(_, v)|
-             v.needs_replacement()).map(|(k, _)| k.clone());
+        let Some(youngest) = &youngest else {
+            return;
+        };
 
-        if let Some(key) = key {
-            self.entries.remove(&key);
-            self._put_as_main_entry(entry);
-        } else {
-            self.entries.pop_last();
-            self._put_as_main_entry(entry);
+        let unordered = &created_time < youngest.created_time();
+        if unordered {
+            self.entries.sort_by(|a, b|
+                a.created_time().cmp(&b.created_time()));
         }
     }
 
     pub(crate) fn on_timeout(&mut self, id: &Id) {
-        let found = self.entries.iter_mut().find(|(_, v)| v.id() == id);
-        if let Some((_, v)) = found {
-            v.on_timeout();
+        let found = self.entries.iter_mut().find(|item| item.id() == id);
+        if let Some(item) = found {
+            item.on_timeout();
         }
     }
 
     pub(crate) fn on_request_sent(&mut self, id: &Id) {
-        let found = self.entries.iter_mut().find(|(_, v)| v.id() == id);
-        if let Some((_, v)) = found {
-            v.on_request_sent();
+        let found = self.entries.iter_mut().find(|item| item.id() == id);
+        if let Some(item) = found {
+            item.on_request_sent();
         }
     }
 
     pub(crate) fn on_responded(&mut self, id: &Id, rtt: u64) {
-        let found = self.entries.iter_mut().find(|(_, v)| v.id() == id);
-        if let Some((_, v)) = found {
-            v.on_responded(rtt);
+        let found = self.entries.iter_mut().find(|item| item.id() == id);
+        if let Some(item) = found {
+            item.on_responded(rtt);
         }
     }
 
     pub(crate) fn _remove_bad_entry(&mut self, entry: KBucketEntry, force: bool
     ) -> Option<KBucketEntry> {
-        let test_cb = |v: &KBucketEntry| {
-            v.equals(&entry) && (force || v.needs_replacement())
+        let pos = self.entries.iter().position(|item| item.equals(&entry));
+        let Some(pos) = pos else {
+            return None;
         };
-        let key = self.entries.iter()
-                    .find(|(_, v)|test_cb(v))
-                    .map(|(k, _)| k.clone());
+        let Some(item) = self.entries.get(pos).map(|v| v.clone()) else {
+            return None;
+        };
+        if force || item.needs_replacement() {
+            self.entries.remove(pos);
+        }
+        Some(item)
+    }
 
-        if let Some(key) = key {
-            self.entries.remove(&key)
-        } else {
-            None
+    fn _replace_bad_entry(&mut self, entry: KBucketEntry) {
+        let idx = self.entries.iter().position(|entry| entry.needs_replacement());
+        if let Some(idx) = idx {
+            self.entries.remove(idx);
+            self._put_as_main_entry(entry);
         }
     }
 
     pub(crate) fn filter<F>(&self, test: F) -> usize
     where F: Fn(&KBucketEntry) -> bool,
     {
-        self.entries.iter().filter(|(_, v)| test(v)).count()
+        self.entries.iter().filter(|entry| test(entry)).count()
     }
 
     pub(crate) fn cleanup(&mut self,
@@ -236,7 +246,7 @@ impl fmt::Display for KBucket {
         } else {
             write!(f, " entries[{}]\n", self.entries.len())?;
         }
-        for v in self.entries.values() {
+        for v in self.entries.iter() {
             write!(f, " - {}\n", v)?;
         }
         Ok(())

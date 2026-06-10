@@ -1,10 +1,10 @@
 use std::{
     any::Any,
-    sync::{Weak, Mutex}
+    sync::{Arc, Weak, Mutex}
 };
 use log::{debug, error};
 
-use crate::{Id, NodeInfo};
+use crate::{Id, Network, NodeInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
@@ -14,6 +14,7 @@ use crate::dht::{
         KBucket,
         KBucketEntry,
         KClosestNodes,
+        RoutingTable,
     },
     task::{
         Task, TaskData,
@@ -33,8 +34,11 @@ pub(crate) struct NodeLookupTask {
     // Whether the task should filter the target node during the lookup process.
     want_target: bool,
 
-    result: Option<NodeInfo>,
-    dht: Weak<Mutex<DHT>>,
+    result  : Option<NodeInfo>,
+
+    dht     : Weak<Mutex<DHT>>,
+    rt      : Arc<Mutex<RoutingTable>>,
+    network : Network,
 }
 
 impl NodeLookupTask {
@@ -43,15 +47,19 @@ impl NodeLookupTask {
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
-        Self {
-            base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
-            bootstrap: false,
-            want_token: false,
-            want_target: false,
-            result: None,
+        let strong = dht.upgrade().expect("DHT instance dropped");
+        let locked = strong.lock().unwrap();
 
-            dht,
+        Self {
+            base_data   : TaskData::new(),
+            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
+            bootstrap   : false,
+            want_token  : false,
+            want_target : false,
+            result      : None,
+            dht         : dht.clone(),
+            rt          : locked.rt(),
+            network     : locked.network()
         }
     }
 
@@ -129,23 +137,13 @@ impl Task for NodeLookupTask {
     }
 
     fn prepare(&mut self) {
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to prepare: DHT instance dropped",
-                    self.task_name(),
-                    self.task_id()
-            );
-            return;
-        };
-
         let target = match self.bootstrap {
             true => self.target().distance(&Id::MAX_ID),
             false => self.target().clone()
         };
 
         let kes:Vec<KBucketEntry> = {
-            let locked_dht = strong_dht.lock().unwrap();
-            let cloned_rt = locked_dht.rt();
-            let locked_rt = cloned_rt.lock().unwrap();
+            let locked_rt = self.rt.lock().unwrap();
              let mut kns = KClosestNodes::new(
                 &locked_rt,
                 target,
@@ -168,16 +166,6 @@ impl Task for NodeLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to iterate: DHT instance dropped",
-                    self.task_name(),
-                    self.task_id()
-            );
-            return;
-        };
-        let network = strong_dht.lock().unwrap().network();
-        drop(strong_dht);
-
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
@@ -188,8 +176,8 @@ impl Task for NodeLookupTask {
             let target = next.clone().into();
             let msg = msg::find_node_request(
                 self.target().clone(),
-                network.is_ipv4(),
-                network.is_ipv6(),
+                self.network.is_ipv4(),
+                self.network.is_ipv6(),
                 Some(self.want_token)
             );
             let cb = Consumer::new(move |_| {
@@ -211,16 +199,6 @@ impl Task for NodeLookupTask {
             return;
         }
 
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to process response: DHT instance dropped",
-                    self.task_name(),
-                    self.task_id()
-            );
-            return;
-        };
-        let network = strong_dht.lock().unwrap().network();
-        drop(strong_dht);
-
         let msg  = call.rsp().expect("panic: no response set");
         let body = msg.body().expect("panic: no body contained in the response");
 
@@ -228,7 +206,7 @@ impl Task for NodeLookupTask {
             panic!("panic: the body should be findValue response.");
         };
 
-        let nodes = body.nodes(network);
+        let nodes = body.nodes(self.network);
         let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;
         };

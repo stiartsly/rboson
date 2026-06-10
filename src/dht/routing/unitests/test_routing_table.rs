@@ -60,22 +60,36 @@ mod tests {
         assert_eq!(rt.size(), 1);
         assert_eq!(rt.is_empty(), false);
         assert_eq!(rt.local_nodeid(), &local_id);
-        assert_eq!(rt.is_home_bucket(&rt.buckets().first().unwrap().lock().unwrap().prefix()), true);
-        assert_eq!(rt.bucket_entry(Some(&Id::random())).is_none(), true);
-        assert_eq!(rt.number_of_entries(), 0);
+
+        let buckets = rt.buckets();
+        let bucket = buckets.first();
+        assert!(bucket.is_some());
+        let bucket = bucket.unwrap();
+        let prefix = bucket.lock().unwrap().prefix().clone();
+        assert!(rt.is_home_bucket(&prefix));
+        assert!(rt.random_entry().is_none());
+        assert!(rt.number_of_entries() == 0);
 
         let id = make_id(0x00, 1);
-        let entry = make_reachable_entry(id, "127.0.0.1:32000");
-        rt.put(entry);
+        let expected_entry = make_reachable_entry(id, "127.0.0.1:32000");
+        rt.put(expected_entry.clone());
 
         assert_eq!(rt.contains(&id), true);
         assert_eq!(rt.number_of_entries(), 1);
-        assert_eq!(rt.bucket_entry(None).is_some(), true);
+        assert_eq!(rt.random_entry().is_some(), true);
+
+        let entry = rt.bucket_entry(&id);
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap(), expected_entry);
 
         let removed = rt.remove(&id);
-        assert_eq!(removed.is_some(), true);
-        assert_eq!(rt.contains(&id), false);
-        assert_eq!(rt.number_of_entries(), 0);
+        assert!(removed.is_some());
+        assert!(!rt.contains(&id));
+        assert!(rt.number_of_entries() == 0);
+        assert_eq!(removed.unwrap(), expected_entry);
+
+        let entry = rt.bucket_entry(&id);
+        assert!(entry.is_none());
     }
 
     #[test]
@@ -103,14 +117,14 @@ mod tests {
         rt.put(entry);
 
         rt.on_request_sent(&id);
-        let sent = rt.bucket_entry(Some(&id)).unwrap();
+        let sent = rt.bucket_entry(&id).unwrap();
         assert_eq!(sent.last_sent() > &SystemTime::UNIX_EPOCH, true);
 
         rt.on_timeout(&id);
-        assert_eq!(rt.bucket_entry(Some(&id)).unwrap().failed_reqs(), 1);
+        assert_eq!(rt.bucket_entry(&id).unwrap().failed_reqs(), 1);
 
         rt.on_responded(&id, 55);
-        let responsed = rt.bucket_entry(Some(&id)).unwrap();
+        let responsed = rt.bucket_entry(&id).unwrap();
         assert_eq!(responsed.is_reachable(), true);
         assert_eq!(responsed.failed_reqs(), 0);
         //assert_eq!(responsed.rtt(), 31);

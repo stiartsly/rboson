@@ -146,8 +146,8 @@ impl KClosestNodes {
         let bucket  = bucket.lock().unwrap();
         let entries = bucket.entries();
         for item in entries {
-            if (self.filter)(item) {
-                self.entries.push(item.clone())
+            if (self.filter)(&item) {
+                self.entries.push(item)
             }
         };
     }

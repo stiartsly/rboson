@@ -1,10 +1,10 @@
 use std::{
     any::Any,
-    sync::{Mutex, Weak}
+    sync::{Arc, Weak, Mutex}
 };
 use log::{debug, error, warn, trace};
 
-use crate::{Id, Value};
+use crate::{Id, Network, Value};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
@@ -14,7 +14,8 @@ use crate::dht::{
     routing::{
         KBucket,
         KBucketEntry,
-        KClosestNodes
+        KClosestNodes,
+        RoutingTable
     },
     task::{
         LookupTask, LookupTaskData,
@@ -26,8 +27,10 @@ pub(crate) struct ValueLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
 
-    result: EligibleValue,
-    dht: Weak<Mutex<DHT>>,
+    result  : EligibleValue,
+    dht     : Weak<Mutex<DHT>>,
+    rt      : Arc<Mutex<RoutingTable>>,
+    network : Network,
 }
 
 impl ValueLookupTask {
@@ -37,11 +40,16 @@ impl ValueLookupTask {
         expected_seq: i32,
         done_on_eligible_result: bool
     ) -> Self {
+        let strong = dht.upgrade().expect("DHT instance dropped");
+        let locked = strong.lock().unwrap();
+
         Self {
-            base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
-            result: EligibleValue::new(target, expected_seq),
-            dht,
+            base_data   : TaskData::new(),
+            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
+            result      : EligibleValue::new(target, expected_seq),
+            dht         : dht.clone(),
+            rt          : locked.rt(),
+            network     : locked.network(),
         }
     }
 
@@ -90,18 +98,8 @@ impl Task for ValueLookupTask {
     }
 
     fn prepare(&mut self) {
-        let Some(strong_dht) = self.dht.upgrade() else {
-            error!("{}#{} failed to prepare: DHT instance dropped",
-                self.task_name(),
-                self.task_id()
-            );
-            return;
-        };
-
         let entries:Vec<KBucketEntry> = {
-            let locked_dht = strong_dht.lock().unwrap();
-            let cloned_rt = locked_dht.rt();
-            let locked_rt = cloned_rt.lock().unwrap();
+            let locked_rt = self.rt.lock().unwrap();
             let mut kns = KClosestNodes::new(
                 &locked_rt,
                 self.target().clone(),
@@ -124,10 +122,6 @@ impl Task for ValueLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
-        let dht = self.dht.upgrade()
-            .expect("panic: DHT instance dropped.");
-        let network = dht.lock().unwrap().network();
-
         trace!("{}#{} candidates.size={}",
             self.task_name(),
             self.task_id(),
@@ -143,8 +137,8 @@ impl Task for ValueLookupTask {
             let target = next.clone().into();
             let msg = msg::find_value_request(
                 self.target().clone(),
-                network.is_ipv4(),
-                network.is_ipv6(),
+                self.network.is_ipv4(),
+                self.network.is_ipv6(),
                 self.result.expected_seq(),
             );
 
@@ -190,17 +184,7 @@ impl Task for ValueLookupTask {
                 LookupTask::data_mut(self).done_lookup();
             }
         } else {
-            let Some(strong_dht) = self.dht.upgrade() else {
-                error!("{}#{} failed to iterate: DHT instance dropped",
-                        self.task_name(),
-                        self.task_id()
-                );
-                return;
-            };
-
-            let network = strong_dht.lock().unwrap().network();
-            let nodes = body.nodes(network);
-            drop(strong_dht);
+            let nodes = body.nodes(self.network);
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

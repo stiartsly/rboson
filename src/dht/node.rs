@@ -48,8 +48,8 @@ use crate::dht::{
 const MAX_PEER_AGE  : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
 const MAX_VALUE_AGE : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
 
-const RE_ANNOUNCE_INTERVAL : Duration = Duration::from_millis(5 * 60 * 1000);        // 5 minutes in milliseconds
-const STORAGE_EXPIRE_INTERVAL : Duration = Duration::from_millis(10 * 60 * 1000);    // 10 minutes in milliseconds
+const RE_ANNOUNCE_INTERVAL      : u64 = 5 * 60 * 1000;      // 5 minutes in milliseconds
+const STORAGE_EXPIRE_INTERVAL   : u64 = 10 * 60 * 1000;     // 10 minutes in milliseconds
 
 pub struct Node {
     cfg         : Box<dyn NodeConfig>,
@@ -235,39 +235,32 @@ impl Node {
 
     async fn setup_periodic_tasks(&self) -> Result<()> {
         let client  = self.timer_client();
+
+        let storage = self.storage.clone();
         let _ = client.add_timer(
-            Duration::from_millis(30*1000),
+            30*1000,
             Some(STORAGE_EXPIRE_INTERVAL),
-            {
-                // let storage = self.storage.clone();
-                move || {
-                    //_ = storage.lock().unwrap().purge();
-                    println!("purging storage ...");
-                }
+            move || {
+                _ = storage.lock().unwrap().purge();
             }
         ).await?;
 
+        //let storage = self.storage.clone();
         let _ = client.add_timer(
-            Duration::from_millis(5*60*1000),
+            5*60*1000,
             Some(RE_ANNOUNCE_INTERVAL),
-            {
-                let storage = self.storage.clone();
-                move || {
-                    // TODO:
-                    let _ = storage.clone();
-                    unimplemented!();
-                }
+            move || {
+                // TODO:
+                unimplemented!();
             }
         ).await?;
 
+        let tokenman = self.tokenman.clone();
         let _ = client.add_timer(
             TokenManager::TOKEN_TIMEOUT,
             Some(TokenManager::TOKEN_TIMEOUT),
-            {
-                let tokenman = self.tokenman.clone();
-                move || {
-                    tokenman.update_token_timestamp();
-                }
+            move || {
+                tokenman.update_token_timestamp();
             }
         ).await?;
         Ok(())

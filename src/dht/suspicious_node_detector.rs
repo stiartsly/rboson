@@ -12,6 +12,7 @@ const SUSPICIOUS_HITS_THRESHOLD: usize = 32;
 const DEFAULT_OBSERVATION_PERIOD: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_BAN_DURATION: Duration = Duration::from_secs(30 * 60);
 
+#[allow(dead_code)]
 pub trait SuspiciousNodeDetector : Send + Sync {
     fn is_suspicious_with_expected(&self, addr: &SocketAddr, expected: Option<&Id>) -> bool;
 

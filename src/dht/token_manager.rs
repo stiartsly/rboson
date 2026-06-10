@@ -2,7 +2,7 @@ use std::{
     mem,
     net::{IpAddr, SocketAddr},
     sync::Mutex,
-    time::{Duration, SystemTime}
+    time::SystemTime
 };
 use sha2::{Digest, Sha256};
 use crate::Id;
@@ -14,7 +14,7 @@ pub(crate) struct TokenManager {
 }
 
 impl TokenManager {
-    pub(crate) const TOKEN_TIMEOUT: Duration = Duration::from_millis(5 * 60 * 1000); // 5 minutes
+    pub(crate) const TOKEN_TIMEOUT: u64 = 5 * 60 * 1000; // 5 minutes
 
     pub(crate) fn new() -> Self {
         let session_secret = crate::random_array::<32>();
@@ -27,10 +27,10 @@ impl TokenManager {
     }
 
     pub(crate) fn update_token_timestamp(&self) {
-        let mut locked = crate::locked!(self.timestamp);
-        if locked.elapsed().unwrap_or(Duration::MAX) > Self::TOKEN_TIMEOUT {
-            *self.previous_timestamp.lock().unwrap() = *locked;
-            *locked = SystemTime::now();
+        let mut tm = crate::locked!(self.timestamp);
+        if crate::elapsed_ms!(tm) > Self::TOKEN_TIMEOUT as u128 {
+            *self.previous_timestamp.lock().unwrap() = *tm;
+            *tm = SystemTime::now();
         }
     }
 

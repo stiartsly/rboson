@@ -11,7 +11,10 @@ use crate::dht::{
     msg::msg,
     task::{Task, TaskData},
     rpc::RpcCall,
-    routing::{KBucket, KBucketEntry}
+    routing::{
+        KBucket, KBucketEntry,
+        RoutingTable
+    }
 };
 
 #[allow(unused)]
@@ -25,6 +28,7 @@ pub(crate) struct PingRefreshTask {
     remove_on_timeout: bool,
 
     dht: Weak<Mutex<DHT>>,
+    rt : Arc<Mutex<RoutingTable>>,
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
@@ -32,13 +36,17 @@ const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 #[allow(unused)]
 impl PingRefreshTask {
     pub(crate) fn new(dht: Weak<Mutex<DHT>>) -> Self {
+        let strong = dht.upgrade().expect("DHT instance dropped");
+        let locked = strong.lock().unwrap();
+
         Self {
             base_data: TaskData::new(),
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
             check_all           : false,
             remove_on_timeout   : false,
-            dht,
+            dht                 : dht.clone(),
+            rt                  : locked.rt(),
         }
     }
 
@@ -113,11 +121,8 @@ impl Task for PingRefreshTask {
             target_id
         );
 
-        if let Some(strong_dht) = self.dht.upgrade() {
-            let rt = strong_dht.lock().unwrap().rt();
-            let mut locked_rt = rt.lock().unwrap();
-            locked_rt.remove(&target_id);
-        }
+        let mut rt = self.rt.lock().unwrap();
+        rt.remove(&target_id);
     }
 
     fn iterate(&mut self) {

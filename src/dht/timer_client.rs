@@ -11,7 +11,6 @@ use tokio::{sync::{
 use crate::errors::{Result, StateError};
 
 use super::timer_queue::{
-    TimerCallback,
     Command,
     TimerId,
     Timer,
@@ -39,42 +38,25 @@ impl TimerClient {
 
     pub(crate) async fn add_timer<F>(
         &self,
-        delay: Duration,
-        interval: Option<Duration>,
+        delay: u64,
+        interval: Option<u64>,
         callback: F,
     ) -> Result<TimerId>
     where
         F: Fn() + Send + Sync + 'static,
     {
         let id = self.next_timer_id();
-        let cb: TimerCallback = Arc::new(callback);
-
+        let delay = Duration::from_millis(delay);
+        let interval = interval.map(Duration::from_millis);
         self.sender.send(
             Command::Add {
                 delay,
-                timer: Timer::new(id, interval, cb),
+                timer: Timer::new(id, interval, Arc::new(callback)),
             }
         ).await.map_err(|_| {
             StateError::new("timer queue channel closed")
         })?;
         Ok(id)
-    }
-
-    pub(crate) async fn add_timer_if<F>(
-        &self,
-        predicate: bool,
-        delay: Duration,
-        interval: Option<Duration>,
-        callback: F,
-    ) -> Result<Option<TimerId>>
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        if predicate {
-            self.add_timer(delay, interval, callback).await.map(Some)
-        } else {
-            Ok(None)
-        }
     }
 
     #[allow(unused)]

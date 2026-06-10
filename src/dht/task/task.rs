@@ -424,10 +424,10 @@ pub(crate) trait Task: Send + Sync {
         let txid = call.txid();
         self.data_mut().inflights.insert(txid);
 
-        let dht = self.dht().upgrade()
-            .expect("panic: DHT instance dropped.");
-        let server = dht.lock().unwrap().server().clone();
-        let _ = server.lock().unwrap().send_call(call);
+        self.dht().upgrade()
+            .expect("DHT instance dropped.")
+            .lock().unwrap()
+            .send_call(call);
         Ok(())
     }
 }

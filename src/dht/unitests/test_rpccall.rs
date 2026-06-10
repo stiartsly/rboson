@@ -211,7 +211,8 @@ mod tests {
 
         let req3 = msg::ping_request();
         let mut failed = RpcCall::new(target2.clone(), req3);
-        failed.fail(ProtocolError::new("failed"));
+        let err = ProtocolError::new("failed") as Box<dyn std::error::Error + Send + Sync>;
+        failed.fail(&err);
         assert_eq!(failed.state(), State::Err);
         assert_eq!(failed.cause().is_none(), true);
 

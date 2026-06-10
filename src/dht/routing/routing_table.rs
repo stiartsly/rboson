@@ -1,21 +1,17 @@
 use std::{
     fmt,
-    result::Result as SResult,
+    fs,
+    io::ErrorKind,
+    time::SystemTime,
     sync::{Arc, Mutex},
     cmp::Ordering,
-    path::Path,
+    path::{Path},
 };
 use rbtree::RBTree;
-use libsodium_sys::randombytes_uniform;
-use serde::{
-    Deserialize, Deserializer,
-    Serialize, Serializer,
-    de::{self, MapAccess, Visitor},
-    ser::SerializeStruct,
-};
+use serde::{Deserialize, Serialize};
 use log::debug;
 
-use crate::{Id};
+use crate::{Id, Result};
 use crate::dht::{
     consumer::Consumer,
     rpc::Reachability,
@@ -81,28 +77,12 @@ impl RoutingTable {
         self.buckets.values().cloned().collect()
     }
 
-    fn bucket_of(&mut self, target: &Id) -> Arc<Mutex<KBucket>> {
-        self.buckets.iter()
-            .find(|(k,_v)| k.is_prefix_of(target))
-            .map(|(_,v)| v.clone())
-            .expect("panic: no bucket found, this should never happen")
+    pub(crate) fn bucket_entry(&self, id: &Id) -> Option<KBucketEntry> {
+        self.bucket(id).lock().unwrap().entry(Some(id))
     }
 
-    pub(crate) fn bucket_entry(&self, id: Option<&Id>) -> Option<KBucketEntry> {
-        if let Some(id) = id {
-            return self.bucket(id)
-                .lock().unwrap()
-                .entry(Some(id));
-        }
-
-        let rand_idx = unsafe {
-            randombytes_uniform(self.buckets.len() as u32)
-        } as usize;
-
-        self.buckets.iter()
-            .nth(rand_idx)
-            .map(|(_, bucket)| bucket.lock().unwrap().entry(None))
-            .flatten()
+    pub(crate) fn random_entry(&self) -> Option<KBucketEntry> {
+        self.bucket(&Id::random()).lock().unwrap().entry(None)
     }
 
     #[allow(unused)]
@@ -111,9 +91,7 @@ impl RoutingTable {
     }
 
     pub(crate) fn number_of_entries(&self) -> usize {
-        self.buckets.iter().map(|(_,v)|
-            v.lock().unwrap().size()
-        ).sum()
+        self.buckets.values().map(|v| v.lock().unwrap().size()).sum()
     }
 
     pub(crate) fn index_of(buckets: &Vec<Arc<Mutex<KBucket>>>, id: &Id) -> usize {
@@ -169,7 +147,7 @@ impl RoutingTable {
 
     // The bucket has already been removed from the routing table
     fn _split(&mut self, bucket: Arc<Mutex<KBucket>>) {
-        let mut locked = bucket.lock().unwrap();
+        let locked = bucket.lock().unwrap();
         let prefix = locked.prefix();
 
         let lp = prefix.split_branch(false);
@@ -178,28 +156,43 @@ impl RoutingTable {
         let mut low  = KBucket::new(lp.clone(), self.is_home_bucket(&lp));
         let mut high = KBucket::new(hp.clone(), self.is_home_bucket(&hp));
 
-        while let Some(entry) = locked.pop() {
-            match low.prefix().is_prefix_of(entry.id()) {
+        for entry in locked.entries().iter().cloned() {
+            match prefix.is_prefix_of(entry.id()) {
                 true  => low.put(entry),
                 false => high.put(entry)
             }
         }
+        drop(locked);
 
-        self.buckets.insert(lp, Arc::new(Mutex::new(low)));
-        self.buckets.insert(hp, Arc::new(Mutex::new(high)));
+        self.modify(
+            vec![bucket],
+            vec![Arc::new(Mutex::new(low)), Arc::new(Mutex::new(high))]
+        );
+    }
+
+    fn modify(&mut self,
+        to_remove: Vec<Arc<Mutex<KBucket>>>,
+        to_add: Vec<Arc<Mutex<KBucket>>>
+    ) {
+        for bucket in to_remove {
+            let prefix = bucket.lock().unwrap().prefix().clone();
+            self.buckets.remove(&prefix);
+        }
+        for bucket in to_add {
+            let prefix = bucket.lock().unwrap().prefix().clone();
+            self.buckets.insert(prefix, bucket);
+        }
     }
 
     fn _put(&mut self, entry: KBucketEntry) {
         let entry_id = entry.id();
-        let mut bucket = self.bucket_of(entry_id);
+        let mut bucket = self.bucket(entry_id);
 
         while Self::needs_split(&bucket, &entry) {
             self._split(bucket);
-            bucket = self.bucket_of(entry_id);
+            bucket = self.bucket(entry_id);
         }
-
-        let prefix = bucket.lock().unwrap().prefix().clone();
-        self.buckets.insert(prefix, bucket);
+        bucket.lock().unwrap().put(entry);
     }
 
     fn needs_split(bucket: &Arc<Mutex<KBucket>>, entry: &KBucketEntry) -> bool {
@@ -216,15 +209,15 @@ impl RoutingTable {
             .is_prefix_of(entry.id())
     }
 
-    fn _remove(&mut self, id: &Id) -> Option<KBucketEntry> {
+    fn _remove(&self, id: &Id) -> Option<KBucketEntry> {
         let bucket = self.bucket(id);
-        let to_remove = match bucket.lock().unwrap().entry(Some(id)) {
-            Some(v) => v.clone(),
-            None => return None,
-        };
+        let mut locked = bucket.lock().unwrap();
 
-        let removed = bucket.lock().unwrap()._remove_bad_entry(to_remove, true);
-        removed
+        let entry = locked.entry(Some(id));
+        let Some(to_remove) = entry else {
+            return None;
+        };
+        locked._remove_bad_entry(to_remove, true)
     }
 
     fn _on_timeout(&mut self, id: &Id) {
@@ -283,9 +276,10 @@ impl RoutingTable {
                         new_bucket.put(entry);
                     }
 
-                    let _ = self.buckets.remove(locked_l.prefix());
-                    let _ = self.buckets.remove(locked_r.prefix());
-                    let _ = self.buckets.insert(prefix, Arc::new(Mutex::new(new_bucket)));
+                    self.modify(
+                        vec![l.clone(), r.clone()],
+                        vec![Arc::new(Mutex::new(new_bucket))]
+                    );
 
                     idx -= 2; // Adjust index to re-check after merge
                 }
@@ -317,40 +311,39 @@ impl RoutingTable {
         }
     }
 
-    pub(crate) fn save(&self, _path: &str) -> crate::Result<()> {
-        /*
+    pub(crate) fn save(&self, path: &Path) -> Result<()> {
         if self.number_of_entries() == 0 {
             return Ok(());
         }
 
         let mut entries = Vec::with_capacity(self.number_of_entries());
-        for (_, bucket) in self.buckets.iter() {
-            entries.extend(bucket.lock().unwrap().entries());
+        for (_, item) in self.buckets.iter() {
+            entries.extend(item.lock().unwrap().entries());
         }
 
         let persisted = PersistedRoutingTable {
-            node_id: self.local_id.clone(),
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_millis() as u64,
+            node_id     : self.local_id.clone(),
+            timestamp   : crate::as_ms!(SystemTime::now()) as u64,
             entries,
         };
 
         let bytes = serde_cbor::to_vec(&persisted)?;
-        let file = Path::new(path);
+        let file = path.to_path_buf();
         if let Some(parent) = file.parent() {
             fs::create_dir_all(parent)?;
         }
 
         let tmp_path = file.with_extension("tmp");
-        fs::write(&tmp_path, bytes)?;
-        fs::rename(&tmp_path, file)?;
-        */
+        fs::rename(&file, &tmp_path)?;
+        fs::write (&tmp_path, bytes)?;
+        fs::rename(&tmp_path, &file)?;
+
         Ok(())
     }
 
-    pub(crate) fn load(&mut self, _path: &Path) -> crate::Result<()> {
-        /*
+    pub(crate) fn load(&mut self, path: &Path) -> Result<()> {
+        const MAX_AGE: u64 = 24 * 60 * 60 * 1000;
+
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
@@ -362,94 +355,15 @@ impl RoutingTable {
             return Ok(());
         }
 
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_millis() as u64;
-        if now.saturating_sub(persisted.timestamp) > Self::MAX_PERSIST_AGE_MILLIS {
+        let now = crate::as_ms!(SystemTime::now()) as u64;
+        if now - persisted.timestamp > MAX_AGE{
             return Ok(());
         }
 
-        let mut loaded = RoutingTable::new(self.local_id.clone());
         for entry in persisted.entries {
-            loaded.put(entry);
+            self.put(entry);
         }
-
-        *self = loaded;
-        */
         Ok(())
-    }
-}
-
-impl Serialize for RoutingTable {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        let mut state = se.serialize_struct("RoutingTable", 2)?;
-        let mut entries = Vec::with_capacity(self.number_of_entries());
-        for (_, bucket) in self.buckets.iter() {
-            entries.extend(bucket.lock().unwrap().entries().iter().cloned());
-        }
-
-        state.serialize_field("nodeId", &self.local_id)?;
-        state.serialize_field("entries", &entries)?;
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for RoutingTable {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where D: Deserializer<'de>,
-    {
-        #[derive(Debug)]
-        enum Field {
-            NodeId,
-            Entries,
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let key = String::deserialize(deserializer)?;
-                match key.as_str() {
-                    "nodeId" => Ok(Field::NodeId),
-                    "entries" => Ok(Field::Entries),
-                    _ => Err(de::Error::unknown_field(&key, &["nodeId", "entries"])),
-                }
-            }
-        }
-
-        struct RoutingTableVisitor;
-        impl<'de> Visitor<'de> for RoutingTableVisitor {
-            type Value = RoutingTable;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a RoutingTable struct")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where V: MapAccess<'de>,
-            {
-                let mut node_id: Option<Id> = None;
-                let mut entries: Vec<KBucketEntry> = Vec::new();
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::NodeId => node_id = Some(map.next_value()?),
-                        Field::Entries => entries = map.next_value()?,
-                    }
-                }
-
-                let node_id = node_id.ok_or_else(|| de::Error::missing_field("nodeId"))?;
-                let mut table = RoutingTable::new(node_id);
-                for entry in entries {
-                    table.put(entry);
-                }
-                Ok(table)
-            }
-        }
-        de.deserialize_map(RoutingTableVisitor)
     }
 }
 

@@ -247,30 +247,27 @@ impl RpcServer {
         let call = Arc::new(Mutex::new(call));
         self.pending_calls.insert(txid, call.clone());
 
-        let mut call_mut = call.lock().unwrap();
-        let mut req_mut = call_mut.req_mut();
+        let mut locked = call.lock().unwrap();
+        let req_mut = locked.req_mut();
         req_mut.set_associated_call(call.clone());
 
-        match self.send_msg(&mut req_mut) {
+        match self.send_msg(&req_mut) {
             Ok(_) => {
-                call_mut.sent();
+                locked.sent();
                 if let Some(handler) = self.callsent_handler.as_ref() {
-                    handler(&mut *call_mut);
+                    handler(&mut *locked);
                 }
             },
             Err(e) => {
                 let _ = self.pending_calls.remove(&txid);
-                call_mut.fail(&e);
+                locked.fail(&e);
                 return Err(e);
             }
         }
         Ok(())
     }
 
-    pub(crate) fn send_msg(&self, msg: &mut Message) -> Result<usize> {
-        let nodeid = self.ni.id().clone();
-        msg.set_nodeid(nodeid);
-
+    pub(crate) fn send_msg(&self, msg: &Message) -> Result<usize> {
         // Deserialize message to bytes
         let data = serde_cbor::to_vec(&msg).map_err(|e| -> Error {
             ProtocolError::new(format!("Failed to serialize message: {e}"))

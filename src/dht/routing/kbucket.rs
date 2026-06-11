@@ -107,20 +107,22 @@ impl KBucket {
     }
 
     pub(crate) fn needs_refreshing(&self) -> bool {
-        self.last_refreshed.map_or(true, |v| {
+        let needs_ping = self.entries.iter().any(|(_,v)|v.needs_ping());
+        let needs_refresh = self.last_refreshed.map_or(true, |v| {
             crate::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL
-        }) && self.entries.iter().any(|(_, v)| v.needs_ping())
+        });
+        needs_refresh && needs_ping
     }
 
     // General DHT node does not support replacement
     pub(crate) fn needs_replacement_ping(&self) -> bool { false }
 
+    #[allow(unused)]
     pub(crate) fn needs_replacement(&self) -> bool {
         self.entries.iter().any(|(_, v)| v.needs_replacement())
     }
 
     pub(crate) fn put(&mut self, new: KBucketEntry) {
-        println!(">>>####### kbucket >>line: {}", line!());
         for (_, v) in self.entries.iter_mut() {
             if v.equals(&new) {
                 v.merge(new);
@@ -132,13 +134,9 @@ impl KBucket {
                 return;
             }
         }
-        println!(">>>####### kbucket >>line: {} reachable: {}",
-             line!(), new.is_reachable());
-
         if new.is_reachable() {
             // insert to the list if it still has room
             if self.entries.len() < KBucket::MAX_ENTRIES {
-                println!(">>>####### kbucket >>line: {}", line!());
                 self._put_as_main_entry(new);
                 return;
             }
@@ -155,22 +153,23 @@ impl KBucket {
         }
     }
 
-    fn _put_as_main_entry(&mut self, _entry: KBucketEntry) {
-        let created_time = _entry.created_time().clone();
-        self.entries.insert(created_time, _entry);
+    fn _put_as_main_entry(&mut self, entry: KBucketEntry) {
+        let created_time = *entry.created_time();
+        self.entries.insert(created_time, entry);
     }
 
     fn _replace_bad_entry(&mut self, entry: KBucketEntry) {
-        let key = self.entries.iter().find(|(_, v)|
-             v.needs_replacement()).map(|(k, _)| k.clone());
+        let key = self.entries.iter()
+            .find(|(_,v)| v.needs_replacement())
+            .map(|(k,_)| k.clone());
 
-        if let Some(key) = key {
-            self.entries.remove(&key);
-            self._put_as_main_entry(entry);
+        if let Some(ref key) = key {
+            self.entries.remove(key);
         } else {
             self.entries.pop_last();
-            self._put_as_main_entry(entry);
         }
+
+        self._put_as_main_entry(entry);
     }
 
     pub(crate) fn on_timeout(&mut self, id: &Id) {
@@ -203,11 +202,7 @@ impl KBucket {
                     .find(|(_, v)|test_cb(v))
                     .map(|(k, _)| k.clone());
 
-        if let Some(key) = key {
-            self.entries.remove(&key)
-        } else {
-            None
-        }
+        key.map(|ref k| self.entries.remove(k)).flatten()
     }
 
     pub(crate) fn filter<F>(&self, test: F) -> usize

@@ -5,7 +5,7 @@ use std::{
     time::SystemTime,
     sync::{Arc, Mutex},
     cmp::Ordering,
-    path::{Path},
+    path::Path,
 };
 use rbtree::RBTree;
 use serde::{Deserialize, Serialize};
@@ -153,13 +153,13 @@ impl RoutingTable {
         let lp = prefix.split_branch(false);
         let hp = prefix.split_branch(true);
 
-        let mut low  = KBucket::new(lp.clone(), self.is_home_bucket(&lp));
-        let mut high = KBucket::new(hp.clone(), self.is_home_bucket(&hp));
+        let mut low  = KBucket::new(lp, self.is_home_bucket(&lp));
+        let mut high = KBucket::new(hp, self.is_home_bucket(&hp));
 
-        for entry in locked.entries().iter().cloned() {
-            match prefix.is_prefix_of(entry.id()) {
-                true  => low.put(entry),
-                false => high.put(entry)
+        for item in locked.entries().iter().cloned() {
+            match lp.is_prefix_of(item.id()) {
+                true  => low.put(item),
+                false => high.put(item)
             }
         }
         drop(locked);
@@ -175,11 +175,11 @@ impl RoutingTable {
         to_add: Vec<Arc<Mutex<KBucket>>>
     ) {
         for bucket in to_remove {
-            let prefix = bucket.lock().unwrap().prefix().clone();
+            let prefix = *bucket.lock().unwrap().prefix();
             self.buckets.remove(&prefix);
         }
         for bucket in to_add {
-            let prefix = bucket.lock().unwrap().prefix().clone();
+            let prefix = *bucket.lock().unwrap().prefix();
             self.buckets.insert(prefix, bucket);
         }
     }
@@ -288,25 +288,32 @@ impl RoutingTable {
         }
     }
 
-    pub(crate) fn maintenance(&mut self, bootstrap_ids: &[Id], consumer: Consumer<Arc<Mutex<KBucket>>>) {
-        self._merge_buckets();
+    pub(crate) fn maintenance(
+        rt: Arc<Mutex<Self>>,
+        bootstrap_ids: &[Id],
+        consumer: Consumer<Arc<Mutex<KBucket>>>
+    ){
+        let mut locked_rt = rt.lock().unwrap();
+        locked_rt._merge_buckets();
 
-        for bucket in self.buckets.values() {
+        let buckets = locked_rt.buckets.values().cloned();
+        for bucket in buckets {
             let mut locked = bucket.lock().unwrap();
-            locked.cleanup(&self.local_id, bootstrap_ids,
+            locked.cleanup(&locked_rt.local_id, bootstrap_ids,
                 Consumer::new(move |_entry| {
+                    unimplemented!()
                     // TODO: Self::put(&mut locked, _entry);
                 })
             );
 
-            let need_refreshing  = locked.needs_refreshing();
-            let need_replacement = locked.needs_replacement_ping();
+            let needs_refreshing  = locked.needs_refreshing();
+            let needs_replacement = locked.needs_replacement_ping();
             let prefix = locked.prefix().clone();
             drop(locked);
 
-            if need_refreshing || need_replacement {
+            if needs_refreshing || needs_replacement {
                 log::debug!("Refreshing bucket {}...", prefix);
-                consumer.accept(bucket.clone());
+                consumer.accept(bucket);
             }
         }
     }

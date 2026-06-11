@@ -180,6 +180,7 @@ impl Task for NodeLookupTask {
                 self.network.is_ipv6(),
                 Some(self.want_token)
             );
+
             let cb = Consumer::new(move |_| {
                 next.lock().unwrap().set_sent();
             });

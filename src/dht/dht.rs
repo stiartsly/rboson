@@ -174,7 +174,6 @@ impl DHT {
         assert!(builder.storage.is_some());
         assert!(builder.timer_client.is_some());
         assert!(builder.tokenman.is_some());
-        //assert!(builder.bootstrap_nodes.is_some());
         assert!(builder.data_dir.is_some());
 
         let identity = builder.identity.as_ref().unwrap().clone();
@@ -409,6 +408,7 @@ impl DHT {
         }
 
         let Some(entry) = self.rt.lock().unwrap().random_entry() else {
+            debug!("Periodic: not performing random ping, routing table is empty.");
             return;
         };
 
@@ -620,7 +620,7 @@ impl DHT {
 
     async fn setup_periodic_tasks(&self) -> Result<()> {
         let weak = self.weak.clone();
-        let _ = self.timer_client.add_timer(30, Some(320),
+        let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
             move || {
                 weak.upgrade().expect("DHT instance is dropped")
                     .lock().unwrap()
@@ -675,8 +675,8 @@ impl DHT {
 
     fn received(&mut self, msg: &Message) {
         let inconsistent_suspicious = |addr: SocketAddr, id: Id| {
-            warn!("Received a message from inconsistent node {}@{}, ignored the potential
-                  routing table update", id, addr);
+            warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
+                id, addr);
 
             self.suspicious_detector.as_ref().map(|v|
                 v.lock().unwrap().inconsistent(addr, Some(id))
@@ -692,7 +692,6 @@ impl DHT {
                 v.lock().unwrap().observe(addr, id)
             );
         };
-
 
         let allowed = match cfg!(feature = "devp") {
             true => is_any_unicast(&msg.remote_addr().ip()),
@@ -807,7 +806,7 @@ impl DHT {
         if let Some(_call) = call_opt {
             let locked = _call.lock().unwrap();
             new_entry.on_responded(0); // TOOD: RTT.
-            new_entry.update_last_sent(locked.sent_time());
+            new_entry.update_last_sent(locked.sent_time().unwrap());
         }
 
         self.rt.lock().unwrap().put(new_entry.clone());
@@ -816,10 +815,6 @@ impl DHT {
 		// incoming request && the new entry is unreachable && the target bucket not full,
 		// then try to do a ping request to the new entry check its availability.
         if existing_opt.is_none() && !new_entry.is_reachable(){
-            println!(">>> existing_opt.is_none():{}, reacable: {}",
-                existing_opt.is_none(),
-                new_entry.is_reachable()
-            );
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
             let call = RpcCall::new(new_entry, ping_request());
@@ -853,6 +848,12 @@ impl DHT {
     }
 
     fn on_request(&mut self, msg: &Message) {
+        debug!("Received a {} request message from {}/{}, txid {}",
+            msg.method(),
+            msg.remote_addr(),
+            msg.remote_id(),
+            msg.txid()
+        );
         let method = msg.method();
         match method {
             Method::Ping        => self.on_ping(msg),
@@ -866,7 +867,7 @@ impl DHT {
     }
 
     fn on_response(&mut self, msg: &Message) {
-        debug!("Received a response message {} from {}/{}, txid {}",
+        debug!("Received a {} response message from {}/{}, txid {}",
             msg.method(),
             msg.remote_addr(),
             msg.remote_id(),
@@ -879,7 +880,7 @@ impl DHT {
             panic!("Panic: should be error message");
         };
 
-        warn!("Error message from {}/{} - {}:{}, txid {}",
+        warn!("Received an error message from {}/{} - {}:{}, txid {}",
             msg.remote_addr(),
             msg.remote_id(),
             err.code(),

@@ -6,15 +6,15 @@ use std::{
 #[derive(Debug)]
 pub struct ImmutableSubstitutionError {}
 
-impl Error for ImmutableSubstitutionError {
-    fn description(&self) -> &str {
-        "Not owner of the peer"
-    }
-}
-
 impl ImmutableSubstitutionError {
     pub fn new() -> Box<Self> {
         Box::new(Self {})
+    }
+}
+
+impl Error for ImmutableSubstitutionError {
+    fn description(&self) -> &str {
+        "Not owner of the peer"
     }
 }
 

@@ -215,7 +215,7 @@ impl KBucket {
         _local_id: &Id,
         _bootstrap_ids: &[Id],
         _dropped_handler: Consumer<KBucketEntry>) {
-        unimplemented!()
+        //unimplemented!()
     }
 }
 

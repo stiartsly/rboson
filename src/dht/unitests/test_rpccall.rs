@@ -136,8 +136,8 @@ mod tests {
         assert_eq!(call.lock().unwrap().state(), State::Sent);
         assert_eq!(state_changes.lock().unwrap().to_owned(), State::Sent);
 
-        let rsp = make_response(&call.lock().unwrap());
-        call.lock().unwrap().respond(&rsp);
+        let rsp = Arc::new(make_response(&call.lock().unwrap()));
+        call.lock().unwrap().respond(rsp);
         assert_eq!(call.lock().unwrap().state(), State::Responded);
         assert_eq!(responded.lock().unwrap().to_owned(), 1);
         assert_eq!(state_changes.lock().unwrap().to_owned(), State::Responded);
@@ -162,7 +162,7 @@ mod tests {
         let mut err = msg::error_msg(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
         err.set_nodeid(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
-        error_call.lock().unwrap().respond(&err);
+        error_call.lock().unwrap().respond(Arc::new(err));
 
         let locked = error_call.lock().unwrap();
         assert_eq!(locked.state(), State::Err);
@@ -190,7 +190,7 @@ mod tests {
         call.lock().unwrap().set_listener(listener);
 
         call.lock().unwrap().sent();
-        let inconsistent = make_response(&call.lock().unwrap());
+        let inconsistent = Arc::new(make_response(&call.lock().unwrap()));
         call.lock().unwrap().respond_inconsistent_socket(inconsistent);
         assert_eq!(call.lock().unwrap().state(), State::Stalled);
         assert_eq!(*stalled.lock().unwrap(), 1);
@@ -205,7 +205,7 @@ mod tests {
         let mut rsp = msg::store_value_response(wrong_method.txid());
         rsp.set_nodeid(target2.id().clone());
         rsp.set_remote(target2.id().clone(), *target2.socket_addr());
-        wrong_method.respond_wrong_method(rsp);
+        wrong_method.respond_wrong_method(Arc::new(rsp));
         assert_eq!(wrong_method.state(), State::Err);
         assert_eq!(wrong_method.cause().unwrap().to_string().contains("wrong method"), true);
 

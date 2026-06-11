@@ -76,7 +76,8 @@ impl Node {
 
         // Setup logger before any log is generated.
         logger::setup(
-            cfg.as_ref().log_level(),
+            //cfg.as_ref().log_level(),
+            log::LevelFilter::Debug,
             cfg.as_ref().log_file()
         );
         logger::enable_console_output();

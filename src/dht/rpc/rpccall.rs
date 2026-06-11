@@ -1,5 +1,6 @@
 use std::{
-    time::{SystemTime, Duration},
+    sync::Arc,
+    time::SystemTime,
     error::Error as StdError,
 };
 use log::error;
@@ -39,11 +40,14 @@ pub(crate) struct RpcCall {
     target      : Target,
     target_reachable: bool,
 
-    req         : Message,
-    rsp         : Option<Message>,
+     // a tricky field to store req message before becoming Arc<Message> object.
+    transient   : Option<Message>,
 
-    sent_time   : SystemTime,
-    resp_time   : SystemTime,
+    req         : Option<Arc<Message>>,
+    rsp         : Option<Arc<Message>>,
+
+    sent_time   : Option<SystemTime>,
+    resp_time   : Option<SystemTime>,
     expected_rtt: u64,
 
     state       : State,
@@ -52,32 +56,29 @@ pub(crate) struct RpcCall {
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
-    //TODO： timeout_task: Option<TimerId>,
+    timeout_timer: Option<u64>
 }
 
 impl RpcCall {
     pub(crate) fn new(target: impl Into<Target>, mut req: Message) -> Self {
         let target: Target = target.into();
-        let reachable = target.is_reachable();
-        let ni = target.ni();
+        let target_reachable = target.is_reachable();
 
-        req.set_remote(
-            ni.id().clone(),
-            ni.socket_addr().clone()
-        );
+        req.set_remote(target.id(),target.socket_addr());
 
         Self {
-            target_reachable:   reachable,
+            target_reachable,
             target,
-            req,
-            rsp         : None,
-            sent_time   : SystemTime::UNIX_EPOCH,
-            resp_time   : SystemTime::UNIX_EPOCH,
-            state       : State::Unsent,
-            listener    : None,
-            cause       : None,
-            // TODO:timeout_task: None,
-            expected_rtt: 0,
+            transient       : Some(req),
+            req             : None,
+            rsp             : None,
+            sent_time       : None,
+            resp_time       : None,
+            state           : State::Unsent,
+            listener        : None,
+            cause           : None,
+            timeout_timer   : None,
+            expected_rtt    : 0,
         }
     }
 
@@ -89,12 +90,26 @@ impl RpcCall {
         &self.target
     }
 
+    pub(crate) fn take_transient(&mut self) -> Message {
+        self.transient.take().expect("Transient message not set")
+    }
+
+    pub(crate) fn set_request(&mut self, req: Arc<Message>) {
+        self.req = Some(req);
+    }
+
     pub(crate) fn is_reachable_at_creation(&self) -> bool {
         self.target_reachable
     }
 
     pub(crate) fn txid(&self) -> i32 {
-        self.req.txid()
+        if let Some(req) = self.req.as_ref() {
+            return req.txid();
+        } else if let Some(msg) = self.transient.as_ref() {
+            return msg.txid();
+        } else {
+            panic!("Should contain request message");
+        }
     }
 
     /*
@@ -119,16 +134,13 @@ impl RpcCall {
     }
     */
 
-    pub(crate) fn req(&self) -> &Message {
-        &self.req
+    pub(crate) fn req(&self) -> Arc<Message> {
+        self.req.as_ref().expect("Painic: request not set").clone()
+
     }
 
-    pub(crate) fn req_mut(&mut self) -> &mut Message {
-        &mut self.req
-    }
-
-    pub(crate) fn rsp(&self) -> Option<&Message> {
-        self.rsp.as_ref()
+    pub(crate) fn rsp(&self) -> Option<Arc<Message>> {
+        self.rsp.as_ref().cloned()
     }
 
     #[cfg(test)]
@@ -144,27 +156,29 @@ impl RpcCall {
     pub(crate) fn nodeid_mismatched(&self) -> bool {
         self.rsp.as_ref().map(|v| {
             v.nodeid() != &self.target_id()
-        }).unwrap_or(true)
+        }).unwrap_or(false)
     }
 
     pub(crate) fn addr_mismatched(&self) -> bool {
         self.rsp.as_ref().map(|v| {
-            v.remote_addr() != self.req.remote_addr()
-        }).unwrap_or(true)
+            v.remote_addr() != self.req().remote_addr()
+        }).unwrap_or(false)
     }
 
-    pub(crate) fn sent_time(&self) -> SystemTime {
+    pub(crate) fn sent_time(&self) -> Option<SystemTime> {
         self.sent_time
     }
 
     #[allow(unused)]
-    pub(crate) fn resp_time(&self) -> SystemTime {
+    pub(crate) fn resp_time(&self) -> Option<SystemTime> {
         self.resp_time
     }
 
     /*
     pub(crate) fn rtt(&self) -> Option<Duration> {
-        self.resp_time.duration_since(self.sent_time()).ok()
+        self.resp_time.and_then(|resp| {
+            self.sent_time.and_then(|sent| resp.duration_since(sent).ok())
+        })
     }
     */
 
@@ -216,27 +230,28 @@ impl RpcCall {
     }
 
     fn check_timeout(&mut self) {
-        // TODO:self.timeout_task = None;
+        self.timeout_timer = None;
 
         if self.state != State::Sent && self.state != State::Stalled {
             return;
         }
 
-        let elapsed = self.sent_time
-            .elapsed()
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
-        if remaining > 0 {
-            self.update_state(State::Stalled);
-            self.set_timeout_timer(remaining);
-        } else {
+        let sent_time = self.sent_time.unwrap_or(SystemTime::UNIX_EPOCH);
+        let elapsed = crate::elapsed_ms!(&sent_time) as u64;
+        if RpcServer::RPC_CALL_TIMEOUT_MAX <= elapsed {
             self.update_state(State::Timeout);
+            return;
         }
+
+        let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
+        self.update_state(State::Stalled);
+        self.set_timeout_timer(remaining);
     }
 
     pub(crate) fn sent(&mut self) {
-        self.sent_time = SystemTime::now();
+        // TODO: RTT;
+
+        self.sent_time = Some(SystemTime::now());
         self.update_state(State::Sent);
 
         if self.expected_rtt > 0 {
@@ -244,14 +259,13 @@ impl RpcCall {
         }
     }
 
-    pub(crate) fn respond(&mut self, rsp: &Message) {
-        self.resp_time = SystemTime::now();
+    pub(crate) fn respond(&mut self, rsp: Arc<Message>) {
+        self.resp_time = Some(SystemTime::now());
         // rsp.set_associated_call(self.weak.clone());
 
         self.cancel_timeout_timer();
-        // self.rsp = Some(rsp.clone());
+        self.rsp = Some(rsp.clone());
 
-        //let rsp = self.rsp.as_ref().unwrap();
         if rsp.is_err() {
             self.cause = match rsp.body() {
                 Some(Body::Error(err)) => Some(ProtocolError::new(err.to_string())),
@@ -270,7 +284,7 @@ impl RpcCall {
     // Handles a response received from an inconsistent socket
     // (e.g., due to port-mangling NAT).
 	// Transitions to STALLED state to allow retry without treating as an error.
-    pub(crate) fn respond_inconsistent_socket(&mut self, _: Message) {
+    pub(crate) fn respond_inconsistent_socket(&mut self, _: Arc<Message>) {
         if self.state != State::Sent {
             return;
         }
@@ -278,14 +292,15 @@ impl RpcCall {
     }
 
     // Handles a response with an incorrect method, treating it as a protocol error.
-    pub(crate) fn respond_wrong_method(&mut self, rsp: Message) {
-        self.resp_time = SystemTime::now();
+    pub(crate) fn respond_wrong_method(&mut self, rsp: Arc<Message>) {
+        self.resp_time = Some(SystemTime::now());
         self.cancel_timeout_timer();
         self.rsp = Some(rsp);
         self.cause = Some(ProtocolError::new(format!("Got response with wrong method")));
         self.update_state(State::Err);
     }
 
+    // Fails the RPC call with the specified cause.
     pub(crate) fn fail(&mut self, _err: &Box<dyn StdError + Send + Sync>) {
         if self.state.is_final() {
             return;

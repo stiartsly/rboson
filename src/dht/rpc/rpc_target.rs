@@ -40,6 +40,7 @@ pub(crate) trait NodeInfoLike {
     fn socket_addr(&self) -> &SocketAddr;
 }
 
+#[derive(Clone)]
 pub(crate) enum Target {
     Candidate(Arc<Mutex<CandidateNode>>),
     KBucketEntry(KBucketEntry),
@@ -47,6 +48,7 @@ pub(crate) enum Target {
 }
 
 impl Target {
+    /*
     pub(crate) fn ni(&self) -> NodeInfo {
         match self {
             Target::Candidate(v) => v.lock().unwrap().ni(),
@@ -54,6 +56,7 @@ impl Target {
             Target::NodeInfo(v) => v.ni()
         }
     }
+    */
 
     pub(crate) fn id(&self) -> Id {
         match self {

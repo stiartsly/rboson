@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime}
 };
-use log::{info, warn, error};
+use log::{info, warn, error, debug};
 use tokio::{
     net::UdpSocket,
     task::JoinHandle,
@@ -238,20 +238,25 @@ impl RpcServer {
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
 
-    pub(crate) fn send_call(&mut self, call: RpcCall) -> Result<()>{
+    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()>{
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
             return Err(StateError::new("Too many active calls pending in the queue."));
         }
 
         let txid = call.txid();
+        let mut msg  = call.take_transient();
+        msg.set_nodeid(*self.ni.id());
+
         let call = Arc::new(Mutex::new(call));
+        msg.set_associated_call(call.clone());
         self.pending_calls.insert(txid, call.clone());
 
         let mut locked = call.lock().unwrap();
-        let req_mut = locked.req_mut();
-        req_mut.set_associated_call(call.clone());
 
-        match self.send_msg(&req_mut) {
+        let msg = Arc::new(msg);
+        locked.set_request(msg.clone());
+
+        match self.send_msg(msg.as_ref()) {
             Ok(_) => {
                 locked.sent();
                 if let Some(handler) = self.callsent_handler.as_ref() {
@@ -269,7 +274,7 @@ impl RpcServer {
 
     pub(crate) fn send_msg(&self, msg: &Message) -> Result<usize> {
         // Deserialize message to bytes
-        let data = serde_cbor::to_vec(&msg).map_err(|e| -> Error {
+        let data = serde_cbor::to_vec(msg).map_err(|e| -> Error {
             ProtocolError::new(format!("Failed to serialize message: {e}"))
         })?;
 
@@ -302,8 +307,8 @@ impl RpcServer {
             return Err(NetworkError::new(format!("Error: sent length {} does not match expected {}", sent_len, buf.len())) as crate::errors::Error);
         }
 
-        info!("Sent message {{{}@{}}} to {}@{}: {}",
-            msg.kind(), msg.method(), msg.remote_id(), msg.remote_addr(), msg);
+        debug!("Message <{}@{} to {}@{}> was sent : {}",
+            msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
 
         Ok(sent_len)
     }
@@ -383,8 +388,8 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
     msg.set_nodeid(from_id);
     msg.set_remote(from_id, from);
 
-    info!("Received message {}-{} from {}@{}: {}",
-        msg.kind(), msg.method(), from_id, from, msg);
+    debug!("Received message <{}-{} from {}@{}>: {}",
+        msg.method(), msg.kind(), from_id, from, msg);
 
     // Handle request message.
     if msg.is_req() {
@@ -406,6 +411,10 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
             msg.method(), msg.txid());
         return;
     };
+    let msg = Arc::new({
+        msg.set_associated_call(call.clone());
+        msg
+    });
 
     let mut locked = call.lock().unwrap();
     let req = locked.req();
@@ -423,7 +432,7 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
         inconsistent_socket(from, from_id);
         // but expect an upcoming timeout if it's really just a misbehaving node
         locked.respond_inconsistent_socket(msg);
-            return;
+        return;
     }
 
     // Checking message with same address but different method,
@@ -437,12 +446,12 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
         return;
     }
 
-    msg.set_associated_call(call.clone());
-    locked.respond(&msg);
+    locked.respond(msg.clone());
+    drop(locked);
 
     let message_cb = server.lock().unwrap().message_handler.take();
     if let Some(cb) = message_cb {
-        cb(&msg);
+        cb(msg.as_ref());
         server.lock().unwrap().message_handler = Some(cb);
     };
 

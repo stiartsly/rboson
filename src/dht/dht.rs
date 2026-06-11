@@ -1402,11 +1402,7 @@ impl DHT {
         );
 
         self.taskman.add(task);
-
-        match future.clone().await {
-            Ok(_) => future.result(),
-            Err(e) => Err(e)
-        }
+        Ok(future.await?)
     }
 
     pub(crate) async fn store_value(
@@ -1414,8 +1410,6 @@ impl DHT {
         value: Value,
         expected_seq: i32
     ) -> Result<()> {
-
-        let taskman = self.taskman.clone();
         let promise = Promise::<()>::new();
         let future  = promise.future();
         let valueid = value.id();
@@ -1430,6 +1424,7 @@ impl DHT {
             )
         );
 
+        let taskman = self.taskman.clone();
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
         let mut task = Box::new(NodeLookupTask::new(
@@ -1469,11 +1464,7 @@ impl DHT {
         });
 
         taskman.add(task);
-
-        match future.clone().await {
-            Ok(_) => future.result(),
-            Err(e) => Err(e)
-        }
+        Ok(future.await?)
     }
 
     pub(crate) async fn find_peer(
@@ -1483,7 +1474,6 @@ impl DHT {
         expected_count: usize,
         option: LookupOption
     ) -> Result<Vec<PeerInfo>> {
-
         let promise = Promise::<Vec<PeerInfo>>::new();
         let future  = promise.future();
 
@@ -1505,26 +1495,21 @@ impl DHT {
         });
 
         self.taskman.add(task);
-
-        match future.clone().await {
-            Ok(_) => future.result(),
-            Err(e) => Err(e)
-        }
+        Ok(future.await?)
     }
 
     pub(crate) async fn announce_peer(
         &self,
         peer: PeerInfo,
         expected_seq: i32
-    ) -> Result<()>{
-        let taskman = self.taskman.clone();
+    ) -> Result<()> {
         let promise = Promise::<()>::new();
         let future  = promise.future();
 
         // Announce task to announce the peer to the closest nodes found
         // by the lookup task.
         let mut nested = Box::new(PeerAnnounceTask::new(
-            self.weak.clone(), peer.clone(), expected_seq
+            self.weak.clone(), peer.clone(), expected_seq,
         ));
         nested.with_name(format!("Announce peer: {}", peer.id()));
         nested.with_listener(
@@ -1533,15 +1518,15 @@ impl DHT {
             )
         );
 
-        // Lookup task to find the closest nodes to the peer, and
-        // then nested announce task to announce to those nodes.
+        let taskman = self.taskman.clone();
+        // Lookup task to find the closest nodes to the targetid.
         let mut task = Box::new(NodeLookupTask::new(
             self.weak.clone(), peer.id().clone(), false
         ));
+        task.with_name(format!("Announce peer: lookup closest node to {}", peer.id()));
         task.with_want_token(true);
-        task.with_name(format!("AnnouncePeer: lookup closest node to {}", peer.id()));
         task.with_nested(nested);
-        task.with_listener(
+        task.with_listener({
             TaskListener::default().ended_fn({
                 let taskman = taskman.clone();
                 move |t: &dyn Task| {
@@ -1558,7 +1543,7 @@ impl DHT {
                     let closest = task.closest();
                     if closest.is_empty() {
                         // This should never happen
-                        warn!("!!! Peer announce task not started because the node lookup task got the empty closest nodes.");
+                        warn!("!!! Announce peer task not started because the node lookup task got the empty closest nodes.");
                         nested.cancel();
                         return;
                     }
@@ -1569,13 +1554,9 @@ impl DHT {
 
                     taskman.add(nested);
             }})
-        );
+        });
 
         taskman.add(task);
-
-        match future.clone().await {
-            Ok(_) => future.result(),
-            Err(e) => Err(e)
-        }
+        Ok(future.await?)
     }
 }

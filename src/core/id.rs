@@ -309,7 +309,7 @@ impl fmt::Binary for Id {
     where S: Serializer,
     {
         match se.is_human_readable() {
-            true => se.serialize_str(&self.to_base58()),
+            true  => se.serialize_str(&self.to_base58()),
             false => se.serialize_bytes(&self.0),
         }
     }
@@ -317,36 +317,31 @@ impl fmt::Binary for Id {
 
 impl<'de> Deserialize<'de> for Id {
     fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>,
     {
         struct IdVisitor;
         impl<'de> Visitor<'de> for IdVisitor {
             type Value = Id;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a base58 string or 32 bytes")
+                formatter.write_str("a base58 string or 32 byte array")
             }
 
             fn visit_str<E>(self, value: &str) -> SResult<Self::Value, E>
             where E: de::Error,
             {
-                Id::try_from(value).map_err(|e|
-                    de::Error::custom(format!("Invalid ID string: {e}"))
-                )
+                Id::try_from(value).map_err(|e| de::Error::custom(e))
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> SResult<Self::Value, E>
             where E: de::Error,
             {
-                Id::try_from_bytes(v).map_err(|e|
-                    de::Error::custom(format!("Invalid ID bytes: {e}"))
-                )
+                Id::try_from_bytes(v).map_err(|e| de::Error::custom(e))
             }
         }
 
         match de.is_human_readable() {
-            true => de.deserialize_str(IdVisitor),
+            true  => de.deserialize_str(IdVisitor),
             false => de.deserialize_bytes(IdVisitor),
         }
     }

@@ -23,9 +23,20 @@ impl log::Log for Logger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             let record_target = record.target().rsplit("::").next().unwrap_or("N/A");
-            let log = format!("[{}] [{}] {}",
+            let record_target = if record_target.len() > 8 {
+                &record_target[0..8]
+            } else {
+                record_target
+            };
+            let record_level = format!("{}", record.level());
+            let record_level = if record_level.len() > 4 {
+                &record_level[0..4]
+            } else {
+                &record_level
+            };
+            let log = format!("[{:<8}] [{:^4}] {}",
                 record_target,
-                record.level(),
+                record_level,
                 record.args()
             );
 

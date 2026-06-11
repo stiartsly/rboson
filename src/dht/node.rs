@@ -1,18 +1,21 @@
 use std::{
-    fs::{self, File},
+    fs, fs::File,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration
+    sync::{Arc, Mutex, Weak},
+    time::{Duration, SystemTime}
 };
-use log::{warn, info};
+use futures::future::LocalBoxFuture;
+use futures::stream::FuturesUnordered;
+use futures::FutureExt;
+use futures::StreamExt;
 use tokio::{
     task,
     task::JoinHandle,
     sync::mpsc,
     runtime,
 };
-
+use log::{warn, info};
 use crate::{
     CryptoContext, CryptoIdentity,
     Id, Identity, JointResult, Network,
@@ -23,7 +26,7 @@ use crate::{
     signature
 };
 use crate::dht::{
-    dht::{self, DHT},
+    dht::{DHT, Builder as DHTBuilder},
     NodeConfig,
     LookupOption,
     node_status::NodeStatus,
@@ -68,6 +71,7 @@ pub struct Node {
 
     storage     : Arc<Mutex<Box<dyn DataStorage>>>,
     tokenman    : Arc<TokenManager>,
+    weak        : Weak<Self>,
 }
 
 impl Node {
@@ -76,8 +80,7 @@ impl Node {
 
         // Setup logger before any log is generated.
         logger::setup(
-            //cfg.as_ref().log_level(),
-            log::LevelFilter::Debug,
+            cfg.as_ref().log_level(),
             cfg.as_ref().log_file()
         );
         logger::enable_console_output();
@@ -115,7 +118,7 @@ impl Node {
 
         info!("Current Node id: {}", identity.id());
 
-        Ok(Arc::new(Self {
+        Ok(Arc::new_cyclic(|weak| Self {
             cfg,
             identity,
             data_dir,
@@ -127,7 +130,8 @@ impl Node {
             timer_client    : Mutex::new(None),
             timer_task      : Mutex::new(None),
             storage         : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
-            tokenman        : Arc::new(TokenManager::new())
+            tokenman        : Arc::new(TokenManager::new()),
+            weak            : weak.clone(),
         }))
     }
 
@@ -173,27 +177,34 @@ impl Node {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn dht4(&self) -> Option<Arc<Mutex<DHT>>> {
         self.dht4.lock().unwrap().clone()
     }
 
-    #[inline(always)]
+    #[inline]
     fn dht6(&self) -> Option<Arc<Mutex<DHT>>> {
         self.dht6.lock().unwrap().clone()
     }
 
-    #[inline(always)]
+    #[inline]
     fn option(&self, option: Option<LookupOption>) -> LookupOption {
         option.unwrap_or_else(|| self.default_lookup_option())
     }
 
-    #[inline(always)]
+    #[inline]
     fn check_running(&self) -> Result<()> {
         match self.is_running() {
             true => Ok(()),
             false => Err(StateError::new("kadNode is not running".to_string()))
         }
+    }
+
+    #[inline]
+    fn timer_client(&self) -> Arc<TimerClient> {
+        self.timer_client.lock().unwrap()
+            .as_ref().expect("Timer client is not initalized")
+            .clone()
     }
 
     async fn start_timer_task(&self) -> Result<()> {
@@ -227,11 +238,70 @@ impl Node {
         }
     }
 
-    #[inline(always)]
-    fn timer_client(&self) -> Arc<TimerClient> {
-        self.timer_client.lock().unwrap()
-            .as_ref().expect("Timer client is not initalized")
-            .clone()
+    async fn persistent_announce(self: Arc<Self>) {
+        info!("Re-announce the persistent values and peers...");
+
+        let storage = self.storage.clone();
+
+        // Re-announce values
+        let before = crate::as_ms!(SystemTime::now()) as u64
+            - MAX_VALUE_AGE.as_millis() as u64
+            + RE_ANNOUNCE_INTERVAL * 2;
+
+        let values = match storage.lock().unwrap()
+                .get_values_announced_before(true, before) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Failed to re-announce the values: {}", e);
+                Vec::new()
+            }
+        };
+
+        let mut futures = FuturesUnordered::<LocalBoxFuture<'static, ()>>::new();
+
+        for value in values {
+            info!("Re-announce the value: {}", value.id());
+
+            let node = self.clone();
+            let task: LocalBoxFuture<'static, ()> = async move {
+                let value_id = value.id();
+                match node.store_value(&value, value.sequence_number(), true).await {
+                    Ok(_) => info!("Re-announce the value {} success", value_id),
+                    Err(e) => warn!("Re-announce the value {} failed: {}", value_id, e),
+                }
+            }.boxed_local();
+            futures.push(task);
+        }
+
+        // Re-announce peers
+        let before_peer = crate::as_ms!(SystemTime::now()) as u64
+            - MAX_PEER_AGE.as_millis() as u64
+            + RE_ANNOUNCE_INTERVAL * 2;
+
+        let peers = match storage.lock().unwrap().get_peers_announced_before(true, before_peer) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Failed to re-announce the peers: {}", e);
+                Vec::new()
+            }
+        };
+
+        for peer in peers {
+            info!("Re-announce the peer: {}", peer.id());
+
+            let node = self.clone();
+            let task: LocalBoxFuture<'static, ()> = async move {
+                let peer_id = peer.id().clone();
+                match node.announce_peer(&peer, -1, true).await {
+                    Ok(_) => info!("Re-announce the peer {} success", peer_id),
+                    Err(e) => warn!("Re-announce the peer {} failed: {}", peer_id, e),
+                }
+            }.boxed_local();
+            futures.push(task);
+        }
+
+        while futures.next().await.is_some() {
+        }
     }
 
     async fn setup_periodic_tasks(&self) -> Result<()> {
@@ -242,17 +312,26 @@ impl Node {
             30*1000,
             Some(STORAGE_EXPIRE_INTERVAL),
             move || {
-                _ = storage.lock().unwrap().purge();
+                let _ = storage.lock().unwrap().purge();
             }
         ).await?;
 
-        //let storage = self.storage.clone();
+        let weak = self.weak.clone();
         let _ = client.add_timer(
             5*60*1000,
             Some(RE_ANNOUNCE_INTERVAL),
             move || {
-                // TODO:
-                unimplemented!();
+                if let Some(node) = weak.upgrade() {
+                    task::spawn_blocking(move || {
+                        runtime::Builder::new_current_thread()
+                            .enable_time()
+                            .enable_io()
+                            .build().expect("persistent announce runtime should build")
+                            .block_on(async move {
+                                node.persistent_announce().await;
+                            });
+                    });
+                }
             }
         ).await?;
 
@@ -286,7 +365,7 @@ impl Node {
         self.setup_periodic_tasks().await?;
 
         let builder = {
-            let mut b = dht::Builder::default();
+            let mut b = DHTBuilder::default();
             b.with_timer_client(self.timer_client())
              .with_identity(self.identity.identity())
              .with_storage(self.storage.clone())
@@ -678,16 +757,16 @@ impl Node {
         let (rc4, rc6) = tokio::join!(
             async move {
                 if let Some(dht) = dht4 {
-                    dht.lock().unwrap()
-                        .announce_peer(peer4, expected_seq).await
+                      dht.lock().unwrap()
+                         .announce_peer(peer4, expected_seq).await
                 } else {
                     Ok(())
                 }
             },
             async move {
                 if let Some(dht) = dht6 {
-                    dht.lock().unwrap()
-                        .announce_peer(peer6, expected_seq).await
+                     dht.lock().unwrap()
+                         .announce_peer(peer6, expected_seq).await
                 } else {
                     Ok(())
                 }

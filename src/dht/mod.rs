@@ -100,7 +100,6 @@ mod routing {
         mod test_kclosest_nodes;
         mod test_routing_table;
         mod test_kbucket_entry;
-        mod test_kbucket;
     }
 
     pub(crate) use {

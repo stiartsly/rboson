@@ -142,27 +142,24 @@ impl<'de> Deserialize<'de> for NodeInfo {
             where
                 A: SeqAccess<'de>,
             {
-                let id: Id = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let bad_length = || de::Error::invalid_length(0, &self);
 
-                let ip_bytes: Vec<u8> = seq.next_element()?
-                    .ok_or_else(||de::Error::invalid_length(1, &self))?;
+                let id = seq.next_element::<Id>()?.ok_or_else(|| bad_length())?;
+                let ip = seq.next_element::<Vec<u8>>()?.ok_or_else(|| bad_length())?;
+                let port: u16 = seq.next_element()?.ok_or_else(|| bad_length())?;
 
-                let port: u16 = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
-
-                let ip = match ip_bytes.len() {
+                let ip = match ip.len() {
                     4 => {
                         let mut octets = [0u8; 4];
-                        octets.copy_from_slice(&ip_bytes);
+                        octets.copy_from_slice(&ip);
                         IpAddr::V4(Ipv4Addr::from(octets))
                     },
                     16 => {
                         let mut octets = [0u8; 16];
-                        octets.copy_from_slice(&ip_bytes);
+                        octets.copy_from_slice(&ip);
                         IpAddr::V6(Ipv6Addr::from(octets))
                     },
-                    _ => return Err(de::Error::invalid_value(de::Unexpected::Bytes(&ip_bytes), &self)),
+                    _ => return Err(de::Error::invalid_value(de::Unexpected::Bytes(&ip), &self)),
                 };
 
                 Ok(NodeInfo {

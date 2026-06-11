@@ -17,6 +17,8 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+#[derive(Deserialize)]
+#[serde(try_from = "YamlNodeConfig")]
 pub struct NodeConfiguration {
     host4       : Option<String>,
     host6       : Option<String>,
@@ -44,21 +46,66 @@ struct YamlNodeConfig {
     database_uri: String,
     #[serde(default)]
     bootstraps  : Vec<YamlNodeEntry>,
-    logger      : Option<YamlLoggerConfig>,
+    #[serde(rename = "logLevel")]
+    log_level   : Option<String>,
+    #[serde(rename = "logFile")]
+    log_file    : Option<String>,
     #[serde(rename = "enableDeveloperMode", default)]
     devp        : bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct YamlLoggerConfig {
-    #[serde(rename = "logLevel")]
-    level       : Option<String>,
-    #[serde(rename = "logFile")]
-    log_file    : Option<String>,
+impl TryFrom<YamlNodeConfig> for NodeConfiguration {
+    type Error = crate::Error;
+    fn try_from(yaml: YamlNodeConfig) -> Result<Self> {
+        let sk = signature::PrivateKey::try_from(yaml.private_key.as_str())?;
+        let bootstrap_nodes = yaml.bootstraps.into_iter()
+            .map(|entry| NodeInfo::try_from(entry))
+            .collect::<Result<Vec<_>>>()?;
+
+        let addr4 = if yaml.ipv4.unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(true)?.to_string())
+        } else {
+            None
+        };
+        let addr6 = if yaml.ipv6.unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(false)?.to_string())
+        } else {
+            None
+        };
+
+        Ok(NodeConfiguration {
+            host4   : addr4,
+            host6   : addr6,
+            port    : yaml.port,
+            private_key: sk,
+            data_dir: expand_data_dir(yaml.data_dir),
+            database_uri: yaml.database_uri,
+            bootstrap_nodes,
+            log_level: log_level(yaml.log_level.as_deref()),
+            log_file: yaml.log_file,
+            devp    : yaml.devp,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct YamlNodeEntry(Id, String, u16);
+
+impl TryFrom<YamlNodeEntry> for NodeInfo {
+    type Error = crate::Error;
+
+    fn try_from(value: YamlNodeEntry) -> Result<NodeInfo> {
+        let YamlNodeEntry(id, host, port) = value;
+        let addr = format!("{host}:{port}")
+            .parse::<SocketAddr>()
+            .map_err(|e|
+                ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
+        )?;
+        Ok(NodeInfo::new(id, addr))
+    }
+}
 
 fn default_port() -> u16 {
     DEFAULT_DHT_PORT
@@ -94,45 +141,6 @@ impl NodeConfiguration {
         };
 
         Self::load(path)
-    }
-}
-
-impl TryFrom<YamlNodeConfig> for NodeConfiguration {
-    type Error = crate::Error;
-
-    fn try_from(yaml: YamlNodeConfig) -> Result<Self> {
-        let sk = signature::PrivateKey::try_from(yaml.private_key.as_str())?;
-        let bootstrap_nodes = yaml.bootstraps.into_iter()
-            .map(|entry| NodeInfo::try_from(entry))
-            .collect::<Result<Vec<_>>>()?;
-
-        let addr4 = if yaml.ipv4 .unwrap_or(false) {
-            use crate::local_addr;
-            Some(local_addr(true)?.to_string())
-        } else {
-            None
-        };
-        let addr6 = if yaml.ipv6.unwrap_or(false) {
-            use crate::local_addr;
-            Some(local_addr(false)?.to_string())
-        } else {
-            None
-        };
-
-        let logger = yaml.logger.as_ref();
-
-        Ok(Self {
-            host4   : addr4,
-            host6   : addr6,
-            port    : yaml.port,
-            private_key: sk,
-            data_dir: expand_data_dir(yaml.data_dir),
-            database_uri: yaml.database_uri,
-            bootstrap_nodes,
-            log_level: log_level(logger.and_then(|logger| logger.level.as_deref())),
-            log_file: logger.and_then(|logger| logger.log_file.clone()),
-            devp    : yaml.devp,
-        })
     }
 }
 
@@ -179,20 +187,6 @@ impl NodeConfig for NodeConfiguration {
 
     fn dump(&self) {
         println!("{}", self);
-    }
-}
-
-impl TryFrom<YamlNodeEntry> for NodeInfo {
-    type Error = crate::Error;
-
-    fn try_from(value: YamlNodeEntry) -> Result<NodeInfo> {
-        let YamlNodeEntry(id, host, port) = value;
-        let addr = format!("{host}:{port}")
-            .parse::<SocketAddr>()
-            .map_err(|e|
-                ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
-        )?;
-        Ok(NodeInfo::new(id, addr))
     }
 }
 

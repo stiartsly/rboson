@@ -48,8 +48,8 @@ pub(crate) struct RpcServer {
 
     reachable_handler   : Option<Consumer<bool>>,
     message_handler     : Option<Box<dyn Fn(&Message) + Send>>,
-    callsent_handler    : Option<Box<dyn Fn(&mut RpcCall) + Send>>,
-    calltimeout_handler : Option<Box<dyn Fn(&mut RpcCall) + Send>>,
+    callsent_handler    : Option<Box<dyn Fn(&RpcCall) + Send>>,
+    calltimeout_handler : Option<Box<dyn Fn(&RpcCall) + Send>>,
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
@@ -148,13 +148,13 @@ impl RpcServer {
     }
 
     pub(crate) fn callsent_handler<F>(&mut self, cb: F)
-    where F: Fn(&mut RpcCall) + Send + 'static,
+    where F: Fn(&RpcCall) + Send + 'static,
     {
         self.callsent_handler = Some(Box::new(cb));
     }
 
     pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
-    where F: Fn(&mut RpcCall) + Send + 'static,
+    where F: Fn(&RpcCall) + Send + 'static,
     {
         self.calltimeout_handler = Some(Box::new(cb));
     }

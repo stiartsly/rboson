@@ -132,11 +132,11 @@ impl RoutingTable {
         self._remove(id)
     }
 
-    pub(crate) fn on_timeout(&mut self, id: &Id) {
+    pub(crate) fn on_timeout(&self, id: &Id) {
         self._on_timeout(id)
     }
 
-    pub(crate) fn on_request_sent(&mut self, id: &Id) {
+    pub(crate) fn on_request_sent(&self, id: &Id) {
         self._on_request_sent(id)
     }
 
@@ -220,11 +220,11 @@ impl RoutingTable {
         locked._remove_bad_entry(to_remove, true)
     }
 
-    fn _on_timeout(&mut self, id: &Id) {
+    fn _on_timeout(&self, id: &Id) {
         self.bucket(id).lock().unwrap().on_timeout(id);
     }
 
-    fn _on_request_sent(&mut self, id: &Id) {
+    fn _on_request_sent(&self, id: &Id) {
         self.bucket(id).lock().unwrap().on_request_sent(id);
     }
 

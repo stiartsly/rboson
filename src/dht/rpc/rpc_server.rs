@@ -104,12 +104,10 @@ impl RpcServer {
             return;
         }
 
-        let timed_out = now
-            .duration_since(self.last_reachable_check)
-            .unwrap_or(Duration::ZERO) > Self::REACHABILITY_TIMEOUT;
-        if timed_out && self.recv_packets != 0 && self.recv_packets_at_last_reachable_check != 0 {
+        if crate::elapsed_ms!(&self.last_reachable_check) > Self::REACHABILITY_TIMEOUT.as_millis() &&
+            self.recv_packets != 0 &&
+            self.recv_packets_at_last_reachable_check != 0 {
             self.set_reachable(false);
-            // TODO: reset timeout_sampler
         }
     }
 
@@ -265,7 +263,7 @@ impl RpcServer {
             },
             Err(e) => {
                 let _ = self.pending_calls.remove(&txid);
-                locked.fail(&e);
+                locked.fail();
                 return Err(e);
             }
         }
@@ -431,7 +429,7 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
 
         inconsistent_socket(from, from_id);
         // but expect an upcoming timeout if it's really just a misbehaving node
-        locked.respond_inconsistent_socket(msg);
+        locked.respond_inconsistent_socket();
         return;
     }
 
@@ -441,7 +439,7 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
         warn!("Got response with wrong method {} from {}@{} for {}",
             msg.method(), from_id, from, req.method());
 
-        locked.respond_wrong_method(msg);
+        locked.respond_wrong_method();
         malformed_message(from);
         return;
     }

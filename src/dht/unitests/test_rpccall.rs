@@ -58,15 +58,13 @@ mod tests {
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-        assert_eq!(call.is_reachable_at_creation(), false);
         // assert_eq!(call.expected_rtt(), 40);
         assert_eq!(call.state(), State::Unsent);
 
         // call.set_expected_rtt(90);
         // assert_eq!(call.expected_rtt(), 90);
         assert_eq!(call.state(), State::Unsent);
-        assert_eq!(call.is_pending(), true);
-        assert_eq!(call.cause().is_none(), true);
+       // assert_eq!(call.is_pending(), true);
     }
 
     #[test]
@@ -84,15 +82,13 @@ mod tests {
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-        assert_eq!(call.is_reachable_at_creation(), true);
        // assert_eq!(call.expected_rtt(), 42);
         assert_eq!(call.state(), State::Unsent);
 
       //  call.set_expected_rtt(91);
       //  assert_eq!(call.expected_rtt(), 91);
         assert_eq!(call.state(), State::Unsent);
-        assert_eq!(call.is_pending(), true);
-        assert_eq!(call.cause().is_none(), true);
+        //assert_eq!(call.is_pending(), true);
     }
 
     #[test]
@@ -143,7 +139,6 @@ mod tests {
         assert_eq!(state_changes.lock().unwrap().to_owned(), State::Responded);
 
         let locked = call.lock().unwrap();
-        assert_eq!(locked.is_reachable_at_creation(), true);
         assert_eq!(locked.state(), State::Responded);
         assert_eq!(locked.rsp().is_none(), true);
         assert_eq!(locked.nodeid_mismatched(), true);
@@ -166,7 +161,6 @@ mod tests {
 
         let locked = error_call.lock().unwrap();
         assert_eq!(locked.state(), State::Err);
-        assert_eq!(locked.cause().unwrap().to_string().contains("boom"), true);
     }
 
     #[test]
@@ -190,8 +184,7 @@ mod tests {
         call.lock().unwrap().set_listener(listener);
 
         call.lock().unwrap().sent();
-        let inconsistent = Arc::new(make_response(&call.lock().unwrap()));
-        call.lock().unwrap().respond_inconsistent_socket(inconsistent);
+        call.lock().unwrap().respond_inconsistent_socket();
         assert_eq!(call.lock().unwrap().state(), State::Stalled);
         assert_eq!(*stalled.lock().unwrap(), 1);
 
@@ -205,22 +198,14 @@ mod tests {
         let mut rsp = msg::store_value_response(wrong_method.txid());
         rsp.set_nodeid(target2.id().clone());
         rsp.set_remote(target2.id().clone(), *target2.socket_addr());
-        wrong_method.respond_wrong_method(Arc::new(rsp));
+        wrong_method.respond_wrong_method();
         assert_eq!(wrong_method.state(), State::Err);
-        assert_eq!(wrong_method.cause().unwrap().to_string().contains("wrong method"), true);
 
         let req3 = msg::ping_request();
         let mut failed = RpcCall::new(target2.clone(), req3);
         let err = ProtocolError::new("failed") as Box<dyn std::error::Error + Send + Sync>;
-        failed.fail(&err);
+        failed.fail();
         assert_eq!(failed.state(), State::Err);
-        assert_eq!(failed.cause().is_none(), true);
-
-        let req4 = msg::ping_request();
-        let mut canceled = RpcCall::new(target2, req4);
-        canceled.cancel();
-        assert_eq!(canceled.state(), State::Canceled);
-        assert_eq!(canceled.is_pending(), false);
     }
 
     #[ignore]

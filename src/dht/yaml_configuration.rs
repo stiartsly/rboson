@@ -80,7 +80,7 @@ impl TryFrom<YamlNodeConfig> for NodeConfiguration {
             host6   : addr6,
             port    : yaml.port,
             private_key: sk,
-            data_dir: expand_data_dir(yaml.data_dir),
+            data_dir: expand_datadir(yaml.data_dir),
             database_uri: yaml.database_uri,
             bootstrap_nodes,
             log_level: log_level(yaml.log_level.as_deref()),
@@ -100,8 +100,8 @@ impl TryFrom<YamlNodeEntry> for NodeInfo {
         let YamlNodeEntry(id, host, port) = value;
         let addr = format!("{host}:{port}")
             .parse::<SocketAddr>()
-            .map_err(|e|
-                ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
+            .map_err(|e|ArgumentError::new(
+                format!("Invalid bootstrap node address {host}:{port}: {e}"))
         )?;
         Ok(NodeInfo::new(id, addr))
     }
@@ -112,15 +112,15 @@ fn default_port() -> u16 {
 }
 
 impl NodeConfiguration {
-    pub fn from(input: &str) -> Result<Self> {
-        let expanded = expand_env(input)?;
-        let config = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
-            .map_err(|e| ArgumentError::new(format!("Invalid node.yaml content: {e}")))?;
+    pub fn from(yaml: &str) -> Result<Self> {
+        let expanded = expand_env(yaml)?;
+        let config   = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
+                .map_err(|e| ArgumentError::new(format!("invalid yaml format: {e}")))?;
         Self::try_from(config)
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+        let path  = path.as_ref();
         let input = fs::read_to_string(path).map_err(|e|
             IOError::new(format!("Reading config {} failed: {e}", path.display()))
         )?;
@@ -128,13 +128,11 @@ impl NodeConfiguration {
     }
 
     pub fn load_default() -> Result<Self> {
-        let candidates = config_paths();
-        let Some(path) = candidates.iter().find(|path| path.exists()) else {
+        let paths = config_paths();
+        let Some(path) = paths.iter().find(|path| path.exists()) else {
             return Err(ArgumentError::new(format!(
                 "Unable to locate node.yaml in any default location: {}",
-                candidates
-                    .iter()
-                    .map(|path| path.display().to_string())
+                paths.iter().map(|path| path.display().to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             )));
@@ -195,7 +193,7 @@ fn log_level(level: Option<&str>) -> LevelFilter {
         .unwrap_or(LevelFilter::Info)
 }
 
-fn expand_data_dir(data_dir: Option<String>) -> String {
+fn expand_datadir(data_dir: Option<String>) -> String {
     let Some(data_dir) = data_dir else {
         return ".".to_string();
     };

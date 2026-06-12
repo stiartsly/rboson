@@ -47,9 +47,9 @@ pub(crate) struct RpcServer {
     is_reachable        : bool,
 
     reachable_handler   : Option<Consumer<bool>>,
-    message_handler     : Option<Box<dyn Fn(&Message) + Send>>,
-    callsent_handler    : Option<Box<dyn Fn(&RpcCall) + Send>>,
-    calltimeout_handler : Option<Box<dyn Fn(&RpcCall) + Send>>,
+    message_handler     : Option<Consumer<Message>>,
+    callsent_handler    : Option<Consumer<RpcCall>>,
+    calltimeout_handler : Option<Consumer<RpcCall>>,
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
@@ -117,14 +117,12 @@ impl RpcServer {
         }
         self.is_reachable = reachable;
         if let Some(handler) = self.reachable_handler.as_ref() {
-            handler.accept(reachable);
+            handler.accept(&reachable);
         }
     }
 
-    pub(crate) fn reachable_handler<F>(&mut self, cb: F)
-    where F: Fn(bool) + Send + 'static,
-    {
-        self.reachable_handler = Some(Consumer::new(cb));
+    pub(crate) fn reachable_handler(&mut self, consumer: Consumer<bool>) {
+        self.reachable_handler = Some(consumer);
     }
 
     pub(crate) fn is_reachable(&self) -> bool {
@@ -135,65 +133,20 @@ impl RpcServer {
         !self.pending_calls.is_empty()
     }
 
-    pub(crate) fn age(&self) -> Duration {
-        self.start_time
-            .and_then(|start_time| start_time.elapsed().ok())
-            .unwrap_or(Duration::ZERO)
+    pub(crate) fn message_handler(&mut self, consumer: Consumer<Message>) {
+        self.message_handler = Some(consumer);
     }
 
-    pub(crate) fn message_handler<F>(&mut self, cb: F)
-    where F: Fn(&Message) + Send + 'static,
-    {
-        self.message_handler = Some(Box::new(cb));
+    pub(crate) fn callsent_handler(&mut self, consumer: Consumer<RpcCall>) {
+        self.callsent_handler = Some(consumer);
     }
 
-    pub(crate) fn callsent_handler<F>(&mut self, cb: F)
-    where F: Fn(&RpcCall) + Send + 'static,
-    {
-        self.callsent_handler = Some(Box::new(cb));
+    pub(crate) fn calltimeout_handler(&mut self, consumer: Consumer<RpcCall>) {
+        self.calltimeout_handler = Some(consumer);
     }
-
-    pub(crate) fn calltimeout_handler<F>(&mut self, cb: F)
-    where F: Fn(&RpcCall) + Send + 'static,
-    {
-        self.calltimeout_handler = Some(Box::new(cb));
-    }
-
-    /*
-    pub(crate) fn start_reachability_check(server: Arc<Mutex<RpcServer>>) {
-        let task_server = server.clone();
-        let task = tokio::spawn(async move {
-            tokio::time::sleep(Self::REACHABILITY_CHECK_INTERVAL.mul_f32(2.0)).await;
-
-            loop {
-                {
-                    let mut locked = match task_server.lock() {
-                        Ok(locked) => locked,
-                        Err(_) => break,
-                    };
-
-                    if !locked.is_running {
-                        break;
-                    }
-
-                    locked.check_reachability();
-                }
-
-                tokio::time::sleep(Self::REACHABILITY_CHECK_INTERVAL).await;
-            }
-        });
-
-        if let Ok(mut locked) = server.lock() {
-            if let Some(previous) = locked.reachable_check_task.replace(task) {
-                previous.abort();
-            }
-        }
-    }
-    */
 
     pub(crate) async fn start(&mut self) -> Result<()> {
         let socket_addr = self.ni.socket_addr();
-        //let socket = match UdpSocket::bind(socket_addr).await {
         let socket = match StdUdpSocket::bind(socket_addr) {
             Ok(socket) => Arc::new(socket),
             Err(e) => {
@@ -258,7 +211,7 @@ impl RpcServer {
             Ok(_) => {
                 locked.sent();
                 if let Some(handler) = self.callsent_handler.as_ref() {
-                    handler(&mut *locked);
+                    handler.accept(&locked);
                 }
             },
             Err(e) => {
@@ -391,9 +344,9 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
 
     // Handle request message.
     if msg.is_req() {
-        let message_cb = server.lock().unwrap().message_handler.take();
-        if let Some(cb) = message_cb {
-            cb(&msg);
+        let handler = server.lock().unwrap().message_handler.take();
+        if let Some(cb) = handler {
+            cb.accept(&msg);
             server.lock().unwrap().message_handler = Some(cb);
         }
         return;
@@ -447,13 +400,11 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
     locked.respond(msg.clone());
     drop(locked);
 
-    let message_cb = server.lock().unwrap().message_handler.take();
-    if let Some(cb) = message_cb {
-        cb(msg.as_ref());
+    let handler = server.lock().unwrap().message_handler.take();
+    if let Some(cb) = handler {
+        cb.accept(msg.as_ref());
         server.lock().unwrap().message_handler = Some(cb);
     };
-
-    // TODO: handle metrics.
 }
 
 pub(crate) async fn run_loop(
@@ -494,12 +445,11 @@ impl fmt::Display for RpcServer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "RPC Server[{}]: {}@{}:{}, uptime: {:?}",
+            "RPC Server[{}]: {}@{}:{}",
             self.ni.network(),
             self.ni.id(),
             self.ni.host(),
-            self.ni.port(),
-            self.age()
+            self.ni.port()
         )
     }
 }

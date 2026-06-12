@@ -270,7 +270,7 @@ pub(crate) trait Task: Send + Sync {
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
-            ended.accept(());
+            ended.accept(&());
         }
 
         let listener = self.data_mut().listener.take();
@@ -294,7 +294,7 @@ pub(crate) trait Task: Send + Sync {
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
-            ended.accept(());
+            ended.accept(&());
         }
 
         let listener = self.data_mut().listener.take();
@@ -418,7 +418,7 @@ pub(crate) trait Task: Send + Sync {
         });
 
         if let Some(handler) = consumer {
-            handler.accept(());
+            handler.accept(&());
         };
 
         let txid = call.txid();

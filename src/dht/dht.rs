@@ -441,12 +441,12 @@ impl DHT {
             RoutingTable::maintenance(
                 rt,
                 bootstrap_ids.as_ref(),
-                Consumer::new(move |bucket: Arc<Mutex<KBucket>>| {
+                Consumer::new(move |bucket: &Arc<Mutex<KBucket>>| {
                     let prefix = bucket.lock().unwrap().prefix().clone();
                     weak_dht.upgrade()
                         .expect("DHT instance is dropped")
                         .lock().unwrap()
-                        .try_ping_maintenance(bucket, false, false, false,
+                        .try_ping_maintenance(bucket.clone(), false, false, false,
                             format!("Routing table maintenance: refreshing bucket {}", prefix)
                         );
                 })
@@ -523,7 +523,7 @@ impl DHT {
             self.identity.clone(),
             self.suspicious_detector.clone()
         );
-        server.message_handler({
+        server.message_handler(Consumer::new({
             let weak = self.weak.clone();
             move |msg| {
                 weak.upgrade()
@@ -531,36 +531,36 @@ impl DHT {
                     .lock().unwrap()
                     .on_message(msg)
             }
-        });
-        server.callsent_handler({
+        }));
+        server.callsent_handler(Consumer::new({
             let rt = self.rt();
-            move |call| {
+            move |call: &RpcCall| {
                 let nodeid = call.target_id();
                 rt.lock().unwrap().on_request_sent(&nodeid);
             }
-        });
-        server.calltimeout_handler({
+        }));
+        server.calltimeout_handler(Consumer::new({
             let rt = self.rt();
-            move |call| {
+            move |call: &RpcCall| {
                 let nodeid = call.target_id();
                 rt.lock().unwrap().on_timeout(&nodeid);
             }
-        });
+        }));
         server.start().await?;
-        server.reachable_handler({
+        server.reachable_handler(Consumer::new({
             let weak = self.weak.clone();
             move |reachable| {
                 let dht = weak.upgrade().expect("DHT instance is dropped");
                 let mut locked = dht.lock().unwrap();
 
-                if reachable {
+                if *reachable {
                     locked.set_status(ConnectionStatus::Connected);
                 } else {
                     locked.random_ping();
                     locked.set_status(ConnectionStatus::Disconnected);
                 }
             }
-        });
+        }));
 
         self.rpc_server = Some(Arc::new(Mutex::new(server)));
         self.set_status(ConnectionStatus::Connecting);

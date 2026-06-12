@@ -313,7 +313,7 @@ impl RoutingTable {
 
             if needs_refreshing || needs_replacement {
                 log::debug!("Refreshing bucket {}...", prefix);
-                consumer.accept(bucket);
+                consumer.accept(&bucket);
             }
         }
     }

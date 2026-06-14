@@ -34,6 +34,8 @@ use crate::dht::{
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
+    consumer::AsyncConsumer,
+    promise::Promise,
     timer_client::TimerClient,
     timer_queue::{TimerQueue, Command},
     storage::{
@@ -208,7 +210,7 @@ impl Node {
     }
 
     async fn start_timer_task(&self) -> Result<()> {
-        let (tx, rx) = mpsc::channel::<Command>(128);
+        let (tx, rx) = mpsc::unbounded_channel::<Command>();
         let timer_queue  = TimerQueue::new(rx);
         let timer_client = TimerClient::new(tx);
         let timer_task   = task::spawn_blocking(move || {
@@ -231,7 +233,7 @@ impl Node {
         let timer_task   = self.timer_task.lock().unwrap().take();
 
         if let Some(client) = timer_client {
-            let _ = client.stop_all().await;
+            let _ = client.stop();
         }
         if let Some(task) = timer_task {
             let _ = task.await;
@@ -311,38 +313,45 @@ impl Node {
         let _ = client.add_timer(
             30*1000,
             Some(STORAGE_EXPIRE_INTERVAL),
-            move || {
-                let _ = storage.lock().unwrap().purge();
-            }
-        ).await?;
+            AsyncConsumer::new(move |_|{
+                    let storage = storage.clone();
+                    Box::pin(async move {
+                        let _ = storage.lock().unwrap().purge();
+                })
+        }))?;
 
         let weak = self.weak.clone();
         let _ = client.add_timer(
             5*60*1000,
             Some(RE_ANNOUNCE_INTERVAL),
-            move || {
-                if let Some(node) = weak.upgrade() {
-                    task::spawn_blocking(move || {
-                        runtime::Builder::new_current_thread()
-                            .enable_time()
-                            .enable_io()
-                            .build().expect("persistent announce runtime should build")
-                            .block_on(async move {
-                                node.persistent_announce().await;
-                            });
-                    });
-                }
-            }
-        ).await?;
+            AsyncConsumer::new(move |_| {
+                let weak = weak.clone();
+                Box::pin(async move {
+                    if let Some(node) = weak.upgrade() {
+                        task::spawn_blocking(move || {
+                            runtime::Builder::new_current_thread()
+                                .enable_time()
+                                .enable_io()
+                                .build().expect("persistent announce runtime should build")
+                                .block_on(async move {
+                                    node.persistent_announce().await;
+                                });
+                        });
+                    }
+                })
+        }))?;
 
         let tokenman = self.tokenman.clone();
         let _ = client.add_timer(
             TokenManager::TOKEN_TIMEOUT,
             Some(TokenManager::TOKEN_TIMEOUT),
-            move || {
-                tokenman.update_token_timestamp();
-            }
-        ).await?;
+            AsyncConsumer::new(move |_| {
+                let tokenman = tokenman.clone();
+                Box::pin(async move {
+                    tokenman.update_token_timestamp();
+                })
+            })
+        )?;
         Ok(())
     }
 
@@ -504,27 +513,27 @@ impl Node {
     ) -> Result<JointResult<NodeInfo>> {
         self.check_running()?;
 
-        let target  = target.clone();
-        let option  = self.option(lookup_option);
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
+        let target = target.clone();
+        let option = self.option(lookup_option);
+        let dht4   = self.dht4();
+        let dht6   = self.dht6();
 
-        let rc = tokio::select!{
-            v = async move {
-                if let Some(dht) = dht4 {
-                    dht.lock().unwrap().find_node(&target, option).await
-                } else {
-                    Ok(None)
-                }
-            }, if dht4.is_some() => (Network::IPv4, v),
-            v = async move {
-                if let Some(dht) = dht6 {
-                    dht.lock().unwrap().find_node(&target, option).await
-                } else {
-                    Ok(None)
-                }
-            }, if dht6.is_some() => (Network::IPv6, v),
+        let find_node_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+            let promise = Promise::<Option<NodeInfo>>::new();
+            let future = promise.future();
+
+            if let Some(dht) = dht {
+                dht.lock().unwrap().find_node(&target, option, promise);
+            } else {
+                promise.complete(Ok(None));
+            }
+            future
         };
+
+        let rc = tokio::select!(
+            v = find_node_cb(dht4), if dht4.is_some() => (Network::IPv4, v),
+            v = find_node_cb(dht6), if dht6.is_some() => (Network::IPv6, v),
+        );
 
         Ok({
             let mut jres = JointResult::<NodeInfo>::new();
@@ -551,9 +560,7 @@ impl Node {
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let mut eligible = EligibleValue::new(
-            target, expected_seq
-        );
+        let mut eligible = EligibleValue::new(target, expected_seq);
 
         let value = crate::locked!(self.storage).get_value(&target)?;
         if let Some(v) = value {
@@ -568,23 +575,22 @@ impl Node {
             }
         }
 
+        let find_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+            let promise = Promise::<Option<Value>>::new();
+            let future = promise.future();
+
+            if let Some(dht) = dht {
+                dht.lock().unwrap().find_value(
+                    &target, expected_seq, option, promise);
+            } else {
+                promise.complete(Ok(None));
+            }
+            future
+        };
+
         let rc = tokio::select!(
-            v = async move {
-                if let Some(dht) = dht4 {
-                    crate::locked!(dht).find_value(
-                        &target, expected_seq, option).await
-                } else {
-                    Ok(None)
-                }
-            }, if dht4.is_some() => v,
-            v = async move {
-                if let Some(dht) = dht6 {
-                    crate::locked!(dht).find_value(
-                        &target, expected_seq, option).await
-                } else {
-                    Ok(None)
-                }
-            }, if dht6.is_some() => v
+            v = find_value_cb(dht4), if dht4.is_some() => v,
+            v = find_value_cb(dht6), if dht6.is_some() => v,
         );
 
         if let Some(value) = rc? {
@@ -636,23 +642,22 @@ impl Node {
             }
         }
 
+        let find_peers_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+            let promise = Promise::<Vec<PeerInfo>>::new();
+            let future = promise.future();
+
+            if let Some(dht) = dht {
+                dht.lock().unwrap().find_peer(
+                    &target, expected_seq , expected_count, option, promise);
+            } else {
+                promise.complete(Ok(Vec::new()));
+            }
+            future
+        };
+
         let rc = tokio::select!(
-            v = async move {
-                if let Some(dht) = dht4 {
-                    crate::locked!(dht).find_peer(
-                        &target, expected_seq, expected_count, option).await
-                } else {
-                    Ok(Vec::new())
-                }
-            }, if dht4.is_some() => v,
-            v = async move {
-                if let Some(dht) = dht6 {
-                    crate::locked!(dht).find_peer(
-                        &target, expected_seq, expected_count, option).await
-                } else {
-                    Ok(Vec::new())
-                }
-            }, if dht6.is_some() => v
+            v = find_peers_cb(dht4), if dht4.is_some() => v,
+            v = find_peers_cb(dht6), if dht6.is_some() => v,
         );
 
         eligible.add(rc?, true);
@@ -689,27 +694,28 @@ impl Node {
         )?;
 
         // store the value to the network.
-        let value4  = value.clone();
-        let value6  = value.clone();
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let (rc4, rc6) = tokio::join!(
-            async move {
-                if let Some(dht) = dht4 {
-                    dht.lock().unwrap().store_value(value4, expected_seq).await
-                } else {
-                    Ok(())
-                }
-            },
-            async move {
-                if let Some(dht) = dht6 {
-                    dht.lock().unwrap().store_value(value6, expected_seq).await
-                } else {
-                    Ok(())
-                }
+        let store_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+            let promise = Promise::<()>::new();
+            let future  = promise.future();
+            let value   = value.clone();
+
+            if let Some(dht) = dht {
+                let _ = dht.lock().unwrap()
+                        .store_value(value, expected_seq, promise);
+            } else {
+                promise.complete(Ok(()));
             }
+            future
+        };
+
+        let (rc4, rc6) = tokio::join!(
+            store_value_cb(dht4),
+            store_value_cb(dht6),
         );
+
         for rc in [rc4, rc6] {
             let _ = rc?;
         }

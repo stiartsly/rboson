@@ -528,6 +528,9 @@ pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: Strin
     Message::new(Kind::Error, method, txid, Some(body))
 }
 
+unsafe impl Send for Message {}
+unsafe impl Sync for Message {}
+
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let json = serde_json::to_string(&self)

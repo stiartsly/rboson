@@ -27,9 +27,9 @@ impl<T> Data<T> {
     }
 
     fn complete(&mut self, result: Result<T>) {
+        self.result = Some(result);
+        self.completed = true;
         if let Some(waker) = self.waker.take() {
-            self.result = Some(result);
-            self.completed = true;
             waker.wake();
         }
     }
@@ -45,12 +45,6 @@ impl<T> Data<T> {
 }
 
 pub(crate) struct PromiseFuture<T>(Arc<Mutex<Data<T>>>);
-
-impl<T> PromiseFuture<T> {
-    pub(crate) fn result(&self) -> Result<T> {
-        self.0.lock().unwrap().result()
-    }
-}
 
 impl<T> Unpin for PromiseFuture<T> {}
 impl<T> Clone for PromiseFuture<T> {
@@ -95,5 +89,11 @@ impl<T> Promise<T> {
 
     pub(crate) fn future(&self) -> PromiseFuture<T> {
         PromiseFuture(self.result.clone())
+    }
+
+    pub(crate) fn pair() -> (Self, PromiseFuture<T>) {
+        let promise = Self::new();
+        let future = promise.future();
+        (promise, future)
     }
 }

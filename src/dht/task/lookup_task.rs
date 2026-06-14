@@ -169,13 +169,8 @@ pub(crate) trait LookupTask {
 
         cn.lock().unwrap().set_replied();
 
-        let Some(rsp) = call.rsp() else {
-            panic!("panic: Call should has response.");
-        };
-        let Some(body) = rsp.body() else {
-            panic!("panic: The response should contain body.");
-        };
-
+        let rsp  = call.rsp().expect("no response set.");
+        let body = rsp.body().expect("no message body in response.");
         let token = match body {
             Body::FindNodeResponse(body) => body.token(),
             Body::FindPeerResponse(body) => body.token(),

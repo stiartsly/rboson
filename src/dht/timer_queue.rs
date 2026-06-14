@@ -1,11 +1,8 @@
 use std::{
     fmt,
     collections::HashMap,
-    sync::Arc,
     time::Duration,
 };
-use log::info;
-
 use futures::StreamExt;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -15,18 +12,17 @@ use tokio_util::time::{
     DelayQueue,
 };
 
+use crate::dht::consumer::AsyncConsumer;
 pub type TimerId = u64;
-pub type TimerCallback =
-    Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub(crate) struct Timer {
     id: TimerId,
     pub(crate) interval: Option<Duration>,
-    cb: TimerCallback,
+    cb: AsyncConsumer<()>,
 }
 
 impl Timer {
-    pub(crate) fn new(id: TimerId, interval: Option<Duration>, cb: TimerCallback) -> Self {
+    pub(crate) fn new(id: TimerId, interval: Option<Duration>, cb: AsyncConsumer<()>) -> Self {
         Self {
             id,
             interval,
@@ -60,19 +56,19 @@ impl fmt::Display for Command {
 
 struct TimerEntry {
     interval: Option<Duration>,
-    callback: TimerCallback,
+    callback: AsyncConsumer<()>,
     key: Key,
 }
 
 pub struct TimerQueue {
-    receiver    : mpsc::Receiver<Command>,
+    receiver    : mpsc::UnboundedReceiver<Command>,
     delay_queue : DelayQueue<TimerId>,
     timers      : HashMap<TimerId, TimerEntry>,
 }
 
 impl TimerQueue {
     pub fn new(
-        receiver: mpsc::Receiver<Command>,
+        receiver: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
         Self {
             receiver,
@@ -89,7 +85,7 @@ impl TimerQueue {
 
         let key = self.delay_queue.insert(id, delay);
         let entry = TimerEntry {
-            callback: timer.cb.clone(),
+            callback: timer.cb,
             interval: timer.interval,
             key,
         };
@@ -111,22 +107,23 @@ impl TimerQueue {
         self.timers.is_empty()
     }
 
-    fn fire_expired(&mut self, id: TimerId) {
+    async fn fire_expired(&mut self, id: TimerId) {
         let Some(entry) = self.timers.remove(&id) else {
             return;
         };
 
-        (entry.callback)();
+        let cb = entry.callback;
+        cb.accept(()).await;
 
         if let Some(interval) = entry.interval {
-            let timer = Timer::new(id, Some(interval), entry.callback.clone());
+            let timer = Timer::new(id, Some(interval), cb);
             self.add_timer(interval, timer);
         }
     }
 
     pub async fn run(mut self) {
-        info!("The task managing timer-queue started");
-        loop {
+        let mut quit = false;
+        while !quit {
             tokio::select! {
                 Some(cmd) = self.receiver.recv() => {
                     match cmd {
@@ -138,16 +135,15 @@ impl TimerQueue {
                         }
                         Command::Stop { complete } => {
                             self.stop_all();
-                            let _ = complete.send(());
-                            break;
+                           // let _ = complete.send(());
+                            quit = true;
                         }
                     }
                 }
 
                 Some(expired) = self.delay_queue.next(), if !self.is_idle() => {
-                    self.fire_expired(expired.into_inner());
+                    self.fire_expired(expired.into_inner()).await;
                 }
-                else => {}
             }
         }
     }

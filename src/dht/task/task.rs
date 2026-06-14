@@ -8,7 +8,7 @@ use std::{
 };
 use log::{warn, debug};
 
-use crate::core::Result;
+use crate::core::{Network, Result};
 use crate::dht::{
     dht::DHT,
     msg::Message,
@@ -17,7 +17,8 @@ use crate::dht::{
     rpc::{
         Target,
         RpcCall, rpccall::State as CallState,
-    }
+    },
+    routing::RoutingTable,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,7 +83,9 @@ pub(crate) struct TaskData {
     listener    : Option<TaskListener>,
     end_handler : Option<Consumer<()>>,
 
-    nested      : Mutex<Option<Box<dyn Task>>>
+    nested      : Mutex<Option<Box<dyn Task>>>,
+
+    cloned      : Option<Weak<Mutex<Box<dyn Task>>>>,
 }
 
 impl TaskData {
@@ -99,6 +102,8 @@ impl TaskData {
             listener    : None,
             end_handler : None,
             nested      : Mutex::new(None),
+            cloned      : None,
+
         }
     }
 
@@ -209,8 +214,12 @@ pub(crate) trait Task: Send + Sync {
         self.data_mut().listener = Some(l);
     }
 
-    fn cloned(&self) -> Arc<Mutex<Box<dyn Task>>> {
-        unimplemented!()
+    fn set_cloned(&mut self, weak: Weak<Mutex<Box<dyn Task>>>) {
+        self.data_mut().cloned = Some(weak);
+    }
+
+    fn cloned(&self) -> Weak<Mutex<Box<dyn Task>>> {
+        self.data().cloned.clone().expect("Task instance is dropped")
     }
 
     fn start(&mut self) {
@@ -299,6 +308,7 @@ pub(crate) trait Task: Send + Sync {
 
         let listener = self.data_mut().listener.take();
         if let Some(l) = listener {
+            l.ended(self.as_task());
             l.canceled(self.as_task());
             self.data_mut().listener = Some(l);
         }
@@ -379,7 +389,9 @@ pub(crate) trait Task: Send + Sync {
 
         let mut call = RpcCall::new(target, msg);
         let task = self.cloned();
+        let task = task.upgrade().expect("Task instance is droppped");
         call.set_simple_listener(move |c, _, state| {
+            let task = task.clone();
             if task.lock().unwrap().is_ended() {
                 debug!("{}#{} call to {} state changed ignored due to the task is terminated",
                     task.lock().unwrap().task_name(),
@@ -424,11 +436,31 @@ pub(crate) trait Task: Send + Sync {
         let txid = call.txid();
         self.data_mut().inflights.insert(txid);
 
+        let weak = self.dht();
+        tokio::spawn(async move {
+            let _ = weak.upgrade().expect("DHT instance dropped.")
+                .lock().unwrap()
+                .rpc_server()
+                .lock().unwrap()
+                .send_call(call)
+                .map_err(|e| {
+                    use log::error;
+                    error!(">>> task::spawn :{}", e);
+                });
+        });
+        Ok(())
+    }
+
+    fn rt(&self) -> Arc<Mutex<RoutingTable>>{
         self.dht().upgrade()
             .expect("DHT instance dropped.")
-            .lock().unwrap()
-            .send_call(call);
-        Ok(())
+            .lock().unwrap().rt().clone()
+    }
+
+    fn network(&self) -> Network {
+        self.dht().upgrade()
+            .expect("DHT instance dropped.")
+            .lock().unwrap().network()
     }
 }
 

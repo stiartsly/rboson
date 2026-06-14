@@ -10,7 +10,10 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tokio::{task::JoinHandle};
+use tokio::{
+    task::JoinHandle,
+    sync::Notify
+};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
@@ -24,7 +27,7 @@ use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
     promise::Promise,
-    consumer::Consumer,
+    consumer::{Consumer, AsyncConsumer},
     token_manager::TokenManager,
     lookup_option::LookupOption,
     timer_client::TimerClient,
@@ -34,7 +37,6 @@ use crate::dht::{
         Reachability,
         RpcCall, rpccall::State as CallState,
         rpc_server::{self, RpcServer},
-        rpc_target::NodeInfoLike,
     },
     msg::{
         Message,
@@ -150,6 +152,7 @@ pub(crate) struct DHT {
 
     quit_flag       : Arc<Mutex<bool>>,
     server_task     : Option<JoinHandle<()>>,
+    notifier        : Arc<Notify>,
 }
 
 impl DHT {
@@ -214,6 +217,7 @@ impl DHT {
             weak                : Weak::new(), // will be set later
             quit_flag           : Arc::new(Mutex::new(false)),
             server_task         : None,
+            notifier            : Arc::new(Notify::new()),
         })
     }
 
@@ -238,11 +242,11 @@ impl DHT {
             .expect("RpcServer not initialized")
     }
 
-    fn send_msg(&self, msg: Message) {
+    pub(crate) fn send_msg(&self, msg: Message) {
         let _ = self.rpc_server.as_ref().expect("Rpc server not initalized")
                     .lock().unwrap()
                     .send_msg(&msg)
-                    .map_err(|e| error!("{e}"))
+                    .map_err(|e| {error!("{e}"); e})
                     .map(|_|());
     }
 
@@ -250,7 +254,7 @@ impl DHT {
         let _ = self.rpc_server.as_ref().expect("Rpc server not initalized")
                     .lock().unwrap()
                     .send_call(call)
-                    .map_err(|e| error!("{e}"))
+                    .map_err(|e| {error!("{e}"); e})
                     .map(|_|());
     }
 
@@ -398,7 +402,7 @@ impl DHT {
         self.taskman.add(task);
     }
 
-    pub(crate) fn random_ping(&mut self) {
+    pub(crate) async fn random_ping(&mut self) {
         let has_pending_calls =
             self.rpc_server().lock().unwrap().has_pending_calls();
 
@@ -415,15 +419,15 @@ impl DHT {
         info!("Periodic: random ping ...");
 
         let call = RpcCall::new(entry, ping_request());
-        self.send_call(call);
+        let _ = self.send_call(call);
     }
 
-    fn update(&mut self) {
+    async fn update(&mut self) {
         if !self.is_running {
             return;
         }
 
-        info!("Periodic: DHT update...");
+        info!("Periodic: 1DHT update...");
 
         // routing table maintenance
         if crate::elapsed_ms!(self.last_maintenance) <
@@ -465,11 +469,9 @@ impl DHT {
             };
 
             let weak = self.weak.clone();
-            let _ = tokio::spawn(async move {
-                if let Some(dht) = weak.upgrade() {
-                    DHT::do_bootstrap(dht, bootstrap_nodes).await;
-                }
-            });
+            if let Some(dht) = weak.upgrade() {
+                DHT::do_bootstrap(dht, bootstrap_nodes).await;
+            }
         }
     }
 
@@ -523,18 +525,18 @@ impl DHT {
             self.identity.clone(),
             self.suspicious_detector.clone()
         );
-        server.message_handler(Consumer::new({
-            let weak = self.weak.clone();
-            move |msg| {
-                weak.upgrade()
-                    .expect("DHT instance is dropped")
-                    .lock().unwrap()
-                    .on_message(msg)
-            }
+
+        let dht = self.weak.clone().upgrade().expect("DHT instance is dropped");
+        server.message_handler(AsyncConsumer::new(move |msg:Arc<Message>| {
+            let dht = dht.clone();
+            Box::pin(async move {
+                dht.lock().unwrap().on_message(&msg);
+            })
+
         }));
         server.callsent_handler(Consumer::new({
             let rt = self.rt();
-            move |call: &RpcCall| {
+            move |call: &RpcCall|{
                 let nodeid = call.target_id();
                 rt.lock().unwrap().on_request_sent(&nodeid);
             }
@@ -547,19 +549,19 @@ impl DHT {
             }
         }));
         server.start().await?;
-        server.reachable_handler(Consumer::new({
-            let weak = self.weak.clone();
-            move |reachable| {
-                let dht = weak.upgrade().expect("DHT instance is dropped");
+        let weak = self.weak.clone();
+        server.reachable_handler(AsyncConsumer::new(move |reachable: bool|{
+            let dht = weak.upgrade().expect("DHT instance is dropped");
+            Box::pin(async move {
                 let mut locked = dht.lock().unwrap();
 
-                if *reachable {
+                if reachable {
                     locked.set_status(ConnectionStatus::Connected);
                 } else {
-                    locked.random_ping();
+                    locked.random_ping().await;
                     locked.set_status(ConnectionStatus::Disconnected);
                 }
-            }
+            })
         }));
 
         self.rpc_server = Some(Arc::new(Mutex::new(server)));
@@ -567,15 +569,17 @@ impl DHT {
 
         let server = self.rpc_server().clone();
         let quit   = self.quit_flag.clone();
+        let taskm  = self.taskman.clone();
+        let notified = self.notifier.clone();
         let task   = tokio::task::spawn_blocking(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_time()
                 .enable_io()
                 .build().expect("no rpc server engine runtime build")
                 .block_on(async move {
-                    rpc_server::run_loop(server, quit).await;
+                    rpc_server::run_loop(server, taskm, notified, quit).await;
                 }
-            );
+            )
         });
 
         self.setup_periodic_tasks().await?;
@@ -598,8 +602,15 @@ impl DHT {
         self.bootstrapping.store(false, Ordering::SeqCst);
         self.set_status(ConnectionStatus::Disconnected);
 
-        self.rpc_server.take().map(async |s| s.lock().unwrap().stop().await);
-        self.server_task.take().map(async |t| t.await);
+        if let Some(s) = self.rpc_server.take() {
+            s.lock().unwrap().stop().await;
+        }
+
+        if let Some(task) = self.server_task.take() {
+            *self.quit_flag.lock().unwrap() = true;
+            self.notifier.notify_one();
+            let _ = task.await;
+        }
         self.taskman.stop();
 
         if let Some(path) = self.persist_file.take() {
@@ -621,54 +632,69 @@ impl DHT {
     async fn setup_periodic_tasks(&self) -> Result<()> {
         let weak = self.weak.clone();
         let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
-            move || {
-                weak.upgrade().expect("DHT instance is dropped")
-                    .lock().unwrap()
-                    .update()
-            }
-        ).await?;
+            AsyncConsumer::new(move |_| {
+                let weak = weak.clone();
+                Box::pin(async move {
+                    weak.upgrade().expect("DHT instance is dropped")
+                        .lock().unwrap()
+                        .update().await;
+                })
+            })
+        )?;
 
         let weak = self.weak.clone();
         let _ = self.timer_client.add_timer(
             Self::RANDOM_LOOKUP_INTERVAL,
             Some(Self::RANDOM_LOOKUP_INTERVAL),
-            move || {
-                weak.upgrade().expect("DHT instance is dropped")
-                    .lock().unwrap()
-                    .random_lookup();
-            }
-        ).await?;
+            AsyncConsumer::new(move |_| {
+                let weak = weak.clone();
+                Box::pin(async move {
+                    weak.upgrade().expect("DHT instance is dropped")
+                        .lock().unwrap()
+                        .random_lookup();
+                })
+            })
+        )?;
 
         let weak = self.weak.clone();
         let _ = self.timer_client.add_timer(
             Self::RANDOM_PING_INTERVAL,
             Some(Self::RANDOM_PING_INTERVAL),
-            move || {
-                weak.upgrade().expect("DHT instance is dropped")
-                    .lock().unwrap()
-                    .random_ping();
-            }
-        ).await?;
+            AsyncConsumer::new(move |_| {
+                let weak = weak.clone();
+                Box::pin(async move {
+                    weak.upgrade().expect("DHT instance is dropped")
+                        .lock().unwrap()
+                        .random_ping().await;
+                })
+            })
+        )?;
 
         if let Some(detector) = self.suspicious_detector.as_ref() {
             let detector = detector.clone();
             let _ = self.timer_client.add_timer(60, Some(30),
-                move || {
-                    info!("Periodic: purging suspicious nodes ...");
-                    detector.lock().unwrap().purge()
-                }
-            ).await?;
-        };
+                AsyncConsumer::new(move |_| {
+                    let detector = detector.clone();
+                    Box::pin(async move {
+                        info!("Periodic: purging suspicious nodes ...");
+                        detector.lock().unwrap().purge();
+                    })
+                }))?;
+        }
 
         if let Some(path) = self.persist_file.clone() {
             let rt = self.rt();
             let _  = self.timer_client.add_timer(
                 120,
                 Some(Self::ROUTING_TABLE_PERSIST_INTERVAL),
-                move || {
-                    let _ = rt.lock().unwrap().save(&path);
-                }
-            ).await?;
+                AsyncConsumer::new(move |_| {
+                    let rt = rt.clone();
+                    let path = path.clone();
+                    Box::pin(async move {
+                        let _ = rt.lock().unwrap().save(&path);
+                    })
+                })
+            )?;
         }
         Ok(())
     }
@@ -722,7 +748,6 @@ impl DHT {
 
         if let Some(ref known_id) = last_known_id(remote_addr) {
             if known_id != msg.nodeid() {
-
                 // We already know a node with that address but with a different ID.
                 // This might happen if one node changes its ID.
                 // Force remove from the routing table to prevent suspicious behavior
@@ -877,7 +902,7 @@ impl DHT {
 
     fn on_error(&mut self, msg: &Message) {
         let Some(Body::Error(err)) = msg.body() else {
-            panic!("Panic: should be error message");
+            return;
         };
 
         warn!("Received an error message from {}/{} - {}:{}, txid {}",
@@ -925,7 +950,7 @@ impl DHT {
 
     fn on_find_node(&mut self, req: &Message) {
         let Some(Body::FindNodeRequest(body)) = req.body() else {
-            panic!("Should be find node request");
+            return;
         };
 
         let network= self.network();
@@ -956,7 +981,7 @@ impl DHT {
 
     fn on_find_value(&mut self, req: &Message) {
         let Some(Body::FindValueRequest(body)) = req.body() else {
-            panic!("Should be find value request");
+            return;
         };
 
         let result = self.storage.lock().unwrap().get_value(body.target());
@@ -1001,7 +1026,7 @@ impl DHT {
 
     fn on_store_value(&mut self, req: &Message) {
         let Some(Body::StoreValueRequest(body)) = req.body() else {
-            panic!("Should be store value request");
+            return;
         };
 
         let value = body.value();
@@ -1033,17 +1058,20 @@ impl DHT {
         if let Some(existing) = local_value {
             if existing.is_mutable() != value.is_mutable() {
                 warn!("Rejecting value {}: cannot replace mismatched mutable/immutable", value_id);
-                self.send_err(Method::StoreValue, 300, "Cannot replace mismatched mutable/immutable value");
+                self.send_err(Method::StoreValue, 300,
+                    "Cannot replace mismatched mutable/immutable value");
                 return;
             }
             if value.sequence_number() < existing.sequence_number() {
                 warn!("Rejecting value {}: sequence number {} is less than existing {}", value_id, value.sequence_number(), existing.sequence_number());
-                self.send_err(Method::StoreValue, 300, "Sequence number is less than existing value");
+                self.send_err(Method::StoreValue, 300,
+                    "Sequence number is less than existing value");
                 return;
             }
             if body.expected_seq() >= 0 && existing.sequence_number() > body.expected_seq() {
                 warn!("Rejecting value {}: existing sequence number {} is greater than expected {}", value_id, existing.sequence_number(), body.expected_seq());
-                self.send_err(Method::StoreValue, 300, "Existing sequence number is greater than expected");
+                self.send_err(Method::StoreValue, 300,
+                    "Existing sequence number is greater than expected");
                 return;
             }
             if existing.has_private_key() && !value.has_private_key() {
@@ -1068,7 +1096,7 @@ impl DHT {
 
     fn on_find_peer(&mut self, req: &Message) {
         let Some(Body::FindPeerRequest(body)) = req.body() else {
-            panic!("Should be find peer request");
+            return;
         };
 
         let result = self.storage.lock().unwrap().get_peers_with_expected_seq(
@@ -1107,7 +1135,7 @@ impl DHT {
 
     fn on_announce_peer(&mut self, req: &Message) {
         let Some(Body::AnnouncePeerRequest(body)) = req.body() else {
-            panic!("Should be announce peer request");
+            return;
         };
 
         let peer = body.peer();
@@ -1139,13 +1167,15 @@ impl DHT {
         if let Some(existing) = local_peers {
             if peer.sequence_number() < existing.sequence_number() {
                 warn!("Rejecting peer {}: sequence number {} is less than existing {}", peer.id(), peer.sequence_number(), existing.sequence_number());
-                self.send_err(Method::AnnouncePeer, 300, "Sequence number is less than existing value");
+                self.send_err(Method::AnnouncePeer, 300,
+                    "Sequence number is less than existing value");
                 return;
             }
 
             if body.expected_seq() >= 0 && existing.sequence_number() > body.expected_seq() {
                 warn!("Rejecting peer {}: existing sequence number {} is greater than expected {}", peer.id(), existing.sequence_number(), body.expected_seq());
-                self.send_err(Method::AnnouncePeer, 300, "Existing sequence number is greater than expected");
+                self.send_err(Method::AnnouncePeer, 300,
+                    "Existing sequence number is greater than expected");
                 return;
             }
 
@@ -1334,22 +1364,23 @@ impl DHT {
         self.bootstrap_ids   = dedup.keys().cloned().collect();
     }
 
-    pub(crate) async fn find_node(
-        &self,
+    pub(crate) fn find_node(&self,
         target: &Id,
-        option: LookupOption
-    ) -> Result<Option<NodeInfo>> {
+        option: LookupOption,
+        promise: Promise<Option<NodeInfo>>
+    ) {
+        let node: Option<NodeInfo> = self.rt.lock().unwrap()
+                .bucket_entry(target)
+                .map(|v| v.into());
 
-        let node = self.rt.lock().unwrap().bucket_entry(target).map(|v| v.ni());
         if option == LookupOption::Local {
-            return Ok(node);
+            promise.complete(Ok(None));
+            return;
         }
         if option == LookupOption::Conservative && node.is_some() {
-            return Ok(node);
+            promise.complete(Ok(node));
+            return;
         }
-
-        let promise = Promise::<Option<NodeInfo>>::new();
-        let future  = promise.future();
 
         let mut task = Box::new(NodeLookupTask::new(
             self.weak.clone(),
@@ -1368,23 +1399,17 @@ impl DHT {
         );
 
         self.taskman.add(task);
-
-        match future.clone().await {
-            Ok(_) => future.result(),
-            Err(e) => Err(e)
-        }
+        self.notifier.notify_one();
     }
 
-    pub(crate) async fn find_value(
+
+    pub(crate) fn find_value(
         &self,
         value_id: &Id,
         expected_seq: i32,
-        option: LookupOption
-    ) -> Result<Option<Value>> {
-
-        let promise = Promise::<Option<Value>>::new();
-        let future  = promise.future();
-
+        option: LookupOption,
+        promise: Promise<Option<Value>>
+    ) {
         let mut task = Box::new(ValueLookupTask::new(
             self.weak.clone(),
             value_id.clone(),
@@ -1402,18 +1427,16 @@ impl DHT {
         );
 
         self.taskman.add(task);
-        Ok(future.await?)
+        self.notifier.notify_one();
     }
 
     pub(crate) async fn store_value(
         &self,
         value: Value,
-        expected_seq: i32
-    ) -> Result<()> {
-        let promise = Promise::<()>::new();
-        let future  = promise.future();
+        expected_seq: i32,
+        promise: Promise::<()>
+    ) {
         let valueid = value.id();
-
         let mut nested = Box::new(ValueAnnounceTask::new(
             self.weak.clone(), value.clone(), expected_seq
         ));
@@ -1464,19 +1487,17 @@ impl DHT {
         });
 
         taskman.add(task);
-        Ok(future.await?)
+        self.notifier.notify_one();
     }
 
-    pub(crate) async fn find_peer(
+    pub(crate) fn find_peer(
         &self,
         peerid: &Id,
         expected_seq: i32,
         expected_count: usize,
-        option: LookupOption
-    ) -> Result<Vec<PeerInfo>> {
-        let promise = Promise::<Vec<PeerInfo>>::new();
-        let future  = promise.future();
-
+        option: LookupOption,
+        promise: Promise::<Vec<PeerInfo>>
+    ) {
         let mut task = Box::new(PeerLookupTask::new(
             self.weak.clone(),
             peerid.clone(),
@@ -1495,7 +1516,7 @@ impl DHT {
         });
 
         self.taskman.add(task);
-        Ok(future.await?)
+        self.notifier.notify_one();
     }
 
     pub(crate) async fn announce_peer(
@@ -1560,3 +1581,6 @@ impl DHT {
         Ok(future.await?)
     }
 }
+
+unsafe impl Send for DHT {}
+unsafe impl Sync for DHT {}

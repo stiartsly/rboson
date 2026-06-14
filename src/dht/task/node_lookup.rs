@@ -1,10 +1,10 @@
 use std::{
     any::Any,
-    sync::{Arc, Weak, Mutex}
+    sync::{Weak, Mutex}
 };
 use log::{debug, error};
 
-use crate::{Id, Network, NodeInfo};
+use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
@@ -14,7 +14,6 @@ use crate::dht::{
         KBucket,
         KBucketEntry,
         KClosestNodes,
-        RoutingTable,
     },
     task::{
         Task, TaskData,
@@ -35,10 +34,7 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result  : Option<NodeInfo>,
-
     dht     : Weak<Mutex<DHT>>,
-    rt      : Arc<Mutex<RoutingTable>>,
-    network : Network,
 }
 
 impl NodeLookupTask {
@@ -47,9 +43,6 @@ impl NodeLookupTask {
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
-        let strong = dht.upgrade().expect("DHT instance dropped");
-        let locked = strong.lock().unwrap();
-
         Self {
             base_data   : TaskData::new(),
             lookup_data : LookupTaskData::new(target, done_on_eligible_result),
@@ -58,8 +51,6 @@ impl NodeLookupTask {
             want_target : false,
             result      : None,
             dht         : dht.clone(),
-            rt          : locked.rt(),
-            network     : locked.network()
         }
     }
 
@@ -142,8 +133,9 @@ impl Task for NodeLookupTask {
             false => self.target().clone()
         };
 
+        let rt = self.rt();
         let kes:Vec<KBucketEntry> = {
-            let locked_rt = self.rt.lock().unwrap();
+            let locked_rt = rt.lock().unwrap();
              let mut kns = KClosestNodes::new(
                 &locked_rt,
                 target,
@@ -166,18 +158,18 @@ impl Task for NodeLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
+        let network = self.network();
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
-                None => break
+                _ => break
             };
-
 
             let target = next.clone().into();
             let msg = msg::find_node_request(
                 self.target().clone(),
-                self.network.is_ipv4(),
-                self.network.is_ipv6(),
+                network.is_ipv4(),
+                network.is_ipv6(),
                 Some(self.want_token)
             );
 
@@ -200,14 +192,14 @@ impl Task for NodeLookupTask {
             return;
         }
 
-        let msg  = call.rsp().expect("panic: no response set");
-        let body = msg.body().expect("panic: no body contained in the response");
-
+        let rsp  = call.rsp().expect("no response set.");
+        let body = rsp.body().expect("no message body in response.");
         let Body::FindNodeResponse(body) = body else {
-            panic!("panic: the body should be findValue response.");
+            return;
         };
 
-        let nodes = body.nodes(self.network);
+        let network = self.network();
+        let nodes = body.nodes(network);
         let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
             return;
         };
@@ -251,7 +243,8 @@ impl Task for NodeLookupTask {
     }
 
     fn is_done(&self) -> bool {
-        LookupTask::is_done(self)
+        let isdone = LookupTask::is_done(self);
+        isdone
     }
 }
 

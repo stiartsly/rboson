@@ -11,10 +11,7 @@ use crate::dht::{
     msg::msg,
     task::{Task, TaskData},
     rpc::RpcCall,
-    routing::{
-        KBucket, KBucketEntry,
-        RoutingTable
-    }
+    routing::{KBucket, KBucketEntry}
 };
 
 #[allow(unused)]
@@ -27,8 +24,7 @@ pub(crate) struct PingRefreshTask {
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
-    dht: Weak<Mutex<DHT>>,
-    rt : Arc<Mutex<RoutingTable>>,
+    dht: Weak<Mutex<DHT>>
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
@@ -36,17 +32,13 @@ const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 #[allow(unused)]
 impl PingRefreshTask {
     pub(crate) fn new(dht: Weak<Mutex<DHT>>) -> Self {
-        let strong = dht.upgrade().expect("DHT instance dropped");
-        let locked = strong.lock().unwrap();
-
         Self {
             base_data: TaskData::new(),
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
             check_all           : false,
             remove_on_timeout   : false,
-            dht                 : dht.clone(),
-            rt                  : locked.rt(),
+            dht                 : dht.clone()
         }
     }
 
@@ -121,15 +113,16 @@ impl Task for PingRefreshTask {
             target_id
         );
 
-        let mut rt = self.rt.lock().unwrap();
-        rt.remove(&target_id);
+        let rt = self.rt();
+        let mut locked_rt = rt.lock().unwrap();
+        locked_rt.remove(&target_id);
     }
 
     fn iterate(&mut self) {
         while self.can_dorequest() {
             let kentry = match self.todo.lock().unwrap().front() {
                 Some(v) => v.clone(),
-                None => break,
+                _ => break,
             };
 
             if !self.check_all && !kentry.needs_ping() {

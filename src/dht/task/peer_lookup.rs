@@ -1,10 +1,10 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex, Weak}
+    sync::{Mutex, Weak}
 };
 use log::{debug, error, warn};
 
-use crate::{Id, Network, PeerInfo};
+use crate::{Id, PeerInfo};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
@@ -12,8 +12,7 @@ use crate::dht::{
     rpc::RpcCall,
     routing::{
         KBucket, KBucketEntry,
-        KClosestNodes,
-        RoutingTable
+        KClosestNodes
     },
     msg::{msg, Body, LookupResponse},
     task::{
@@ -27,9 +26,7 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Weak<Mutex<DHT>>,
-    rt : Arc<Mutex<RoutingTable>>,
-    network: Network,
+    dht: Weak<Mutex<DHT>>
 }
 
 impl PeerLookupTask {
@@ -40,15 +37,11 @@ impl PeerLookupTask {
         expected_count: usize,
         done_on_eligible_result: bool
     ) -> Self {
-        let strong = dht.upgrade().expect("DHT instance dropped");
-        let locked = strong.lock().unwrap();
         Self {
             base_data   : TaskData::new(),
             lookup_data : LookupTaskData::new(target, done_on_eligible_result),
             result      : EligiblePeers::new(target, expected_seq, expected_count),
-            dht         : dht.clone(),
-            rt          : locked.rt(),
-            network     : locked.network()
+            dht         : dht.clone()
         }
     }
 
@@ -98,7 +91,8 @@ impl Task for PeerLookupTask {
 
     fn prepare(&mut self) {
         let entries: Vec<KBucketEntry> = {
-            let locked_rt = self.rt.lock().unwrap();
+            let rt = self.rt();
+            let locked_rt = rt.lock().unwrap();
             let mut kns = KClosestNodes::new(
                 &locked_rt,
                 self.target().clone(),
@@ -121,17 +115,18 @@ impl Task for PeerLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
+        let network = self.network();
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
-                None => break,
+                _ => break,
             };
 
             let target = next.clone().into();
             let msg = msg::find_peer_request(
                 self.target().clone(),
-                self.network.is_ipv4(),
-                self.network.is_ipv6(),
+                network.is_ipv4(),
+                network.is_ipv6(),
                 self.result.expected_seq(),
                 self.result.expected_count() as i32,
             );
@@ -152,11 +147,10 @@ impl Task for PeerLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let msg = call.rsp()
-            .expect("panic: no response set");
 
-        let Body::FindPeerResponse(body) = msg.body()
-            .expect("no message body") else {
+        let rsp  = call.rsp().expect("no response set.");
+        let body = rsp.body().expect("no message body in response.");
+        let Body::FindPeerResponse(body) = body else {
             return;
         };
 
@@ -194,7 +188,7 @@ impl Task for PeerLookupTask {
                 self.result.prune();
             }
         } else {
-            let nodes = body.nodes(self.network);
+            let nodes = body.nodes(self.network());
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",
                     self.task_name(),

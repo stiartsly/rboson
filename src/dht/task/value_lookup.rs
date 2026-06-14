@@ -1,10 +1,10 @@
 use std::{
     any::Any,
-    sync::{Arc, Weak, Mutex}
+    sync::{Weak, Mutex}
 };
-use log::{debug, error, warn, trace};
+use log::{debug, error, warn};
 
-use crate::{Id, Network, Value};
+use crate::{Id, Value};
 use crate::dht::{
     dht::DHT,
     consumer::Consumer,
@@ -14,8 +14,7 @@ use crate::dht::{
     routing::{
         KBucket,
         KBucketEntry,
-        KClosestNodes,
-        RoutingTable
+        KClosestNodes
     },
     task::{
         LookupTask, LookupTaskData,
@@ -29,8 +28,6 @@ pub(crate) struct ValueLookupTask {
 
     result  : EligibleValue,
     dht     : Weak<Mutex<DHT>>,
-    rt      : Arc<Mutex<RoutingTable>>,
-    network : Network,
 }
 
 impl ValueLookupTask {
@@ -40,16 +37,11 @@ impl ValueLookupTask {
         expected_seq: i32,
         done_on_eligible_result: bool
     ) -> Self {
-        let strong = dht.upgrade().expect("DHT instance dropped");
-        let locked = strong.lock().unwrap();
-
         Self {
             base_data   : TaskData::new(),
             lookup_data : LookupTaskData::new(target, done_on_eligible_result),
             result      : EligibleValue::new(target, expected_seq),
             dht         : dht.clone(),
-            rt          : locked.rt(),
-            network     : locked.network(),
         }
     }
 
@@ -99,7 +91,8 @@ impl Task for ValueLookupTask {
 
     fn prepare(&mut self) {
         let entries:Vec<KBucketEntry> = {
-            let locked_rt = self.rt.lock().unwrap();
+            let rt = self.rt();
+            let locked_rt = rt.lock().unwrap();
             let mut kns = KClosestNodes::new(
                 &locked_rt,
                 self.target().clone(),
@@ -122,23 +115,18 @@ impl Task for ValueLookupTask {
     fn iterate(&mut self) {
         LookupTask::iterate(self);
 
-        trace!("{}#{} candidates.size={}",
-            self.task_name(),
-            self.task_id(),
-            LookupTask::candidate_size(self)
-        );
-
+        let network = self.network();
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next.clone(),
-                None => break,
+                _ => break,
             };
 
             let target = next.clone().into();
             let msg = msg::find_value_request(
                 self.target().clone(),
-                self.network.is_ipv4(),
-                self.network.is_ipv6(),
+                network.is_ipv4(),
+                network.is_ipv6(),
                 self.result.expected_seq(),
             );
 
@@ -158,11 +146,11 @@ impl Task for ValueLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let rsp = call.rsp().expect("panic: should has response.");
-        let body = rsp.body().expect("panic: should contain body in the response.");
+        let rsp  = call.rsp().expect("no response set.");
+        let body = rsp.body().expect("no message body in response.");
 
         let Body::FindValueResponse(body) = body else {
-            panic!("panic: should be findValue response body.");
+            return;
         };
 
         if let Some(value) = body.value() {
@@ -184,7 +172,7 @@ impl Task for ValueLookupTask {
                 LookupTask::data_mut(self).done_lookup();
             }
         } else {
-            let nodes = body.nodes(self.network);
+            let nodes = body.nodes(self.network());
 
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
                 warn!("{}#{} received empty nodes list from {}, ignoring",

@@ -3,7 +3,6 @@ use std::{
     time::SystemTime
 };
 use log::error;
-
 use crate::{
     Id,
     errors::{ProtocolError},
@@ -11,8 +10,8 @@ use crate::{
 use crate::dht::{
     msg::{Body, Message, msg::Kind},
     rpc::{
-        rpc_server::RpcServer,
         Target,
+        rpc_server::RpcServer,
         Listener as CallListener,
     },
 };
@@ -53,7 +52,7 @@ pub(crate) struct RpcCall {
 
     cause: Option<Box<dyn std::error::Error + Send>>,
 
-    timeout_timer: Option<u64>
+    _timeout_timer: Option<u64>
 }
 
 impl RpcCall {
@@ -72,7 +71,7 @@ impl RpcCall {
             state           : State::Unsent,
             listener        : None,
             cause           : None,
-            timeout_timer   : None,
+            _timeout_timer   : None,
         }
     }
 
@@ -102,7 +101,7 @@ impl RpcCall {
         } else if let Some(msg) = self.transient.as_ref() {
             return msg.txid();
         } else {
-            panic!("Should contain request message");
+            -1
         }
     }
 
@@ -183,7 +182,7 @@ impl RpcCall {
     }
 
     fn check_timeout(&mut self) {
-        self.timeout_timer = None;
+        self._timeout_timer = None;
 
         if self.state != State::Sent && self.state != State::Stalled {
             return;

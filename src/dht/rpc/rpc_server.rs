@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap,
     fmt,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
     sync::{Arc, Mutex},
+    collections::HashMap,
     time::{Duration, SystemTime}
 };
 use log::{info, warn, error, debug};
@@ -10,7 +10,6 @@ use tokio::{
     net::UdpSocket,
     task::JoinHandle,
 };
-
 use crate::{
     CryptoBox,
     CryptoIdentity,
@@ -23,13 +22,13 @@ use crate::{
         CryptoError,
         NetworkError,
         ProtocolError,
-        StateError
     },
     dht::{
         suspicious_node_detector::SuspiciousNodeDetector,
-        consumer::Consumer,
+        consumer::{Consumer, AsyncConsumer},
         rpc::RpcCall,
         msg::Message,
+        task::task_manager::TaskManager,
     }
 };
 
@@ -46,8 +45,8 @@ pub(crate) struct RpcServer {
     last_reachable_check: SystemTime,
     is_reachable        : bool,
 
-    reachable_handler   : Option<Consumer<bool>>,
-    message_handler     : Option<Consumer<Message>>,
+    reachable_handler   : Option<AsyncConsumer<bool>>,
+    message_handler     : Option<AsyncConsumer<Arc<Message>>>,
     callsent_handler    : Option<Consumer<RpcCall>>,
     calltimeout_handler : Option<Consumer<RpcCall>>,
 
@@ -59,7 +58,6 @@ pub(crate) struct RpcServer {
     rx_socket           : Option<Arc<StdUdpSocket>>,
 }
 
-#[allow(dead_code)]
 impl RpcServer {
     const MAX_ACTIVE_CALLS: usize = 64;
     pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
@@ -94,11 +92,11 @@ impl RpcServer {
         }
     }
 
-    fn check_reachability(&mut self) {
+    async fn check_reachability(&mut self) {
         let now = SystemTime::now();
 
         if self.recv_packets != self.recv_packets_at_last_reachable_check {
-            self.set_reachable(true);
+            self.set_reachable(true).await;
             self.last_reachable_check = now;
             self.recv_packets_at_last_reachable_check = self.recv_packets;
             return;
@@ -107,21 +105,21 @@ impl RpcServer {
         if crate::elapsed_ms!(&self.last_reachable_check) > Self::REACHABILITY_TIMEOUT.as_millis() &&
             self.recv_packets != 0 &&
             self.recv_packets_at_last_reachable_check != 0 {
-            self.set_reachable(false);
+            self.set_reachable(false).await;
         }
     }
 
-    pub(crate) fn set_reachable(&mut self, reachable: bool) {
+    pub(crate) async fn set_reachable(&mut self, reachable: bool) {
         if self.is_reachable == reachable {
             return;
         }
         self.is_reachable = reachable;
         if let Some(handler) = self.reachable_handler.as_ref() {
-            handler.accept(&reachable);
+            handler.accept(reachable).await;
         }
     }
 
-    pub(crate) fn reachable_handler(&mut self, consumer: Consumer<bool>) {
+    pub(crate) fn reachable_handler(&mut self, consumer: AsyncConsumer<bool>) {
         self.reachable_handler = Some(consumer);
     }
 
@@ -133,7 +131,7 @@ impl RpcServer {
         !self.pending_calls.is_empty()
     }
 
-    pub(crate) fn message_handler(&mut self, consumer: Consumer<Message>) {
+    pub(crate) fn message_handler(&mut self, consumer: AsyncConsumer<Arc<Message>>) {
         self.message_handler = Some(consumer);
     }
 
@@ -147,13 +145,11 @@ impl RpcServer {
 
     pub(crate) async fn start(&mut self) -> Result<()> {
         let socket_addr = self.ni.socket_addr();
-        let socket = match StdUdpSocket::bind(socket_addr) {
-            Ok(socket) => Arc::new(socket),
-            Err(e) => {
-                error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
-                return Err(NetworkError::new(format!("{e}")));
-            }
-        };
+        let socket = StdUdpSocket::bind(socket_addr).map_err(|e| {
+            error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
+            NetworkError::new(format!("{e}"))
+        })?;
+        let socket = Arc::new(socket);
         self.rx_socket = Some(socket.clone());
         self.tx_socket = Some(socket.clone());
 
@@ -191,7 +187,8 @@ impl RpcServer {
 
     pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()>{
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
-            return Err(StateError::new("Too many active calls pending in the queue."));
+       // return Err(StateError::new("Too many active calls pending in the queue.") as Box<dyn Error>);
+            return Ok(());
         }
 
         let txid = call.txid();
@@ -250,18 +247,21 @@ impl RpcServer {
         let rc = self.tx_socket.as_ref().unwrap().send_to(
             &buf[..cipher_len + Id::BYTES], msg.remote_addr()
         );
+
         let sent_len = match rc {
             Ok(len) => len,
-            Err(e) => return Err(NetworkError::new(format!("Failed to send message: {e}")))
+            Err(e) => return Err(NetworkError::new(
+                                format!("Failed to send message: {e}")))
         };
         if sent_len != buf.len() {
-            return Err(NetworkError::new(format!("Error: sent length {} does not match expected {}", sent_len, buf.len())) as crate::errors::Error);
+            return Err(NetworkError::new(
+                format!("Error: sent length {} does not match expected {}", sent_len, buf.len())));
         }
 
         debug!("Message <{}@{} to {}@{}> was sent : {}",
             msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
 
-        Ok(sent_len)
+        Ok(rc.unwrap())
     }
 
     #[inline]
@@ -286,7 +286,7 @@ impl RpcServer {
     }
 }
 
-fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) {
+async fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) {
     let malformed_message = |from: SocketAddr| {
         server.lock().unwrap().malformed_message(from);
     };
@@ -343,10 +343,11 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
         msg.method(), msg.kind(), from_id, from, msg);
 
     // Handle request message.
-    if msg.is_req() {
+    let is_req = msg.is_req();
+    if is_req {
         let handler = server.lock().unwrap().message_handler.take();
         if let Some(cb) = handler {
-            cb.accept(&msg);
+            cb.accept(Arc::new(msg)).await;
             server.lock().unwrap().message_handler = Some(cb);
         }
         return;
@@ -367,79 +368,103 @@ fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: SocketAddr) 
         msg
     });
 
-    let mut locked = call.lock().unwrap();
-    let req = locked.req();
-    if req.remote_addr() != &from {
-        // Handle inconsistent socket (e.g., NAT issues or attack)
-        // - the message is not a request
-        // - the transaction ID matched
-        // - response source did not match request destination
-        // this happening by chance is exceedingly unlikely indicates either port-mangling NAT,
-        // a multihomed host listening on any-local address or some kind of attack
-        let target_id = locked.target().id();
-        warn!("Node address does not be consistent, ignored. request: {}@{} <- response: {}@{}",
-            target_id, req.remote_addr(), from_id, from);
+    {
+        let mut locked = call.lock().unwrap();
+        let req = locked.req();
+        if req.remote_addr() != &from {
+            // Handle inconsistent socket (e.g., NAT issues or attack)
+            // - the message is not a request
+            // - the transaction ID matched
+            // - response source did not match request destination
+            // this happening by chance is exceedingly unlikely indicates either port-mangling NAT,
+            // a multihomed host listening on any-local address or some kind of attack
+            let target_id = locked.target().id();
+            warn!("Node address does not be consistent, ignored. request: {}@{} <- response: {}@{}",
+                target_id, req.remote_addr(), from_id, from);
 
-        inconsistent_socket(from, from_id);
-        // but expect an upcoming timeout if it's really just a misbehaving node
-        locked.respond_inconsistent_socket();
-        return;
+            inconsistent_socket(from, from_id);
+            // but expect an upcoming timeout if it's really just a misbehaving node
+            locked.respond_inconsistent_socket();
+            return;
+        }
+
+        // Checking message with same address but different method,
+        // which is a strong signal of attack or misbehaving node.
+        if msg.method() != req.method() {
+            warn!("Got response with wrong method {} from {}@{} for {}",
+                msg.method(), from_id, from, req.method());
+
+            locked.respond_wrong_method();
+            malformed_message(from);
+            return;
+        }
+
+        locked.respond(msg.clone());
     }
-
-    // Checking message with same address but different method,
-    // which is a strong signal of attack or misbehaving node.
-    if msg.method() != req.method() {
-        warn!("Got response with wrong method {} from {}@{} for {}",
-            msg.method(), from_id, from, req.method());
-
-        locked.respond_wrong_method();
-        malformed_message(from);
-        return;
-    }
-
-    locked.respond(msg.clone());
-    drop(locked);
 
     let handler = server.lock().unwrap().message_handler.take();
     if let Some(cb) = handler {
-        cb.accept(msg.as_ref());
+        cb.accept(msg).await;
         server.lock().unwrap().message_handler = Some(cb);
     };
+
+    // TODO: handle metrics.
 }
 
 pub(crate) async fn run_loop(
     server: Arc<Mutex<RpcServer>>,
+    taskm: Arc<TaskManager>,
+    notfiied: Arc<tokio::sync::Notify>,
     quit_flag: Arc<Mutex<bool>>,
-) -> bool {
-    let socket = server.lock().unwrap().rx_socket.take().unwrap();
+) {
+    let rx_socket = {
+        let locked = server.lock().unwrap();
+        info!("RPC server started at {}", locked.ni.socket_addr());
 
-    let Ok(std_socket) = socket.try_clone() else {
-        return false;
-    };
-    let Ok(_) = std_socket.set_nonblocking(true) else {
-        return false;
-    };
-    let Ok(async_socket) = UdpSocket::from_std(std_socket) else {
-        return false;
+        let std_socket = locked.rx_socket.as_ref()
+            .expect("RPC server socket not initialized")
+            .clone();
+
+        let std_socket = std_socket.as_ref().try_clone().expect("Failed to clone UDP socket");
+        if let Err(_) = std_socket.set_nonblocking(true) {
+            return;
+        }
+
+        UdpSocket::from_std(std_socket)
+            .expect("Failed to create Tokio UdpSocket from std UdpSocket")
     };
 
-    info!("RPC server started at {}", server.lock().unwrap().ni.socket_addr());
     let mut buf = vec![0u8; 2048];
     loop {
-        let packet = async_socket.recv_from(&mut buf).await;
-        if let Err(e) = packet.as_ref() {
-            error!("Rpc server failed to receive packet: {e}");
-            if *quit_flag.lock().unwrap() {
-                break;
-            } else {
-                continue;
-            }
+        if *quit_flag.lock().unwrap() {
+            break;
         }
-        let (len, from) = packet.unwrap();
-        handle_packet(&server, &buf[..len], from);
-    };
-    true
+        tokio::select!(
+            packet = rx_socket.recv_from(&mut buf) => {
+                if let Err(e) = packet.as_ref() {
+                    error!("Receiving data error: {e}");
+                    if *quit_flag.lock().unwrap() {
+                        break;
+                    } else {
+                        continue;
+                    }
+                }
+                let (len, from) = packet.unwrap();
+                handle_packet(&server, &buf[..len], from).await;
+            },
+            _ = notfiied.notified() => {
+                if *quit_flag.lock().unwrap() {
+                    break;
+                } else {
+                    taskm.dequeue();
+                }
+            }
+        );
+    }
 }
+
+unsafe impl Sync for RpcServer {}
+unsafe impl Send for RpcServer {}
 
 impl fmt::Display for RpcServer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

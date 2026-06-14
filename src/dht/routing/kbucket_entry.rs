@@ -204,16 +204,6 @@ impl KBucketEntry {
         self.last_sent  = self.last_sent.max(entry.last_sent);
     }
 
-    #[allow(unused)]
-    pub(crate) fn rtt(&self) -> u64 {
-        0 // TODO: u
-    }
-
-    #[allow(unused)]
-    pub(crate) fn rtt_with(&self, default_rtt: u64) -> u64 {
-        unimplemented!()
-    }
-
     pub(crate) fn on_request_sent(&mut self) {
         self.last_sent = SystemTime::now();
     }
@@ -256,6 +246,12 @@ impl Eq for KBucketEntry {}
 impl PartialEq for KBucketEntry {
     fn eq(&self, other: &Self) -> bool {
         self.ni.eq(&other.ni)
+    }
+}
+
+impl Into<NodeInfo> for KBucketEntry {
+    fn into(self) -> NodeInfo {
+        self.ni
     }
 }
 

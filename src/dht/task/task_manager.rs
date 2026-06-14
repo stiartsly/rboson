@@ -14,9 +14,9 @@ use crate::dht::{
 const MAX_ACTIVE_TASKS: usize = 8;
 
 pub(crate) struct TaskManager {
-    queued      : Mutex<VecDeque<Box<dyn Task>>>,
+    queued      : Mutex<VecDeque<Arc<Mutex<Box<dyn Task>>>>>,
     running     : Arc<Mutex<HashSet<TaskId>>>,
-    canceling   : AtomicBool,
+    canceling   : AtomicBool
 }
 
 impl TaskManager {
@@ -56,7 +56,7 @@ impl TaskManager {
         }
 
         self.enqueue(task, priori);
-        self.dequeue();
+        //self.dequeue(); // call dequeue in rpc_server run_loop.
     }
 
     #[inline(always)]
@@ -66,6 +66,8 @@ impl TaskManager {
     }
 
     fn enqueue(&self, task: Box<dyn Task>, priori: bool) {
+        let task = Arc::new(Mutex::new(task));
+        task.lock().unwrap().set_cloned(Arc::downgrade(&task));
         let mut queue = locked!(self.queued);
         match priori {
             true => queue.push_front(task),
@@ -73,21 +75,21 @@ impl TaskManager {
         };
     }
 
-    fn dequeue(&self) {
+    pub(crate) fn dequeue(&self) {
         while self.is_ready() {
-            let Some(mut task) = locked!(self.queued).pop_front() else {
+           let Some(task) = locked!(self.queued).pop_front() else {
                 debug!("Queue drained.");
                 break;
             };
-            if task.is_ended() {
+
+            if task.lock().unwrap().is_ended() {
                 continue;
             }
 
-            debug!("Start task: {}", task);
-
-            let taskid = task.task_id();
+            let taskid = task.lock().unwrap().task_id();
             let _ = locked!(self.running).insert(taskid);
-            task.start();
+
+            task.lock().unwrap().start();
         }
     }
 
@@ -95,8 +97,8 @@ impl TaskManager {
         self.canceling.store(true, Ordering::SeqCst);
 
         let _ = locked!(self.running).drain();
-        for mut t in locked!(self.queued).drain(..) {
-            t.cancel();
+        for t in locked!(self.queued).drain(..) {
+            t.lock().unwrap().cancel();
         }
 
         self.canceling.store(false, Ordering::SeqCst);

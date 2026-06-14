@@ -26,7 +26,7 @@ pub(super) fn make_test_dht(
 ) -> Arc<Mutex<DHT>> {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
-    let (tx, _rx) = mpsc::channel::<Command>(64);
+    let (tx, _rx) = mpsc::unbounded_channel::<Command>();
     let timer_client = Arc::new(TimerClient::new(tx));
     let bootstrap_nodes: Vec<NodeInfo> = Vec::new();
     let data_dir = PathBuf::from(".");

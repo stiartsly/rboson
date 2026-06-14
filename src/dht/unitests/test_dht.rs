@@ -23,6 +23,7 @@ pub(super) fn make_dht(
     identity: Arc<CryptoIdentity>,
     network: Network,
     host: &str,
+    quit_flag: Arc<Mutex<bool>>
 ) -> Arc<Mutex<DHT>> {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
@@ -38,7 +39,7 @@ pub(super) fn make_dht(
             .expect("timer runtime should build");
 
         runtime.block_on(async move {
-            TimerQueue::new(rx).run().await;
+            TimerQueue::new(rx).run(quit_flag).await;
         });
     });
 
@@ -69,7 +70,8 @@ mod tests {
     #[tokio::test]
     async fn test_dht4() {
         let identity = Arc::new(CryptoIdentity::new());
-        let dht = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
+        let quit_flag = Arc::new(Mutex::new(false));
+        let dht = make_dht(identity.clone(), Network::IPv4, "127.0.0.1", quit_flag);
 
         let mut locked_dht = dht.lock().unwrap();
         locked_dht.start().await.expect("Failed to deploy DHT");

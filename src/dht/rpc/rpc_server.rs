@@ -414,7 +414,7 @@ async fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: Socket
 pub(crate) async fn run_loop(
     server: Arc<Mutex<RpcServer>>,
     taskm: Arc<TaskManager>,
-    notfiied: Arc<tokio::sync::Notify>,
+    notified: Arc<tokio::sync::Notify>,
     quit_flag: Arc<Mutex<bool>>,
 ) {
     let rx_socket = {
@@ -436,9 +436,6 @@ pub(crate) async fn run_loop(
 
     let mut buf = vec![0u8; 2048];
     loop {
-        if *quit_flag.lock().unwrap() {
-            break;
-        }
         tokio::select!(
             packet = rx_socket.recv_from(&mut buf) => {
                 if let Err(e) = packet.as_ref() {
@@ -452,7 +449,7 @@ pub(crate) async fn run_loop(
                 let (len, from) = packet.unwrap();
                 handle_packet(&server, &buf[..len], from).await;
             },
-            _ = notfiied.notified() => {
+            _ = notified.notified() => {
                 if *quit_flag.lock().unwrap() {
                     break;
                 } else {

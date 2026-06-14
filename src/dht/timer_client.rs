@@ -61,7 +61,7 @@ impl TimerClient {
     pub(crate) async fn stop(
         &self,
     ) -> Result<()> {
-        let (tx, _rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
 
         self.sender.send(
             Command::Stop {
@@ -70,9 +70,9 @@ impl TimerClient {
         ).map_err(|_| {
             StateError::new("timer queue channel closed")
         })?;
-      //  rx.await.map_err(|_| {
-      //      StateError::new("timer queue shutdown acknowledgement dropped")
-      //  })?;
+        rx.await.map_err(|_| {
+            StateError::new("timer queue shutdown acknowledgement dropped")
+        })?;
         Ok(())
     }
 }

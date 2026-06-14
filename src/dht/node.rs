@@ -70,6 +70,7 @@ pub struct Node {
 
     timer_client: Mutex<Option<Arc<TimerClient>>>,
     timer_task  : Mutex<Option<JoinHandle<()>>>,
+    stop_task   : Arc<Mutex<bool>>,
 
     storage     : Arc<Mutex<Box<dyn DataStorage>>>,
     tokenman    : Arc<TokenManager>,
@@ -131,6 +132,7 @@ impl Node {
             dht6            : Mutex::new(None),
             timer_client    : Mutex::new(None),
             timer_task      : Mutex::new(None),
+            stop_task       : Arc::new(Mutex::new(false)),
             storage         : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
             tokenman        : Arc::new(TokenManager::new()),
             weak            : weak.clone(),
@@ -213,12 +215,13 @@ impl Node {
         let (tx, rx) = mpsc::unbounded_channel::<Command>();
         let timer_queue  = TimerQueue::new(rx);
         let timer_client = TimerClient::new(tx);
+        let stop_task    = self.stop_task.clone();
         let timer_task   = task::spawn_blocking(move || {
             runtime::Builder::new_current_thread()
                 .enable_time()
                 .build().expect("timer runtime should build")
                 .block_on(async move {
-                    timer_queue.run().await;
+                    timer_queue.run(stop_task).await;
                 }
             );
         });
@@ -231,6 +234,7 @@ impl Node {
     async fn stop_timer_task(&self) {
         let timer_client = self.timer_client.lock().unwrap().take();
         let timer_task   = self.timer_task.lock().unwrap().take();
+        *self.stop_task.lock().unwrap() = true;
 
         if let Some(client) = timer_client {
             let _ = client.stop();

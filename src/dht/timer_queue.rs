@@ -2,6 +2,7 @@ use std::{
     fmt,
     collections::HashMap,
     time::Duration,
+    sync::{Arc, Mutex}
 };
 use futures::StreamExt;
 use tokio::{
@@ -121,9 +122,8 @@ impl TimerQueue {
         }
     }
 
-    pub async fn run(mut self) {
-        let mut quit = false;
-        while !quit {
+    pub(crate) async fn run(mut self, quit: Arc<Mutex<bool>>) {
+        loop {
             tokio::select! {
                 Some(cmd) = self.receiver.recv() => {
                     match cmd {
@@ -135,14 +135,19 @@ impl TimerQueue {
                         }
                         Command::Stop { complete } => {
                             self.stop_all();
-                           // let _ = complete.send(());
-                            quit = true;
+                            let _ = complete.send(());
+                            if *quit.lock().unwrap() {
+                                break;
+                            }
                         }
                     }
                 }
-
                 Some(expired) = self.delay_queue.next(), if !self.is_idle() => {
-                    self.fire_expired(expired.into_inner()).await;
+                    if *quit.lock().unwrap() {
+                        break;
+                    } else {
+                        self.fire_expired(expired.into_inner()).await;
+                    }
                 }
             }
         }

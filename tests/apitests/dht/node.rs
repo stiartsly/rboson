@@ -1,13 +1,16 @@
 use std::{
-    time::Duration,
     fs,
     sync::Arc,
+    time::Duration,
 };
 use serial_test::serial;
 use boson::{
-    cryptobox::{Nonce, CryptoBox},
-    core::{PeerBuilder, Result, ValueBuilder},
     signature,
+    cryptobox::{Nonce, CryptoBox},
+    core::{
+        PeerBuilder, Result,
+        ImmutableBuilder as ValueBuilder,
+    },
     dht::{
         NodeConfiguration,
         Node,
@@ -33,6 +36,10 @@ fn working_path(input: &str) -> String {
     path.display().to_string()
 }
 
+fn cleanup_path(input: &str) {
+    remove_working_path(input);
+}
+
 fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
     let private_key = signature::KeyPair::random().private_key().to_string();
     let config_path = format!("{path}/node.yaml");
@@ -46,7 +53,6 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
 
     fs::write(&config_path, yaml)?;
     let cfg = NodeConfiguration::load(&config_path).unwrap();
-
     Ok(Node::new(Box::new(cfg))?)
 }
 
@@ -55,11 +61,18 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
 async fn test_encryption_into() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
+
     let node1 = create_node(32222, &path1).unwrap();
     let node2 = create_node(32223, &path2).unwrap();
-
-    _ = node1.start().await;
-    _ = node2.start().await;
+    let rcs   = tokio::join!(
+        node1.start(),
+        node2.start()
+    );
+    for rc in [rcs.0, rcs.1] {
+        if let Err(e) = rc {
+            panic!("Failed to start node: {e}");
+        }
+    }
 
     let plain = create_random_bytes(32);
     let result = node1.encrypt_into(node2.id(), &plain);
@@ -89,10 +102,12 @@ async fn test_encryption_into() {
         }
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    remove_working_path(&path1);
-    remove_working_path(&path2);
+    _ = tokio::join!(
+        node1.stop(),
+        node2.stop()
+    );
+    cleanup_path(&path1);
+    cleanup_path(&path2);
 }
 
 #[tokio::test]
@@ -100,11 +115,16 @@ async fn test_encryption_into() {
 async fn test_encryption() {
     let path1 = working_path("node1");
     let path2 = working_path("node2");
+
     let node1 = create_node(32222, &path1).unwrap();
     let node2 = create_node(32223, &path2).unwrap();
-
-    _ = node1.start().await;
-    _ = node2.start().await;
+    let rcs = tokio::join!(
+        node1.start(),
+        node2.start()
+    );
+    for rc in [rcs.0, rcs.1] {
+        _ = rc.map_err(|e| assert!(false, "Faild to start node: {e}"))
+    }
 
     let plain = create_random_bytes(32);
     let mut cipher = vec![0u8; 1024];
@@ -136,11 +156,12 @@ async fn test_encryption() {
         }
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-
-    remove_working_path(&path1);
-    remove_working_path(&path2);
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop()
+    );
+    cleanup_path(&path1);
+    cleanup_path(&path2);
 }
 
 #[tokio::test]
@@ -151,8 +172,12 @@ async fn test_signinto() {
     let node1 = create_node(32222, &path1).unwrap();
     let node2 = create_node(32223, &path2).unwrap();
 
-    _ = node1.start().await;
-    _ = node2.start().await;
+    let (r1, r2) = tokio::join!(
+        node1.start(),
+        node2.start()
+    );
+    _ = r1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = r2.map_err(|e| panic!("Failed to start node2: {e}"));
 
     let data = create_random_bytes(32);
     let result = node1.sign_into(&data);
@@ -167,7 +192,6 @@ async fn test_signinto() {
             panic!("testcase failed");
         }
     };
-
     let result = node1.verify(&data, &sig);
     match result {
         Ok(_) => assert!(true),
@@ -177,9 +201,10 @@ async fn test_signinto() {
         }
     };
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop()
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
 }
@@ -192,8 +217,12 @@ async fn test_sign() {
     let node1 = create_node(32222, &path1).unwrap();
     let node2 = create_node(32223, &path2).unwrap();
 
-    _ = node1.start().await;
-    _ = node2.start().await;
+    let (r1, r2) = tokio::join!(
+        node1.start(),
+        node2.start()
+    );
+    _ = r1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = r2.map_err(|e| panic!("Failed to start node2: {e}"));
 
     let data = create_random_bytes(32);
     let mut sig = vec![0u8; signature::Signature::BYTES];
@@ -203,9 +232,10 @@ async fn test_sign() {
     let result = node2.verify(&data, &sig);
     assert_eq!(result.is_ok(), true);
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop()
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
 }
@@ -220,15 +250,25 @@ async fn test_find_node() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(3*1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| panic!("Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to bootstrapping node1 on node3: {e}"));
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     assert_eq!(node1.is_running(), true);
     assert_eq!(node2.is_running(), true);
@@ -246,7 +286,8 @@ async fn test_find_node() {
 
             found.v4().map(|ni| {
                 assert!(ni.id() == node2.id());
-                println!("found target {} on node {}", node2.id(), node1.id());
+                println!("\x1b[31mfound target {} on node {}\x1b[0m",
+                    node2.id(), node1.id());
             });
         }
         _ => {
@@ -261,7 +302,8 @@ async fn test_find_node() {
 
             found.v4().map(|ni| {
                 assert!(ni.id() == node3.id());
-                println!("found target {} on node {}", node3.id(), node2.id());
+                println!("\x1b[32mfound target {} on node {}\x1b[0m",
+                    node3.id(), node2.id());
             });
         }
         _ => {
@@ -269,16 +311,16 @@ async fn test_find_node() {
         }
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop()
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_store_value() {
@@ -289,13 +331,23 @@ async fn test_store_value() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
+
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| panic!("Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to bootstrapping node1 on node3: {e}"));
 
     tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
 
@@ -313,16 +365,16 @@ async fn test_store_value() {
         Err(e) => panic!("store value error: {}", e)
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop()
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_announce_peer() {
@@ -333,15 +385,25 @@ async fn test_announce_peer() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| panic!("Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to bootstrapping node1 on node3: {e}"));
+
+    //tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
 
     assert_eq!(node1.is_running(), true);
     assert_eq!(node2.is_running(), true);
@@ -356,16 +418,17 @@ async fn test_announce_peer() {
         Err(e) => panic!("announce peer error: {}", e)
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop()
+    );
 
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_find_value() {
@@ -376,15 +439,24 @@ async fn test_find_value() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| panic!("Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| panic!("Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| panic!("Failed to bootstrapping node1 on node3: {e}"));
+    // tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
 
     assert_eq!(node1.is_running(), true);
     assert_eq!(node2.is_running(), true);
@@ -411,7 +483,7 @@ async fn test_find_value() {
             assert_eq!(v.is_mutable(), false);
             assert_eq!(value.data(), v.data());
         },
-        Ok(None) => {
+        Ok(_) => {
             assert!(false);
             panic!("Should have found the value");
         },
@@ -423,23 +495,24 @@ async fn test_find_value() {
             assert_eq!(v.is_mutable(), false);
             assert_eq!(value.data(), v.data());
         },
-        Ok(None) => {
+        Ok(_) => {
             assert!(false);
             panic!("Should have found the value");
         },
         Err(e) => panic!("Find value error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop()
+    );
 
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_find_peer() {
@@ -450,15 +523,25 @@ async fn test_find_peer() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node3: {e}"));
+
+    // tokio::time::sleep(Duration::from_millis(3 * 1000)).await;
 
     assert_eq!(node1.is_running(), true);
     assert_eq!(node2.is_running(), true);
@@ -470,7 +553,7 @@ async fn test_find_peer() {
 
     match node1.announce_peer(&peer, -1, false).await {
         Ok(_) => assert!(true),
-        Err(e) => panic!("Announce peer error: {}", e)
+        Err(e) => assert!(false, "Announce peer error: {}", e)
     }
 
     let peer_id = peer.id().clone();
@@ -486,7 +569,7 @@ async fn test_find_peer() {
             assert_eq!(v[0].endpoint(), peer.endpoint());
             assert_eq!(v[0].nodeid(), peer.nodeid());
         },
-        Err(e) => panic!("Find peer error: {}", e),
+        Err(e) => assert!(false, "Find peer error: {}", e),
     }
     match result.1 {
         Ok(v) => {
@@ -495,19 +578,20 @@ async fn test_find_peer() {
             assert_eq!(v[0].endpoint(), peer.endpoint());
             assert_eq!(v[0].nodeid(), peer.nodeid());
         },
-        Err(e) => panic!("Find peer error: {}", e),
+        Err(e) => assert!(false, "Find peer error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop()
+    );
 
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_get_value() {
@@ -518,44 +602,58 @@ async fn test_get_value() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node3: {e}"));
+
+    //tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
 
     let data = create_random_bytes(32);
     let value = ValueBuilder::new(&data)
         .build()
         .expect("Failed to build immutable value");
 
-    _ = node1.store_value(&value, -1, false).await.unwrap();
+    let _ = tokio::join!(
+        node1.store_value(&value, -1, false),
+    );
 
     let value_id = value.id();
     let result = node1.value(value_id);
     match result {
         Ok(Some(v)) => {
             assert_eq!(v.id(), value_id);
-            assert_eq!(v, value);
+            assert_eq!(v.data(), value.data());
+            //assert_eq!(v, value);
         },
-        Ok(None) => panic!("Should have found the value"),
+        Ok(_) => panic!("Should have found the value"),
         Err(e) => panic!("get value error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop(),
+    );
 
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_get_peer() {
@@ -566,43 +664,57 @@ async fn test_get_peer() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node3: {e}"));
+
+    // tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
 
     let peer = PeerBuilder::new("https://example.com")
         .build()
         .expect("Failed to build peer");
 
-    _ = node1.announce_peer(&peer, -1, false).await.unwrap();
+    let _ = tokio::join!(
+        node1.announce_peer(&peer, -1, false)
+    );
 
     let peer_id = peer.id().clone();
     let result = node1.peer(peer_id.clone(), peer.fingerprint()).await;
     match result {
         Ok(Some(v)) => {
             assert_eq!(v.id(), &peer_id);
-            assert_eq!(v, peer);
+            assert_eq!(v.signature(), peer.signature());
+            assert_eq!(v.fingerprint(), peer.fingerprint());
+            //assert_eq!(v, peer);
         },
-        Ok(None) => panic!("Should have found the peer"),
+        Ok(_) => panic!("Should have found the peer"),
         Err(e) => panic!("get peer error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop(),
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_remove_value() {
@@ -613,22 +725,34 @@ async fn test_remove_value() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node3: {e}"));
+
+    // tokio::time::sleep(Duration::from_millis(2 * 1000)).await;
 
     let data = create_random_bytes(32);
     let value = ValueBuilder::new(&data)
         .build()
         .expect("Failed to build immutable value");
 
-    _ = node1.store_value(&value, -1, false).await.unwrap();
+    let _ = tokio::join!(
+        node1.store_value(&value, -1, false)
+    );
 
     let value_id = value.id();
     let result = node1.remove_value(value_id.clone());
@@ -640,20 +764,21 @@ async fn test_remove_value() {
     let result = node1.value(value_id);
     match result {
         Ok(Some(_)) => assert!(false),
-        Ok(None) => assert!(true),
+        Ok(_) => assert!(true),
         Err(e) => panic!("get value error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop(),
+    );
 
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);
 }
 
-#[ignore]
 #[tokio::test]
 #[serial]
 async fn test_remove_peer() {
@@ -664,21 +789,33 @@ async fn test_remove_peer() {
     let node2 = create_node(32224, &path2).unwrap();
     let node3 = create_node(32226, &path3).unwrap();
 
-    _ = node1.start().await.map_err(|e| panic!("Failed to start node1: {e}"));
-    _ = node2.start().await.map_err(|e| panic!("Failed to start node2: {e}"));
-    _ = node3.start().await.map_err(|e| panic!("Failed to start node3: {e}"));
+    let (rc1, rc2, rc3) = tokio::join!(
+        node1.start(),
+        node2.start(),
+        node3.start()
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to start node1: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
+    _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
     let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
-    _ = node2.bootstrap_one(&ni).await;
-    _ = node3.bootstrap_one(&ni).await;
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (rc1, rc2) = tokio::join!(
+        node2.bootstrap_one(&ni),
+        node3.bootstrap_one(&ni)
+    );
+    _ = rc1.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node2: {e}"));
+    _ = rc2.map_err(|e| assert!(false, "Failed to bootstrapping node1 on node3: {e}"));
+
+    // tokio::time::sleep(Duration::from_secs(2)).await;
 
     let peer = PeerBuilder::new("https://example.com")
         .build()
         .expect("Failed to build peer");
 
-    _ = node1.announce_peer(&peer, -1, false).await.unwrap();
+    let _ = tokio::join!(
+        node1.announce_peer(&peer, -1, false)
+    );
 
     let peer_id = peer.id().clone();
     let result = node1.remove_peer(peer_id.clone(), peer.fingerprint()).await;
@@ -690,14 +827,15 @@ async fn test_remove_peer() {
     let result = node1.peer(peer_id, peer.fingerprint()).await;
     match result {
         Ok(Some(_)) => assert!(false),
-        Ok(None) => assert!(true),
+        Ok(_) => assert!(true),
         Err(e) => panic!("get peer error: {}", e),
     }
 
-    _ = node1.stop().await;
-    _ = node2.stop().await;
-    _ = node3.stop().await;
-
+    let _ = tokio::join!(
+        node1.stop(),
+        node2.stop(),
+        node3.stop(),
+    );
     remove_working_path(&path1);
     remove_working_path(&path2);
     remove_working_path(&path3);

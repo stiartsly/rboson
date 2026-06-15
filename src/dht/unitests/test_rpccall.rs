@@ -4,7 +4,6 @@ use std::{
 };
 
 use crate::{Id, NodeInfo};
-use crate::errors::ProtocolError;
 use crate::dht::{
     msg::{msg, msg::Method},
     routing::KBucketEntry,
@@ -203,7 +202,7 @@ mod tests {
 
         let req3 = msg::ping_request();
         let mut failed = RpcCall::new(target2.clone(), req3);
-        let err = ProtocolError::new("failed") as Box<dyn std::error::Error + Send + Sync>;
+        //let err = ProtocolError::new("failed") as Box<dyn std::error::Error + Send + Sync>;
         failed.fail();
         assert_eq!(failed.state(), State::Err);
     }

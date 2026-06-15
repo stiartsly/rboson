@@ -1,14 +1,14 @@
 use std::{
     fmt,
-    fs,
-    io::ErrorKind,
-    time::SystemTime,
-    sync::{Arc, Mutex},
-    cmp::Ordering,
     path::Path,
+    cmp::Ordering,
+    time::SystemTime,
+    fs::{self, File},
+    io::{ErrorKind, Error as StdError},
+    sync::{Arc, Mutex},
 };
-use rbtree::RBTree;
 use serde::{Deserialize, Serialize};
+use rbtree::RBTree;
 use log::debug;
 
 use crate::{Id, Result};
@@ -23,16 +23,18 @@ use crate::dht::{
 };
 
 #[derive(Serialize, Deserialize)]
-struct PersistedRoutingTable {
+struct SerdeRoutingTable {
     #[serde(rename = "nodeId")]
-    node_id: Id,
+    nodeid: Id,
     timestamp: u64,
     entries: Vec<KBucketEntry>,
 }
 
 pub(crate) struct RoutingTable {
-    local_id: Id,
-    buckets: RBTree<Prefix, Arc<Mutex<KBucket>>>,
+    nodeid  : Id,
+    buckets : RBTree<Prefix, Arc<Mutex<KBucket>>>,
+    updated : SystemTime,
+    saved   : SystemTime,
 }
 
 impl RoutingTable {
@@ -45,8 +47,10 @@ impl RoutingTable {
         bs.insert(prefix, bucket);
 
         Self {
-            local_id: nodeid,
+            nodeid  : nodeid,
             buckets : bs,
+            updated : SystemTime::UNIX_EPOCH,
+            saved   : SystemTime::UNIX_EPOCH,
         }
     }
 
@@ -55,11 +59,11 @@ impl RoutingTable {
     }
 
     pub(crate) fn is_home_bucket(&self, p: &Prefix) -> bool {
-        p.is_prefix_of(&self.local_id)
+        p.is_prefix_of(&self.nodeid)
     }
 
-    pub(crate) fn local_nodeid(&self) -> &Id {
-        &self.local_id
+    pub(crate) fn nodeid(&self) -> &Id {
+        &self.nodeid
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -125,11 +129,15 @@ impl RoutingTable {
     }
 
     pub(crate) fn put(&mut self, entry: KBucketEntry) {
-        self._put(entry)
+        self._put(entry);
+        self.updated = SystemTime::now();
     }
 
     pub(crate) fn remove(&mut self, id: &Id) -> Option<KBucketEntry> {
-        self._remove(id)
+        self._remove(id).map(|entry| {
+            self.updated = SystemTime::now();
+            entry
+        })
     }
 
     pub(crate) fn on_timeout(&self, id: &Id) {
@@ -295,11 +303,12 @@ impl RoutingTable {
     ){
         let mut locked_rt = rt.lock().unwrap();
         locked_rt._merge_buckets();
+        locked_rt.updated = SystemTime::now();
 
         let buckets = locked_rt.buckets.values().cloned();
         for bucket in buckets {
             let mut locked = bucket.lock().unwrap();
-            locked.cleanup(&locked_rt.local_id, bootstrap_ids,
+            locked.cleanup(&locked_rt.nodeid, bootstrap_ids,
                 Consumer::new(move |_entry| {
                     unimplemented!()
                     // TODO: Self::put(&mut locked, _entry);
@@ -318,33 +327,46 @@ impl RoutingTable {
         }
     }
 
-    pub(crate) fn save(&self, path: &Path) -> Result<()> {
+    pub(crate) fn save(&mut self, path: &Path) -> Result<()> {
+        if self.updated <= self.saved {
+            return Ok(());
+        }
+
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            File::create(path)?;
+        }
+        if !path.is_file() {
+            return Err(StdError::new(
+                ErrorKind::InvalidInput,
+                format!("Path {} is not a file", path.display())
+            ).into());
+        }
+
         if self.number_of_entries() == 0 {
             return Ok(());
         }
 
         let mut entries = Vec::with_capacity(self.number_of_entries());
-        for (_, item) in self.buckets.iter() {
+        for item in self.buckets.values() {
             entries.extend(item.lock().unwrap().entries());
         }
 
-        let persisted = PersistedRoutingTable {
-            node_id     : self.local_id.clone(),
-            timestamp   : crate::as_ms!(SystemTime::now()) as u64,
+        let saved = SystemTime::now();
+        let persisted = SerdeRoutingTable {
+            nodeid      : self.nodeid,
+            timestamp   : crate::as_ms!(saved) as u64,
             entries,
         };
 
         let bytes = serde_cbor::to_vec(&persisted)?;
-        let file = path.to_path_buf();
-        if let Some(parent) = file.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, bytes)?;
+        fs::rename(&tmp_path, &path)?;
 
-        let tmp_path = file.with_extension("tmp");
-        fs::rename(&file, &tmp_path)?;
-        fs::write (&tmp_path, bytes)?;
-        fs::rename(&tmp_path, &file)?;
-
+        self.saved = saved;
         Ok(())
     }
 
@@ -357,18 +379,18 @@ impl RoutingTable {
             Err(err) => return Err(err.into()),
         };
 
-        let persisted: PersistedRoutingTable = serde_cbor::from_slice(&bytes)?;
-        if persisted.node_id != self.local_id {
+        let rt: SerdeRoutingTable = serde_cbor::from_slice(&bytes)?;
+        if  rt.nodeid != self.nodeid {
             return Ok(());
         }
 
         let now = crate::as_ms!(SystemTime::now()) as u64;
-        if now - persisted.timestamp > MAX_AGE{
+        if now - rt.timestamp > MAX_AGE{
             return Ok(());
         }
 
-        for entry in persisted.entries {
-            self.put(entry);
+        for item in rt.entries {
+            self._put(item);
         }
         Ok(())
     }
@@ -376,14 +398,14 @@ impl RoutingTable {
 
 impl fmt::Display for RoutingTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "nodeId:{}\n", self.local_id)?;
+        write!(f, "nodeId:{}\n", self.nodeid)?;
         write!(f,
             "buckets:{}/ entries:{}\n",
             self.size(),
             self.number_of_entries()
         )?;
 
-        self.buckets.iter().for_each(|(_,v)| {
+        self.buckets.values().for_each(|v| {
             _ = write!(f, "* {}", v.lock().unwrap());
         });
         Ok(())

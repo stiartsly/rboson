@@ -72,7 +72,7 @@ pub struct Node {
     timer_task  : Mutex<Option<JoinHandle<()>>>,
     stop_task   : Arc<Mutex<bool>>,
 
-    storage     : Arc<Mutex<Box<dyn DataStorage>>>,
+    storage     : Arc<Mutex<dyn DataStorage>>,
     tokenman    : Arc<TokenManager>,
     weak        : Weak<Self>,
 }
@@ -133,7 +133,7 @@ impl Node {
             timer_client    : Mutex::new(None),
             timer_task      : Mutex::new(None),
             stop_task       : Arc::new(Mutex::new(false)),
-            storage         : Arc::new(Mutex::new(Box::new(SqliteStorage::new()))),
+            storage         : Arc::new(Mutex::new(SqliteStorage::new())),
             tokenman        : Arc::new(TokenManager::new()),
             weak            : weak.clone(),
         }))
@@ -200,7 +200,7 @@ impl Node {
     fn check_running(&self) -> Result<()> {
         match self.is_running() {
             true => Ok(()),
-            false => Err(StateError::new("kadNode is not running".to_string()))
+            false => Err(StateError::new("kadNode is not running"))
         }
     }
 
@@ -362,14 +362,14 @@ impl Node {
     pub async fn start(&self) -> Result<()> {
         if !self.is_stopped() {
             return Err(StateError::new(
-                format!("kadNode is not being stopped: {}", *self.status.lock().unwrap())));
+                format!("Cannot start KadNode: current state is not Stopped.")));
         };
 
         *self.status.lock().unwrap() = NodeStatus::Initializing;
 
         {
-            let mut locked = self.storage.lock().unwrap();
             let db_path = self.database_uri.to_str().unwrap();
+            let mut locked = self.storage.lock().unwrap();
             locked.open(db_path)?;
             locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
         }
@@ -377,20 +377,17 @@ impl Node {
         self.start_timer_task().await?;
         self.setup_periodic_tasks().await?;
 
-        let builder = {
-            let mut b = DHTBuilder::default();
-            b.with_timer_client(self.timer_client())
-             .with_identity(self.identity.identity())
-             .with_storage(self.storage.clone())
-             .with_tokenman(self.tokenman.clone())
-             .with_bootstrap_nodes(self.cfg.bootstrap_nodes())
-             .with_datadir(self.data_dir.as_path());
-            b
-        };
+        let dht_builder = DHTBuilder::default()
+            .with_timer_client(self.timer_client())
+            .with_identity(self.identity.identity())
+            .with_storage(self.storage.clone())
+            .with_tokenman(self.tokenman.clone())
+            .with_bootstrap(self.cfg.bootstrap_nodes())
+            .with_datadir(self.data_dir.as_path());
 
         let port = self.cfg.port();
         if let Some(host4) = self.cfg.host4() {
-            let mut dht = builder.build_dht4(host4, port)?;
+            let mut dht = dht_builder.build(Network::IPv4, host4, port)?;
             dht.set_connection_status_listener();
 
             *self.dht4.lock().unwrap() = Some({
@@ -400,9 +397,8 @@ impl Node {
                 dht
             });
         }
-
         if let Some(host6) = self.cfg.host6() {
-            let mut dht = builder.build_dht6(host6, port)?;
+            let mut dht = dht_builder.build(Network::IPv6, host6, port)?;
             dht.set_connection_status_listener();
 
             *self.dht6.lock().unwrap() = Some({
@@ -422,16 +418,16 @@ impl Node {
         if self.is_stopped() {
             return Ok(());
         }
-        if *self.status.lock().unwrap() == NodeStatus::Stopped {
-            return Ok(());
-        }
         *self.status.lock().unwrap() = NodeStatus::Stopped;
 
-        if let Some(dht4) = self.dht4.lock().unwrap().take() {
-            dht4.lock().unwrap().stop().await;
+        let dht4 = self.dht4.lock().unwrap().take();
+        let dht6 = self.dht6.lock().unwrap().take();
+
+        if let Some(dht) = dht4 {
+            dht.lock().unwrap().stop().await;
         }
-        if let Some(dht6) = self.dht6.lock().unwrap().take() {
-            dht6.lock().unwrap().stop().await;
+        if let Some(dht) = dht6 {
+            dht.lock().unwrap().stop().await;
         }
 
         self.stop_timer_task().await;
@@ -510,21 +506,15 @@ impl Node {
         Ok(())
     }
 
-    pub async fn find_node(
-        &self,
-        target: &Id,
-        lookup_option: Option<LookupOption>
-    ) -> Result<JointResult<NodeInfo>> {
+    pub async fn find_node(&self, target: &Id,
+        lookup_option: Option<LookupOption>) -> Result<JointResult<NodeInfo>>
+    {
         self.check_running()?;
 
-        let target = target.clone();
-        let option = self.option(lookup_option);
-        let dht4   = self.dht4();
-        let dht6   = self.dht6();
-
         let find_node_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let promise = Promise::<Option<NodeInfo>>::new();
-            let future = promise.future();
+            let (promise, future) = Promise::<Option<NodeInfo>>::new().pair();
+            let target  = target.clone();
+            let option  = self.option(lookup_option);
 
             if let Some(dht) = dht {
                 dht.lock().unwrap().find_node(&target, option, promise);
@@ -534,29 +524,31 @@ impl Node {
             future
         };
 
-        let rc = tokio::select!(
+        let dht4 = self.dht4();
+        let dht6 = self.dht6();
+
+        let result = tokio::select!(
             v = find_node_cb(dht4), if dht4.is_some() => (Network::IPv4, v),
             v = find_node_cb(dht6), if dht6.is_some() => (Network::IPv6, v),
         );
 
-        Ok({
-            let mut jres = JointResult::<NodeInfo>::new();
-            if let Some(ni) = rc.1? {
-                jres.set_value(rc.0, ni);
-            }
-            jres
-        })
+        let mut joint = JointResult::<NodeInfo>::new();
+        if let Some(ni) = result.1? {
+            joint.set_value(result.0, ni);
+        }
+        Ok(joint)
     }
 
-    pub async fn find_value(&self,
-        value_id: &Id,
-        expected_seq: i32,
+    pub async fn find_value(
+        &self, value_id: &Id, expected_seq: i32,
         lookup_option: Option<LookupOption>
-    ) -> Result<Option<Value>> {
+    ) -> Result<Option<Value>>
+    {
         if expected_seq < -1 {
-            return Err(ArgumentError::new(
-                format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
         }
+
         self.check_running()?;
 
         let target  = value_id.clone();
@@ -564,24 +556,23 @@ impl Node {
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let mut eligible = EligibleValue::new(target, expected_seq);
+        let mut ev = EligibleValue::new(target, expected_seq);
 
-        let value = crate::locked!(self.storage).get_value(&target)?;
+        let value = self.storage.lock().unwrap().get_value(&target)?;
         if let Some(v) = value {
             let is_mutable = v.is_mutable();
-            eligible.update(v, false);
+            ev.update(v, false);
 
             if !is_mutable {
-                return Ok(eligible.value());
+                return Ok(ev.value());
             }
-            if option != LookupOption::Conservative && !eligible.is_empty() {
-                return Ok(eligible.value());
+            if option != LookupOption::Conservative && !ev.is_empty() {
+                return Ok(ev.value());
             }
         }
 
         let find_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let promise = Promise::<Option<Value>>::new();
-            let future = promise.future();
+            let (promise, future) = Promise::<Option<Value>>::new().pair();
 
             if let Some(dht) = dht {
                 dht.lock().unwrap().find_value(
@@ -598,27 +589,30 @@ impl Node {
         );
 
         if let Some(value) = rc? {
-            eligible.update(value, true);
+            ev.update(value, true);
         }
 
-        if !eligible.is_empty() && eligible.is_latest() {
-            let _ = crate::locked!(self.storage).put_value(
-                eligible.value().unwrap(), false
+        if !ev.is_empty() && ev.is_latest() {
+            let _ = self.storage.lock().unwrap().put_value(
+                ev.value().unwrap(), false
             );
         }
 
-        Ok(eligible.value())
+        Ok(ev.value())
     }
 
-    pub async fn find_peer(&self,
-        peer_id: &Id,
-        expected_seq: i32,
-        expected_count: usize,
+    pub async fn find_peer(
+        &self, peer_id: &Id, expected_seq: i32, expected_count: usize,
         lookup_option: Option<LookupOption>
-    ) -> Result<Vec<PeerInfo>> {
+    ) -> Result<Vec<PeerInfo>>
+    {
         if expected_seq < -1 {
-            return Err(ArgumentError::new(
-                format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
+        }
+        if expected_count == 0 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected count: {expected_count}, must be larger than 0")));
         }
         self.check_running()?;
 
@@ -627,28 +621,27 @@ impl Node {
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let mut eligible = EligiblePeers::new(
-            target, expected_seq, expected_count
-        );
+        let mut ep = EligiblePeers::new(
+            target, expected_seq, expected_count);
 
-        let peers = crate::locked!(self.storage).get_peers_with_expected_seq(
+        let peers = self.storage.lock().unwrap().get_peers_with_expected_seq(
                 &target, expected_seq, expected_count as i32)?;
-        eligible.add(peers, false);
-        eligible.prune();
 
-        if !eligible.is_empty() {
+        ep.add(peers, false);
+        ep.prune();
+
+        if !ep.is_empty() {
             if option == LookupOption::Local {
-                return Ok(eligible.peers())
+                return Ok(ep.peers())
             }
             if option  != LookupOption::Conservative &&
-                expected_seq >= 0 && eligible.reached_capacity() {
-                return Ok(eligible.peers())
+                expected_seq >= 0 && ep.reached_capacity() {
+                return Ok(ep.peers())
             }
         }
 
         let find_peers_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let promise = Promise::<Vec<PeerInfo>>::new();
-            let future = promise.future();
+            let (promise, future) = Promise::<Vec<PeerInfo>>::new().pair();
 
             if let Some(dht) = dht {
                 dht.lock().unwrap().find_peer(
@@ -664,32 +657,32 @@ impl Node {
             v = find_peers_cb(dht6), if dht6.is_some() => v,
         );
 
-        eligible.add(rc?, true);
-        eligible.prune();
+        ep.add(rc?, true);
+        ep.prune();
 
-        if !eligible.is_empty() && eligible.is_latest() {
-            let _ = self.storage.lock().unwrap().put_peers(eligible.peers());
+        if !ep.is_empty() && ep.is_latest() {
+            let _ = self.storage.lock().unwrap().put_peers(ep.peers());
         }
-        Ok(eligible.peers())
+        Ok(ep.peers())
     }
 
-    pub async fn store_value(&self,
-        value: &Value,
-        expected_seq: i32,
-        persistent: bool
-    ) -> Result<()> {
+    pub async fn store_value(
+        &self, value: &Value, expected_seq: i32, persistent: bool
+    ) -> Result<()>
+    {
         if !value.is_valid() {
-            return Err(ArgumentError::new("The value is verified to be invalid"));
+            return Err(ArgumentError::new("The value failed validation."));
         }
         if expected_seq < -1 {
-            return Err(ArgumentError::new(
-                format!("Invalid expected sequence number: {expected_seq}")));
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
         }
         self.check_running()?;
 
-        let result = self.storage.lock().unwrap().get_value(&value.id())?;
+        let value_id = value.id();
+        let result = self.storage.lock().unwrap().get_value(&value_id)?;
         if let Some(ref existing) = result {
-            check_value(existing, value, expected_seq)?;
+            let _  = check_value_validity(existing, value, expected_seq)?;
         };
 
         // store the value in local node.
@@ -702,8 +695,7 @@ impl Node {
         let dht6    = self.dht6();
 
         let store_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let promise = Promise::<()>::new();
-            let future  = promise.future();
+            let (promise, future) = Promise::<()>::new().pair();
             let value   = value.clone();
 
             if let Some(dht) = dht {
@@ -714,26 +706,21 @@ impl Node {
             }
             future
         };
-
-        let (rc4, rc6) = tokio::join!(
+        let result = tokio::join!(
             store_value_cb(dht4),
             store_value_cb(dht6),
         );
 
-        for rc in [rc4, rc6] {
-            let _ = rc?;
+        for item in [result.0, result.1] {
+            let _ = item?;
         }
 
-        let value_id = value.id();
-        let _ = crate::locked!(self.storage)
-                .update_value_announced_time(&value_id);
+        let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
         Ok(())
     }
 
-    pub async fn announce_peer(&self,
-        peer: &PeerInfo,
-        expected_seq: i32,
-        persistent: bool
+    pub async fn announce_peer(
+        &self, peer: &PeerInfo, expected_seq: i32, persistent: bool
     ) -> Result<()> {
         if !peer.is_valid() {
             return Err(ArgumentError::new("The peer is verified to be invalid."));
@@ -744,50 +731,46 @@ impl Node {
         }
         self.check_running()?;
 
-        let result = crate::locked!(self.storage).get_peer(
+        let result = self.storage.lock().unwrap().get_peer(
             peer.id(), peer.fingerprint()
         )?;
 
         // check the peer validity.
         if let Some(ref existing) = result {
-            check_peer(existing, peer, expected_seq)?;
+            let _ = check_peer_validity(existing, peer, expected_seq)?;
         }
 
         // store the new peer locally.
-        let _ = crate::locked!(self.storage).put_peer(
+        let _ = self.storage.lock().unwrap().put_peer(
             peer.clone(), persistent
-        );
+        )?;
 
         // announce the peer to the network.
-        let peer4   = peer.clone();
-        let peer6   = peer.clone();
         let dht4    = self.dht4();
         let dht6    = self.dht6();
 
-        let (rc4, rc6) = tokio::join!(
-            async move {
-                if let Some(dht) = dht4 {
-                      dht.lock().unwrap()
-                         .announce_peer(peer4, expected_seq).await
-                } else {
-                    Ok(())
-                }
-            },
-            async move {
-                if let Some(dht) = dht6 {
-                     dht.lock().unwrap()
-                         .announce_peer(peer6, expected_seq).await
-                } else {
-                    Ok(())
-                }
+        let announce_peer_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+            let (promise, future) = Promise::<()>::new().pair();
+            let peer = peer.clone();
+
+            if let Some(dht) = dht {
+                let _ = dht.lock().unwrap()
+                    .announce_peer(peer, expected_seq, promise);
+            } else {
+                promise.complete(Ok(()));
             }
+            future
+        };
+
+        let result = tokio::join!(
+            announce_peer_cb(dht4),
+            announce_peer_cb(dht6),
         );
-        for rc in [rc4, rc6] {
-            let _ = rc?;
+        for item in [result.0, result.1] {
+            let _ = item?;
         }
 
-        // update the peer announced time.
-        _ = crate::locked!(self.storage)
+        let _ = self.storage.lock().unwrap()
                 .update_peer_announced_time(peer.id(), peer.fingerprint());
         Ok(())
     }
@@ -877,7 +860,7 @@ impl Identity for Node {
     }
 }
 
-fn check_value(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {
+fn check_value_validity(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {
     let valueid = new.id();
     if old.is_mutable() != new.is_mutable() {
         warn!("Rejecting value {} with mutability changed from {} to {}",
@@ -901,7 +884,7 @@ fn check_value(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {
     Ok(())
 }
 
-fn check_peer(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Result<()> {
+fn check_peer_validity(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Result<()> {
     if new.sequence_number() < old.sequence_number() {
         warn!("Rejecting peer {} with old sequence number {} < {}",
             new.id(), new.sequence_number(), old.sequence_number());

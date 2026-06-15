@@ -147,7 +147,7 @@ impl Task for ValueLookupTask {
             return;
         }
         let rsp  = call.rsp().expect("no response set.");
-        let body = rsp.body().expect("no message body in response.");
+        let body = rsp.body().expect("no message body in the response.");
 
         let Body::FindValueResponse(body) = body else {
             return;

@@ -25,7 +25,7 @@ pub(super) fn make_test_dht(
     host: &str,
 ) -> Arc<Mutex<DHT>> {
     let tokenman = Arc::new(TokenManager::new());
-    let storage: Arc<Mutex<Box<dyn DataStorage>>> = Arc::new(Mutex::new(Box::new(SqliteStorage::new())));
+    let storage: Arc<Mutex<dyn DataStorage>> = Arc::new(Mutex::new(SqliteStorage::new()));
     let (tx, _rx) = mpsc::unbounded_channel::<Command>();
     let timer_client = Arc::new(TimerClient::new(tx));
     let bootstrap_nodes: Vec<NodeInfo> = Vec::new();
@@ -43,20 +43,15 @@ pub(super) fn make_test_dht(
     });
     */
 
-    let mut builder = Builder::default();
-    builder
+    let dht = Builder::default()
         .with_identity(identity)
         .with_storage(storage)
         .with_tokenman(tokenman)
         .with_timer_client(timer_client)
-        .with_bootstrap_nodes(&bootstrap_nodes)
-        .with_datadir(data_dir.as_path());
-
-    let dht = match network {
-        Network::IPv4 => builder.build_dht4(host, 0),
-        Network::IPv6 => builder.build_dht6(host, 0),
-    }
-    .expect("test DHT should build");
+        .with_bootstrap(&bootstrap_nodes)
+        .with_datadir(data_dir.as_path())
+        .build(network, host, 0)
+        .expect("test DHT should build");
 
     let dht = Arc::new(Mutex::new(dht));
     dht.lock().unwrap().weak = Arc::downgrade(&dht);

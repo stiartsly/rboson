@@ -96,7 +96,7 @@ mod tests {
         let mut closest = make_closest(&rt, target, 5);
         closest.fill();
 
-        let local_id = rt.local_nodeid().clone();
+        let local_id = rt.nodeid().clone();
         assert!(!closest.entries()
             .iter()
             .any(|entry| entry.id() == &local_id));
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn test_set_filter_excludes_local_nodeid() {
         let rt = build_rt_with_local_entry();
-        let local_id = rt.local_nodeid().clone();
+        let local_id = rt.nodeid().clone();
         let mut closest = make_closest(&rt, make_id(0x00, 1), 4);
 
         closest.set_filter(|_| true);
@@ -202,7 +202,7 @@ mod tests {
             entries.iter().map(|entry| entry.id().clone()).collect::<Vec<_>>(),
             expected_ids
         );
-        assert!(entries.iter().all(|entry| entry.id() != rt.local_nodeid()));
+        assert!(entries.iter().all(|entry| entry.id() != rt.nodeid()));
     }
 
     #[test]

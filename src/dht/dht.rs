@@ -67,56 +67,65 @@ use crate::dht::{
 #[derive(Default)]
 pub(crate) struct Builder<'a> {
     identity        : Option<Arc<CryptoIdentity>>,
-    storage         : Option<Arc<Mutex<Box<dyn DataStorage>>>>,
-    tokenman        : Option<Arc<TokenManager>>,
+    storage         : Option<Arc<Mutex<dyn DataStorage>>>,
+    token_man        : Option<Arc<TokenManager>>,
     timer_client    : Option<Arc<TimerClient>>,
     data_dir        : Option<&'a Path>,
     bootstrap_nodes : Option<&'a[NodeInfo]>,
 }
 
 impl<'a> Builder<'a> {
-    pub(crate) fn with_identity(&mut self, identity: Arc<CryptoIdentity>) -> &mut Self {
+    pub(crate) fn with_identity(mut self, identity: Arc<CryptoIdentity>) -> Self {
         self.identity = Some(identity);
         self
     }
 
-    pub(crate) fn with_bootstrap_nodes(&mut self, bootstrap_nodes: &'a [NodeInfo]) -> &mut Self {
+    pub(crate) fn with_bootstrap(mut self, bootstrap_nodes: &'a [NodeInfo]) -> Self {
         self.bootstrap_nodes = Some(bootstrap_nodes);
         self
     }
 
-    pub(crate) fn with_timer_client(&mut self, timer_client: Arc<TimerClient>) -> &mut Self {
+    pub(crate) fn with_timer_client(mut self, timer_client: Arc<TimerClient>) -> Self {
         self.timer_client = Some(timer_client);
         self
     }
 
-    pub(crate) fn with_storage(&mut self, storage: Arc<Mutex<Box<dyn DataStorage>>>) -> &mut Self {
+    pub(crate) fn with_storage(mut self, storage: Arc<Mutex<dyn DataStorage>>) -> Self {
         self.storage = Some(storage);
         self
     }
 
-    pub(crate) fn with_tokenman(&mut self, tokenman: Arc<TokenManager>) -> &mut Self {
-        self.tokenman = Some(tokenman);
+    pub(crate) fn with_tokenman(mut self, token_man: Arc<TokenManager>) -> Self {
+        self.token_man = Some(token_man);
         self
     }
 
-    pub(crate) fn with_datadir(&mut self, datadir: &'a Path) -> &mut Self {
+    pub(crate) fn with_datadir(mut self, datadir: &'a Path) -> Self {
         self.data_dir = Some(datadir);
         self
     }
 
-    pub(crate) fn build_dht4(&self, host: &str, port: u16) -> Result<DHT> {
+    fn build_dht4(&self, host: &str, port: u16) -> Result<DHT> {
         let persist_file = self.data_dir.as_ref()
             .map(|v| v.join("dht4.cache"));
+
+        println!("persist_file: {}", persist_file.as_ref().unwrap().display());
 
         DHT::new(self, Network::IPv4, host, port, persist_file)
     }
 
-    pub(crate) fn build_dht6(&self, host: &str, port: u16) -> Result<DHT> {
+    fn build_dht6(&self, host: &str, port: u16) -> Result<DHT> {
         let persist_file = self.data_dir.as_ref()
             .map(|v| v.join("dht6.cache"));
 
         DHT::new(self, Network::IPv6, host, port, persist_file)
+    }
+
+    pub(crate) fn build(&self, network: Network, host: &str, port: u16) -> Result<DHT> {
+        match network {
+            Network::IPv4 => self.build_dht4(host, port),
+            Network::IPv6 => self.build_dht6(host, port),
+        }
     }
 }
 
@@ -126,13 +135,13 @@ pub(crate) struct DHT {
     network         : Network,
     host            : String,
     port            : u16,
+
     is_running      : bool,
     status          : ConnectionStatus,
 
-    storage         : Arc<Mutex<Box<dyn DataStorage>>>,
-    tokenman        : Arc<TokenManager>,
-    taskman         : Arc<TaskManager>,
-    rpc_server      : Option<Arc<Mutex<RpcServer>>>,
+    storage         : Arc<Mutex<dyn DataStorage>>,
+    token_man       : Arc<TokenManager>,
+    task_man        : Arc<TaskManager>,
 
     persist_file    : Option<PathBuf>,
     rt              : Arc<Mutex<RoutingTable>>,
@@ -147,11 +156,13 @@ pub(crate) struct DHT {
 
     timer_client        : Arc<TimerClient>,
 
+    rpc_server          : Option<Arc<Mutex<RpcServer>>>,
+    rpc_task            : Option<JoinHandle<()>>,
+    rpc_task_quit_flag  : Arc<Mutex<bool>>,
+
     suspicious_detector : Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     pub(crate) weak     : Weak<Mutex<DHT>>,
 
-    quit_flag       : Arc<Mutex<bool>>,
-    server_task     : Option<JoinHandle<()>>,
     notifier        : Arc<Notify>,
 }
 
@@ -173,15 +184,16 @@ impl DHT {
         port    : u16,
         persist_file: Option<PathBuf>,
     ) -> Result<Self> {
+
         assert!(builder.identity.is_some());
         assert!(builder.storage.is_some());
         assert!(builder.timer_client.is_some());
-        assert!(builder.tokenman.is_some());
+        assert!(builder.token_man.is_some());
         assert!(builder.data_dir.is_some());
 
         let identity = builder.identity.as_ref().unwrap().clone();
         let storage  = builder.storage.as_ref().unwrap().clone();
-        let tokenman = builder.tokenman.as_ref().unwrap().clone();
+        let tokenman = builder.token_man.as_ref().unwrap().clone();
         let tclient  = builder.timer_client.as_ref().unwrap().clone();
 
         let nodeid = identity.id().clone();
@@ -201,9 +213,8 @@ impl DHT {
             is_running          : false,
             status              : ConnectionStatus::Disconnected,
             storage,
-            tokenman,
-            taskman             : Arc::new(TaskManager::new()),
-            rpc_server          : None,
+            token_man           : tokenman,
+            task_man            : Arc::new(TaskManager::new()),
             rt                  : Arc::new(Mutex::new(RoutingTable::new(nodeid))),
             persist_file,
             bootstrap_nodes,
@@ -213,10 +224,13 @@ impl DHT {
             maintenance_tasks   : Arc::new(Mutex::new(HashSet::new())),
             bootstrapping       : AtomicBool::new(false),
             timer_client        : tclient,
-            suspicious_detector: None,
+            suspicious_detector : None,
             weak                : Weak::new(), // will be set later
-            quit_flag           : Arc::new(Mutex::new(false)),
-            server_task         : None,
+
+            rpc_server          : None,
+            rpc_task            : None,
+            rpc_task_quit_flag  : Arc::new(Mutex::new(false)),
+
             notifier            : Arc::new(Notify::new()),
         })
     }
@@ -269,9 +283,9 @@ impl DHT {
         let promise = Promise::<()>::new();
         let future  = promise.future();
 
-        let (weak, nodeid, taskman) = {
+        let (weak, nodeid, task_man) = {
             let locked = dht.lock().unwrap();
-            (locked.weak.clone(), locked.id().clone(), locked.taskman.clone())
+            (locked.weak.clone(), locked.id().clone(), locked.task_man.clone())
         };
         let mut task = Box::new(NodeLookupTask::new(
             weak,
@@ -287,7 +301,7 @@ impl DHT {
             )
         );
 
-        taskman.add(task);
+        task_man.add(task);
         futures.push(future);
 
         return async move {
@@ -304,7 +318,7 @@ impl DHT {
                 locked_rt.number_of_entries(),
                 locked_rt.buckets(),
                 locked_dht.weak.clone(),
-                locked_dht.taskman.clone(),
+                locked_dht.task_man.clone(),
             )
         };
 
@@ -382,7 +396,7 @@ impl DHT {
                     TaskListener::default().ended_fn(move |_| {
                         maintenance_tasks.lock().unwrap().remove(&prefix);
                 }));
-                self.taskman.add(task);
+                self.task_man.add(task);
             }
         }
     }
@@ -399,7 +413,7 @@ impl DHT {
             false,
         ));
         task.with_name("Periodic: random node lookup".into());
-        self.taskman.add(task);
+        self.task_man.add(task);
     }
 
     pub(crate) async fn random_ping(&mut self) {
@@ -416,7 +430,7 @@ impl DHT {
             return;
         };
 
-        info!("Periodic: random ping ...");
+        debug!("Periodic: random ping ...");
 
         let call = RpcCall::new(entry, ping_request());
         let _ = self.send_call(call);
@@ -427,7 +441,7 @@ impl DHT {
             return;
         }
 
-        info!("Periodic: 1DHT update...");
+        debug!("Periodic: 1DHT update...");
 
         // routing table maintenance
         if crate::elapsed_ms!(self.last_maintenance) <
@@ -435,7 +449,7 @@ impl DHT {
             return;
         }
 
-        info!("Routing table maintenance ...");
+        debug!("Routing table maintenance ...");
         self.last_maintenance = SystemTime::now();
 
         let weak_dht = self.weak.clone();
@@ -568,8 +582,8 @@ impl DHT {
         self.set_status(ConnectionStatus::Connecting);
 
         let server = self.rpc_server().clone();
-        let quit   = self.quit_flag.clone();
-        let taskm  = self.taskman.clone();
+        let quit   = self.rpc_task_quit_flag.clone();
+        let taskm  = self.task_man.clone();
         let notified = self.notifier.clone();
         let task   = tokio::task::spawn_blocking(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -583,7 +597,7 @@ impl DHT {
         });
 
         self.setup_periodic_tasks().await?;
-        self.server_task = Some(task);
+        self.rpc_task = Some(task);
         self.is_running = true;
 
         info!("Started DHT/{}:{} on {}:{}", self.network, self.id(), self.host, self.port);
@@ -595,30 +609,29 @@ impl DHT {
             return;
         }
 
-        info!("Stopping DHT {}:{} on {}:{}......",
+        info!("Stopping DHT/{}:{} on {}:{}......",
             self.network, self.id(), self.host, self.port);
 
         self.is_running = false;
         self.bootstrapping.store(false, Ordering::SeqCst);
         self.set_status(ConnectionStatus::Disconnected);
 
-        if let Some(s) = self.rpc_server.take() {
+        let rpc_server = self.rpc_server.take();
+        let rpc_task   = self.rpc_task.take();
+
+        if let Some(s) = rpc_server {
             s.lock().unwrap().stop().await;
         }
-
-        if let Some(task) = self.server_task.take() {
-            *self.quit_flag.lock().unwrap() = true;
+        if let Some(t) = rpc_task {
+            *self.rpc_task_quit_flag.lock().unwrap() = true;
             self.notifier.notify_one();
-            let _ = task.await;
+            let _ = t.await;
         }
-        self.taskman.stop();
+
+        self.task_man.stop();
 
         if let Some(path) = self.persist_file.take() {
-            let log_err = |e: Box<dyn StdError + Send + Sync>| {
-                warn!("Failed to persist routing table to {}: {}", path.display(), e);
-            };
-            let _ = self.rt.lock().unwrap()
-                        .save(&path).map_err(log_err);
+            let _ = self.rt.lock().unwrap().save(&path);
         }
 
         if let Some(detector) = self.suspicious_detector.take() {
@@ -964,7 +977,7 @@ impl DHT {
             false => None
         };
         let token  = match body.want_token() {
-            true  => self.tokenman.generate_token(
+            true  => self.token_man.generate_token(
                         req.nodeid(), req.remote_addr(), &target),
             false => 0
         };
@@ -1033,7 +1046,7 @@ impl DHT {
         let value_id = value.id();
         let remote_addr = req.remote_addr().clone();
 
-        let is_valid = self.tokenman.verify_token(
+        let is_valid = self.token_man.verify_token(
             body.token(), req.nodeid(), &remote_addr, &value_id
         );
 
@@ -1140,7 +1153,7 @@ impl DHT {
 
         let peer = body.peer();
         let remote_addr = req.remote_addr().clone();
-        let is_valid = self.tokenman.verify_token(
+        let is_valid = self.token_man.verify_token(
             body.token(), req.nodeid(), &remote_addr, peer.id()
         );
 
@@ -1398,7 +1411,7 @@ impl DHT {
             })
         );
 
-        self.taskman.add(task);
+        self.task_man.add(task);
         self.notifier.notify_one();
     }
 
@@ -1426,11 +1439,11 @@ impl DHT {
             })
         );
 
-        self.taskman.add(task);
+        self.task_man.add(task);
         self.notifier.notify_one();
     }
 
-    pub(crate) async fn store_value(
+    pub(crate) fn store_value(
         &self,
         value: Value,
         expected_seq: i32,
@@ -1440,6 +1453,7 @@ impl DHT {
         let mut nested = Box::new(ValueAnnounceTask::new(
             self.weak.clone(), value.clone(), expected_seq
         ));
+        println!("<DHT> store_value >>>> line: {}", line!());
         nested.with_name(format!("Store value:{valueid}"));
         nested.with_listener(
             TaskListener::default().ended_fn(
@@ -1447,7 +1461,8 @@ impl DHT {
             )
         );
 
-        let taskman = self.taskman.clone();
+        println!("<DHT> store_value >>>> line: {}", line!());
+        let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
         let mut task = Box::new(NodeLookupTask::new(
@@ -1456,10 +1471,13 @@ impl DHT {
         task.with_name(format!("Store value: lookup closest node to {valueid}"));
         task.with_want_token(true);
         task.with_nested(nested);
+        println!("<DHT> store_value >>>> line: {}", line!());
+        let notfier = self.notifier.clone();
         task.with_listener({
             TaskListener::default().ended_fn({
-                let taskman = taskman.clone();
+                let task_man = task_man.clone();
                 move |t: &dyn Task| {
+                    println!("<DHT> store_value >>>> line: {}", line!());
                     let task = t.as_any()
                         .downcast_ref::<NodeLookupTask>().unwrap();
 
@@ -1470,6 +1488,7 @@ impl DHT {
                         return;
                     };
 
+                    println!("<DHT> store_value >>>> line: {}", line!());
                     let closest = task.closest();
                     if closest.is_empty() {
                         // This should never happen
@@ -1478,16 +1497,23 @@ impl DHT {
                         return;
                     }
 
+                    println!("<DHT> store_value >>>> line: {}", line!());
                     nested.as_any()
                         .downcast_ref::<ValueAnnounceTask>().unwrap()
                         .with_closest(closest.clone());
 
-                    taskman.add(nested);
+                    println!("<DHT> store_value >>>> line: {}", line!());
+                    task_man.add(nested);
+                    notfier.notify_one();
+                    println!("<DHT> store_value >>>> line: {}", line!());
             }})
         });
 
-        taskman.add(task);
+        println!("<DHT> store_value >>>> line: {}", line!());
+        task_man.add(task);
+        println!("<DHT> store_value >>>> line: {}", line!());
         self.notifier.notify_one();
+        println!("<DHT> store_value >>>> line: {}", line!());
     }
 
     pub(crate) fn find_peer(
@@ -1515,18 +1541,16 @@ impl DHT {
             })
         });
 
-        self.taskman.add(task);
+        self.task_man.add(task);
         self.notifier.notify_one();
     }
 
-    pub(crate) async fn announce_peer(
+    pub(crate) fn announce_peer(
         &self,
         peer: PeerInfo,
-        expected_seq: i32
-    ) -> Result<()> {
-        let promise = Promise::<()>::new();
-        let future  = promise.future();
-
+        expected_seq: i32,
+        promise: Promise::<()>
+    ) {
         // Announce task to announce the peer to the closest nodes found
         // by the lookup task.
         let mut nested = Box::new(PeerAnnounceTask::new(
@@ -1539,7 +1563,8 @@ impl DHT {
             )
         );
 
-        let taskman = self.taskman.clone();
+        let task_man = self.task_man.clone();
+        let notifier = self.notifier.clone();
         // Lookup task to find the closest nodes to the targetid.
         let mut task = Box::new(NodeLookupTask::new(
             self.weak.clone(), peer.id().clone(), false
@@ -1549,7 +1574,7 @@ impl DHT {
         task.with_nested(nested);
         task.with_listener({
             TaskListener::default().ended_fn({
-                let taskman = taskman.clone();
+                let task_man = task_man.clone();
                 move |t: &dyn Task| {
                     let task = t.as_any()
                         .downcast_ref::<NodeLookupTask>().unwrap();
@@ -1573,14 +1598,13 @@ impl DHT {
                         .downcast_ref::<PeerAnnounceTask>().unwrap()
                         .with_closest(closest.clone());
 
-                    taskman.add(nested);
+                    task_man.add(nested);
+                    notifier.notify_one();
+
             }})
         });
 
-        taskman.add(task);
-        Ok(future.await?)
+        task_man.add(task);
+        self.notifier.notify_one();
     }
 }
-
-unsafe impl Send for DHT {}
-unsafe impl Sync for DHT {}

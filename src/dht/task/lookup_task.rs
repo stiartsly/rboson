@@ -63,6 +63,7 @@ pub(crate) trait LookupTask {
         &self.data().target
     }
 
+    #[allow(unused)]
     fn candidate_size(&self) -> usize {
         self.data().candidates.size()
     }

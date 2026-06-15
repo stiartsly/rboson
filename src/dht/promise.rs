@@ -91,9 +91,8 @@ impl<T> Promise<T> {
         PromiseFuture(self.result.clone())
     }
 
-    pub(crate) fn pair() -> (Self, PromiseFuture<T>) {
-        let promise = Self::new();
-        let future = promise.future();
-        (promise, future)
+    pub(crate) fn pair(self) -> (Self, PromiseFuture<T>) {
+        let future = self.future();
+        (self, future)
     }
 }

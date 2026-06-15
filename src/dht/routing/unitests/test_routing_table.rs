@@ -59,7 +59,7 @@ mod tests {
 
         assert_eq!(rt.size(), 1);
         assert_eq!(rt.is_empty(), false);
-        assert_eq!(rt.local_nodeid(), &local_id);
+        assert_eq!(rt.nodeid(), &local_id);
 
         let buckets = rt.buckets();
         let bucket = buckets.first();

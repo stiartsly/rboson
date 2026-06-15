@@ -28,7 +28,7 @@ impl KClosestNodes {
         target: Id,
         capacity: usize
     ) -> Self {
-        let local_id = rt.local_nodeid().clone();
+        let local_id = rt.nodeid().clone();
         let buckets  = rt.buckets();
         Self {
             filter: Self::default_filter(local_id.clone()),

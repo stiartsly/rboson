@@ -373,6 +373,10 @@ impl RoutingTable {
     pub(crate) fn load(&mut self, path: &Path) -> Result<()> {
         const MAX_AGE: u64 = 24 * 60 * 60 * 1000;
 
+        if !path.exists() || !path.is_file() {
+            return Ok(());
+        }
+
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),

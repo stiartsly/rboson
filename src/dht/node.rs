@@ -29,7 +29,6 @@ use crate::dht::{
     dht::{DHT, Builder as DHTBuilder},
     NodeConfig,
     LookupOption,
-    node_status::NodeStatus,
     eligible_value::EligibleValue,
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
@@ -61,7 +60,7 @@ pub struct Node {
     identity    : CachedIdentity,
 
     lookup_option  : Mutex<LookupOption>,
-    status      : Mutex<NodeStatus>,
+    running     : Mutex<bool>,
     data_dir    : PathBuf,
     database_uri: PathBuf,
 
@@ -127,7 +126,7 @@ impl Node {
             data_dir,
             database_uri,
             lookup_option   : Mutex::new(LookupOption::Conservative),
-            status          : Mutex::new(NodeStatus::Stopped),
+            running         : Mutex::new(false),
             dht4            : Mutex::new(None),
             dht6            : Mutex::new(None),
             timer_client    : Mutex::new(None),
@@ -360,12 +359,9 @@ impl Node {
     }
 
     pub async fn start(&self) -> Result<()> {
-        if !self.is_stopped() {
-            return Err(StateError::new(
-                format!("Cannot start KadNode: current state is not Stopped.")));
+        if self.is_running() {
+            return Ok(());
         };
-
-        *self.status.lock().unwrap() = NodeStatus::Initializing;
 
         {
             let db_path = self.database_uri.to_str().unwrap();
@@ -409,16 +405,16 @@ impl Node {
             });
         }
 
-        *self.status.lock().unwrap() = NodeStatus::Running;
+        *self.running.lock().unwrap() = true;
         info!("Kademlia node started.");
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
-        if self.is_stopped() {
+        if !self.is_running() {
             return Ok(());
         }
-        *self.status.lock().unwrap() = NodeStatus::Stopped;
+        *self.running.lock().unwrap() = false;
 
         let dht4 = self.dht4.lock().unwrap().take();
         let dht6 = self.dht6.lock().unwrap().take();
@@ -469,11 +465,7 @@ impl Node {
     }
 
     pub fn is_running(&self) -> bool {
-        *self.status.lock().unwrap() == NodeStatus::Running
-    }
-
-    pub fn is_stopped(&self) -> bool {
-        *self.status.lock().unwrap() == NodeStatus::Stopped
+        *self.running.lock().unwrap()
     }
 
     pub async fn bootstrap_one(&self,  node: &NodeInfo) -> Result<()> {

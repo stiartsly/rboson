@@ -141,8 +141,6 @@ pub mod yaml_configuration;
 pub mod errors;
 pub mod connection_status_listener;
 pub mod connection_status;
-pub mod node_status;
-pub mod node_status_listener;
 pub mod lookup_option;
 pub mod node;
 
@@ -151,7 +149,6 @@ pub use crate::dht::{
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
-    node_status_listener::NodeStatusListener,
     node_config::NodeConfig,
     yaml_configuration::NodeConfiguration,
 };

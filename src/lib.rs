@@ -48,7 +48,8 @@ pub use crate::did::{
 
 pub use crate::dht::{
     node::{self, Node},
-    node_status::{self, NodeStatus}
+    connection_status::{self, ConnectionStatus},
+    connection_status_listener::{self, ConnectionStatusListener}
 };
 
 /*

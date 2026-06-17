@@ -412,10 +412,9 @@ async fn handle_packet(server: &Arc<Mutex<RpcServer>>, data: &[u8], from: Socket
 }
 
 pub(crate) async fn run_loop(
-    server: Arc<Mutex<RpcServer>>,
-    taskm: Arc<TaskManager>,
-    notified: Arc<tokio::sync::Notify>,
-    quit_flag: Arc<Mutex<bool>>,
+    server      : Arc<Mutex<RpcServer>>,
+    taskman     : Arc<TaskManager>,
+    quit_flag   : Arc<Mutex<bool>>,
 ) {
     let rx_socket = {
         let locked = server.lock().unwrap();
@@ -433,6 +432,8 @@ pub(crate) async fn run_loop(
         UdpSocket::from_std(std_socket)
             .expect("Failed to create Tokio UdpSocket from std UdpSocket")
     };
+
+    let notified = taskman.notified();
 
     let mut buf = vec![0u8; 2048];
     loop {
@@ -453,7 +454,7 @@ pub(crate) async fn run_loop(
                 if *quit_flag.lock().unwrap() {
                     break;
                 } else {
-                    taskm.dequeue();
+                    taskman.dequeue();
                 }
             }
         );

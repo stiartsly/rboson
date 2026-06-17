@@ -3,6 +3,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     collections::{VecDeque, HashSet},
 };
+use tokio::sync::Notify;
 use log::{debug, error};
 
 use crate::locked;
@@ -16,7 +17,9 @@ const MAX_ACTIVE_TASKS: usize = 8;
 pub(crate) struct TaskManager {
     queued      : Mutex<VecDeque<Arc<Mutex<Box<dyn Task>>>>>,
     running     : Arc<Mutex<HashSet<TaskId>>>,
-    canceling   : AtomicBool
+    canceling   : AtomicBool,
+
+    notifier    : Arc<Notify>,
 }
 
 impl TaskManager {
@@ -25,11 +28,17 @@ impl TaskManager {
             queued      : Mutex::new(VecDeque::new()),
             running     : Arc::new(Mutex::new(HashSet::new())),
             canceling   : AtomicBool::new(false),
+            notifier    : Arc::new(Notify::new()),
         }
     }
 
     pub(crate) fn add(&self, task: Box<dyn Task>) {
-        self.add_prior(task, false)
+        self.add_prior(task, false);
+        self.notifier.notify_one();
+    }
+
+    pub(crate) fn notified(&self) -> Arc<Notify> {
+        self.notifier.clone()
     }
 
     pub(crate) fn add_prior(&self, mut task: Box<dyn Task>, priori: bool) {

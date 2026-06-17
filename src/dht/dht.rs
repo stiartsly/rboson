@@ -10,10 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tokio::{
-    task::JoinHandle,
-    sync::Notify
-};
+use tokio::task::JoinHandle;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, warn, error};
 
@@ -157,8 +154,6 @@ pub(crate) struct DHT {
 
     suspicious_detector : Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     pub(crate) weak     : Weak<Mutex<DHT>>,
-
-    notifier            : Arc<Notify>,
 }
 
 impl DHT {
@@ -221,8 +216,6 @@ impl DHT {
             rpc_server          : None,
             rpc_task            : None,
             rpc_task_quit_flag  : Arc::new(Mutex::new(false)),
-
-            notifier            : Arc::new(Notify::new()),
         })
     }
 
@@ -243,6 +236,10 @@ impl DHT {
             .expect("RpcServer not initialized")
     }
 
+    pub(crate) fn rt(&self) -> Arc<Mutex<RoutingTable>> {
+        self.rt.clone()
+    }
+
     pub(crate) fn id(&self) -> &Id {
         self.identity.as_ref().id()
     }
@@ -261,10 +258,6 @@ impl DHT {
                     .send_call(call)
                     .map_err(|e| {error!("{e}"); e})
                     .map(|_|());
-    }
-
-    pub(crate) fn rt(&self) -> Arc<Mutex<RoutingTable>> {
-        self.rt.clone()
     }
 
     fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
@@ -577,14 +570,13 @@ impl DHT {
         let server = self.rpc_server().clone();
         let quit   = self.rpc_task_quit_flag.clone();
         let taskm  = self.task_man.clone();
-        let notified = self.notifier.clone();
         let task   = tokio::task::spawn_blocking(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_time()
                 .enable_io()
                 .build().expect("no rpc server engine runtime build")
                 .block_on(async move {
-                    rpc_server::run_loop(server, taskm, notified, quit).await;
+                    rpc_server::run_loop(server, taskm, quit).await;
                 }
             )
         });
@@ -617,7 +609,7 @@ impl DHT {
         }
         if let Some(t) = rpc_task {
             *self.rpc_task_quit_flag.lock().unwrap() = true;
-            self.notifier.notify_one();
+            self.task_man.notified().notify_one();
             let _ = t.await;
         }
 
@@ -1405,7 +1397,6 @@ impl DHT {
         );
 
         self.task_man.add(task);
-        self.notifier.notify_one();
     }
 
 
@@ -1433,7 +1424,6 @@ impl DHT {
         );
 
         self.task_man.add(task);
-        self.notifier.notify_one();
     }
 
     pub(crate) fn store_value(
@@ -1453,7 +1443,6 @@ impl DHT {
             )
         );
 
-        let notfier = self.notifier.clone();
         let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
@@ -1490,12 +1479,10 @@ impl DHT {
                         .with_closest(closest.clone());
 
                     task_man.add(nested);
-                    notfier.notify_one();
             }})
         });
 
         task_man.add(task);
-        self.notifier.notify_one();
     }
 
     pub(crate) fn find_peer(
@@ -1524,7 +1511,6 @@ impl DHT {
         });
 
         self.task_man.add(task);
-        self.notifier.notify_one();
     }
 
     pub(crate) fn announce_peer(
@@ -1546,7 +1532,6 @@ impl DHT {
         );
 
         let task_man = self.task_man.clone();
-        let notifier = self.notifier.clone();
         // Lookup task to find the closest nodes to the targetid.
         let mut task = Box::new(NodeLookupTask::new(
             self.weak.clone(), peer.id().clone(), false
@@ -1581,12 +1566,10 @@ impl DHT {
                         .with_closest(closest.clone());
 
                     task_man.add(nested);
-                    notifier.notify_one();
 
             }})
         });
 
         task_man.add(task);
-        self.notifier.notify_one();
     }
 }

@@ -58,6 +58,20 @@ impl TimerClient {
         Ok(id)
     }
 
+    pub(crate) fn cancel_timer(
+        &self,
+        timer_id: TimerId,
+    ) -> Result<()> {
+        self.sender.send(
+            Command::Cancel {
+                id: timer_id,
+            }
+        ).map_err(|_| {
+            StateError::new("timer queue channel closed")
+        })?;
+        Ok(())
+    }
+
     pub(crate) async fn stop(
         &self,
     ) -> Result<()> {

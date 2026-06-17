@@ -26,6 +26,7 @@ use crate::{
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
+    ConnectionStatusListener,
     promise::Promise,
     consumer::{Consumer, AsyncConsumer},
     token_manager::TokenManager,
@@ -68,10 +69,11 @@ use crate::dht::{
 pub(crate) struct Builder<'a> {
     identity        : Option<Arc<CryptoIdentity>>,
     storage         : Option<Arc<Mutex<dyn DataStorage>>>,
-    token_man        : Option<Arc<TokenManager>>,
+    token_man       : Option<Arc<TokenManager>>,
     timer_client    : Option<Arc<TimerClient>>,
     data_dir        : Option<&'a Path>,
     bootstrap_nodes : Option<&'a[NodeInfo]>,
+    listener        : Option<Arc<dyn ConnectionStatusListener>>,
 }
 
 impl<'a> Builder<'a> {
@@ -105,51 +107,44 @@ impl<'a> Builder<'a> {
         self
     }
 
-    fn build_dht4(&self, host: &str, port: u16) -> Result<DHT> {
-        let persist_file = self.data_dir.as_ref()
-            .map(|v| v.join("dht4.cache"));
-
-        println!("persist_file: {}", persist_file.as_ref().unwrap().display());
-
-        DHT::new(self, Network::IPv4, host, port, persist_file)
-    }
-
-    fn build_dht6(&self, host: &str, port: u16) -> Result<DHT> {
-        let persist_file = self.data_dir.as_ref()
-            .map(|v| v.join("dht6.cache"));
-
-        DHT::new(self, Network::IPv6, host, port, persist_file)
+    pub(crate) fn with_listener(mut self, listener: Arc<dyn ConnectionStatusListener>)  -> Self {
+        self.listener = Some(listener);
+        self
     }
 
     pub(crate) fn build(&self, network: Network, host: &str, port: u16) -> Result<DHT> {
-        match network {
-            Network::IPv4 => self.build_dht4(host, port),
-            Network::IPv6 => self.build_dht6(host, port),
-        }
+        let persist_file = self.data_dir.as_ref().map(|v| {
+            let filename = match network {
+                Network::IPv4 => "dht4.cache",
+                Network::IPv6 => "dht6.cache",
+            };
+            v.join(filename)
+        });
+        DHT::new(self, network, host.into(), port, persist_file)
     }
 }
 
 pub(crate) struct DHT {
-    identity        : Arc<CryptoIdentity>,
-    ni              : Arc<NodeInfo>,
-    network         : Network,
-    host            : String,
-    port            : u16,
+    identity            : Arc<CryptoIdentity>,
+    network             : Network,
+    host                : String,
+    port                : u16,
 
-    is_running      : bool,
-    status          : ConnectionStatus,
+    is_running          : bool,
+    status              : ConnectionStatus,
+    listener            : Arc<dyn ConnectionStatusListener>,
 
-    storage         : Arc<Mutex<dyn DataStorage>>,
-    token_man       : Arc<TokenManager>,
-    task_man        : Arc<TaskManager>,
+    storage             : Arc<Mutex<dyn DataStorage>>,
+    tokenman            : Arc<TokenManager>,
+    task_man            : Arc<TaskManager>,
 
-    persist_file    : Option<PathBuf>,
-    rt              : Arc<Mutex<RoutingTable>>,
+    persist_file        : Option<PathBuf>,
+    rt                  : Arc<Mutex<RoutingTable>>,
 
-    bootstrap_nodes : Vec<NodeInfo>,
-    bootstrap_ids   : Vec<Id>,
-    last_bootstrap  : SystemTime,
-    bootstrapping   : AtomicBool,
+    bootstrap_nodes     : Vec<NodeInfo>,
+    bootstrap_ids       : Vec<Id>,
+    last_bootstrap      : SystemTime,
+    bootstrapping       : AtomicBool,
 
     last_maintenance    : SystemTime,
     maintenance_tasks   : Arc<Mutex<HashSet<Prefix>>>,
@@ -163,7 +158,7 @@ pub(crate) struct DHT {
     suspicious_detector : Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     pub(crate) weak     : Weak<Mutex<DHT>>,
 
-    notifier        : Arc<Notify>,
+    notifier            : Arc<Notify>,
 }
 
 impl DHT {
@@ -178,30 +173,26 @@ impl DHT {
     const USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES: usize = 8;
 
     fn new(
-        builder : &Builder,
-        network : Network,
-        host    : &str,
-        port    : u16,
-        persist_file: Option<PathBuf>,
-    ) -> Result<Self> {
+        b: &Builder,
+        network: Network, host: String, port: u16,
+        persist_file: Option<PathBuf>
+    ) -> Result<Self>
+    {
+        assert!(b.identity.is_some());
+        assert!(b.storage.is_some());
+        assert!(b.timer_client.is_some());
+        assert!(b.token_man.is_some());
+        assert!(b.data_dir.is_some());
+        assert!(b.listener.is_some());
 
-        assert!(builder.identity.is_some());
-        assert!(builder.storage.is_some());
-        assert!(builder.timer_client.is_some());
-        assert!(builder.token_man.is_some());
-        assert!(builder.data_dir.is_some());
-
-        let identity = builder.identity.as_ref().unwrap().clone();
-        let storage  = builder.storage.as_ref().unwrap().clone();
-        let tokenman = builder.token_man.as_ref().unwrap().clone();
-        let tclient  = builder.timer_client.as_ref().unwrap().clone();
+        let identity = b.identity.as_ref().unwrap().clone();
+        let storage  = b.storage.as_ref().unwrap().clone();
+        let tokenman = b.token_man.as_ref().unwrap().clone();
+        let tclient  = b.timer_client.as_ref().unwrap().clone();
+        let listener = b.listener.as_ref().unwrap().clone();
 
         let nodeid = identity.id().clone();
-        let host   = host.to_string();
-        let socket_addr = SocketAddr::new(host.parse()?, port);
-        let ni = Arc::new(NodeInfo::new(nodeid, socket_addr));
-        let bootstrap_nodes = builder.bootstrap_nodes
-            .map(|nodes| nodes.to_vec())
+        let bootstrap_nodes = b.bootstrap_nodes.map(|nodes| nodes.to_vec())
             .unwrap_or_else(Vec::new);
 
         Ok( Self {
@@ -209,11 +200,11 @@ impl DHT {
             network,
             host,
             port,
-            ni,
             is_running          : false,
             status              : ConnectionStatus::Disconnected,
+            listener,
             storage,
-            token_man           : tokenman,
+            tokenman,
             task_man            : Arc::new(TaskManager::new()),
             rt                  : Arc::new(Mutex::new(RoutingTable::new(nodeid))),
             persist_file,
@@ -239,21 +230,21 @@ impl DHT {
         self.network
     }
 
-    pub(crate) fn ni(&self) -> Arc<NodeInfo> {
-        self.ni.clone()
-    }
-
-    pub(crate) fn id(&self) -> &Id {
-        self.ni.id()
-    }
-
-    pub(crate) fn addr(&self) -> &SocketAddr {
-        self.ni.socket_addr()
+    pub(crate) fn ni(&self) -> NodeInfo {
+        let ip = self.host.parse().unwrap();
+        NodeInfo::new(
+            self.identity.id().clone(),
+            SocketAddr::new(ip, self.port),
+        )
     }
 
     pub(crate) fn rpc_server(&self) -> &Arc<Mutex<RpcServer>> {
         self.rpc_server.as_ref()
             .expect("RpcServer not initialized")
+    }
+
+    pub(crate) fn id(&self) -> &Id {
+        self.identity.as_ref().id()
     }
 
     pub(crate) fn send_msg(&self, msg: Message) {
@@ -493,19 +484,21 @@ impl DHT {
         if self.status == status {
             return;
         }
-
         let old = self.status;
         self.status = status;
 
-        info!("DHT {}:{} connection status changed: {} -> {}",
-            self.network, self.id(), old, self.status
+        info!("DHT {}:{} connection status changed: {} => {}",
+            self.network,
+            self.identity.id(),old, self.status
         );
 
-        // TODO:
-    }
-
-    pub(crate) fn set_connection_status_listener(&mut self) {
-        // TODO: unimplemented!();
+        let l = &self.listener;
+        l.status_changed(self.network, self.status, old);
+        match status {
+            ConnectionStatus::Connecting    => l.connecting(self.network),
+            ConnectionStatus::Connected     => l.connected(self.network),
+            ConnectionStatus::Disconnected  => l.disconnected(self.network)
+        }
     }
 
     pub(crate) async fn start(&mut self) -> Result<()> {
@@ -513,7 +506,7 @@ impl DHT {
             return Ok(());
         }
 
-        info!("Starting DHT/{}:{} on {} ...", self.network, self.id(), self.addr());
+        info!("Starting DHT/{}:{} on {}:{} ...", self.network, self.id(), self.host, self.port);
 
         if let Some(path) = self.persist_file.as_ref() {
 
@@ -977,7 +970,7 @@ impl DHT {
             false => None
         };
         let token  = match body.want_token() {
-            true  => self.token_man.generate_token(
+            true  => self.tokenman.generate_token(
                         req.nodeid(), req.remote_addr(), &target),
             false => 0
         };
@@ -1046,7 +1039,7 @@ impl DHT {
         let value_id = value.id();
         let remote_addr = req.remote_addr().clone();
 
-        let is_valid = self.token_man.verify_token(
+        let is_valid = self.tokenman.verify_token(
             body.token(), req.nodeid(), &remote_addr, &value_id
         );
 
@@ -1153,7 +1146,7 @@ impl DHT {
 
         let peer = body.peer();
         let remote_addr = req.remote_addr().clone();
-        let is_valid = self.token_man.verify_token(
+        let is_valid = self.tokenman.verify_token(
             body.token(), req.nodeid(), &remote_addr, peer.id()
         );
 
@@ -1453,7 +1446,6 @@ impl DHT {
         let mut nested = Box::new(ValueAnnounceTask::new(
             self.weak.clone(), value.clone(), expected_seq
         ));
-        println!("<DHT> store_value >>>> line: {}", line!());
         nested.with_name(format!("Store value:{valueid}"));
         nested.with_listener(
             TaskListener::default().ended_fn(
@@ -1461,7 +1453,7 @@ impl DHT {
             )
         );
 
-        println!("<DHT> store_value >>>> line: {}", line!());
+        let notfier = self.notifier.clone();
         let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
@@ -1471,13 +1463,10 @@ impl DHT {
         task.with_name(format!("Store value: lookup closest node to {valueid}"));
         task.with_want_token(true);
         task.with_nested(nested);
-        println!("<DHT> store_value >>>> line: {}", line!());
-        let notfier = self.notifier.clone();
         task.with_listener({
             TaskListener::default().ended_fn({
                 let task_man = task_man.clone();
                 move |t: &dyn Task| {
-                    println!("<DHT> store_value >>>> line: {}", line!());
                     let task = t.as_any()
                         .downcast_ref::<NodeLookupTask>().unwrap();
 
@@ -1488,7 +1477,6 @@ impl DHT {
                         return;
                     };
 
-                    println!("<DHT> store_value >>>> line: {}", line!());
                     let closest = task.closest();
                     if closest.is_empty() {
                         // This should never happen
@@ -1497,23 +1485,17 @@ impl DHT {
                         return;
                     }
 
-                    println!("<DHT> store_value >>>> line: {}", line!());
                     nested.as_any()
                         .downcast_ref::<ValueAnnounceTask>().unwrap()
                         .with_closest(closest.clone());
 
-                    println!("<DHT> store_value >>>> line: {}", line!());
                     task_man.add(nested);
                     notfier.notify_one();
-                    println!("<DHT> store_value >>>> line: {}", line!());
             }})
         });
 
-        println!("<DHT> store_value >>>> line: {}", line!());
         task_man.add(task);
-        println!("<DHT> store_value >>>> line: {}", line!());
         self.notifier.notify_one();
-        println!("<DHT> store_value >>>> line: {}", line!());
     }
 
     pub(crate) fn find_peer(

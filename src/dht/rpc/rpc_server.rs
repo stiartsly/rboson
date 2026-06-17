@@ -35,7 +35,7 @@ use crate::{
 #[allow(dead_code)]
 pub(crate) struct RpcServer {
     identity            : Arc<CryptoIdentity>,
-    ni                  : Arc<NodeInfo>,
+    ni                  : NodeInfo,
 
     suspicious_node_detector: Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     pending_calls       : HashMap<i32, Arc<Mutex<RpcCall>>>,
@@ -65,7 +65,7 @@ impl RpcServer {
     const REACHABILITY_TIMEOUT: Duration = Duration::from_millis(60_000);
 
     pub(crate) fn new(
-        ni: Arc<NodeInfo>,
+        ni: NodeInfo,
         identity: Arc<CryptoIdentity>,
         suspicious_node_detector: Option<Arc<Mutex<dyn SuspiciousNodeDetector>>>,
     ) -> Self {

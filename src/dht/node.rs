@@ -17,12 +17,13 @@ use tokio::{
 };
 use log::{warn, info};
 use crate::{
-    CryptoContext, CryptoIdentity,
-    Id, Identity, JointResult, Network,
+    Id,
+    Network,
+    CryptoContext, CryptoIdentity, Identity,
     NodeInfo, PeerInfo, Value,
+    JointResult,
     core::{logger,version},
-    Result,
-    errors::{ ArgumentError, IOError, StateError},
+    errors::{Result, ArgumentError, IOError, StateError},
     signature
 };
 use crate::dht::{
@@ -35,6 +36,8 @@ use crate::dht::{
     token_manager::TokenManager,
     consumer::AsyncConsumer,
     promise::Promise,
+    connection_status::ConnectionStatus,
+    connection_status_listener::ConnectionStatusListener,
     timer_client::TimerClient,
     timer_queue::{TimerQueue, Command},
     storage::{
@@ -60,19 +63,24 @@ pub struct Node {
     identity    : CachedIdentity,
 
     lookup_option  : Mutex<LookupOption>,
-    running     : Mutex<bool>,
+
+
+
     data_dir    : PathBuf,
     database_uri: PathBuf,
 
     dht4        : Mutex<Option<Arc<Mutex<DHT>>>>,
     dht6        : Mutex<Option<Arc<Mutex<DHT>>>>,
 
+    running     : Mutex<bool>,
+    listeners   : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
+
     timer_client: Mutex<Option<Arc<TimerClient>>>,
     timer_task  : Mutex<Option<JoinHandle<()>>>,
     stop_task   : Arc<Mutex<bool>>,
 
     storage     : Arc<Mutex<dyn DataStorage>>,
-    tokenman    : Arc<TokenManager>,
+    token_man   : Arc<TokenManager>,
     weak        : Weak<Self>,
 }
 
@@ -126,14 +134,17 @@ impl Node {
             data_dir,
             database_uri,
             lookup_option   : Mutex::new(LookupOption::Conservative),
-            running         : Mutex::new(false),
             dht4            : Mutex::new(None),
             dht6            : Mutex::new(None),
+
+            running         : Mutex::new(false),
+            listeners       : Arc::new(Mutex::new(Vec::new())),
+
             timer_client    : Mutex::new(None),
             timer_task      : Mutex::new(None),
             stop_task       : Arc::new(Mutex::new(false)),
             storage         : Arc::new(Mutex::new(SqliteStorage::new())),
-            tokenman        : Arc::new(TokenManager::new()),
+            token_man       : Arc::new(TokenManager::new()),
             weak            : weak.clone(),
         }))
     }
@@ -148,20 +159,21 @@ impl Node {
         //        "At least one bootstrap node must be specified"));
         //}
 
-        let data_dir = cfg.data_dir();
-        if data_dir.is_empty() {
+        if cfg.data_dir().is_empty() {
             return Err(ArgumentError::new("Data directory cannot be empty"));
         }
+
+        let data_dir = cfg.data_dir();
         let path = Path::new(data_dir);
         if path.exists() {
             if !path.is_dir() {
-                return Err(ArgumentError::new(
-                    format!("Data path {} is not a directory", data_dir)))
+                return Err(ArgumentError::new(format!(
+                    "Data path {} is not a directory", data_dir)))
             }
         } else {
             fs::create_dir_all(path).map_err(|e| {
-                ArgumentError::new(
-                    format!("Data path {} can not be created: {}", data_dir, e))
+                ArgumentError::new(format!(
+                    "Data path {} can not be created: {}", data_dir, e))
             })?;
         };
 
@@ -171,11 +183,11 @@ impl Node {
         }
         if database_uri.contains("/") {
             return Err(ArgumentError::new(
-                "Database URI cannot contain path separator '/'"));
+                    "Database URI cannot contain path separator '/'"));
         }
         if !data_storage::supports(database_uri) {
-            return Err(ArgumentError::new(
-                format!("Unsupported database URI: {}", database_uri)));
+            return Err(ArgumentError::new(format!(
+                    "Unsupported database URI: {}", database_uri)));
         }
         Ok(())
     }
@@ -314,7 +326,7 @@ impl Node {
 
         let storage = self.storage.clone();
         let _ = client.add_timer(
-            30*1000,
+            30_000,
             Some(STORAGE_EXPIRE_INTERVAL),
             AsyncConsumer::new(move |_|{
                     let storage = storage.clone();
@@ -323,44 +335,40 @@ impl Node {
                 })
         }))?;
 
-        let weak = self.weak.clone();
+        //let weak = self.weak.clone();
         let _ = client.add_timer(
-            5*60*1000,
+            60_000,
             Some(RE_ANNOUNCE_INTERVAL),
             AsyncConsumer::new(move |_| {
-                let weak = weak.clone();
+                //let weak = weak.clone();
                 Box::pin(async move {
-                    if let Some(node) = weak.upgrade() {
-                        task::spawn_blocking(move || {
-                            runtime::Builder::new_current_thread()
-                                .enable_time()
-                                .enable_io()
-                                .build().expect("persistent announce runtime should build")
-                                .block_on(async move {
-                                    node.persistent_announce().await;
-                                });
-                        });
-                    }
+                   // weak.upgrade().expect("KadNode instance is dropped")
+                   //     .persistent_announce().await;
                 })
-        }))?;
+            })
+        )?;
 
-        let tokenman = self.tokenman.clone();
+        let token_man = self.token_man.clone();
         let _ = client.add_timer(
             TokenManager::TOKEN_TIMEOUT,
             Some(TokenManager::TOKEN_TIMEOUT),
             AsyncConsumer::new(move |_| {
-                let tokenman = tokenman.clone();
+                let token_man = token_man.clone();
                 Box::pin(async move {
-                    tokenman.update_token_timestamp();
+                    token_man.update_token_timestamp();
                 })
             })
         )?;
         Ok(())
     }
 
+    pub fn add_listener(&self, listener: Box<dyn ConnectionStatusListener>) {
+        self.listeners.lock().unwrap().push(listener);
+    }
+
     pub async fn start(&self) -> Result<()> {
         if self.is_running() {
-            return Ok(());
+            return Err(StateError::new(format!("KadNode is already running.")));
         };
 
         {
@@ -373,18 +381,22 @@ impl Node {
         self.start_timer_task().await?;
         self.setup_periodic_tasks().await?;
 
+        let listener = Arc::new(DefaultConnectionStatusListener {
+            listeners: self.listeners.clone()
+        });
+
         let dht_builder = DHTBuilder::default()
             .with_timer_client(self.timer_client())
             .with_identity(self.identity.identity())
             .with_storage(self.storage.clone())
-            .with_tokenman(self.tokenman.clone())
+            .with_tokenman(self.token_man.clone())
             .with_bootstrap(self.cfg.bootstrap_nodes())
-            .with_datadir(self.data_dir.as_path());
+            .with_datadir(self.data_dir.as_path())
+            .with_listener(listener);
 
         let port = self.cfg.port();
         if let Some(host4) = self.cfg.host4() {
-            let mut dht = dht_builder.build(Network::IPv4, host4, port)?;
-            dht.set_connection_status_listener();
+            let dht = dht_builder.build(Network::IPv4, host4, port)?;
 
             *self.dht4.lock().unwrap() = Some({
                 let dht = Arc::new(Mutex::new(dht));
@@ -394,8 +406,7 @@ impl Node {
             });
         }
         if let Some(host6) = self.cfg.host6() {
-            let mut dht = dht_builder.build(Network::IPv6, host6, port)?;
-            dht.set_connection_status_listener();
+            let dht = dht_builder.build(Network::IPv6, host6, port)?;
 
             *self.dht6.lock().unwrap() = Some({
                 let dht = Arc::new(Mutex::new(dht));
@@ -442,12 +453,10 @@ impl Node {
     pub fn node_info(&self) -> JointResult<NodeInfo> {
         let mut result = JointResult::new();
         if let Some(dht) = self.dht4() {
-            let ni = Arc::unwrap_or_clone(dht.lock().unwrap().ni());
-            result.set_value(Network::IPv4, ni);
+            result.set_value(Network::IPv4, dht.lock().unwrap().ni());
         }
         if let Some(dht) = self.dht6() {
-            let ni = Arc::unwrap_or_clone(dht.lock().unwrap().ni());
-            result.set_value(Network::IPv6, ni);
+            result.set_value(Network::IPv6, dht.lock().unwrap().ni());
         }
         result
     }
@@ -892,4 +901,43 @@ fn check_peer_validity(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Res
         return Err(NotOwnerError::new());
     }
     Ok(())
+}
+
+struct DefaultConnectionStatusListener {
+    listeners: Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>
+}
+
+impl ConnectionStatusListener for DefaultConnectionStatusListener {
+    fn status_changed(&self,
+        network: Network,
+        new_status: ConnectionStatus,
+        old_status: ConnectionStatus,
+    ) {
+        info!("Connection status changed for network {}: {}->{}", network, old_status, new_status);
+        let locked = self.listeners.lock().unwrap();
+        for l in locked.iter() {
+            l.status_changed(network, new_status, old_status);
+        }
+    }
+    fn connecting(&self, network: Network) {
+        info!("Connecting to network {}...", network);
+        let locked = self.listeners.lock().unwrap();
+        for l in locked.iter() {
+            l.connecting(network);
+        }
+    }
+    fn connected(&self, network: Network) {
+        info!("Connected to network {}.", network);
+        let locked = self.listeners.lock().unwrap();
+        for l in locked.iter() {
+            l.connected(network);
+        }
+    }
+    fn disconnected(&self, network: Network) {
+        info!("Disconnected from network {}.", network);
+        let locked = self.listeners.lock().unwrap();
+        for l in locked.iter() {
+            l.disconnected(network);
+        }
+    }
 }

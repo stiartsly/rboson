@@ -72,8 +72,7 @@ pub(crate) trait LookupTask {
         let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
 
         let locked_dht = strong_dht.lock().unwrap();
-        let id   = locked_dht.id().clone();
-        let addr = locked_dht.addr().clone();
+        let ni   = locked_dht.ni();
         drop(locked_dht);
         drop(strong_dht);
 
@@ -87,8 +86,8 @@ pub(crate) trait LookupTask {
             };
 
             if bogon ||self.data().closest.contains(candidate.id()) ||
-                &id == candidate.id() ||
-                &addr == candidate.socket_addr() {
+                ni.id() == candidate.id() ||
+                ni.socket_addr() == candidate.socket_addr() {
                 continue;
             }
             todo.push(candidate);

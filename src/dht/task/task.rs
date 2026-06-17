@@ -468,17 +468,13 @@ impl fmt::Display for dyn Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let dht = self.dht().upgrade()
             .expect("panic: DHT instance dropped.");
-        let addr = dht.lock().unwrap().addr().clone();
-        let addr_family = match addr.is_ipv4() {
-            true => "ipv4",
-            false => "ipv6"
-        };
+        let network = dht.lock().unwrap().network();
 
         write!(f,
             "#{}[{}] DHT:{}, state:{}",
             self.task_id(),
             self.task_name(),
-            addr_family,
+            network,
             self.task_state()
         )
     }

@@ -265,10 +265,7 @@ impl DHT {
     }
 
     fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
-        assert!(!nodes.is_empty(), "No nodes to fill the home bucket");
-
         let (promise,future) = Promise::<()>::pair();
-
         let (nodeid, task_man) = {
             let locked = dht.lock().unwrap();
             (locked.id().clone(), locked.task_man.clone())
@@ -330,10 +327,10 @@ impl DHT {
             futures.push(future);
         }
 
-        return async move {
+        async move {
             futures.collect::<Vec<_>>().await;
             Ok(())
-        };
+        }
     }
 
     fn try_ping_maintenance(&self,
@@ -393,7 +390,7 @@ impl DHT {
         self.task_man.add(task);
     }
 
-    pub(crate) async fn random_ping(&mut self) {
+    pub(crate) fn random_ping(&mut self) {
         let has_pending_calls =
             self.rpc_server().lock().unwrap().has_pending_calls();
 
@@ -429,18 +426,16 @@ impl DHT {
         debug!("Routing table maintenance ...");
         self.last_maintenance = SystemTime::now();
 
-        let weak_dht = self.weak.clone();
         let bootstrap_ids = self.bootstrap_ids.clone();
         let rt = self.rt();
+        let dht = self.dht();
         let _ = tokio::spawn(async move {
             RoutingTable::maintenance(
                 rt,
                 bootstrap_ids.as_ref(),
                 Consumer::new(move |bucket: &Arc<Mutex<KBucket>>| {
                     let prefix = bucket.lock().unwrap().prefix().clone();
-                    weak_dht.upgrade()
-                        .expect("DHT instance is dropped")
-                        .lock().unwrap()
+                    dht.lock().unwrap()
                         .try_ping_maintenance(bucket.clone(), false, false, false,
                             format!("Routing table maintenance: refreshing bucket {}", prefix)
                         );
@@ -459,10 +454,8 @@ impl DHT {
                 return;
             };
 
-            let weak = self.weak.clone();
-            if let Some(dht) = weak.upgrade() {
-                DHT::do_bootstrap(dht, bootstrap_nodes).await;
-            }
+            let dht = self.dht();
+            DHT::do_bootstrap(dht, bootstrap_nodes).await;
         }
     }
 
@@ -519,7 +512,7 @@ impl DHT {
             self.suspicious_detector.clone()
         );
 
-        let dht = self.weak.clone().upgrade().expect("DHT instance is dropped");
+        let dht = self.dht();
         server.message_handler(AsyncConsumer::new(move |msg:Arc<Message>| {
             let dht = dht.clone();
             Box::pin(async move {
@@ -541,16 +534,16 @@ impl DHT {
             }
         }));
         server.start().await?;
-        let weak = self.weak.clone();
+        let dht = self.dht();
         server.reachable_handler(AsyncConsumer::new(move |reachable: bool|{
-            let dht = weak.upgrade().expect("DHT instance is dropped");
+            let dht = dht.clone();
             Box::pin(async move {
                 let mut locked = dht.lock().unwrap();
 
                 if reachable {
                     locked.set_status(ConnectionStatus::Connected);
                 } else {
-                    locked.random_ping().await;
+                    locked.random_ping();
                     locked.set_status(ConnectionStatus::Disconnected);
                 }
             })
@@ -620,42 +613,36 @@ impl DHT {
     }
 
     async fn setup_periodic_tasks(&self) -> Result<()> {
-        let weak = self.weak.clone();
+        let dht = self.dht();
         let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
             AsyncConsumer::new(move |_| {
-                let weak = weak.clone();
+                let dht = dht.clone();
                 Box::pin(async move {
-                    weak.upgrade().expect("DHT instance is dropped")
-                        .lock().unwrap()
-                        .update().await;
+                    dht.lock().unwrap().update().await;
                 })
             })
         )?;
 
-        let weak = self.weak.clone();
+        let dht = self.dht();
         let _ = self.timer_client.add_timer(
             Self::RANDOM_LOOKUP_INTERVAL,
             Some(Self::RANDOM_LOOKUP_INTERVAL),
             AsyncConsumer::new(move |_| {
-                let weak = weak.clone();
+                let dht = dht.clone();
                 Box::pin(async move {
-                    weak.upgrade().expect("DHT instance is dropped")
-                        .lock().unwrap()
-                        .random_lookup();
+                    dht.lock().unwrap().random_lookup();
                 })
             })
         )?;
 
-        let weak = self.weak.clone();
+        let dht = self.dht();
         let _ = self.timer_client.add_timer(
             Self::RANDOM_PING_INTERVAL,
             Some(Self::RANDOM_PING_INTERVAL),
             AsyncConsumer::new(move |_| {
-                let weak = weak.clone();
+                let dht = dht.clone();
                 Box::pin(async move {
-                    weak.upgrade().expect("DHT instance is dropped")
-                        .lock().unwrap()
-                        .random_ping().await;
+                    dht.lock().unwrap().random_ping();
                 })
             })
         )?;
@@ -1216,10 +1203,6 @@ impl DHT {
     }
 
     async fn do_bootstrap(dht: Arc<Mutex<Self>>, nodes: Vec<NodeInfo>) {
-        if nodes.is_empty() {
-            return;
-        }
-
         let (self_id, network, server) = {
             let locked_dht = dht.lock().unwrap();
 

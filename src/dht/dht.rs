@@ -1,4 +1,5 @@
 use std::{
+    pin::Pin,
     collections::{HashMap, HashSet},
     net::SocketAddr,
     time::SystemTime,
@@ -11,7 +12,7 @@ use std::{
     },
 };
 use tokio::task::JoinHandle;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{FuturesUnordered, FuturesOrdered, StreamExt};
 use log::{debug, info, warn, error};
 
 use crate::{
@@ -24,7 +25,7 @@ use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
     ConnectionStatusListener,
-    promise::Promise,
+    promise::{Promise, PromiseFuture},
     consumer::{Consumer, AsyncConsumer},
     token_manager::TokenManager,
     lookup_option::LookupOption,
@@ -264,15 +265,10 @@ impl DHT {
                     .map(|_|());
     }
 
-    fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
-        let (promise,future) = Promise::<()>::pair();
-        let (nodeid, task_man) = {
-            let locked = dht.lock().unwrap();
-            (locked.id().clone(), locked.task_man.clone())
-        };
+    fn fill_home_bucket(&self, nodes: Vec<NodeInfo>, promise: Promise<()>){
         let mut task = Box::new(NodeLookupTask::new(
-            dht.clone(),
-            nodeid,
+            self.dht(),
+            self.id().clone(),
             false,
         ));
         task.with_name("Bootstrap: filling home bucket".into());
@@ -283,18 +279,15 @@ impl DHT {
                 move |_| promise.complete(Ok(()))
             )
         );
-        task_man.add(task);
-        future
+        self.task_man.add(task);
     }
 
-    fn fill_buckets(dht: Arc<Mutex<DHT>>) -> impl Future<Output = Result<()>> {
-        let (number_of_entries, buckets, taskman) = {
-            let locked_dht = dht.lock().unwrap();
-            let locked_rt  = locked_dht.rt.lock().unwrap();
+    fn fill_buckets(&self) ->  FuturesUnordered<PromiseFuture<()>> {
+        let (number_of_entries, buckets) = {
+            let locked_rt  = self.rt.lock().unwrap();
             (
                 locked_rt.number_of_entries(),
                 locked_rt.buckets(),
-                locked_dht.task_man.clone(),
             )
         };
 
@@ -308,12 +301,14 @@ impl DHT {
             let (lookup_target, bucket_prefix) = {
                 let mut locked = bucket.lock().unwrap();
                 locked.update_refresh_time();
-                (locked.prefix().random_id(), locked.prefix().clone())
+
+                let prefix = locked.prefix().clone();
+                (prefix.random_id(), prefix)
             };
 
             let (promise,future) = Promise::<()>::pair();
             let mut task = Box::new(NodeLookupTask::new(
-                dht.clone(),
+                self.dht(),
                 lookup_target,
                 false,
             ));
@@ -323,14 +318,10 @@ impl DHT {
                     move |_| promise.complete(Ok(()))
                 )
             );
-            taskman.add(task);
+            self.task_man.add(task);
             futures.push(future);
         }
-
-        async move {
-            futures.collect::<Vec<_>>().await;
-            Ok(())
-        }
+        futures
     }
 
     fn try_ping_maintenance(&self,
@@ -1226,11 +1217,12 @@ impl DHT {
             let server  = locked_dht.rpc_server().clone();
             let self_id = locked_dht.id().clone();
 
-            info!("DHT/{}:{} bootstrapping ...", network, self_id);
             (self_id, network, server)
         };
 
-        let mut futures = FuturesUnordered::new();
+        info!("DHT/{}:{} bootstrapping ...", network, self_id);
+
+        let mut unordered = FuturesUnordered::new();
         for item in nodes {
             if item.id() == &self_id {
                 continue;
@@ -1271,14 +1263,14 @@ impl DHT {
                 }
             });
 
-            futures.push(future);
+            unordered.push(future);
             let _ = server.lock().unwrap().send_call(call).map_err(|e| {
                 warn!("{}", e);
             });
         };
 
         let mut nodes: Vec<NodeInfo> = Vec::new();
-        while let Some(result) = futures.next().await {
+        while let Some(result) = unordered.next().await {
             if let Ok(items) = result {
                 for item in items {
                     nodes.push(item);
@@ -1292,15 +1284,30 @@ impl DHT {
             (locked_rt.number_of_entries(), locked_rt.size())
         };
 
+        let mut ordered = FuturesOrdered::<
+            Pin<Box<dyn Future<Output = Result<()>>>>
+        >::new();
+
         // breadth-first lookup: fill more buckets
         if !nodes.is_empty() && entry_sz == 0 {
-            _ = Self::fill_home_bucket(dht.clone(), nodes).await;
+            let (promise, future) = Promise::<()>::pair();
+            dht.lock().unwrap().fill_home_bucket(nodes, promise);
+            ordered.push_back(Box::pin(future));
         };
 
         if bucket_sz > 1 {
             // depth-first lookup: fill each bucket
-			// only if the routing table is more than 1 bucket
-            _ = Self::fill_buckets(dht.clone()).await;
+            // only if the routing table is more than 1 bucket
+            let futures = dht.lock().unwrap().fill_buckets();
+            let chained = async move {
+                futures::future::join_all(futures).await;
+                Ok(())
+            };
+            ordered.push_back(Box::pin(chained));
+        }
+
+        while let Some(result) = ordered.next().await {
+            let _ = result;
         }
 
         {

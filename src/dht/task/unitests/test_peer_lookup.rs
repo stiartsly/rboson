@@ -26,7 +26,7 @@ mod tests {
     fn test_default_task() {
         let target = Id::random();
         let dht    = make_dht();
-        let task   = PeerLookupTask::new(Arc::downgrade(&dht), target.clone(), 7, 3, true);
+        let task   = PeerLookupTask::new(dht.clone(), target.clone(), 7, 3, true);
 
         assert_eq!(task.target(), &target);
         assert_eq!(task.candidate_size(), 0);

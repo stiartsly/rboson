@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Mutex, Weak}
+    sync::{Arc, Mutex}
 };
 use log::{debug, error, warn};
 
@@ -26,12 +26,12 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Weak<Mutex<DHT>>
+    dht: Arc<Mutex<DHT>>
 }
 
 impl PeerLookupTask {
     pub(crate) fn new(
-        dht: Weak<Mutex<DHT>>,
+        dht: Arc<Mutex<DHT>>,
         target: Id,
         expected_seq: i32,
         expected_count: usize,
@@ -55,7 +55,7 @@ impl LookupTask for PeerLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -85,7 +85,7 @@ impl Task for PeerLookupTask {
         self
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Weak, Mutex};
+use std::sync::{Arc, Mutex};
 
 use crate::Id;
 use crate::dht::{
@@ -55,7 +55,7 @@ impl LookupTaskData {
 
 pub(crate) trait LookupTask {
     fn base_data(&self) -> &TaskData;
-    fn dht(&self) -> Weak<Mutex<DHT>>;
+    fn dht(&self) -> Arc<Mutex<DHT>>;
     fn data(&self) -> &LookupTaskData;
     fn data_mut(&mut self) -> &mut LookupTaskData;
 
@@ -69,13 +69,7 @@ pub(crate) trait LookupTask {
     }
 
     fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
-        let strong_dht = self.dht().upgrade().expect("DHT instance dropped");
-
-        let locked_dht = strong_dht.lock().unwrap();
-        let ni   = locked_dht.ni();
-        drop(locked_dht);
-        drop(strong_dht);
-
+        let ni = self.dht().lock().unwrap().ni();
         let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();

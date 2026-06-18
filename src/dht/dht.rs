@@ -240,6 +240,10 @@ impl DHT {
         self.rt.clone()
     }
 
+    pub(crate) fn dht(&self) -> Arc<Mutex<Self>> {
+        self.weak.upgrade().expect("DHT instance is dropped")
+    }
+
     pub(crate) fn id(&self) -> &Id {
         self.identity.as_ref().id()
     }
@@ -263,16 +267,14 @@ impl DHT {
     fn fill_home_bucket(dht: Arc<Mutex<DHT>>, nodes: Vec<NodeInfo>) -> impl Future<Output = Result<()>> {
         assert!(!nodes.is_empty(), "No nodes to fill the home bucket");
 
-        let futures = FuturesUnordered::new();
-        let promise = Promise::<()>::new();
-        let future  = promise.future();
+        let (promise,future) = Promise::<()>::pair();
 
-        let (weak, nodeid, task_man) = {
+        let (nodeid, task_man) = {
             let locked = dht.lock().unwrap();
-            (locked.weak.clone(), locked.id().clone(), locked.task_man.clone())
+            (locked.id().clone(), locked.task_man.clone())
         };
         let mut task = Box::new(NodeLookupTask::new(
-            weak,
+            dht.clone(),
             nodeid,
             false,
         ));
@@ -284,24 +286,17 @@ impl DHT {
                 move |_| promise.complete(Ok(()))
             )
         );
-
         task_man.add(task);
-        futures.push(future);
-
-        return async move {
-            futures.collect::<Vec<_>>().await;
-            Ok(())
-        }
+        future
     }
 
     fn fill_buckets(dht: Arc<Mutex<DHT>>) -> impl Future<Output = Result<()>> {
-        let (number_of_entries, buckets, weak_dht, taskman) = {
+        let (number_of_entries, buckets, taskman) = {
             let locked_dht = dht.lock().unwrap();
             let locked_rt  = locked_dht.rt.lock().unwrap();
             (
                 locked_rt.number_of_entries(),
                 locked_rt.buckets(),
-                locked_dht.weak.clone(),
                 locked_dht.task_man.clone(),
             )
         };
@@ -319,11 +314,9 @@ impl DHT {
                 (locked.prefix().random_id(), locked.prefix().clone())
             };
 
-            let promise = Promise::<()>::new();
-            let future = promise.future();
-
+            let (promise,future) = Promise::<()>::pair();
             let mut task = Box::new(NodeLookupTask::new(
-                weak_dht.clone(),
+                dht.clone(),
                 lookup_target,
                 false,
             ));
@@ -368,7 +361,7 @@ impl DHT {
         }
 
         if need_refresh || need_replacement  {
-            let mut task = Box::new(PingRefreshTask::new(self.weak.clone()));
+            let mut task = Box::new(PingRefreshTask::new(self.dht()));
             task.with_name(name);
             task.with_check_all(check_all);
             task.with_remove_on_timeout(remove_on_timeout);
@@ -392,7 +385,7 @@ impl DHT {
         }
 
         let mut task = Box::new(NodeLookupTask::new(
-            self.weak.clone(),
+            self.dht(),
             Id::random(),
             false,
         ));
@@ -532,7 +525,6 @@ impl DHT {
             Box::pin(async move {
                 dht.lock().unwrap().on_message(&msg);
             })
-
         }));
         server.callsent_handler(Consumer::new({
             let rt = self.rt();
@@ -1220,7 +1212,6 @@ impl DHT {
         // Todo: handle status.
 
         drop(locked);
-
         DHT::do_bootstrap(dht, nodes).await;
     }
 
@@ -1257,7 +1248,6 @@ impl DHT {
         };
 
         let mut futures = FuturesUnordered::new();
-
         for item in nodes {
             if item.id() == &self_id {
                 continue;
@@ -1270,8 +1260,7 @@ impl DHT {
             );
 
             let mut call = RpcCall::new(item, msg);
-            let promise = Promise::<Vec<NodeInfo>>::new();
-            let future  = promise.future();
+            let (promise, future) = Promise::<Vec<NodeInfo>>::pair();
 
             call.set_simple_listener(move |_call, _, cur| {
                 if cur.is_final() {
@@ -1381,7 +1370,7 @@ impl DHT {
         }
 
         let mut task = Box::new(NodeLookupTask::new(
-            self.weak.clone(),
+            self.dht(),
             target.clone(),
             option != LookupOption::Conservative
         ));
@@ -1408,7 +1397,7 @@ impl DHT {
         promise: Promise<Option<Value>>
     ) {
         let mut task = Box::new(ValueLookupTask::new(
-            self.weak.clone(),
+            self.dht(),
             value_id.clone(),
             expected_seq,
             option != LookupOption::Conservative
@@ -1434,7 +1423,7 @@ impl DHT {
     ) {
         let valueid = value.id();
         let mut nested = Box::new(ValueAnnounceTask::new(
-            self.weak.clone(), value.clone(), expected_seq
+            self.dht(), value.clone(), expected_seq
         ));
         nested.with_name(format!("Store value:{valueid}"));
         nested.with_listener(
@@ -1447,7 +1436,7 @@ impl DHT {
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
         let mut task = Box::new(NodeLookupTask::new(
-            self.weak.clone(), valueid, false
+            self.dht(), valueid, false
         ));
         task.with_name(format!("Store value: lookup closest node to {valueid}"));
         task.with_want_token(true);
@@ -1494,7 +1483,7 @@ impl DHT {
         promise: Promise::<Vec<PeerInfo>>
     ) {
         let mut task = Box::new(PeerLookupTask::new(
-            self.weak.clone(),
+            self.dht(),
             peerid.clone(),
             expected_seq,
             expected_count,
@@ -1522,7 +1511,7 @@ impl DHT {
         // Announce task to announce the peer to the closest nodes found
         // by the lookup task.
         let mut nested = Box::new(PeerAnnounceTask::new(
-            self.weak.clone(), peer.clone(), expected_seq,
+            self.dht(), peer.clone(), expected_seq,
         ));
         nested.with_name(format!("Announce peer: {}", peer.id()));
         nested.with_listener(
@@ -1534,7 +1523,7 @@ impl DHT {
         let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the targetid.
         let mut task = Box::new(NodeLookupTask::new(
-            self.weak.clone(), peer.id().clone(), false
+            self.dht(), peer.id().clone(), false
         ));
         task.with_name(format!("Announce peer: lookup closest node to {}", peer.id()));
         task.with_want_token(true);

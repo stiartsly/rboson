@@ -77,22 +77,23 @@ pub(crate) struct Promise<T> {
 }
 
 impl<T> Promise<T> {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             result: Arc::new(Mutex::new(Data::<T>::new())),
         }
     }
 
-    pub(crate) fn complete(&self, result: Result<T>) {
-        self.result.lock().unwrap().complete(result);
-    }
-
-    pub(crate) fn future(&self) -> PromiseFuture<T> {
+    fn future(&self) -> PromiseFuture<T> {
         PromiseFuture(self.result.clone())
     }
 
-    pub(crate) fn pair(self) -> (Self, PromiseFuture<T>) {
-        let future = self.future();
-        (self, future)
+    pub(crate) fn pair() -> (Self, PromiseFuture<T>) {
+        let promise = Self::new();
+        let future  = promise.future();
+        (promise, future)
+    }
+
+    pub(crate) fn complete(&self, result: Result<T>) {
+        self.result.lock().unwrap().complete(result);
     }
 }

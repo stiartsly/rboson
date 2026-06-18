@@ -56,7 +56,7 @@ mod tests {
     fn test_default() {
         let value = make_value();
         let dht   = make_dht();
-        let task = ValueAnnounceTask::new(Arc::downgrade(&dht), value.clone(), 7);
+        let task = ValueAnnounceTask::new(dht.clone(), value.clone(), 7);
 
         assert!(task.data().is_done());
         assert!(task.is_done());
@@ -66,7 +66,7 @@ mod tests {
     fn test_task_with_closestset() {
         let value = make_value();
         let dht = make_dht();
-        let task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let task = ValueAnnounceTask::new(dht.clone(), value, -1);
         assert!(task.is_done());
 
         task.with_closest(make_closestset(42));
@@ -77,7 +77,7 @@ mod tests {
     fn test_cancel() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -99,7 +99,7 @@ mod tests {
     fn test_complete() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -121,7 +121,7 @@ mod tests {
     fn test_start() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(Arc::downgrade(&dht), value, -1);
+        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 

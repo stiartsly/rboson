@@ -513,7 +513,7 @@ impl Node {
         self.check_running()?;
 
         let find_node_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let (promise, future) = Promise::<Option<NodeInfo>>::new().pair();
+            let (promise, future) = Promise::<Option<NodeInfo>>::pair();
             let target  = target.clone();
             let option  = self.option(lookup_option);
 
@@ -573,7 +573,7 @@ impl Node {
         }
 
         let find_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let (promise, future) = Promise::<Option<Value>>::new().pair();
+            let (promise, future) = Promise::<Option<Value>>::pair();
 
             if let Some(dht) = dht {
                 dht.lock().unwrap().find_value(
@@ -642,7 +642,7 @@ impl Node {
         }
 
         let find_peers_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let (promise, future) = Promise::<Vec<PeerInfo>>::new().pair();
+            let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
 
             if let Some(dht) = dht {
                 dht.lock().unwrap().find_peer(
@@ -696,7 +696,7 @@ impl Node {
         let dht6    = self.dht6();
 
         let store_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let (promise, future) = Promise::<()>::new().pair();
+            let (promise, future) = Promise::<()>::pair();
             let value   = value.clone();
 
             if let Some(dht) = dht {
@@ -751,7 +751,7 @@ impl Node {
         let dht6    = self.dht6();
 
         let announce_peer_cb = |dht: Option<Arc<Mutex<DHT>>>| {
-            let (promise, future) = Promise::<()>::new().pair();
+            let (promise, future) = Promise::<()>::pair();
             let peer = peer.clone();
 
             if let Some(dht) = dht {

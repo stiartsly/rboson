@@ -84,7 +84,6 @@ pub(crate) struct TaskData {
     end_handler : Option<Consumer<()>>,
 
     nested      : Mutex<Option<Box<dyn Task>>>,
-
     cloned      : Option<Weak<Mutex<Box<dyn Task>>>>,
 }
 
@@ -119,7 +118,7 @@ pub(crate) trait Task: Send + Sync {
     fn as_task(&self) -> &dyn Task;
     fn as_any(&self) -> &dyn Any;
 
-    fn dht(&self) -> Weak<Mutex<DHT>>;
+    fn dht(&self) -> Arc<Mutex<DHT>>;
 
     fn task_id(&self) -> i32 {
         self.data().taskid
@@ -436,10 +435,9 @@ pub(crate) trait Task: Send + Sync {
         let txid = call.txid();
         self.data_mut().inflights.insert(txid);
 
-        let weak = self.dht();
+        let dht = self.dht();
         tokio::spawn(async move {
-            let _ = weak.upgrade().expect("DHT instance dropped.")
-                .lock().unwrap()
+            let _ = dht.lock().unwrap()
                 .rpc_server()
                 .lock().unwrap()
                 .send_call(call)
@@ -452,23 +450,17 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn rt(&self) -> Arc<Mutex<RoutingTable>>{
-        self.dht().upgrade()
-            .expect("DHT instance dropped.")
-            .lock().unwrap().rt().clone()
+        self.dht().lock().unwrap().rt().clone()
     }
 
     fn network(&self) -> Network {
-        self.dht().upgrade()
-            .expect("DHT instance dropped.")
-            .lock().unwrap().network()
+        self.dht().lock().unwrap().network()
     }
 }
 
 impl fmt::Display for dyn Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let dht = self.dht().upgrade()
-            .expect("panic: DHT instance dropped.");
-        let network = dht.lock().unwrap().network();
+        let network = self.network();
 
         write!(f,
             "#{}[{}] DHT:{}, state:{}",

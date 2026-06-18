@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Weak, Mutex},
+    sync::{Arc, Mutex},
     collections::VecDeque,
 };
 use log::{debug, error};
@@ -24,14 +24,14 @@ pub(crate) struct PingRefreshTask {
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
-    dht: Weak<Mutex<DHT>>
+    dht: Arc<Mutex<DHT>>
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
 #[allow(unused)]
 impl PingRefreshTask {
-    pub(crate) fn new(dht: Weak<Mutex<DHT>>) -> Self {
+    pub(crate) fn new(dht: Arc<Mutex<DHT>>) -> Self {
         Self {
             base_data: TaskData::new(),
             todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
@@ -88,7 +88,7 @@ impl Task for PingRefreshTask {
         self
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 

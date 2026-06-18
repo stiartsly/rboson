@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Weak, Mutex}
+    sync::{Arc, Mutex}
 };
 use log::{debug, error};
 
@@ -34,12 +34,12 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result  : Option<NodeInfo>,
-    dht     : Weak<Mutex<DHT>>,
+    dht     : Arc<Mutex<DHT>>,
 }
 
 impl NodeLookupTask {
     pub(crate) fn new(
-        dht: Weak<Mutex<DHT>>,
+        dht: Arc<Mutex<DHT>>,
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
@@ -93,7 +93,7 @@ impl LookupTask for NodeLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -123,7 +123,7 @@ impl Task for NodeLookupTask {
         self
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 

@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    sync::{Arc, Weak, Mutex},
+    sync::{Arc, Mutex},
     collections::VecDeque,
 };
 use log::{debug, error};
@@ -26,12 +26,12 @@ pub(crate) struct ValueAnnounceTask {
     value: Value,
     expected_seq: i32,
 
-    dht: Weak<Mutex<DHT>>
+    dht: Arc<Mutex<DHT>>
 }
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
-        dht: Weak<Mutex<DHT>>,
+        dht: Arc<Mutex<DHT>>,
         value: Value,
         expected_seq: i32,
     ) -> Self {
@@ -82,7 +82,7 @@ impl Task for ValueAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Weak<Mutex<DHT>> {
+    fn dht(&self) -> Arc<Mutex<DHT>> {
         self.dht.clone()
     }
 
@@ -90,7 +90,7 @@ impl Task for ValueAnnounceTask {
         while self.can_dorequest() {
             let cn = match self.todo.lock().unwrap().front() {
                 Some(cn) => cn.clone(),
-                None => break,
+                _ => break,
             };
 
             let token = cn.lock().unwrap().token();

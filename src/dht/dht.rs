@@ -264,10 +264,10 @@ impl DHT {
                     .map(|_|());
     }
 
-    fn fill_home_bucket(&self, nodes: Vec<NodeInfo>, promise: Promise<()>){
+    fn fill_home_bucket(dht: Arc<Mutex<Self>>, nodes: Vec<NodeInfo>, promise: Promise<()>){
         let mut task = Box::new(NodeLookupTask::new(
-            self.dht(),
-            self.id().clone(),
+            dht.clone(),
+            dht.lock().unwrap().id().clone(),
             false,
         ));
         task.with_name("Bootstrap: filling home bucket".into());
@@ -278,7 +278,7 @@ impl DHT {
                 move |_| promise.complete(Ok(()))
             )
         );
-        self.task_man.add(task);
+        dht.lock().unwrap().task_man.add(task);
     }
 
     fn fill_buckets(&self, promise: Promise<()>) {
@@ -428,29 +428,31 @@ impl DHT {
         );
     }
 
-    async fn update(&mut self) {
-        if !self.is_running {
-            return;
-        }
+    async fn update(dht: Arc<Mutex<DHT>>) {
+        let bootstrap_nodes = {
+            let mut locked = dht.lock().unwrap();
+            if !locked.is_running {
+                return;
+            }
 
-        debug!("Periodic: DHT update...");
-        self.routing_table_maintenance();
+            debug!("Periodic: DHT update...");
+            locked.routing_table_maintenance();
 
-        // bootstraping process.
-        let entry_sz = self.rt().lock().unwrap().number_of_entries();
-        if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
-            crate::elapsed_ms!(self.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
-            return;
-        }
+            // bootstraping process.
+            let entry_sz = locked.rt().lock().unwrap().number_of_entries();
+            if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
+                crate::elapsed_ms!(locked.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
+                return;
+            }
 
-        let mut bootstrap_nodes = Vec::new();
-        if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
-            bootstrap_nodes = self.bootstrap_nodes.clone();
-        }
+            if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
+                locked.bootstrap_nodes.clone()
+            } else {
+                Vec::new()
+            }
+        };
 
-        let dht = self.dht();
         DHT::do_bootstrap(dht, bootstrap_nodes).await;
-
     }
 
     fn set_status(&mut self, status: ConnectionStatus) {
@@ -622,7 +624,7 @@ impl DHT {
             AsyncConsumer::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
-                    dht.lock().unwrap().update().await;
+                    Self::update(dht).await;
                 })
             })
         )?;
@@ -1306,9 +1308,9 @@ impl DHT {
         let mut ordered = FuturesOrdered::new();
 
         // breadth-first lookup: fill more buckets
-        if !nodes.is_empty() && entry_sz == 0 {
+        if !(nodes.is_empty() && entry_sz == 0) {
             let (promise, future) = Promise::<()>::pair();
-            dht.lock().unwrap().fill_home_bucket(nodes, promise);
+            Self::fill_home_bucket(dht.clone(), nodes, promise);
             ordered.push_back(Box::pin(future));
         };
 

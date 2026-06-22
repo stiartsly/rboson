@@ -162,7 +162,11 @@ impl Task for NodeLookupTask {
         while self.can_dorequest() {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
-                _ => break
+                _ => {
+                    debug!("{}#{} no eligible candidates in non-empty queue",
+                        self.task_name(), self.task_id());
+                    break;
+                }
             };
 
             let target = next.clone().into();

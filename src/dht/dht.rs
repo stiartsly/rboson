@@ -417,37 +417,34 @@ impl DHT {
         debug!("Routing table maintenance ...");
         self.last_maintenance = SystemTime::now();
 
-        let bootstrap_ids = self.bootstrap_ids.clone();
-        let rt = self.rt();
         let dht = self.dht();
-        let _ = tokio::spawn(async move {
-            RoutingTable::maintenance(
-                rt,
-                bootstrap_ids.as_ref(),
-                Consumer::new(move |bucket: &Arc<Mutex<KBucket>>| {
-                    let prefix = bucket.lock().unwrap().prefix().clone();
-                    dht.lock().unwrap()
-                        .try_ping_maintenance(bucket.clone(), false, false, false,
-                            format!("Routing table maintenance: refreshing bucket {}", prefix)
-                        );
-                })
-            );
-        });
+        let _ = RoutingTable::maintenance(
+            self.rt(),
+            self.bootstrap_ids.as_slice(),
+            Consumer::new(move |bucket: &Arc<Mutex<KBucket>>| {
+                let prefix = bucket.lock().unwrap().prefix().clone();
+                dht.lock().unwrap()
+                    .try_ping_maintenance(bucket.clone(), false, false, false,
+                        format!("Routing table maintenance: refreshing bucket {}", prefix)
+                    );
+            })
+        );
 
         // bootstraping process.
-        let entries = self.rt.lock().unwrap().number_of_entries();
-        if entries < Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES ||
-            crate::elapsed_ms!(self.last_bootstrap) > Self::SELF_LOOKUP_INTERVAL {
-
-            let bootstrap_nodes = if entries < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
-                self.bootstrap_nodes.clone()
-            } else {
-                return;
-            };
-
-            let dht = self.dht();
-            DHT::do_bootstrap(dht, bootstrap_nodes).await;
+        let entry_sz = self.rt.lock().unwrap().number_of_entries();
+        if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
+            crate::elapsed_ms!(self.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
+            return;
         }
+
+        let mut bootstrap_nodes = Vec::new();
+        if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
+            bootstrap_nodes = self.bootstrap_nodes.clone();
+        }
+
+        let dht = self.dht();
+        DHT::do_bootstrap(dht, bootstrap_nodes).await;
+
     }
 
     fn set_status(&mut self, status: ConnectionStatus) {

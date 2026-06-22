@@ -137,7 +137,7 @@ pub(crate) struct DHT {
     task_man            : Arc<TaskManager>,
 
     persist_file        : Option<PathBuf>,
-    rt                  : Arc<Mutex<RoutingTable>>,
+    rt                  : Option<Arc<Mutex<RoutingTable>>>,
 
     bootstrap_nodes     : Vec<NodeInfo>,
     bootstrap_ids       : Vec<Id>,
@@ -202,8 +202,10 @@ impl DHT {
             storage,
             tokenman,
             task_man            : Arc::new(TaskManager::new()),
-            rt                  : Arc::new(Mutex::new(RoutingTable::new(nodeid))),
+
+            rt                  : None,
             persist_file,
+
             bootstrap_nodes,
             bootstrap_ids       : Vec::new(),
             last_bootstrap      : SystemTime::UNIX_EPOCH,
@@ -233,12 +235,11 @@ impl DHT {
     }
 
     pub(crate) fn rpc_server(&self) -> &Arc<Mutex<RpcServer>> {
-        self.rpc_server.as_ref()
-            .expect("RpcServer not initialized")
+        self.rpc_server.as_ref().expect("RpcServer not initialized")
     }
 
-    pub(crate) fn rt(&self) -> Arc<Mutex<RoutingTable>> {
-        self.rt.clone()
+    pub(crate) fn rt(&self) -> &Arc<Mutex<RoutingTable>> {
+        self.rt.as_ref().expect("Routing table not initialized")
     }
 
     pub(crate) fn dht(&self) -> Arc<Mutex<Self>> {
@@ -284,7 +285,7 @@ impl DHT {
 
     fn fill_buckets(&self) ->  FuturesUnordered<PromiseFuture<()>> {
         let (number_of_entries, buckets) = {
-            let locked_rt  = self.rt.lock().unwrap();
+            let locked_rt  = self.rt().lock().unwrap();
             (
                 locked_rt.number_of_entries(),
                 locked_rt.buckets(),
@@ -390,7 +391,7 @@ impl DHT {
             return;
         }
 
-        let Some(entry) = self.rt.lock().unwrap().random_entry() else {
+        let Some(entry) = self.rt().lock().unwrap().random_entry() else {
             debug!("Periodic: not performing random ping, routing table is empty.");
             return;
         };
@@ -411,8 +412,9 @@ impl DHT {
         self.last_maintenance = SystemTime::now();
 
         let dht = self.dht();
+        let rt  = self.rt().clone();
         let _ = RoutingTable::maintenance(
-            self.rt(),
+            rt,
             self.bootstrap_ids.as_slice(),
             Consumer::new(move |bucket: &Arc<Mutex<KBucket>>| {
                 let prefix = bucket.lock().unwrap().prefix().clone();
@@ -433,7 +435,7 @@ impl DHT {
         self.routing_table_maintenance();
 
         // bootstraping process.
-        let entry_sz = self.rt.lock().unwrap().number_of_entries();
+        let entry_sz = self.rt().lock().unwrap().number_of_entries();
         if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
             crate::elapsed_ms!(self.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
             return;
@@ -477,23 +479,21 @@ impl DHT {
 
         info!("Starting DHT/{}:{} on {}:{} ...", self.network, self.id(), self.host, self.port);
 
-        if let Some(path) = self.persist_file.as_ref() {
+        let mut rt = RoutingTable::new(self.id().clone());
+        let mut _need_ping_from_cached_rt = false;
+        if let Some(ref path) = self.persist_file {
+            let file = path.display();
+            let suc_cb = |_| debug!("Loaded routing table from {}.", file);
+            let err_cb = |e| warn! ("Loading routing table from {} error: {e}", file);
 
-            if path.exists() || path.is_file() {
-                let file = path.display().to_string();
-                let log = |_| {
-                    debug!("Routing table persist file: {}", file);
-                };
-                let log_err = |e: Box<dyn StdError + Send + Sync>| {
-                    warn!("Failed to load routing table from {}: {}", file, e);
-                };
+            debug!("Loading routing table from {}.", file);
+            let result = rt.load(&path)
+                .map(suc_cb)
+                .map_err(err_cb);
 
-                debug!("Loading routing table from {}.", file);
-                let _ = self.rt.lock().unwrap().load(&path)
-                    .map(log)
-                    .map_err(log_err);
-            }
+            _need_ping_from_cached_rt = result.is_ok() && !rt.is_empty();
         };
+        self.rt = Some(Arc::new(Mutex::new(rt)));
 
         // initialize RPC server
         let mut server = RpcServer::new(
@@ -509,15 +509,17 @@ impl DHT {
                 dht.lock().unwrap().on_message(&msg);
             })
         }));
+
+        let rt = self.rt().clone();
         server.callsent_handler(Consumer::new({
-            let rt = self.rt();
+            let rt = rt.clone();
             move |call: &RpcCall|{
                 let nodeid = call.target_id();
                 rt.lock().unwrap().on_request_sent(&nodeid);
             }
         }));
         server.calltimeout_handler(Consumer::new({
-            let rt = self.rt();
+            let rt = rt.clone();
             move |call: &RpcCall| {
                 let nodeid = call.target_id();
                 rt.lock().unwrap().on_timeout(&nodeid);
@@ -579,19 +581,29 @@ impl DHT {
         let rpc_server = self.rpc_server.take();
         let rpc_task   = self.rpc_task.take();
 
+        let notified = self.task_man.notified().clone();
+        if let Some(t) = rpc_task {
+            debug!("Stopping RPC server task...");
+            *self.rpc_task_quit_flag.lock().unwrap() = true;
+            notified.notify_one();
+            let _ = t.await;
+            info!("RPC server task stopped.");
+        }
+
         if let Some(s) = rpc_server {
             s.lock().unwrap().stop().await;
         }
-        if let Some(t) = rpc_task {
-            *self.rpc_task_quit_flag.lock().unwrap() = true;
-            self.task_man.notified().notify_one();
-            let _ = t.await;
+
+        {
+            debug!("Stopping task manager...");
+            self.task_man.stop();
+            info!("Task manager stopped.");
         }
 
-        self.task_man.stop();
-
-        if let Some(path) = self.persist_file.take() {
-            let _ = self.rt.lock().unwrap().save(&path);
+        let path = self.persist_file.take();
+        let rt   = self.rt.take();
+        if let (Some(path), Some(rt)) = (path, rt) {
+            let _ = rt.lock().unwrap().save(&path);
         }
 
         if let Some(detector) = self.suspicious_detector.take() {
@@ -650,7 +662,7 @@ impl DHT {
         }
 
         if let Some(path) = self.persist_file.clone() {
-            let rt = self.rt();
+            let rt = self.rt().clone();
             let _  = self.timer_client.add_timer(
                 120,
                 Some(Self::ROUTING_TABLE_PERSIST_INTERVAL),
@@ -721,7 +733,7 @@ impl DHT {
                 warn!("Received a message from suspicious node {}@{}, force-removing routing table entries because ID-change was detected; new ID {}",
                     remote_id, remote_addr, known_id);
 
-                let mut locked_rt = self.rt.lock().unwrap();
+                let mut locked_rt = self.rt().lock().unwrap();
                 let removed = locked_rt.remove(&known_id).is_some();
                 if  removed {
                     // Might be a pollution attack, check other entries in the same bucket too.
@@ -778,7 +790,7 @@ impl DHT {
         }
 
         let existing_opt = {
-            let locked = self.rt.lock().unwrap();
+            let locked = self.rt().lock().unwrap();
             locked.bucket_entry(&remote_id)
         };
 
@@ -801,7 +813,7 @@ impl DHT {
             new_entry.update_last_sent(locked.sent_time().unwrap());
         }
 
-        self.rt.lock().unwrap().put(new_entry.clone());
+        self.rt().lock().unwrap().put(new_entry.clone());
 
         // Optimize: not the standard Kademlia behavior
 		// incoming request && the new entry is unreachable && the target bucket not full,
@@ -905,7 +917,7 @@ impl DHT {
     }
 
     fn fill_closest_nodes(&self, target: Id) -> Vec<NodeInfo> {
-        let locked  = self.rt.lock().unwrap();
+        let locked  = self.rt().lock().unwrap();
         let mut kns = KClosestNodes::new(
             &locked,
             target,
@@ -1200,7 +1212,7 @@ impl DHT {
                 return;
             }
 
-            let locked_rt = locked_dht.rt.lock().unwrap();
+            let locked_rt = locked_dht.rt().lock().unwrap();
             if nodes.is_empty() && locked_rt.is_empty() {
                 warn!("no bootstrap nodes provided and routing table is empty.");
                 return;
@@ -1279,7 +1291,7 @@ impl DHT {
 
         let (entry_sz, bucket_sz) = {
             let locked = dht.lock().unwrap();
-            let locked_rt = locked.rt.lock().unwrap();
+            let locked_rt = locked.rt().lock().unwrap();
             (locked_rt.number_of_entries(), locked_rt.size())
         };
 
@@ -1345,7 +1357,7 @@ impl DHT {
         option: LookupOption,
         promise: Promise<Option<NodeInfo>>
     ) {
-        let node: Option<NodeInfo> = self.rt.lock().unwrap()
+        let node: Option<NodeInfo> = self.rt().lock().unwrap()
                 .bucket_entry(target)
                 .map(|v| v.into());
 

@@ -4,7 +4,6 @@ use std::{
     net::SocketAddr,
     time::SystemTime,
     path::{PathBuf, Path},
-    error::Error as StdError,
     future::Future,
     sync::{
         Arc, Weak, Mutex,
@@ -187,7 +186,6 @@ impl DHT {
         let tclient  = b.timer_client.as_ref().unwrap().clone();
         let listener = b.listener.as_ref().unwrap().clone();
 
-        let nodeid = identity.id().clone();
         let bootstrap_nodes = b.bootstrap_nodes.map(|nodes| nodes.to_vec())
             .unwrap_or_else(Vec::new);
 
@@ -214,11 +212,11 @@ impl DHT {
             bootstrapping       : AtomicBool::new(false),
             timer_client        : tclient,
             suspicious_detector : None,
-            weak                : Weak::new(), // will be set later
-
             rpc_server          : None,
             rpc_task            : None,
             rpc_task_quit_flag  : Arc::new(Mutex::new(false)),
+
+            weak                : Weak::new(), // will be set later
         })
     }
 
@@ -283,7 +281,7 @@ impl DHT {
         self.task_man.add(task);
     }
 
-    fn fill_buckets(&self) ->  FuturesUnordered<PromiseFuture<()>> {
+    fn fill_buckets(&self, promise: Promise<()>) {
         let (number_of_entries, buckets) = {
             let locked_rt  = self.rt().lock().unwrap();
             (
@@ -292,7 +290,7 @@ impl DHT {
             )
         };
 
-        let futures = FuturesUnordered::new();
+        let unordered = FuturesUnordered::new();
         for bucket in buckets {
             if bucket.lock().unwrap().is_full() &&
                 number_of_entries >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES {
@@ -320,9 +318,13 @@ impl DHT {
                 )
             );
             self.task_man.add(task);
-            futures.push(future);
+            unordered.push(future);
         }
-        futures
+
+        let _ = async move {
+            futures::future::join_all(unordered).await;
+            promise.complete(Ok(()));
+        };
     }
 
     fn try_ping_maintenance(&self,
@@ -1204,38 +1206,15 @@ impl DHT {
         DHT::do_bootstrap(dht, nodes).await;
     }
 
-    async fn do_bootstrap(dht: Arc<Mutex<Self>>, nodes: Vec<NodeInfo>) {
-        let (self_id, network, server) = {
-            let locked_dht = dht.lock().unwrap();
+    fn find_closest_nodes(&self, nodes: Vec<NodeInfo>)
+    -> FuturesUnordered<impl Future<Output=Result<Vec<NodeInfo>>>> {
+        let unordered = FuturesUnordered::new();
 
-            if crate::elapsed_ms!(locked_dht.last_bootstrap) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
-                return;
-            }
+        let network = self.network();
+        let server  = self.rpc_server().clone();
 
-            let locked_rt = locked_dht.rt().lock().unwrap();
-            if nodes.is_empty() && locked_rt.is_empty() {
-                warn!("no bootstrap nodes provided and routing table is empty.");
-                return;
-            }
-            drop(locked_rt);
-
-            if locked_dht.bootstrapping.swap(true, Ordering::Relaxed) {
-                warn!("The DHT/{} instance is already bootstrapping.", locked_dht.network);
-                return;
-            }
-
-            let network = locked_dht.network();
-            let server  = locked_dht.rpc_server().clone();
-            let self_id = locked_dht.id().clone();
-
-            (self_id, network, server)
-        };
-
-        info!("DHT/{}:{} bootstrapping ...", network, self_id);
-
-        let mut unordered = FuturesUnordered::new();
         for item in nodes {
-            if item.id() == &self_id {
+            if item.id() == self.id() {
                 continue;
             }
             let msg = find_node_request(
@@ -1274,18 +1253,47 @@ impl DHT {
                 }
             });
 
-            unordered.push(future);
-            let _ = server.lock().unwrap().send_call(call).map_err(|e| {
-                warn!("{}", e);
-            });
+            match server.lock().unwrap().send_call(call) {
+                Ok(_) => unordered.push(future),
+                Err(e) => warn!("{e}"),
+            }
+        };
+        unordered
+    }
+
+    async fn do_bootstrap(dht: Arc<Mutex<Self>>, nodes: Vec<NodeInfo>) {
+        let (self_id, network) = {
+            let locked_dht = dht.lock().unwrap();
+
+            if crate::elapsed_ms!(locked_dht.last_bootstrap) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
+                return;
+            }
+
+            let locked_rt = locked_dht.rt().lock().unwrap();
+            if nodes.is_empty() && locked_rt.is_empty() {
+                warn!("no bootstrap nodes provided and routing table is empty.");
+                return;
+            }
+            drop(locked_rt);
+
+            if locked_dht.bootstrapping.swap(true, Ordering::Relaxed) {
+                warn!("The DHT/{} instance is already bootstrapping.", locked_dht.network);
+                return;
+            }
+
+            let network = locked_dht.network();
+            let self_id = locked_dht.id().clone();
+
+            (self_id, network)
         };
 
-        let mut nodes: Vec<NodeInfo> = Vec::new();
+        info!("DHT/{}:{} bootstrapping ...", network, self_id);
+
+        let mut unordered = dht.lock().unwrap().find_closest_nodes(nodes);
+        let mut nodes = Vec::new();
         while let Some(result) = unordered.next().await {
-            if let Ok(items) = result {
-                for item in items {
-                    nodes.push(item);
-                }
+            if let Ok(item) = result {
+                nodes.extend(item);
             }
         }
 
@@ -1295,9 +1303,7 @@ impl DHT {
             (locked_rt.number_of_entries(), locked_rt.size())
         };
 
-        let mut ordered = FuturesOrdered::<
-            Pin<Box<dyn Future<Output = Result<()>>>>
-        >::new();
+        let mut ordered = FuturesOrdered::new();
 
         // breadth-first lookup: fill more buckets
         if !nodes.is_empty() && entry_sz == 0 {
@@ -1309,12 +1315,9 @@ impl DHT {
         if bucket_sz > 1 {
             // depth-first lookup: fill each bucket
             // only if the routing table is more than 1 bucket
-            let futures = dht.lock().unwrap().fill_buckets();
-            let chained = async move {
-                futures::future::join_all(futures).await;
-                Ok(())
-            };
-            ordered.push_back(Box::pin(chained));
+            let (promise, future) = Promise::<()>::pair();
+            dht.lock().unwrap().fill_buckets(promise);
+            ordered.push_back(Box::pin(future));
         }
 
         while let Some(result) = ordered.next().await {

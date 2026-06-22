@@ -401,14 +401,7 @@ impl DHT {
         let _ = self.send_call(call);
     }
 
-    async fn update(&mut self) {
-        if !self.is_running {
-            return;
-        }
-
-        debug!("Periodic: 1DHT update...");
-
-        // routing table maintenance
+    fn routing_table_maintenance(&mut self) {
         if crate::elapsed_ms!(self.last_maintenance) <
                 Self::ROUTING_TABLE_MAINTENANCE_INTERVAL {
             return;
@@ -429,6 +422,15 @@ impl DHT {
                     );
             })
         );
+    }
+
+    async fn update(&mut self) {
+        if !self.is_running {
+            return;
+        }
+
+        debug!("Periodic: DHT update...");
+        self.routing_table_maintenance();
 
         // bootstraping process.
         let entry_sz = self.rt.lock().unwrap().number_of_entries();

@@ -106,7 +106,7 @@ impl RpcCall {
     }
 
     pub(crate) fn req(&self) -> Arc<Message> {
-        self.req.as_ref().expect("Painic: request not set").clone()
+        self.req.as_ref().expect("Request not set").clone()
     }
     pub(crate) fn rsp(&self) -> Option<Arc<Message>> {
         self.rsp.as_ref().cloned()

@@ -913,28 +913,28 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
         new_status: ConnectionStatus,
         old_status: ConnectionStatus,
     ) {
-        info!("Connection status changed for network {}: {}->{}", network, old_status, new_status);
+        info!("Connection status changed for DHT{{{}}}: {}->{}", network, old_status, new_status);
         let locked = self.listeners.lock().unwrap();
         for l in locked.iter() {
             l.status_changed(network, new_status, old_status);
         }
     }
     fn connecting(&self, network: Network) {
-        info!("Connecting to network {}...", network);
+        info!("Connecting to DHT{{{}}}...", network);
         let locked = self.listeners.lock().unwrap();
         for l in locked.iter() {
             l.connecting(network);
         }
     }
     fn connected(&self, network: Network) {
-        info!("Connected to network {}.", network);
+        info!("Connected to DHT{{{}}}.", network);
         let locked = self.listeners.lock().unwrap();
         for l in locked.iter() {
             l.connected(network);
         }
     }
     fn disconnected(&self, network: Network) {
-        info!("Disconnected from network {}.", network);
+        info!("Disconnected from DHT{{{}}}.", network);
         let locked = self.listeners.lock().unwrap();
         for l in locked.iter() {
             l.disconnected(network);

@@ -100,7 +100,7 @@ impl Prefix {
 
     fn set_tail(&mut self, bit: i32) {
         let index = bit >> 3;
-        self.id.update(|bytes| {
+        self.id.update(|bytes: &mut[u8]| {
             bytes[index as usize] &= !(0x80 >> (bit & 0x07))
         });
     }

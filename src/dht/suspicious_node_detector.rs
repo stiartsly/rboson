@@ -82,9 +82,6 @@ impl Default for DefaultSuspiciousNodeDetector {
     }
 }
 
-unsafe impl Send for ObservationRecord {}
-unsafe impl Sync for ObservationRecord {}
-
 impl DefaultSuspiciousNodeDetector {
     pub fn new(
         observation_period: Duration,
@@ -361,6 +358,3 @@ impl fmt::Display for DefaultSuspiciousNodeDetector {
         Ok(())
     }
 }
-
-unsafe impl Send for DefaultSuspiciousNodeDetector {}
-unsafe impl Sync for DefaultSuspiciousNodeDetector {}

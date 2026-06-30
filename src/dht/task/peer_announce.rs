@@ -1,33 +1,32 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex},
+    rc::Rc,
+    cell::RefCell,
     collections::VecDeque,
 };
-use log::{debug, error, warn};
-
 use crate::PeerInfo;
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    consumer::Consumer,
+    handler::Handler,
     task::{ClosestSet, CandidateNode,Task, TaskData}
 };
 
 pub(crate) struct PeerAnnounceTask {
     base_data: TaskData,
 
-    todo: Arc<Mutex<VecDeque<Arc<Mutex<CandidateNode>>>>>,
+    todo: Rc<RefCell<VecDeque<Rc<RefCell<CandidateNode>>>>>,
     peer: PeerInfo,
     expected_seq: i32,
 
-    dht: Arc<Mutex<DHT>>
+    dht: Rc<RefCell<DHT>>,
 }
 
 const MAX_TODO_ENTRIES: usize = 24;
 
 impl PeerAnnounceTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Rc<RefCell<DHT>>,
         peer: PeerInfo,
         expected_seq: i32
     ) -> Self {
@@ -35,28 +34,28 @@ impl PeerAnnounceTask {
             dht,
             base_data: TaskData::new(),
             peer,
-            todo: Arc::new(Mutex::new(
+            todo: Rc::new(RefCell::new(
                 VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             expected_seq
         }
     }
 
     pub(crate) fn with_closest(&self, closest: ClosestSet) -> &Self {
-        let mut loced_todo = self.todo.lock().unwrap();
+        let mut borrowed_todo = self.todo.borrow_mut();
         let mut entries = closest.entries();
 
         while let Some(cn) = entries.pop() {
-            if loced_todo.len() >= MAX_TODO_ENTRIES {
+            if borrowed_todo.len() >= MAX_TODO_ENTRIES {
                 break;
             }
-            loced_todo.push_back(cn);
+            borrowed_todo.push_back(cn);
         }
 
-        debug!(
+        log::debug!(
             "{}#{} added {} eligible nodes to announce queue",
             self.task_name(),
             self.task_id(),
-            loced_todo.len()
+            borrowed_todo.len()
         );
         self
     }
@@ -79,25 +78,25 @@ impl Task for PeerAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
     fn iterate(&mut self) {
         while self.can_dorequest() {
-            let cn = match self.todo.lock().unwrap().front() {
+            let cn = match self.todo.borrow().front() {
                 Some(cn) => cn.clone(),
                 _ => break,
             };
 
-            let token = cn.lock().unwrap().token();
+            let token = cn.borrow().token();
             if token == 0 {
-                warn!("{}#{} skip announcing to {} due to missing token",
+                log::warn!("{}#{} skip announcing to {} due to missing token",
                     self.task_name(),
                     self.task_id(),
-                    cn.lock().unwrap().id(),
+                    cn.borrow().id(),
                 );
-                self.todo.lock().unwrap().pop_front();
+                self.todo.borrow_mut().pop_front();
                 continue;
             }
 
@@ -106,21 +105,15 @@ impl Task for PeerAnnounceTask {
             );
 
             let cloned_todo = self.todo.clone();
-            let cb = Consumer::new(move |_| {
-                cloned_todo.lock().unwrap().pop_front();
+            let cb = Handler::new(move |_| {
+                cloned_todo.borrow_mut().pop_front();
             });
-
-            if let Err(e) = self.send_call(cn.into(), msg, Some(cb)) {
-                error!("Sending 'announcePeer' request error: {}", e);
-             };
+            self.send_call(cn.into(), msg, Some(cb));
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() &&
+        self.todo.borrow().is_empty() &&
             self.data().is_done()
     }
 }
-
-unsafe impl Send for PeerAnnounceTask {}
-unsafe impl Sync for PeerAnnounceTask {}

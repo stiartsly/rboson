@@ -1,44 +1,35 @@
 use std::{
-    sync::{Arc, Mutex},
+    rc::Rc,
+    cell::RefCell,
     sync::atomic::{AtomicBool, Ordering},
     collections::{VecDeque, HashSet},
 };
-use tokio::sync::Notify;
 use log::{debug, error};
 
-use crate::locked;
 use crate::dht::{
-    consumer::Consumer,
+    handler::Handler,
     task::{Task, task::{State, TaskId}}
 };
 
 const MAX_ACTIVE_TASKS: usize = 8;
 
 pub(crate) struct TaskManager {
-    queued      : Mutex<VecDeque<Arc<Mutex<Box<dyn Task>>>>>,
-    running     : Arc<Mutex<HashSet<TaskId>>>,
+    queued      : RefCell<VecDeque<Rc<RefCell<Box<dyn Task>>>>>,
+    running     : RefCell<HashSet<TaskId>>,
     canceling   : AtomicBool,
-
-    notifier    : Arc<Notify>,
 }
 
 impl TaskManager {
     pub(crate) fn new() -> Self {
         Self {
-            queued      : Mutex::new(VecDeque::new()),
-            running     : Arc::new(Mutex::new(HashSet::new())),
+            queued      : RefCell::new(VecDeque::new()),
+            running     : RefCell::new(HashSet::new()),
             canceling   : AtomicBool::new(false),
-            notifier    : Arc::new(Notify::new()),
         }
     }
 
     pub(crate) fn add(&self, task: Box<dyn Task>) {
         self.add_prior(task, false);
-        self.notifier.notify_one();
-    }
-
-    pub(crate) fn notified(&self) -> Arc<Notify> {
-        self.notifier.clone()
     }
 
     pub(crate) fn add_prior(&self, mut task: Box<dyn Task>, priori: bool) {
@@ -52,8 +43,8 @@ impl TaskManager {
         let taskid = task.task_id();
         let running = self.running.clone();
         task.with_ended_handler(
-            Consumer::new(move |_| {
-                locked!(running).remove(&taskid);
+            Handler::new(move |_| {
+                running.borrow_mut().remove(&taskid);
             })
         );
 
@@ -65,19 +56,19 @@ impl TaskManager {
         }
 
         self.enqueue(task, priori);
-        //self.dequeue(); // call dequeue in rpc_server run_loop.
+        self.dequeue();
     }
 
     #[inline(always)]
     fn is_ready(&self) -> bool {
         !self.canceling.load(Ordering::SeqCst) &&
-            locked!(self.running).len() < MAX_ACTIVE_TASKS
+            self.running.borrow().len() < MAX_ACTIVE_TASKS
     }
 
     fn enqueue(&self, task: Box<dyn Task>, priori: bool) {
-        let task = Arc::new(Mutex::new(task));
-        task.lock().unwrap().set_cloned(Arc::downgrade(&task));
-        let mut queue = locked!(self.queued);
+        let task = Rc::new(RefCell::new(task));
+        task.borrow_mut().set_cloned(std::rc::Rc::downgrade(&task));
+        let mut queue = self.queued.borrow_mut();
         match priori {
             true => queue.push_front(task),
             false => queue.push_back(task),
@@ -86,28 +77,28 @@ impl TaskManager {
 
     pub(crate) fn dequeue(&self) {
         while self.is_ready() {
-           let Some(task) = locked!(self.queued).pop_front() else {
+           let Some(task) = self.queued.borrow_mut().pop_front() else {
                 debug!("Queue drained.");
                 break;
             };
 
-            if task.lock().unwrap().is_ended() {
+            if task.borrow().is_ended() {
                 continue;
             }
 
-            let taskid = task.lock().unwrap().task_id();
-            let _ = locked!(self.running).insert(taskid);
+            let taskid = task.borrow().task_id();
+            let _ = self.running.borrow_mut().insert(taskid);
 
-            task.lock().unwrap().start();
+            task.borrow_mut().start();
         }
     }
 
     pub(crate) fn stop(&self) {
         self.canceling.store(true, Ordering::SeqCst);
 
-        let _ = locked!(self.running).drain();
-        for t in locked!(self.queued).drain(..) {
-            t.lock().unwrap().cancel();
+        let _ = self.running.borrow_mut().drain();
+        for t in self.queued.borrow_mut().drain(..) {
+            t.borrow_mut().cancel();
         }
 
         self.canceling.store(false, Ordering::SeqCst);
@@ -116,7 +107,7 @@ impl TaskManager {
 
 impl Drop for TaskManager {
     fn drop(&mut self) {
-        locked!(self.running).clear();
-        locked!(self.queued).clear();
+        self.running.borrow_mut().clear();
+        self.queued.borrow_mut().clear();
     }
 }

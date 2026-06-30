@@ -5,17 +5,14 @@ use std::{
     sync::{Arc, Mutex, Weak},
     time::{Duration, SystemTime}
 };
-use futures::future::LocalBoxFuture;
-use futures::stream::FuturesUnordered;
-use futures::FutureExt;
-use futures::StreamExt;
-use tokio::{
-    task,
-    task::JoinHandle,
-    sync::mpsc,
-    runtime,
+use futures::{
+    future::LocalBoxFuture,
+    stream::FuturesUnordered,
+    FutureExt,
+    StreamExt
 };
-use log::{warn, info};
+use log::{warn, info, debug};
+
 use crate::{
     Id,
     Network,
@@ -27,19 +24,16 @@ use crate::{
     signature
 };
 use crate::dht::{
-    dht::{DHT, Builder as DHTBuilder},
     NodeConfig,
     LookupOption,
     eligible_value::EligibleValue,
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
-    consumer::AsyncConsumer,
+    handler::AsyncHandler,
     promise::Promise,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
-    timer_client::TimerClient,
-    timer_queue::{TimerQueue, Command},
     storage::{
         data_storage::{self, DataStorage},
         sqlite_storage::SqliteStorage,
@@ -49,7 +43,9 @@ use crate::dht::{
         SeqNotMonotonic,
         NotOwnerError,
         ImmutableSubstitutionError
-    }
+    },
+    timer_verticle,
+    dht_verticle::{self, VerticleClient, VerticleOptions},
 };
 
 const MAX_PEER_AGE  : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
@@ -59,34 +55,31 @@ const RE_ANNOUNCE_INTERVAL      : u64 = 5 * 60 * 1000;      // 5 minutes in mill
 const STORAGE_EXPIRE_INTERVAL   : u64 = 10 * 60 * 1000;     // 10 minutes in milliseconds
 
 pub struct Node {
-    cfg         : Box<dyn NodeConfig>,
-    identity    : CachedIdentity,
+    cfg             : Box<dyn NodeConfig>,
+    identity        : CachedIdentity,
 
-    lookup_option  : Mutex<LookupOption>,
+    lookup_option   : Mutex<LookupOption>,
 
+    dht4            : Mutex<Option<Arc<VerticleClient>>>,
+    dht6            : Mutex<Option<Arc<VerticleClient>>>,
 
+    data_dir        : PathBuf,
+    database_uri    : PathBuf,
 
-    data_dir    : PathBuf,
-    database_uri: PathBuf,
+    running         : Mutex<bool>,
+    listeners       : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
 
-    dht4        : Mutex<Option<Arc<Mutex<DHT>>>>,
-    dht6        : Mutex<Option<Arc<Mutex<DHT>>>>,
+    timer_verticle  : Mutex<Option<Arc<timer_verticle::VerticleClient>>>,
+    //timer_task      : Mutex<Option<JoinHandle<()>>>,
 
-    running     : Mutex<bool>,
-    listeners   : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
-
-    timer_client: Mutex<Option<Arc<TimerClient>>>,
-    timer_task  : Mutex<Option<JoinHandle<()>>>,
-    stop_task   : Arc<Mutex<bool>>,
-
-    storage     : Arc<Mutex<dyn DataStorage>>,
-    token_man   : Arc<TokenManager>,
-    weak        : Weak<Self>,
+    storage         : Arc<Mutex<dyn DataStorage>>,
+    token_man       : Arc<TokenManager>,
+    weak            : Weak<Self>,
 }
 
 impl Node {
     pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
-        Self::check_config(cfg.as_ref())?;
+        Self::check_config(&cfg)?;
 
         // Setup logger before any log is generated.
         logger::setup(
@@ -116,17 +109,13 @@ impl Node {
 
         // Cache the node id to a file for quick access in the future.
         let bs58 = identity.id().to_base58();
-        File::create({
-            let mut path = data_dir.clone();
-            path.push("id");
-            path
-        })
-        .map_err(|e| IOError::new(
+        let path = data_dir.clone().join("id");
+        File::create(&path).map_err(|e| IOError::new(
                 format!("Creating node id cache file error: {e}")))?
-        .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
+            .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
                 format!("Writing node id cache file error: {e}")))?;
 
-        info!("Current Node id: {}", identity.id());
+        info!("The Kad node ID: {}", identity.id());
 
         Ok(Arc::new_cyclic(|weak| Self {
             cfg,
@@ -140,20 +129,20 @@ impl Node {
             running         : Mutex::new(false),
             listeners       : Arc::new(Mutex::new(Vec::new())),
 
-            timer_client    : Mutex::new(None),
-            timer_task      : Mutex::new(None),
-            stop_task       : Arc::new(Mutex::new(false)),
+            timer_verticle  : Mutex::new(None),
+
             storage         : Arc::new(Mutex::new(SqliteStorage::new())),
             token_man       : Arc::new(TokenManager::new()),
             weak            : weak.clone(),
         }))
     }
 
-    fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
+    fn check_config(cfg: &Box<dyn NodeConfig>) -> Result<()> {
         if cfg.host4().is_none() && cfg.host6().is_none() {
             return Err(ArgumentError::new(
                 "At least one host/address must be specified"));
         }
+
         //if cfg.bootstrap_nodes().is_empty() {
         //    return Err(ArgumentError::new(
         //        "At least one bootstrap node must be specified"));
@@ -182,24 +171,12 @@ impl Node {
             return Err(ArgumentError::new("Database URI cannot be empty"));
         }
         if database_uri.contains("/") {
-            return Err(ArgumentError::new(
-                    "Database URI cannot contain path separator '/'"));
+            return Err(ArgumentError::new("Database URI cannot contain path separator '/'"));
         }
         if !data_storage::supports(database_uri) {
-            return Err(ArgumentError::new(format!(
-                    "Unsupported database URI: {}", database_uri)));
+            return Err(ArgumentError::new(format!("Unsupported database URI: {}", database_uri)));
         }
         Ok(())
-    }
-
-    #[inline]
-    fn dht4(&self) -> Option<Arc<Mutex<DHT>>> {
-        self.dht4.lock().unwrap().clone()
-    }
-
-    #[inline]
-    fn dht6(&self) -> Option<Arc<Mutex<DHT>>> {
-        self.dht6.lock().unwrap().clone()
     }
 
     #[inline]
@@ -216,43 +193,10 @@ impl Node {
     }
 
     #[inline]
-    fn timer_client(&self) -> Arc<TimerClient> {
-        self.timer_client.lock().unwrap()
-            .as_ref().expect("Timer client is not initalized")
+    fn timer_verticle(&self) -> Arc<timer_verticle::VerticleClient> {
+        self.timer_verticle.lock().unwrap()
+            .as_ref().expect("Timer verticle is not initialized")
             .clone()
-    }
-
-    async fn start_timer_task(&self) -> Result<()> {
-        let (tx, rx) = mpsc::unbounded_channel::<Command>();
-        let timer_queue  = TimerQueue::new(rx);
-        let timer_client = TimerClient::new(tx);
-        let stop_task    = self.stop_task.clone();
-        let timer_task   = task::spawn_blocking(move || {
-            runtime::Builder::new_current_thread()
-                .enable_time()
-                .build().expect("timer runtime should build")
-                .block_on(async move {
-                    timer_queue.run(stop_task).await;
-                }
-            );
-        });
-
-        *self.timer_task.lock().unwrap()   = Some(timer_task);
-        *self.timer_client.lock().unwrap() = Some(Arc::new(timer_client));
-        Ok(())
-    }
-
-    async fn stop_timer_task(&self) {
-        let timer_client = self.timer_client.lock().unwrap().take();
-        let timer_task   = self.timer_task.lock().unwrap().take();
-        *self.stop_task.lock().unwrap() = true;
-
-        if let Some(client) = timer_client {
-            let _ = client.stop();
-        }
-        if let Some(task) = timer_task {
-            let _ = task.await;
-        }
     }
 
     async fn persistent_announce(self: Arc<Self>) {
@@ -322,13 +266,13 @@ impl Node {
     }
 
     async fn setup_periodic_tasks(&self) -> Result<()> {
-        let client  = self.timer_client();
+        let client  = self.timer_verticle();
 
         let storage = self.storage.clone();
         let _ = client.add_timer(
             30_000,
             Some(STORAGE_EXPIRE_INTERVAL),
-            AsyncConsumer::new(move |_|{
+            AsyncHandler::new(move |_|{
                     let storage = storage.clone();
                     Box::pin(async move {
                         let _ = storage.lock().unwrap().purge();
@@ -339,7 +283,7 @@ impl Node {
         let _ = client.add_timer(
             60_000,
             Some(RE_ANNOUNCE_INTERVAL),
-            AsyncConsumer::new(move |_| {
+            AsyncHandler::new(move |_| {
                 //let weak = weak.clone();
                 Box::pin(async move {
                    // weak.upgrade().expect("KadNode instance is dropped")
@@ -352,7 +296,7 @@ impl Node {
         let _ = client.add_timer(
             TokenManager::TOKEN_TIMEOUT,
             Some(TokenManager::TOKEN_TIMEOUT),
-            AsyncConsumer::new(move |_| {
+            AsyncHandler::new(move |_| {
                 let token_man = token_man.clone();
                 Box::pin(async move {
                     token_man.update_token_timestamp();
@@ -378,42 +322,44 @@ impl Node {
             locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
         }
 
-        self.start_timer_task().await?;
+        let options = timer_verticle::VerticleOptions{};
+        let client = timer_verticle::deploy(options)?;
+        *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
+
         self.setup_periodic_tasks().await?;
 
         let listener = Arc::new(DefaultConnectionStatusListener {
             listeners: self.listeners.clone()
         });
 
-        let dht_builder = DHTBuilder::default()
-            .with_timer_client(self.timer_client())
+        let options = VerticleOptions::default()
             .with_identity(self.identity.identity())
             .with_storage(self.storage.clone())
             .with_tokenman(self.token_man.clone())
-            .with_bootstrap(self.cfg.bootstrap_nodes())
-            .with_datadir(self.data_dir.as_path())
+            .with_bootstrap(self.cfg.bootstrap_nodes().to_vec())
+            .with_datadir(self.data_dir.clone())
             .with_listener(listener);
 
         let port = self.cfg.port();
         if let Some(host4) = self.cfg.host4() {
-            let dht = dht_builder.build(Network::IPv4, host4, port)?;
+            let verticle = dht_verticle::deploy(
+                options.clone(),
+                Network::IPv4,
+                host4.to_string(),
+                port
+            )?;
 
-            *self.dht4.lock().unwrap() = Some({
-                let dht = Arc::new(Mutex::new(dht));
-                dht.lock().unwrap().weak = Arc::downgrade(&dht);
-                dht.lock().unwrap().start().await?;
-                dht
-            });
+            *self.dht4.lock().unwrap() = Some(Arc::new(verticle));
         }
         if let Some(host6) = self.cfg.host6() {
-            let dht = dht_builder.build(Network::IPv6, host6, port)?;
+            let verticle = dht_verticle::deploy(
+                options.clone(),
+                Network::IPv6,
+                host6.to_string(),
+                port
+            )?;
 
-            *self.dht6.lock().unwrap() = Some({
-                let dht = Arc::new(Mutex::new(dht));
-                dht.lock().unwrap().weak = Arc::downgrade(&dht);
-                dht.lock().unwrap().start().await?;
-                dht
-            });
+            *self.dht6.lock().unwrap() = Some(Arc::new(verticle));
         }
 
         *self.running.lock().unwrap() = true;
@@ -422,22 +368,29 @@ impl Node {
     }
 
     pub async fn stop(&self) -> Result<()> {
+        debug!("Kademlia node is stopping ....");
         if !self.is_running() {
             return Ok(());
         }
         *self.running.lock().unwrap() = false;
 
         let dht4 = self.dht4.lock().unwrap().take();
-        let dht6 = self.dht6.lock().unwrap().take();
-
         if let Some(dht) = dht4 {
-            dht.lock().unwrap().stop().await;
-        }
-        if let Some(dht) = dht6 {
-            dht.lock().unwrap().stop().await;
+            let mut c = Arc::try_unwrap(dht).ok().unwrap();
+            let _ = c.stop().await;
         }
 
-        self.stop_timer_task().await;
+        let dht6 = self.dht6.lock().unwrap().take();
+        if let Some(dht) = dht6 {
+            let mut c = Arc::try_unwrap(dht).ok().unwrap();
+            let _ = c.stop().await;
+        }
+
+        let verticle = self.timer_verticle.lock().unwrap().take();
+        if let Some(verticle) = verticle {
+            let mut vert = Arc::try_unwrap(verticle).ok().unwrap();
+            let _ = vert.stop().await;
+        }
         self.storage.lock().unwrap().close();
 
         info!("Kademlia node stopped.");
@@ -450,15 +403,18 @@ impl Node {
         self.identity.id()
     }
 
-    pub fn node_info(&self) -> JointResult<NodeInfo> {
-        let mut result = JointResult::new();
-        if let Some(dht) = self.dht4() {
-            result.set_value(Network::IPv4, dht.lock().unwrap().ni());
-        }
-        if let Some(dht) = self.dht6() {
-            result.set_value(Network::IPv6, dht.lock().unwrap().ni());
-        }
-        result
+    pub fn node_info(&self) -> NodeInfo {
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let mut ni = None;
+        if let Some(dht) = dht6 {
+            ni = Some(dht.ni());
+        };
+        if let Some(dht) = dht4 {
+            ni = Some(dht.ni());
+        };
+        ni.unwrap()
     }
 
     pub fn version(&self) -> String {
@@ -482,66 +438,73 @@ impl Node {
     }
 
     pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
-        if nodes.is_empty() {
-            return Err(ArgumentError::new("Bootstrap nodes cannot be empty"));
-        }
         self.check_running()?;
 
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
-        let nodes4  = nodes.to_vec();
-        let nodes6  = nodes.to_vec();
+        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+            let (promise, future) = Promise::<()>::pair();
+            let nodes = nodes.to_vec();
 
-        tokio::join!(
-            async move {
-                if let Some(dht) = dht4 {
-                    DHT::bootstrap(dht, nodes4).await;
-                }
-            },
-            async move {
-                if let Some(dht) = dht6 {
-                    DHT::bootstrap(dht, nodes6).await;
-                }
+            if let Some(dht) = dht {
+                dht.bootstrap(nodes, promise).await;
+            } else {
+                promise.complete(Ok(()));
             }
+            future
+        };
+
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let result = tokio::join!(
+            cb(dht4),
+            cb(dht6)
         );
+        for item in [result.0, result.1] {
+            let _ = item.await?;
+        }
         Ok(())
     }
 
-    pub async fn find_node(&self, target: &Id,
-        lookup_option: Option<LookupOption>) -> Result<JointResult<NodeInfo>>
+    pub async fn find_node(
+        &self,
+        target: &Id,
+        lookup_option: Option<LookupOption>
+    ) -> Result<JointResult<NodeInfo>>
     {
         self.check_running()?;
 
-        let find_node_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+        let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let (promise, future) = Promise::<Option<NodeInfo>>::pair();
             let target  = target.clone();
             let option  = self.option(lookup_option);
 
             if let Some(dht) = dht {
-                dht.lock().unwrap().find_node(&target, option, promise);
+                dht.find_node(target, option, promise).await;
             } else {
                 promise.complete(Ok(None));
             }
             future
         };
 
-        let dht4 = self.dht4();
-        let dht6 = self.dht6();
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
 
         let result = tokio::select!(
-            v = find_node_cb(dht4), if dht4.is_some() => (Network::IPv4, v),
-            v = find_node_cb(dht6), if dht6.is_some() => (Network::IPv6, v),
+            v = cb(dht4), if dht4.is_some() => (Network::IPv4, v),
+            v = cb(dht6), if dht6.is_some() => (Network::IPv6, v),
         );
 
         let mut joint = JointResult::<NodeInfo>::new();
-        if let Some(ni) = result.1? {
+        if let Some(ni) = result.1.await? {
             joint.set_value(result.0, ni);
         }
         Ok(joint)
     }
 
     pub async fn find_value(
-        &self, value_id: &Id, expected_seq: i32,
+        &self,
+        value_id: &Id,
+        expected_seq: i32,
         lookup_option: Option<LookupOption>
     ) -> Result<Option<Value>>
     {
@@ -554,8 +517,8 @@ impl Node {
 
         let target  = value_id.clone();
         let option  = self.option(lookup_option);
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
+        let dht4    = self.dht4.lock().unwrap().clone();
+        let dht6    = self.dht6.lock().unwrap().clone();
 
         let mut ev = EligibleValue::new(target, expected_seq);
 
@@ -572,12 +535,12 @@ impl Node {
             }
         }
 
-        let find_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+        let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let (promise, future) = Promise::<Option<Value>>::pair();
 
             if let Some(dht) = dht {
-                dht.lock().unwrap().find_value(
-                    &target, expected_seq, option, promise);
+                dht.find_value(
+                    target, expected_seq, option, promise).await;
             } else {
                 promise.complete(Ok(None));
             }
@@ -585,11 +548,11 @@ impl Node {
         };
 
         let rc = tokio::select!(
-            v = find_value_cb(dht4), if dht4.is_some() => v,
-            v = find_value_cb(dht6), if dht6.is_some() => v,
+            v = cb(dht4), if dht4.is_some() => v,
+            v = cb(dht6), if dht6.is_some() => v,
         );
 
-        if let Some(value) = rc? {
+        if let Some(value) = rc.await? {
             ev.update(value, true);
         }
 
@@ -603,7 +566,10 @@ impl Node {
     }
 
     pub async fn find_peer(
-        &self, peer_id: &Id, expected_seq: i32, expected_count: usize,
+        &self,
+        peer_id: &Id,
+        expected_seq: i32,
+        expected_count: usize,
         lookup_option: Option<LookupOption>
     ) -> Result<Vec<PeerInfo>>
     {
@@ -619,8 +585,8 @@ impl Node {
 
         let target  = peer_id.clone();
         let option  = self.option(lookup_option);
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
+        let dht4    = self.dht4.lock().unwrap().clone();
+        let dht6    = self.dht6.lock().unwrap().clone();
 
         let mut ep = EligiblePeers::new(
             target, expected_seq, expected_count);
@@ -641,12 +607,12 @@ impl Node {
             }
         }
 
-        let find_peers_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+        let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
 
             if let Some(dht) = dht {
-                dht.lock().unwrap().find_peer(
-                    &target, expected_seq , expected_count, option, promise);
+                dht.find_peer(
+                    target, expected_seq , expected_count, option, promise).await;
             } else {
                 promise.complete(Ok(Vec::new()));
             }
@@ -654,11 +620,11 @@ impl Node {
         };
 
         let rc = tokio::select!(
-            v = find_peers_cb(dht4), if dht4.is_some() => v,
-            v = find_peers_cb(dht6), if dht6.is_some() => v,
+            v = cb(dht4), if dht4.is_some() => v,
+            v = cb(dht6), if dht6.is_some() => v,
         );
 
-        ep.add(rc?, true);
+        ep.add(rc.await?, true);
         ep.prune();
 
         if !ep.is_empty() && ep.is_latest() {
@@ -668,7 +634,10 @@ impl Node {
     }
 
     pub async fn store_value(
-        &self, value: &Value, expected_seq: i32, persistent: bool
+        &self,
+        value: &Value,
+        expected_seq: i32,
+        persistent: bool
     ) -> Result<()>
     {
         if !value.is_valid() {
@@ -692,28 +661,27 @@ impl Node {
         )?;
 
         // store the value to the network.
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
 
-        let store_value_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+        let cb = async move|dht: Option<Arc<VerticleClient>>| {
             let (promise, future) = Promise::<()>::pair();
             let value   = value.clone();
 
             if let Some(dht) = dht {
-                let _ = dht.lock().unwrap()
-                        .store_value(value, expected_seq, promise);
+                dht.store_value(value, expected_seq, promise).await;
             } else {
                 promise.complete(Ok(()));
             }
             future
         };
         let result = tokio::join!(
-            store_value_cb(dht4),
-            store_value_cb(dht6),
+            cb(dht4),
+            cb(dht6),
         );
 
         for item in [result.0, result.1] {
-            let _ = item?;
+            let _ = item.await?;
         }
 
         let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
@@ -721,7 +689,10 @@ impl Node {
     }
 
     pub async fn announce_peer(
-        &self, peer: &PeerInfo, expected_seq: i32, persistent: bool
+        &self,
+        peer: &PeerInfo,
+        expected_seq: i32,
+        persistent: bool
     ) -> Result<()> {
         if !peer.is_valid() {
             return Err(ArgumentError::new("The peer is verified to be invalid."));
@@ -747,16 +718,15 @@ impl Node {
         )?;
 
         // announce the peer to the network.
-        let dht4    = self.dht4();
-        let dht6    = self.dht6();
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
 
-        let announce_peer_cb = |dht: Option<Arc<Mutex<DHT>>>| {
+        let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let (promise, future) = Promise::<()>::pair();
             let peer = peer.clone();
 
             if let Some(dht) = dht {
-                let _ = dht.lock().unwrap()
-                    .announce_peer(peer, expected_seq, promise);
+                dht.announce_peer(peer, expected_seq, promise).await;
             } else {
                 promise.complete(Ok(()));
             }
@@ -764,11 +734,11 @@ impl Node {
         };
 
         let result = tokio::join!(
-            announce_peer_cb(dht4),
-            announce_peer_cb(dht6),
+            cb(dht4),
+            cb(dht6),
         );
         for item in [result.0, result.1] {
-            let _ = item?;
+            let _ = item.await?;
         }
 
         let _ = self.storage.lock().unwrap()
@@ -941,3 +911,6 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
         }
     }
 }
+
+unsafe impl Send for Node {}
+unsafe impl Sync for Node {}

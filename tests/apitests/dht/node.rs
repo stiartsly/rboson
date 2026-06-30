@@ -259,7 +259,7 @@ async fn test_find_node() {
     _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
     _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -340,7 +340,7 @@ async fn test_store_value() {
     _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
     _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -394,7 +394,7 @@ async fn test_announce_peer() {
     _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
     _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -448,7 +448,7 @@ async fn test_find_value() {
     _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
     _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -532,7 +532,7 @@ async fn test_find_peer() {
     _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
     _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -611,7 +611,7 @@ async fn test_get_value() {
     _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
     _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -673,7 +673,7 @@ async fn test_get_peer() {
     _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
     _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -734,7 +734,7 @@ async fn test_remove_value() {
     _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
     _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),
@@ -798,7 +798,7 @@ async fn test_remove_peer() {
     _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
     _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-    let ni = node1.node_info().v4().expect("No Ipv4 nodeinfo").clone();
+    let ni = node1.node_info();
 
     let (rc1, rc2) = tokio::join!(
         node2.bootstrap_one(&ni),

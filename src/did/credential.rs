@@ -227,7 +227,7 @@ impl fmt::Display for Credential {
 }
 
 impl TryFrom<&str> for Credential {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Box<dyn Error>;
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e|
@@ -237,7 +237,7 @@ impl TryFrom<&str> for Credential {
 }
 
 impl TryFrom<&[u8]> for Credential {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Box<dyn Error>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_json::from_slice(data).map_err(|e|

@@ -22,7 +22,7 @@ pub(crate) struct Timer {
     cb: AsyncConsumer<()>,
 }
 
-impl Timer {
+impl Timer1 {
     pub(crate) fn new(id: TimerId, interval: Option<Duration>, cb: AsyncConsumer<()>) -> Self {
         Self {
             id,

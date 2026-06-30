@@ -72,6 +72,7 @@ impl<T> Future for PromiseFuture<T> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Promise<T> {
     result: Arc<Mutex<Data<T>>>,
 }

@@ -1,13 +1,12 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    rc::Rc,
+    cell::RefCell
 };
-use log::{debug, error};
-
 use crate::{Id, NodeInfo};
 use crate::dht::{
     dht::DHT,
-    consumer::Consumer,
+    handler::Handler,
     rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
     routing::{
@@ -34,12 +33,12 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result  : Option<NodeInfo>,
-    dht     : Arc<Mutex<DHT>>,
+    dht     : Rc<RefCell<DHT>>,
 }
 
 impl NodeLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Rc<RefCell<DHT>>,
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
@@ -93,7 +92,7 @@ impl LookupTask for NodeLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
@@ -123,7 +122,7 @@ impl Task for NodeLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
@@ -133,11 +132,10 @@ impl Task for NodeLookupTask {
             false => self.target().clone()
         };
 
-        let rt = self.rt();
+        let rt = self.dht.borrow().rt();
         let kes:Vec<KBucketEntry> = {
-            let locked_rt = rt.lock().unwrap();
-             let mut kns = KClosestNodes::new(
-                &locked_rt,
+            let mut kns = KClosestNodes::new(
+                &rt.borrow(),
                 target,
                 KBucket::MAX_ENTRIES *3
             );
@@ -146,7 +144,7 @@ impl Task for NodeLookupTask {
             kns.into()
         };
 
-        debug!("{}#{} initialized {} candidates for target {}",
+        log::debug!("{}#{} initialized {} candidates for target {}",
             self.task_name(),
             self.task_id(),
             kes.len(),
@@ -163,7 +161,7 @@ impl Task for NodeLookupTask {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
                 _ => {
-                    debug!("{}#{} no eligible candidates in non-empty queue",
+                    log::debug!("{}#{} no eligible candidates in non-empty queue",
                         self.task_name(), self.task_id());
                     break;
                 }
@@ -177,13 +175,10 @@ impl Task for NodeLookupTask {
                 Some(self.want_token)
             );
 
-            let cb = Consumer::new(move |_| {
-                next.lock().unwrap().set_sent();
+            let cb = Handler::new(move |_| {
+                next.borrow_mut().set_sent();
             });
-
-            if let Err(e) = self.send_call(target, msg, Some(cb)) {
-                error!("Sending 'findNode' request error: {}", e);
-            };
+            self.send_call(target, msg, Some(cb));
         }
     }
 
@@ -210,7 +205,7 @@ impl Task for NodeLookupTask {
 
         self.add(nodes.to_vec());
 
-        debug!("{}#{} adding {} candidates from response by target {}",
+        log::debug!("{}#{} adding {} candidates from response by target {}",
             self.task_name(),
             self.task_id(),
             nodes.len(),
@@ -247,10 +242,6 @@ impl Task for NodeLookupTask {
     }
 
     fn is_done(&self) -> bool {
-        let isdone = LookupTask::is_done(self);
-        isdone
+        LookupTask::is_done(self)
     }
 }
-
-unsafe impl Send for NodeLookupTask {}
-unsafe impl Sync for NodeLookupTask {}

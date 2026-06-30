@@ -1,10 +1,9 @@
 use std::{
     fmt,
+    rc::Rc,
+    cell::RefCell,
     net::SocketAddr,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicI32, Ordering}
-    }
+    sync::atomic::{AtomicI32, Ordering}
 };
 use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{Deserialize, Serialize};
@@ -227,7 +226,7 @@ pub(crate) struct Message {
 
     body    : Option<Body>,
 
-    associated_call : Option<Arc<Mutex<RpcCall>>>,
+    associated_call : Option<Rc<RefCell<RpcCall>>>,
     remote_addr     : Option<SocketAddr>,
     remote_id       : Option<Id>,
 }
@@ -299,26 +298,20 @@ impl Message {
         version::format_version(self.ver)
     }
 
-    pub(crate) fn associated_call(&self) -> Option<Arc<Mutex<RpcCall>>> {
+    pub(crate) fn associated_call(&self) -> Option<Rc<RefCell<RpcCall>>> {
         self.associated_call.clone()
     }
 
-    pub(crate) fn set_associated_call(&mut self, call: Arc<Mutex<RpcCall>>) {
-        self.associated_call = Some(call.clone());
+    pub(crate) fn set_associated_call(&mut self, call: Rc<RefCell<RpcCall>>) {
+        self.associated_call = Some(call);
     }
 
     pub(crate) fn remote_id(&self) -> &Id {
-        match self.remote_id.as_ref() {
-            Some(id) => id,
-            None => panic!("remote ID not set")
-        }
+        self.remote_id.as_ref().expect("remote ID not set")
     }
 
     pub(crate) fn remote_addr(&self) -> &SocketAddr {
-        match self.remote_addr.as_ref() {
-            Some(addr) => addr,
-            None => panic!("remote address not set")
-        }
+        self.remote_addr.as_ref().expect("remote address not set")
     }
 
     pub(crate) fn set_remote(&mut self, id: Id, addr: SocketAddr) -> &mut Self {
@@ -527,9 +520,6 @@ pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: Strin
     );
     Message::new(Kind::Error, method, txid, Some(body))
 }
-
-unsafe impl Send for Message {}
-unsafe impl Sync for Message {}
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

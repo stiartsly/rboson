@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    error::Error
+    error::Error as StdError,
 };
 
 #[derive(Debug)]
@@ -9,12 +9,12 @@ pub struct StateError {
 }
 
 impl StateError {
-    pub fn new(message: impl Into<String>) -> Box<Self> {
+    pub fn new(message: impl Into<String>) -> Box<dyn StdError> {
         Box::new(Self { message: message.into() })
     }
 }
 
-impl Error for StateError {
+impl StdError for StateError {
     fn description(&self) -> &str {
         &self.message
      }

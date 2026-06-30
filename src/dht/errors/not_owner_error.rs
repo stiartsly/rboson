@@ -23,6 +23,3 @@ impl fmt::Display for NotOwnerError {
         write!(f, "Error: Not owner of the peer")
      }
 }
-
-unsafe impl Sync for NotOwnerError {}
-unsafe impl Send for NotOwnerError {}

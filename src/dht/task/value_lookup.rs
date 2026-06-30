@@ -1,13 +1,12 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    rc::Rc,
+    cell::RefCell,
 };
-use log::{debug, error, warn};
-
 use crate::{Id, Value};
 use crate::dht::{
     dht::DHT,
-    consumer::Consumer,
+    handler::Handler,
     eligible_value::EligibleValue,
     rpc::RpcCall,
     msg::{msg, LookupResponse, Body},
@@ -27,12 +26,12 @@ pub(crate) struct ValueLookupTask {
     lookup_data: LookupTaskData,
 
     result  : EligibleValue,
-    dht     : Arc<Mutex<DHT>>,
+    dht     : Rc<RefCell<DHT>>,
 }
 
 impl ValueLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Rc<RefCell<DHT>>,
         target: Id,
         expected_seq: i32,
         done_on_eligible_result: bool
@@ -55,7 +54,7 @@ impl LookupTask for ValueLookupTask {
         &Task::data(self)
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         Task::dht(self)
     }
 
@@ -85,16 +84,15 @@ impl Task for ValueLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
     fn prepare(&mut self) {
         let entries:Vec<KBucketEntry> = {
-            let rt = self.rt();
-            let locked_rt = rt.lock().unwrap();
+            let rt = self.dht.borrow().rt();
             let mut kns = KClosestNodes::new(
-                &locked_rt,
+                &rt.borrow(),
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -103,7 +101,7 @@ impl Task for ValueLookupTask {
             kns.into()
         };
 
-        debug!("{}#{} initialized {} candidates for target {}",
+        log::debug!("{}#{} initialized {} candidates for target {}",
             self.task_name(),
             self.task_id(),
             entries.len(),
@@ -130,13 +128,10 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let cb = Consumer::new(move |_| {
-                next.lock().unwrap().set_sent();
-            });
-
-            if let Err(e) = self.send_call(target, msg, Some(cb)) {
-                error!("Sending 'find_value' request error: {}", e);
-            };
+            let handler = Handler::new(move |_|
+                next.borrow_mut().set_sent()
+            );
+            self.send_call(target, msg, Some(handler));
         }
     }
 
@@ -155,15 +150,8 @@ impl Task for ValueLookupTask {
 
         if let Some(value) = body.value() {
             if !self.result.update(value.clone(), false) {
-                warn!(
-                    "{}#{} dropping value response from {} due to ineligible value data",
-                    self.task_name(),
-                    self.task_id(),
-                    call.target_id()
-                );
                 return;
             }
-
             if self.result.is_empty() {
                 return;
             }
@@ -173,19 +161,13 @@ impl Task for ValueLookupTask {
             }
         } else {
             let nodes = body.nodes(self.network());
-
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
-                warn!("{}#{} received empty nodes list from {}, ignoring",
-                    self.task_name(),
-                    self.task_id(),
-                    call.target_id()
-                );
                 return;
             };
 
             self.add(nodes.to_vec());
 
-            debug!("{}#{} added {} additional candidates from response by target {}",
+            log::debug!("{}#{} added {} additional candidates from response by target {}",
                 self.task_name(),
                 self.task_id(),
                 nodes.len(),
@@ -206,6 +188,3 @@ impl Task for ValueLookupTask {
         LookupTask::is_done(self)
     }
 }
-
-unsafe impl Send for ValueLookupTask {}
-unsafe impl Sync for ValueLookupTask {}

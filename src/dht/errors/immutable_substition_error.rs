@@ -23,7 +23,3 @@ impl fmt::Display for ImmutableSubstitutionError {
         write!(f, "ImmutableSubstitutionError: Not owner of the peer")
      }
 }
-
-unsafe impl Sync for ImmutableSubstitutionError {}
-unsafe impl Send for ImmutableSubstitutionError {}
-

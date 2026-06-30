@@ -1,16 +1,17 @@
 use std::{
     fmt,
+    rc::Rc,
+    cell::RefCell,
     cmp::Ordering,
     collections::HashSet,
-    sync::{Arc, Mutex},
     net::{IpAddr, SocketAddr},
 };
 use indexmap::map::IndexMap;
 
 use crate::Id;
 use crate::dht::{
-    task::candidate_node::CandidateNode,
     rpc::rpc_target::NodeInfoLike,
+    task::candidate_node::CandidateNode,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -24,7 +25,7 @@ pub(crate) struct ClosestCandidates {
     capacity: usize,
     dedups_ids: HashSet<Id>,
     dedups_addrs: HashSet<DedupKey>,
-    closest: IndexMap<Id, Arc<Mutex<CandidateNode>>>,
+    closest: IndexMap<Id, Rc<RefCell<CandidateNode>>>,
 
     developer_mode: bool,
 }
@@ -79,10 +80,10 @@ impl ClosestCandidates {
                 continue;
             }
 
-            let cn = Arc::new(Mutex::new(item.into()));
-            self.closest.insert_sorted_by(id, cn, |_, a, _, b|
+            let cn = Rc::new(RefCell::new(item.into()));
+            self.closest.insert_sorted_by(id, cn, |_, a, _, b| {
                 Self::candidate_order(&self.target, a, b)
-            );
+            });
         }
 
         if !self.reached_capacity() {
@@ -91,7 +92,7 @@ impl ClosestCandidates {
 
         // shrink to fit.
         let mut filtered = self.closest.values().filter(|cn|
-            !cn.lock().unwrap().is_inflight()
+            !cn.borrow().is_inflight()
         ).cloned().collect::<Vec<_>>();
 
         filtered.sort_by(|a, b|
@@ -102,13 +103,13 @@ impl ClosestCandidates {
                 break;
             };
 
-            let locked_cn = cn.lock().unwrap();
-            let id = locked_cn.id();
+            let borrowed_cn = cn.borrow();
+            let id = borrowed_cn.id();
             if let Some(removed_cn) = self.closest.shift_remove(id) {
                 self.dedups_ids.remove(id);
 
-                let locked_cn = removed_cn.lock().unwrap();
-                let addr = locked_cn.socket_addr();
+                let borrowed = removed_cn.borrow();
+                let addr = borrowed.socket_addr();
                 let key = self.dedup_key(addr);
                 self.dedups_addrs.remove(&key);
 
@@ -118,24 +119,24 @@ impl ClosestCandidates {
 
     fn candidate_order(
         target: &Id,
-        a: &Arc<Mutex<CandidateNode>>,
-        b: &Arc<Mutex<CandidateNode>>
+        a: &Rc<RefCell<CandidateNode>>,
+        b: &Rc<RefCell<CandidateNode>>
     ) -> Ordering {
-        let id_a = a.lock().unwrap().id().clone();
-        let id_b = b.lock().unwrap().id().clone();
+        let id_a = a.borrow().id().clone();
+        let id_b = b.borrow().id().clone();
 
         match target.three_way_compare(&id_a, &id_b) {
             Ordering::Less      => Ordering::Less,
             Ordering::Greater   => Ordering::Greater,
             Ordering::Equal     => {
-                let pinged_a = a.lock().unwrap().pinged();
-                let pinged_b = b.lock().unwrap().pinged();
+                let pinged_a = a.borrow().pinged();
+                let pinged_b = b.borrow().pinged();
                 pinged_a.cmp(&pinged_b)
             }
         }
     }
 
-    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn remove(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         if self.is_empty() {
             return None;
         }
@@ -144,9 +145,9 @@ impl ClosestCandidates {
         self.closest.shift_remove(id)
     }
 
-    pub(crate) fn next(&self) -> Option<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn next(&self) -> Option<Rc<RefCell<CandidateNode>>> {
         self.closest.values().filter(|cn|
-            cn.lock().unwrap().is_eligible()
+            cn.borrow().is_eligible()
         ).min_by(|left, right|
             Self::candidate_order(&self.target, left, right)
         ).cloned()
@@ -155,20 +156,20 @@ impl ClosestCandidates {
     pub(crate) fn tail(&self) -> Id {
         match self.closest.last() {
             Some((id, _)) => id.clone(),
-            None => self.target.distance(&Id::MAX_ID)
+            _ => self.target.distance(&Id::MAX_ID)
         }
     }
 
     pub(crate) fn head(&self) -> Id {
         match self.closest.first() {
             Some((id, _)) => id.clone(),
-            None => self.target.distance(&Id::MAX_ID)
+            _ => self.target.distance(&Id::MAX_ID)
         }
     }
 
     #[cfg(test)]
     pub(crate) fn remove_if<F>(&mut self,  _filter: F)
-    where F: Fn(&Arc<Mutex<CandidateNode>>) -> bool
+    where F: Fn(&Rc<RefCell<CandidateNode>>) -> bool
     {
         if self.is_empty() {
             return;
@@ -184,7 +185,7 @@ impl ClosestCandidates {
     }
 
     #[cfg(test)]
-    pub(crate) fn candidate_node(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn candidate_node(&self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         self.closest.get(id).cloned()
     }
 }

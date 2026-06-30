@@ -27,6 +27,3 @@ impl fmt::Display for SeqNotExpected {
         write!(f, "Error: {}", self.error_string)
      }
 }
-
-unsafe impl Sync for SeqNotExpected {}
-unsafe impl Send for SeqNotExpected {}

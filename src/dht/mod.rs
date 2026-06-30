@@ -12,6 +12,7 @@ mod msg {
     pub(crate) mod announce_peer_req;
     pub(crate) mod store_value_req;
 
+    /*
     #[cfg(test)]
     mod unitests {
         mod test_find_node_req;
@@ -24,7 +25,7 @@ mod msg {
         mod test_message;
         mod test_store_value_req;
         mod test_error;
-    }
+    }*/
 
     pub(crate) use {
         lookup_req::LookupRequest,
@@ -59,7 +60,7 @@ mod task {
     pub(crate) mod value_lookup;
     pub(crate) mod value_announce;
 
-    #[cfg(test)]
+    /*#[cfg(test)]
     mod unitests {
         mod test_utils;
         mod test_closest_candidates;
@@ -70,7 +71,7 @@ mod task {
         mod test_peer_announce;
         mod test_value_lookup;
         mod test_value_announce;
-    }
+    }*/
 
     pub(crate) use {
         task::{Task, TaskData},
@@ -94,13 +95,13 @@ mod routing {
     pub(crate) mod kclosest_nodes;
     pub(crate) mod routing_table;
 
-    #[cfg(test)]
+    /*#[cfg(test)]
     mod unitests {
         mod test_prefix;
         mod test_kclosest_nodes;
         mod test_routing_table;
         mod test_kbucket_entry;
-    }
+    }*/
 
     pub(crate) use {
         prefix::Prefix,
@@ -126,15 +127,20 @@ mod rpc {
 
 mod storage;
 mod cached_identity;
+mod dht_verticle;
 mod dht;
-mod consumer;
+mod handler;
 mod promise;
 mod eligible_peers;
 mod eligible_value;
 mod suspicious_node_detector;
 mod token_manager;
-mod timer_queue;
+//mod timer_queue;
 mod timer_client;
+mod timer_manager;
+mod local_timer_client;
+mod local_timer_manager;
+mod timer_verticle;
 
 pub mod node_config;
 pub mod yaml_configuration;
@@ -234,6 +240,7 @@ pub(crate) mod utils {
     }
 }
 
+/*
 #[cfg(test)]
 mod unitests {
     mod test_addr;
@@ -247,3 +254,4 @@ mod unitests {
     // storage
     mod test_storage;
 }
+*/

@@ -1,13 +1,12 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex}
+    rc::Rc,
+    cell::RefCell
 };
-use log::{debug, error, warn};
-
 use crate::{Id, PeerInfo};
 use crate::dht::{
     dht::DHT,
-    consumer::Consumer,
+    handler::Handler,
     eligible_peers::EligiblePeers,
     rpc::RpcCall,
     routing::{
@@ -26,12 +25,12 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Arc<Mutex<DHT>>
+    dht: Rc<RefCell<DHT>>
 }
 
 impl PeerLookupTask {
     pub(crate) fn new(
-        dht: Arc<Mutex<DHT>>,
+        dht: Rc<RefCell<DHT>>,
         target: Id,
         expected_seq: i32,
         expected_count: usize,
@@ -55,7 +54,7 @@ impl LookupTask for PeerLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
@@ -85,16 +84,15 @@ impl Task for PeerLookupTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
     fn prepare(&mut self) {
         let entries: Vec<KBucketEntry> = {
-            let rt = self.rt();
-            let locked_rt = rt.lock().unwrap();
+            let rt = self.dht.borrow().rt();
             let mut kns = KClosestNodes::new(
-                &locked_rt,
+                &rt.borrow(),
                 self.target().clone(),
                 KBucket::MAX_ENTRIES *3
             );
@@ -103,7 +101,7 @@ impl Task for PeerLookupTask {
             kns.into()
         };
 
-        debug!("{}#{} initialized {} candidates for target {}",
+        log::debug!("{}#{} initialized {} candidates for target {}",
             self.task_name(),
             self.task_id(),
             entries.len(),
@@ -131,13 +129,10 @@ impl Task for PeerLookupTask {
                 self.result.expected_count() as i32,
             );
 
-            let cb = Consumer::new(move |_| {
-                next.lock().unwrap().set_sent();
+            let cb = Handler::new(move |_| {
+                next.borrow_mut().set_sent();
             });
-
-            if let Err(e) = self.send_call(target, msg, Some(cb)) {
-                error!("Sending 'findPeer' request error: {}", e);
-            };
+            self.send_call(target, msg, Some(cb));
         }
     }
 
@@ -156,7 +151,7 @@ impl Task for PeerLookupTask {
 
         if let Some(peers) = body.peers() {
             if peers.is_empty() {
-                warn!("{}#{} received empty peers from {}, ignoring",
+                log::warn!("{}#{} received empty peers from {}, ignoring",
                     self.task_name(),
                     self.task_id(),
                     call.target_id()
@@ -165,7 +160,7 @@ impl Task for PeerLookupTask {
             }
 
             if !self.result.add(peers.to_vec(), false) {
-                warn!(
+                log::warn!(
                     "{}#{} dropping peer response from {} due to ineligible peer data",
                     self.task_name(),
                     self.task_id(),
@@ -174,7 +169,7 @@ impl Task for PeerLookupTask {
                 return;
             }
 
-            debug!("{}#{} received {} peers from response by {}",
+            log::debug!("{}#{} received {} peers from response by {}",
                 self.task_name(),
                 self.task_id(),
                 peers.len(),
@@ -190,7 +185,7 @@ impl Task for PeerLookupTask {
         } else {
             let nodes = body.nodes(self.network());
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
-                warn!("{}#{} received empty nodes list from {}, ignoring",
+                log::warn!("{}#{} received empty nodes list from {}, ignoring",
                     self.task_name(),
                     self.task_id(),
                     call.target_id()
@@ -200,7 +195,7 @@ impl Task for PeerLookupTask {
 
             self.add(nodes.to_vec());
 
-            debug!("{}#{} added {} candidates from response by {}",
+            log::debug!("{}#{} added {} candidates from response by {}",
                 self.task_name(),
                 self.task_id(),
                 nodes.len(),
@@ -221,6 +216,3 @@ impl Task for PeerLookupTask {
         LookupTask::is_done(self)
     }
 }
-
-unsafe impl Send for PeerLookupTask {}
-unsafe impl Sync for PeerLookupTask {}

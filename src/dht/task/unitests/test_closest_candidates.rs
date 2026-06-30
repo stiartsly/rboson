@@ -85,7 +85,7 @@ mod tests {
 
         candidates.add(vec![keep.clone().into(), remove_a.clone().into(), remove_b.clone().into()]);
         candidates.remove_if(|cn| {
-            cn.lock().unwrap().socket_addr().port() != 39001
+            cn.borrow().socket_addr().port() != 39001
         });
 
         assert_eq!(candidates.size(), 1);
@@ -134,14 +134,14 @@ mod tests {
         ]);
 
         let closest_candidate = candidates.candidate_node(closest.id()).unwrap();
-        closest_candidate.lock().unwrap().set_sent();
+        closest_candidate.borrow_mut().set_sent();
 
         let middle_candidate = candidates.candidate_node(middle.id()).unwrap();
-        middle_candidate.lock().unwrap().set_sent();
-        middle_candidate.lock().unwrap().clear_sent();
+        middle_candidate.borrow_mut().set_sent();
+        middle_candidate.borrow_mut().clear_sent();
 
         let next = candidates.next().unwrap();
-        assert_eq!(next.lock().unwrap().id(), middle.id());
+        assert_eq!(next.borrow().id(), middle.id());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex}
+    rc::Rc,
+    cell::RefCell,
 };
 
 use crate::{Id, NodeInfo};
@@ -21,7 +22,7 @@ impl Into<Target> for KBucketEntry {
     }
 }
 
-impl Into<Target> for Arc<Mutex<CandidateNode>> {
+impl Into<Target> for Rc<RefCell<CandidateNode>> {
     fn into(self) -> Target {
         Target::Candidate(self)
     }
@@ -33,7 +34,6 @@ pub(crate) trait Reachability {
     fn set_reachable(&mut self, _: bool) {}
 }
 
-#[allow(unused)]
 pub(crate) trait NodeInfoLike {
     fn ni(&self) -> NodeInfo;
     fn id(&self) -> &Id;
@@ -42,7 +42,7 @@ pub(crate) trait NodeInfoLike {
 
 #[derive(Clone)]
 pub(crate) enum Target {
-    Candidate(Arc<Mutex<CandidateNode>>),
+    Candidate(Rc<RefCell<CandidateNode>>),
     KBucketEntry(KBucketEntry),
     NodeInfo(NodeInfo),
 }
@@ -51,7 +51,7 @@ impl Target {
     /*
     pub(crate) fn ni(&self) -> NodeInfo {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().ni(),
+            Target::Candidate(v) => v.borrow().ni(),
             Target::KBucketEntry(v) => v.ni(),
             Target::NodeInfo(v) => v.ni()
         }
@@ -60,7 +60,7 @@ impl Target {
 
     pub(crate) fn id(&self) -> Id {
         match self {
-            Target::Candidate(v) => *v.lock().unwrap().id(),
+            Target::Candidate(v) => *v.borrow().id(),
             Target::KBucketEntry(v) => *v.id(),
             Target::NodeInfo(v) => *v.id()
         }
@@ -69,7 +69,7 @@ impl Target {
     #[allow(unused)]
     pub(crate) fn socket_addr(&self) -> SocketAddr {
         match self {
-            Target::Candidate(v) => *v.lock().unwrap().socket_addr(),
+            Target::Candidate(v) => *v.borrow().socket_addr(),
             Target::KBucketEntry(v) => *v.socket_addr(),
             Target::NodeInfo(v) => *v.socket_addr()
         }
@@ -79,7 +79,7 @@ impl Target {
 impl Reachability for Target {
     fn is_reachable(&self) -> bool {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().is_reachable(),
+            Target::Candidate(v) => v.borrow().is_reachable(),
             Target::KBucketEntry(v) => v.is_reachable(),
             _ => false,
         }
@@ -87,7 +87,7 @@ impl Reachability for Target {
 
     fn is_unreachable(&self) -> bool {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().is_unreachable(),
+            Target::Candidate(v) => v.borrow().is_unreachable(),
             Target::KBucketEntry(v) => v.is_unreachable(),
             _ => false,
         }
@@ -95,7 +95,7 @@ impl Reachability for Target {
 
     fn set_reachable(&mut self, reachable: bool) {
         match self {
-            Target::Candidate(v) => v.lock().unwrap().set_reachable(reachable),
+            Target::Candidate(v) => v.borrow_mut().set_reachable(reachable),
             Target::KBucketEntry(v) => v.set_reachable(reachable),
             _ => {}
         }
@@ -103,7 +103,6 @@ impl Reachability for Target {
 }
 
 impl Reachability for NodeInfo {}
-
 impl NodeInfoLike for NodeInfo {
     fn ni(&self) -> NodeInfo {
         self.clone()

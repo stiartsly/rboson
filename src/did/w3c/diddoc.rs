@@ -399,7 +399,7 @@ impl PartialEq<Self> for DIDDocument {
 }
 
 impl TryFrom<&str> for DIDDocument {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Box<dyn Error>;
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e| {
@@ -409,7 +409,7 @@ impl TryFrom<&str> for DIDDocument {
 }
 
 impl FromStr for DIDDocument {
-	type Err = Box<dyn Error + Send + Sync>;
+	type Err = Box<dyn Error>;
 
 	fn from_str(s: &str) -> Result<Self> {
 		Self::try_from(s)
@@ -417,7 +417,7 @@ impl FromStr for DIDDocument {
 }
 
 impl TryFrom<&[u8]> for DIDDocument {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Box<dyn Error>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e| {

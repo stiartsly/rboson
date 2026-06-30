@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    rc::Rc,
+    cell::RefCell,
+};
 use crate::{
     Id,
     NodeInfo,
@@ -8,13 +11,13 @@ use crate::{
     }
 };
 
-fn make_candidate(distance: usize) -> Arc<Mutex<CandidateNode>> {
+fn make_candidate(distance: usize) -> Rc<RefCell<CandidateNode>> {
     let id = Id::try_from_bit_at(Id::BITS - distance).unwrap();
     let node = NodeInfo::new(
         id,
         format!("1.1.1.{}:39001", distance).parse().unwrap(),
     );
-    Arc::new(Mutex::new(node.into()))
+    Rc::new(RefCell::new(node.into()))
 }
 
 #[cfg(test)]
@@ -35,11 +38,11 @@ mod tests {
         let ids = closest
             .entries()
             .into_iter()
-            .map(|entry| entry.lock().unwrap().id().clone())
+            .map(|entry| entry.borrow().id().clone())
             .collect::<Vec<_>>();
         let expected = [1, 2, 3, 4]
             .into_iter()
-            .map(|distance| make_candidate(distance).lock().unwrap().id().clone())
+            .map(|distance| make_candidate(distance).borrow().id().clone())
             .collect::<Vec<_>>();
 
         assert!(closest.reached_capacity());
@@ -55,7 +58,7 @@ mod tests {
         let target = Id::MIN_ID;
         let mut closest = ClosestSet::new(target, 4);
         let candidate = make_candidate(2);
-        let id = candidate.lock().unwrap().id().clone();
+        let id = candidate.borrow().id().clone();
 
         assert!(closest.is_empty());
         assert!(closest.entry(&id).is_none());

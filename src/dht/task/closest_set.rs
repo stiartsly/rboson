@@ -1,7 +1,8 @@
 use std::{
     fmt,
     cmp::Ordering,
-    sync::{Arc, Mutex}
+    rc::Rc,
+    cell::RefCell,
 };
 use indexmap::map::IndexMap;
 use log::debug;
@@ -14,7 +15,7 @@ pub(crate) struct ClosestSet {
     target: Id,
     capacity: usize,
 
-    closest: IndexMap<Id, Arc<Mutex<CandidateNode>>>,
+    closest: IndexMap<Id, Rc<RefCell<CandidateNode>>>,
 
     insert_attempt_since_tail_modification: usize,
     insert_attempt_since_head_modification: usize,
@@ -50,16 +51,16 @@ impl ClosestSet {
 
     fn candidate_order(
         target: &Id,
-        left: &Arc<Mutex<CandidateNode>>,
-        right: &Arc<Mutex<CandidateNode>>,
+        left: &Rc<RefCell<CandidateNode>>,
+        right: &Rc<RefCell<CandidateNode>>,
     ) -> Ordering {
-        let left_id = left.lock().unwrap().id().clone();
-        let right_id = right.lock().unwrap().id().clone();
+        let left_id = left.borrow().id().clone();
+        let right_id = right.borrow().id().clone();
         target.three_way_compare(&left_id, &right_id)
     }
 
-    pub(crate) fn add(&mut self, cn: Arc<Mutex<CandidateNode>>) {
-        let id = cn.lock().unwrap().id().clone();
+    pub(crate) fn add(&mut self, cn: Rc<RefCell<CandidateNode>>) {
+        let id = cn.borrow().id().clone();
         self.closest.insert_sorted_by(id, cn, |_, left, _, right|
             Self::candidate_order(&self.target, left, right)
         );
@@ -90,7 +91,7 @@ impl ClosestSet {
         }
     }
 
-    pub(crate) fn entries(&self) -> Vec<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn entries(&self) -> Vec<Rc<RefCell<CandidateNode>>> {
         self.closest.values().cloned().collect()
     }
 
@@ -129,12 +130,12 @@ impl ClosestSet {
     }
 
     #[cfg(test)]
-    pub(crate) fn entry(&self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn entry(&self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         self.closest.get(id).cloned()
     }
 
     #[cfg(test)]
-    pub(crate) fn remove(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+    pub(crate) fn remove(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         if self.is_empty() {
             return None
         }

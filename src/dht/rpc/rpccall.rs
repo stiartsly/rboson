@@ -1,5 +1,5 @@
 use std::{
-    sync::Arc,
+    rc::Rc,
     time::SystemTime
 };
 use log::error;
@@ -40,8 +40,8 @@ pub(crate) struct RpcCall {
      // a tricky field to store req message before becoming Arc<Message> object.
     transient   : Option<Message>,
 
-    req         : Option<Arc<Message>>,
-    rsp         : Option<Arc<Message>>,
+    req         : Option<Rc<Message>>,
+    rsp         : Option<Rc<Message>>,
 
     sent_time   : Option<SystemTime>,
     resp_time   : Option<SystemTime>,
@@ -87,7 +87,7 @@ impl RpcCall {
         self.transient.take().expect("Transient message not set")
     }
 
-    pub(crate) fn set_request(&mut self, req: Arc<Message>) {
+    pub(crate) fn set_request(&mut self, req: Rc<Message>) {
         self.req = Some(req);
     }
 
@@ -105,10 +105,10 @@ impl RpcCall {
         }
     }
 
-    pub(crate) fn req(&self) -> Arc<Message> {
+    pub(crate) fn req(&self) -> Rc<Message> {
         self.req.as_ref().expect("Request not set").clone()
     }
-    pub(crate) fn rsp(&self) -> Option<Arc<Message>> {
+    pub(crate) fn rsp(&self) -> Option<Rc<Message>> {
         self.rsp.as_ref().cloned()
     }
 
@@ -145,14 +145,15 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
+    /*
     pub(crate) fn set_simple_listener<F>(
         &mut self,
         state_changed_cb: F
     ) -> &mut Self
-    where F: Fn(&RpcCall, State, State) + Send + 'static {
+    where F: Fn(&RpcCall, State, State) +'static {
         self.set_listener(CallListener::new(state_changed_cb));
         self
-    }
+    }*/
 
     pub(crate) fn update_state(&mut self, new_state: State) {
         let prev = self.state;
@@ -206,7 +207,7 @@ impl RpcCall {
         self.set_timeout_timer(10_000);
     }
 
-    pub(crate) fn respond(&mut self, rsp: Arc<Message>) {
+    pub(crate) fn respond(&mut self, rsp: Rc<Message>) {
         self.resp_time = Some(SystemTime::now());
         // rsp.set_associated_call(self.weak.clone());
 

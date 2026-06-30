@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    rc::Rc,
+    cell::RefCell
+};
 
 use crate::Id;
 use crate::dht::{
@@ -55,7 +58,7 @@ impl LookupTaskData {
 
 pub(crate) trait LookupTask {
     fn base_data(&self) -> &TaskData;
-    fn dht(&self) -> Arc<Mutex<DHT>>;
+    fn dht(&self) -> Rc<RefCell<DHT>>;
     fn data(&self) -> &LookupTaskData;
     fn data_mut(&mut self) -> &mut LookupTaskData;
 
@@ -69,7 +72,7 @@ pub(crate) trait LookupTask {
     }
 
     fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
-        let ni = self.dht().lock().unwrap().ni();
+        let ni = self.dht().borrow().ni();
         let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();
@@ -92,15 +95,15 @@ pub(crate) trait LookupTask {
         }
     }
 
-    fn remove_candidate(&mut self, id: &Id) -> Option<Arc<Mutex<CandidateNode>>> {
+    fn remove_candidate(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         self.data_mut().candidates.remove(id)
     }
 
-    fn next_candidate(&mut self) -> Option<Arc<Mutex<CandidateNode>>> {
+    fn next_candidate(&mut self) -> Option<Rc<RefCell<CandidateNode>>> {
        self.data_mut().candidates.next()
     }
 
-    fn add_closest(&mut self, cn: Arc<Mutex<CandidateNode>>) {
+    fn add_closest(&mut self, cn: Rc<RefCell<CandidateNode>>) {
         self.data_mut().closest.add(cn)
     }
 
@@ -142,11 +145,11 @@ pub(crate) trait LookupTask {
 
         match target {
             Target::Candidate(cn) => {
-                let unreachable = cn.lock().unwrap().is_unreachable();
+                let unreachable = cn.borrow().is_unreachable();
                 if unreachable {
                     self.remove_candidate(&id);
                 } else {
-                    cn.lock().unwrap().clear_sent();
+                    cn.borrow_mut().clear_sent();
                 }
             },
             _ => {
@@ -161,7 +164,7 @@ pub(crate) trait LookupTask {
             return;
         };
 
-        cn.lock().unwrap().set_replied();
+        cn.borrow_mut().set_replied();
 
         let rsp  = call.rsp().expect("no response set.");
         let body = rsp.body().expect("no message body in response.");
@@ -172,7 +175,7 @@ pub(crate) trait LookupTask {
             _ => return,
         };
 
-        cn.lock().unwrap().set_token(token);
+        cn.borrow_mut().set_token(token);
         self.add_closest(cn);
     }
 }

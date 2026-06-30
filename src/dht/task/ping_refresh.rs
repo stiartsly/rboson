@@ -1,16 +1,15 @@
 use std::{
     any::Any,
-    sync::{Arc, Mutex},
+    rc::Rc,
+    cell::RefCell,
     collections::VecDeque,
 };
-use log::{debug, error};
-
 use crate::dht::{
     dht::DHT,
-    consumer::Consumer,
     msg::msg,
-    task::{Task, TaskData},
     rpc::RpcCall,
+    handler::Handler,
+    task::{Task, TaskData},
     routing::{KBucket, KBucketEntry}
 };
 
@@ -18,23 +17,23 @@ use crate::dht::{
 pub(crate) struct PingRefreshTask {
     base_data: TaskData,
 
-    todo: Arc<Mutex<VecDeque<KBucketEntry>>>,
+    todo: Rc<RefCell<VecDeque<KBucketEntry>>>,
     // Whether to ping all nodes in the bucket, regardless of their ping status.
     check_all: bool,
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
-    dht: Arc<Mutex<DHT>>
+    dht: Rc<RefCell<DHT>>
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
 #[allow(unused)]
 impl PingRefreshTask {
-    pub(crate) fn new(dht: Arc<Mutex<DHT>>) -> Self {
+    pub(crate) fn new(dht: Rc<RefCell<DHT>>) -> Self {
         Self {
             base_data: TaskData::new(),
-            todo: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
+            todo: Rc::new(RefCell::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
             check_all           : false,
             remove_on_timeout   : false,
@@ -52,9 +51,9 @@ impl PingRefreshTask {
         self
     }
 
-    pub(crate) fn with_bucket(&mut self, bucket: Arc<Mutex<KBucket>>) -> &mut Self {
-        let mut bucket = bucket.lock().unwrap();
-        let mut todo   = self.todo.lock().unwrap();
+    pub(crate) fn with_bucket(&mut self, bucket: Rc<RefCell<KBucket>>) -> &mut Self {
+        let mut bucket = bucket.borrow_mut();
+        let mut todo   = self.todo.borrow_mut();
 
         bucket.update_refresh_time();
         for item in bucket.entries().iter() {
@@ -88,13 +87,13 @@ impl Task for PingRefreshTask {
         self
     }
 
-    fn dht(&self) -> Arc<Mutex<DHT>> {
+    fn dht(&self) -> Rc<RefCell<DHT>> {
         self.dht.clone()
     }
 
     fn call_timeout(&mut self, call: &RpcCall) {
         if !self.remove_on_timeout {
-            debug!(
+            log::debug!(
                 "{}#{} timeout for node {}, not removed (remove_on_timeout=false)",
                 self.task_name(),
                 self.task_id(),
@@ -107,45 +106,41 @@ impl Task for PingRefreshTask {
         // CAUSION:
         // Should not use the original bucket object,
         // because the routing table is dynamic, maybe already changed.
-        debug!("{}#{} removing timeout entry {} from routing table",
+        log::debug!("{}#{} removing timeout entry {} from routing table",
             self.task_name(),
             self.task_id(),
             target_id
         );
 
-        let rt = self.rt();
-        let mut locked_rt = rt.lock().unwrap();
-        locked_rt.remove(&target_id);
+        let rt = self.dht().borrow().rt();
+        let mut borrowed_rt = rt.borrow_mut();
+        borrowed_rt.remove(&target_id);
     }
 
     fn iterate(&mut self) {
         while self.can_dorequest() {
-            let kentry = match self.todo.lock().unwrap().front() {
+            let kentry = match self.todo.borrow().front() {
                 Some(v) => v.clone(),
                 _ => break,
             };
 
             if !self.check_all && !kentry.needs_ping() {
-                _ = self.todo.lock().unwrap().pop_front();
+                _ = self.todo.borrow_mut().pop_front();
                 continue;
             }
 
             let msg  = msg::ping_request();
             let todo = self.todo.clone();
-            let cb = Consumer::new(move |_| {
-                todo.lock().unwrap().pop_front();
+            let cb = Handler::new(move |_| {
+                todo.borrow_mut().pop_front();
             });
-            if let Err(e) = self.send_call(kentry.into(), msg, Some(cb)) {
-               error!("Error on sending 'PingRequest' message: {}", e);
-            }
+
+            self.send_call(kentry.into(), msg, Some(cb));
         }
     }
 
     fn is_done(&self) -> bool {
-        self.todo.lock().unwrap().is_empty() &&
+        self.todo.borrow().is_empty() &&
             self.data().is_done()
     }
 }
-
-unsafe impl Send for PingRefreshTask {}
-unsafe impl Sync for PingRefreshTask {}

@@ -23,7 +23,3 @@ impl fmt::Display for SeqNotMonotonic {
         write!(f, "SeqNotMonotonic: Sequence number not monotonic")
      }
 }
-
-unsafe impl Sync for SeqNotMonotonic {}
-unsafe impl Send for SeqNotMonotonic {}
-

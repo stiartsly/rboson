@@ -1,24 +1,22 @@
 use std::{
     fmt,
     any::Any,
-    sync::{Arc, Weak, Mutex},
-    sync::atomic::{Ordering, AtomicI32},
+    rc::{Rc, Weak},
+    cell::RefCell,
     collections::HashSet,
-    time::{SystemTime, Duration}
+    sync::atomic::{Ordering, AtomicI32},
 };
 use log::{warn, debug};
-
-use crate::core::{Network, Result};
+use crate::core::Network;
 use crate::dht::{
     dht::DHT,
     msg::Message,
-    consumer::Consumer,
+    handler::Handler,
     task::task_listener::TaskListener,
     rpc::{
-        Target,
-        RpcCall, rpccall::State as CallState,
+        Target, RpcCall, rpccall,
+        listener::Listener
     },
-    routing::RoutingTable,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,11 +51,6 @@ impl fmt::Display for State {
     }
 }
 
-/** Maximum concurrent RPC requests for normal tasks. */
-const MAX_CONCURRENT_RPC_REQUESTS: usize = 16;
-/** Maximum concurrent RPC requests for low-priority tasks. */
-const MAX_CONCURRENT_RPC_REQUESTS_LOW_PRIORITY: usize = 4;
-
 pub(crate) type TaskId = i32;
 static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
 fn next_taskid() -> TaskId {
@@ -72,19 +65,18 @@ fn next_taskid() -> TaskId {
 pub(crate) struct TaskData {
     taskid      : TaskId,
     task_name   : String,
-    low_priori  : bool,
     state       : State,
 
-    created     : SystemTime,
-    started     : SystemTime,
-    ended       : SystemTime,
+    //created     : SystemTime,
+    //started     : SystemTime,
+    //ended       : SystemTime,
 
     inflights   : HashSet<i32>,
     listener    : Option<TaskListener>,
-    end_handler : Option<Consumer<()>>,
+    end_handler : Option<Handler<()>>,
 
-    nested      : Mutex<Option<Box<dyn Task>>>,
-    cloned      : Option<Weak<Mutex<Box<dyn Task>>>>,
+    nested      : RefCell<Option<Box<dyn Task>>>,
+    cloned      : Option<Weak<RefCell<Box<dyn Task>>>>,
 }
 
 impl TaskData {
@@ -92,15 +84,11 @@ impl TaskData {
         Self {
             taskid      : next_taskid(),
             task_name   : String::new(),
-            low_priori  : false,
             state       : State::Initialized,
-            created     : SystemTime::now(),
-            started     : SystemTime::UNIX_EPOCH,
-            ended       : SystemTime::UNIX_EPOCH,
             inflights   : HashSet::new(),
             listener    : None,
             end_handler : None,
-            nested      : Mutex::new(None),
+            nested      : RefCell::new(None),
             cloned      : None,
 
         }
@@ -111,14 +99,14 @@ impl TaskData {
     }
 }
 
-pub(crate) trait Task: Send + Sync {
+pub(crate) trait Task {
     fn data(&self) -> &TaskData;
     fn data_mut(&mut self) -> &mut TaskData;
 
     fn as_task(&self) -> &dyn Task;
     fn as_any(&self) -> &dyn Any;
 
-    fn dht(&self) -> Arc<Mutex<DHT>>;
+    fn dht(&self) -> Rc<RefCell<DHT>>;
 
     fn task_id(&self) -> i32 {
         self.data().taskid
@@ -135,7 +123,7 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn with_nested(&mut self, nested: Box<dyn Task>) {
-        *self.data_mut().nested.lock().unwrap() = Some(nested);
+        *self.data_mut().nested.borrow_mut() = Some(nested);
     }
 
     fn set_state_if(&mut self, expected: &State, new_state: State) -> bool {
@@ -183,14 +171,14 @@ pub(crate) trait Task: Send + Sync {
     }
 
     fn nested(&self) -> Option<Box<dyn Task>> {
-        self.data().nested.lock().unwrap().take()
+        self.data().nested.borrow_mut().take()
     }
 
     fn inflight_size(&self) -> usize {
         self.data().inflights.len()
     }
 
-    fn with_ended_handler(&mut self, handler: Consumer<()>) {
+    fn with_ended_handler(&mut self, handler: Handler<()>) {
         self.data_mut().end_handler = Some(handler);
     }
 
@@ -213,11 +201,11 @@ pub(crate) trait Task: Send + Sync {
         self.data_mut().listener = Some(l);
     }
 
-    fn set_cloned(&mut self, weak: Weak<Mutex<Box<dyn Task>>>) {
+    fn set_cloned(&mut self, weak: Weak<RefCell<Box<dyn Task>>>) {
         self.data_mut().cloned = Some(weak);
     }
 
-    fn cloned(&self) -> Weak<Mutex<Box<dyn Task>>> {
+    fn cloned(&self) -> Weak<RefCell<Box<dyn Task>>> {
         self.data().cloned.clone().expect("Task instance is dropped")
     }
 
@@ -227,8 +215,6 @@ pub(crate) trait Task: Send + Sync {
                 self.task_name(),
                 self.task_id()
             );
-            self.data_mut().started = SystemTime::now();
-
             self.prepare();
 
             let listener = self.data_mut().listener.take();
@@ -262,15 +248,14 @@ pub(crate) trait Task: Send + Sync {
             return;
         }
 
-        // Ended nested one.
+        // Cancel nested one.
         {
-            let mut nested = self.data_mut().nested.lock().unwrap();
+            let mut nested = self.data_mut().nested.borrow_mut();
             if let Some(nested) = nested.as_mut() {
                 nested.cancel();
             }
         }
 
-        self.data_mut().ended = SystemTime::now();
         debug!("Task {}#{} canceled",
             self.task_name(),
             self.task_id()
@@ -278,7 +263,7 @@ pub(crate) trait Task: Send + Sync {
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
-            ended.accept(&());
+            ended.cb(&());
         }
 
         let listener = self.data_mut().listener.take();
@@ -294,7 +279,6 @@ pub(crate) trait Task: Send + Sync {
             return;
         }
 
-        self.data_mut().ended = SystemTime::now();
         debug!("Task {}#{} completed",
             self.task_name(),
             self.task_id()
@@ -302,7 +286,7 @@ pub(crate) trait Task: Send + Sync {
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
-            ended.accept(&());
+            ended.cb(&());
         }
 
         let listener = self.data_mut().listener.take();
@@ -337,7 +321,7 @@ pub(crate) trait Task: Send + Sync {
     fn is_done(&self) -> bool {
         self.data().inflights.is_empty()
     }
-
+/*
     #[allow(unused)]
     fn started_time(&self) -> SystemTime {
         self.data().started
@@ -359,16 +343,10 @@ pub(crate) trait Task: Send + Sync {
     fn age(&self) -> Option<Duration> {
         self.data().created.elapsed().ok()
     }
-
+*/
     fn can_dorequest(&self) -> bool {
-        let limit = if self.data().low_priori {
-            MAX_CONCURRENT_RPC_REQUESTS_LOW_PRIORITY
-        } else {
-            MAX_CONCURRENT_RPC_REQUESTS
-        };
-
         self.is_running() &&
-            self.inflight_size() < limit
+            self.inflight_size() < 16
     }
 
     fn prepare(&mut self) {}
@@ -379,42 +357,37 @@ pub(crate) trait Task: Send + Sync {
     fn call_error(&mut self, _: &RpcCall) {}
     fn call_timeout(&mut self, _: &RpcCall) {}
 
-    fn send_call(&mut self, target: Target, msg: Message,
-        consumer: Option<Consumer<()>>) -> Result<()> {
-
+    fn send_call(&mut self, target: Target, msg: Message, handler: Option<Handler<()>>) {
         if !self.can_dorequest() {
-            return Ok(())
+            return;
         }
 
-        let mut call = RpcCall::new(target, msg);
-        let task = self.cloned();
-        let task = task.upgrade().expect("Task instance is droppped");
-        call.set_simple_listener(move |c, _, state| {
-            let task = task.clone();
-            if task.lock().unwrap().is_ended() {
+        let task = self.cloned().upgrade().expect("Task instance is dropped");
+        let listener = Listener::new(move |c, _, state| {
+            if task.borrow().is_ended() {
                 debug!("{}#{} call to {} state changed ignored due to the task is terminated",
-                    task.lock().unwrap().task_name(),
-                    task.lock().unwrap().task_id(),
+                    task.borrow().task_name(),
+                    task.borrow().task_id(),
                     c.target_id());
                 return;
             }
 
-            let mut task = task.lock().unwrap();
+            let mut task = task.borrow_mut();
             match state {
-                CallState::Sent => task.call_sent(c),
-                CallState::Responded => {
+                rpccall::State::Sent => task.call_sent(c),
+                rpccall::State::Responded => {
                     task.data_mut().inflights.remove(&c.txid());
                     if !task.is_ended() && c.rsp().is_some() {
                         task.call_responded(c);
                     }
                 },
-                CallState::Err => {
+                rpccall::State::Err => {
                     task.data_mut().inflights.remove(&c.txid());
                     if !task.is_ended() {
                         task.call_error(c);
                     }
                 },
-                CallState::Timeout => {
+                rpccall::State::Timeout => {
                     task.data_mut().inflights.remove(&c.txid());
                     if !task.is_ended() {
                         task.call_timeout(c);
@@ -423,38 +396,28 @@ pub(crate) trait Task: Send + Sync {
                 _ => {},
             }
 
-            if state >= CallState::Stalled {
+            if state >= rpccall::State::Stalled {
                 task.try_iterate();
             }
         });
 
-        if let Some(handler) = consumer {
-            handler.accept(&());
-        };
+        let mut call = RpcCall::new(target, msg);
+        call.set_listener(listener);
 
-        let txid = call.txid();
-        self.data_mut().inflights.insert(txid);
+        handler.map(|v| v.cb(&()));
+        self.data_mut().inflights.insert(call.txid());
 
         let dht = self.dht();
-        tokio::spawn(async move {
-            let _ = dht.lock().unwrap()
-                .rpc_server()
-                .lock().unwrap()
+        let _ = tokio::task::spawn_local(async move {
+            let rs = dht.borrow().rs();
+            let _ = rs.borrow_mut()
                 .send_call(call)
-                .map_err(|e| {
-                    use log::error;
-                    error!(">>> task::spawn :{}", e);
-                });
+                .map_err(|e| log::error!("{e}"));
         });
-        Ok(())
-    }
-
-    fn rt(&self) -> Arc<Mutex<RoutingTable>>{
-        self.dht().lock().unwrap().rt().clone()
     }
 
     fn network(&self) -> Network {
-        self.dht().lock().unwrap().network()
+        self.dht().borrow().network()
     }
 }
 

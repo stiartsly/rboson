@@ -1,5 +1,6 @@
 use std::{
-    sync::{Arc, Mutex},
+    rc::Rc,
+    cell::RefCell,
     cmp::Ordering
 };
 
@@ -15,7 +16,7 @@ use crate::dht::{
 
 pub(crate) struct KClosestNodes {
     local_id: Id,
-    buckets : Vec<Arc<Mutex<KBucket>>>,
+    buckets : Vec<Rc<RefCell<KBucket>>>,
     target  : Id,
     capacity: usize,
     entries : Vec<KBucketEntry>,
@@ -114,8 +115,8 @@ impl KClosestNodes {
             } else {
                 let low_bucket  = low_bucket.unwrap();
                 let high_bucket = high_bucket.unwrap();
-                let low_prefix  = low_bucket.lock().unwrap().prefix().clone();
-                let high_prefix = high_bucket.lock().unwrap().prefix().clone();
+                let low_prefix  = low_bucket.borrow().prefix().clone();
+                let high_prefix = high_bucket.borrow().prefix().clone();
 
                 let ordering = self.target.three_way_compare(
                     &low_prefix.last(),
@@ -142,8 +143,8 @@ impl KClosestNodes {
         self.shave();
     }
 
-    fn add_entries(&mut self, bucket: &Arc<Mutex<KBucket>>) {
-        let bucket  = bucket.lock().unwrap();
+    fn add_entries(&mut self, bucket: &Rc<RefCell<KBucket>>) {
+        let bucket  = bucket.borrow();
         let entries = bucket.entries();
         for item in entries {
             if (self.filter)(&item) {

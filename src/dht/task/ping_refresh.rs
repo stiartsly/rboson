@@ -52,20 +52,21 @@ impl PingRefreshTask {
     }
 
     pub(crate) fn with_bucket(&mut self, bucket: Rc<RefCell<KBucket>>) -> &mut Self {
-        let mut bucket = bucket.borrow_mut();
-        let mut todo   = self.todo.borrow_mut();
+        let mut borrowed_bucket = bucket.borrow_mut();
+        let mut borrowed_todo   = self.todo.borrow_mut();
 
-        bucket.update_refresh_time();
-        for item in bucket.entries().iter() {
+        borrowed_bucket.update_refresh_time();
+        for item in borrowed_bucket.entries().iter() {
             if self.check_all || self.remove_on_timeout || item.needs_ping() {
-                if todo.len() >= MAX_TODO_ENTRIES {
+                if borrowed_todo.len() >= MAX_TODO_ENTRIES {
                     break;
                 }
-                todo.push_back(item.clone());
+                borrowed_todo.push_back(item.clone());
             }
         }
-        drop(bucket);
-        drop(todo);
+        drop(borrowed_bucket);
+        drop(borrowed_todo);
+
         self
     }
 }

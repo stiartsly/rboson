@@ -13,10 +13,9 @@ use std::{
 };
 use futures::stream::{
     FuturesUnordered,
-    FuturesOrdered,
     StreamExt
 };
-use log::{debug, info, warn, error};
+use log::{trace, debug, info, warn, error};
 
 use crate::{
     Id, Network,
@@ -254,7 +253,7 @@ impl DHT {
         };
     }
 
-    fn try_ping_maintenance(&mut self,
+    fn try_ping_maintenance(&self,
         bucket: Rc<RefCell<KBucket>>,
         check_all: bool,
         remove_on_timeout: bool,
@@ -278,6 +277,7 @@ impl DHT {
             return;
         }
 
+        /*
         if need_refresh || need_replacement  {
             let mut task = Box::new(PingRefreshTask::new(self.dht()));
             task.with_name(name);
@@ -295,6 +295,7 @@ impl DHT {
                 self.task_man.add(task);
             }
         }
+        */
     }
 
     pub(crate) fn random_lookup(&self) {
@@ -343,7 +344,7 @@ impl DHT {
             ids.as_slice(),
             Handler::new(move |bucket: &Rc<RefCell<KBucket>>| {
                 let prefix = bucket.borrow().prefix().clone();
-                dht.borrow_mut().try_ping_maintenance(bucket.clone(), false, false, false,
+                dht.borrow().try_ping_maintenance(bucket.clone(), false, false, false,
                         format!("Routing table maintenance: refreshing bucket {}", prefix)
                     );
             })
@@ -757,12 +758,22 @@ impl DHT {
     }
 
     fn on_request(&mut self, msg: &Message) {
-        debug!("Received a {} request message from {}/{}, txid {}",
-            msg.method(),
-            msg.remote_addr(),
-            msg.remote_id(),
-            msg.txid()
-        );
+        if msg.method() == Method::Ping {
+            trace!("Received a {} request message from {}/{}, txid {}",
+                msg.method(),
+                msg.remote_addr(),
+                msg.remote_id(),
+                msg.txid()
+            );
+        } else {
+            debug!("Received a {} request message from {}/{}, txid {}",
+                msg.method(),
+                msg.remote_addr(),
+                msg.remote_id(),
+                msg.txid()
+            );
+        }
+
         let method = msg.method();
         match method {
             Method::Ping        => self.on_ping(msg),
@@ -776,12 +787,21 @@ impl DHT {
     }
 
     fn on_response(&mut self, msg: &Message) {
-        debug!("Received a {} response message from {}/{}, txid {}",
-            msg.method(),
-            msg.remote_addr(),
-            msg.remote_id(),
-            msg.txid()
-        );
+        if msg.method() == Method::Ping {
+            trace!("Received a {} response message from {}/{}, txid {}",
+                msg.method(),
+                msg.remote_addr(),
+                msg.remote_id(),
+                msg.txid()
+            );
+        } else {
+            debug!("Received a {} response message from {}/{}, txid {}",
+                msg.method(),
+                msg.remote_addr(),
+                msg.remote_id(),
+                msg.txid()
+            );
+        }
     }
 
     fn on_error(&mut self, msg: &Message) {
@@ -1191,33 +1211,43 @@ impl DHT {
             }
         }
 
-        let (entry_sz, bucket_sz) = {
-            let rt = dht.borrow().rt();
-            let borrowed_rt = rt.borrow();
-            (borrowed_rt.number_of_entries(), borrowed_rt.size())
+        let cloned_dht = dht.clone();
+        let fill_home_bucket = async move || {
+            let rt = cloned_dht.borrow().rt();
+            let entry_sz = rt.borrow().number_of_entries();
+
+            let (promise, future) = Promise::<()>::pair();
+            if nodes.is_empty() && entry_sz == 0 {
+                promise.complete(Ok(()));
+                return future;
+            }
+
+            cloned_dht.borrow().fill_home_bucket(nodes, promise);
+            future
         };
 
-        let mut ordered = FuturesOrdered::new();
-        if !(nodes.is_empty() && entry_sz == 0) {
-            let (promise, future) = Promise::<()>::pair();
-            dht.borrow().fill_home_bucket(nodes, promise);
-            ordered.push_back(Box::pin(future));
-        }
+        let _ = fill_home_bucket().await;
 
-        if bucket_sz > 1 {
-            let (promise, future) = Promise::<()>::pair();
-            dht.borrow().fill_buckets(promise);
-            ordered.push_back(Box::pin(future));
-        }
-        while let Some(result) = ordered.next().await {
-            let _ = result;
-        }
+        let cloned_dht = dht.clone();
+        let fill_buckets = async move || {
+            let rt = cloned_dht.borrow().rt();
+            let bucket_sz = rt.borrow().size();
 
-        {
-            let mut dht_ref = dht.borrow_mut();
-            dht_ref.bootstrapping.store(false, Ordering::Relaxed);
-            dht_ref.last_bootstrap = SystemTime::now();
-        }
+            let (promise, future) = Promise::<()>::pair();
+            if bucket_sz <= 1 {
+                promise.complete(Ok(()));
+                return future;
+            }
+
+            cloned_dht.borrow().fill_buckets(promise);
+            future
+        };
+        let _ = fill_buckets().await;
+
+        let mut borrowd_dht = dht.borrow_mut();
+        borrowd_dht.bootstrapping.store(false, Ordering::Relaxed);
+        borrowd_dht.last_bootstrap = SystemTime::now();
+
         info!("DHT {}:{} bootstrapping finished", network, self_id);
     }
 

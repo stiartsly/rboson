@@ -34,8 +34,8 @@ use crate::dht::{
     lookup_option::LookupOption,
     promise::Promise,
     storage::data_storage::DataStorage,
-    local_timer_client::{TimerClient, TimerCmd},
-    local_timer_manager::TimerManager,
+    timer_client::{LocalTimerClient as TimerClient, LocalTimerCmd as TimerCmd},
+    timer_manager::LocalTimerManager as TimerManager,
     token_manager::TokenManager,
     rpc::rpc_server::RpcServer,
 };
@@ -432,7 +432,7 @@ impl Verticle {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
                 self.timer_manager.add_timer(timer_id, delay, interval, cb),
 
-            TimerCmd::Cancel { timer_id } =>
+            TimerCmd::_Cancel { timer_id } =>
                 self.timer_manager.cancel_timer(timer_id),
 
             TimerCmd::Stop { complete } => {

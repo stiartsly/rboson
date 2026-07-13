@@ -36,11 +36,11 @@ impl<T: 'static> AsyncHandler<T> {
 }
 
 type LocalBoxFuture = futures::future::LocalBoxFuture<'static, ()>;
-pub(crate) struct LocalAsyncHandler<T> {
+pub(crate) struct LocalHandler<T> {
     cb: Box<dyn Fn(T) -> LocalBoxFuture + 'static >
 }
 
-impl<T: 'static> LocalAsyncHandler<T> {
+impl<T: 'static> LocalHandler<T> {
     pub(crate) fn new<F>(handler: F) -> Self
     where
         F: Fn(T) -> LocalBoxFuture + 'static
@@ -50,6 +50,22 @@ impl<T: 'static> LocalAsyncHandler<T> {
 
     pub(crate) async fn cb(&self, value: T) {
         (self.cb)(value).await;
+    }
+}
+
+pub(crate) trait Callable<T: 'static>: 'static {
+    fn call_boxed(&self, value: T) -> futures::future::LocalBoxFuture<'static, ()>;
+}
+
+impl<T: 'static> Callable<T> for AsyncHandler<T> {
+    fn call_boxed(&self, value: T) -> futures::future::LocalBoxFuture<'static, ()> {
+        (self.cb)(value)
+    }
+}
+
+impl<T: 'static> Callable<T> for LocalHandler<T> {
+    fn call_boxed(&self, value: T) -> futures::future::LocalBoxFuture<'static, ()> {
+        (self.cb)(value)
     }
 }
 

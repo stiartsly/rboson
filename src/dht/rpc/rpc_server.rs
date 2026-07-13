@@ -27,7 +27,7 @@ use crate::{
     },
     dht::{
         suspicious_node_detector::SuspiciousNodeDetector,
-        handler::{Handler, LocalAsyncHandler as AsyncHandler},
+        handler::{Handler, LocalHandler as AsyncHandler},
         rpc::RpcCall,
         msg::Message
     }

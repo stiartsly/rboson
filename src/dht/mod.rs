@@ -135,11 +135,8 @@ mod eligible_peers;
 mod eligible_value;
 mod suspicious_node_detector;
 mod token_manager;
-//mod timer_queue;
 mod timer_client;
 mod timer_manager;
-mod local_timer_client;
-mod local_timer_manager;
 mod timer_verticle;
 
 pub mod node_config;

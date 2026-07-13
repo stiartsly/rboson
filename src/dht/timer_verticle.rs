@@ -5,8 +5,11 @@ use tokio::{
 };
 use crate::errors::Result;
 use crate::dht::{
-    timer_manager::TimerManager,
-    timer_client::{TimerClient, TimerCmd},
+    timer_manager::AsyncTimerManager as TimerManager,
+    timer_client::{
+        AsyncTimerClient as TimerClient,
+        AsyncTimerCmd as TimerCmd,
+    },
     handler::AsyncHandler,
 };
 
@@ -69,7 +72,7 @@ impl Verticle {
         match cmd {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
                 self.timer_manager.add_timer(timer_id, delay, interval, cb),
-            TimerCmd::Cancel { id: timer_id } =>
+            TimerCmd::_Cancel { timer_id } =>
                 self.timer_manager.cancel_timer(timer_id),
             TimerCmd::Stop { complete } => {
                 self.quit = true;

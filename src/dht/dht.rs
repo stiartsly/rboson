@@ -28,11 +28,11 @@ use crate::dht::{
     ConnectionStatus,
     ConnectionStatusListener,
     promise::Promise,
-    handler::{Handler, LocalAsyncHandler as AsyncHandler,},
+    handler::{Handler, LocalHandler as AsyncHandler,},
     token_manager::TokenManager,
     lookup_option::LookupOption,
     dht_verticle::VerticleOptions,
-    local_timer_client::TimerClient,
+    timer_client::LocalTimerClient as TimerClient,
     storage::data_storage::DataStorage,
     suspicious_node_detector::SuspiciousNodeDetector,
     rpc::{

@@ -8,22 +8,23 @@ use tokio_util::time::{
     delay_queue::Key,
     DelayQueue,
 };
-use crate::dht::handler::AsyncHandler;
+use crate::dht::handler::{AsyncHandler, LocalHandler, Callable};
+
 pub(crate) type TimerId = u64;
 
-struct TimerEntry {
+struct GenericTimerEntry<H> {
     interval    : Option<Duration>,
-    handler     : AsyncHandler<()>,
+    handler     : H,
     key         : Key,
 }
 
-pub struct TimerManager {
+pub struct GenericTimerManager<H> {
     next_id     : AtomicU64,
     delay_queue : DelayQueue<TimerId>,
-    timers      : HashMap<TimerId, TimerEntry>,
+    timers      : HashMap<TimerId, GenericTimerEntry<H>>,
 }
 
-impl TimerManager {
+impl<H: Callable<()>> GenericTimerManager<H> {
     pub fn new() -> Self {
         Self {
             next_id: AtomicU64::new(1),
@@ -36,14 +37,14 @@ impl TimerManager {
         id      : TimerId,
         delay   : Duration,
         interval: Option<Duration>,
-        handler : AsyncHandler<()>
+        handler : H
     ) {
         if let Some(existing) = self.timers.remove(&id) {
             let _ = self.delay_queue.remove(&existing.key);
         }
 
         let key = self.delay_queue.insert(id, delay);
-        let entry = TimerEntry {handler, interval, key};
+        let entry = GenericTimerEntry { handler, interval, key };
         self.timers.insert(id, entry);
     }
 
@@ -51,7 +52,7 @@ impl TimerManager {
         id      : TimerId,
         delay   : u64,
         interval: Option<u64>,
-        cb      : AsyncHandler<()>
+        cb      : H
     ) {
         let delay = Duration::from_millis(delay);
         let interval = interval.map(Duration::from_millis);
@@ -74,11 +75,10 @@ impl TimerManager {
             return;
         };
 
-        let handler = entry.handler;
-        handler.cb(());
+        entry.handler.call_boxed(()).await;
 
         if let Some(interval) = entry.interval {
-            self._add_timer(id, interval, Some(interval), handler);
+            self._add_timer(id, interval, Some(interval), entry.handler);
         }
     }
 
@@ -91,3 +91,9 @@ impl TimerManager {
         self.timers.is_empty()
     }
 }
+
+// Alias for standard (thread-safe Send) timer manager
+pub(crate) type AsyncTimerManager = GenericTimerManager<AsyncHandler<()>>;
+
+// Alias for local (not Send) timer manager
+pub(crate) type LocalTimerManager = GenericTimerManager<LocalHandler<()>>;

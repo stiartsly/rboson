@@ -15,7 +15,7 @@ use futures::{
     },
     FutureExt,
 };
-use log::{error, warn};
+use log::{error, info};
 use tokio::{
     runtime,
     sync::{mpsc,oneshot},
@@ -83,7 +83,6 @@ pub(crate) struct VerticleClient {
     command_tx  : mpsc::UnboundedSender<Cmd>,
     handle      : Option<JoinHandle<()>>,
 }
-
 type CmdResult<T> = StdResult<T, String>;
 
 impl VerticleClient {
@@ -210,23 +209,17 @@ impl VerticleClient {
     }
 
     pub(crate) async fn stop(&mut self) {
-        println!(">>>>>> stopping dht verticle ...... ");
-        let (promise, future) = Promise::<()>::pair();
+        info!("Stopping DHT verticle");
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(
-            Cmd::StopAll { complete: tx }
-        ).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+        if self.command_tx.send(Cmd::StopAll { complete: tx }).is_err() {
             return;
         }
-        self.complete_promise(promise, rx).await;
-        let _ = future.await;
+        let _ = rx.await;
 
-        let handle = self.handle.take();
-        if let Some(handle) = handle {
+        if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
-        println!(">>>>>> dht verticle stopped...... ");
+        info!("DHT verticle stopped");
     }
 }
 
@@ -323,12 +316,11 @@ impl Verticle {
         self.dht.borrow().ni()
     }
 
-    async fn handle_dht_cmd(
+    fn handle_dht_cmd(
         &mut self,
         cmd: Cmd,
         pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output=()>>>>
-    ) -> Result<()> {
-        println!(">>>>>> handle_dht_cmd >>>>");
+    ) {
         match cmd {
             Cmd::Bootstrap {
                 nodes,
@@ -416,15 +408,11 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::StopAll {
-                complete
-            } => {
-                println!(">>>>>> Verticle thread:: stopping dht verticle ...... ");
+            Cmd::StopAll { complete } => {
                 self.quit = true;
                 let _ = complete.send(Ok(()));
             }
         }
-        Ok(())
     }
 
     fn handle_timer_cmd(&mut self, cmd: TimerCmd) {
@@ -444,7 +432,7 @@ impl Verticle {
 
     async fn run_loop(mut self) {
         let mut buf = vec![0u8; 2048];
-        let mut pending_cmds = FuturesUnordered::<Pin<Box<dyn Future<Output=()>>>>::new();
+        let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output=()>>>>::new();
 
         let cloned_server = self.dht.borrow().rs();
         let borrowed_server = cloned_server.borrow();
@@ -459,35 +447,34 @@ impl Verticle {
         loop {
             tokio::select! {
                 Some(cmd) = self.cmd_rx.recv() => {
-                    if let Err(e) = self.handle_dht_cmd(cmd, &mut pending_cmds).await {
-                        warn!("Error handling command: {e}");
-                    }
+                    self.handle_dht_cmd(cmd, &mut pendings);
                 }
                 Some(cmd) = self.tmr_rx.recv() => {
                     self.handle_timer_cmd(cmd);
                 }
                 packet = socket.recv_from(&mut buf) => {
-                    if let Err(e) = packet.as_ref() {
-                        error!("Receiving data error: {e}");
-                    }
-                    let (len, from) = packet.unwrap();
-                    let cloned_server = self.dht.borrow().rs();
-                    RpcServer::handle_packet(cloned_server, &buf[..len], from).await;
+                    let Ok((len, from)) = packet else {
+                        error!("Receiving data error: {:?}", packet.err());
+                        continue;
+                    };
+                    let rs = self.dht.borrow().rs();
+                    RpcServer::handle_packet(rs, &buf[..len], from).await;
+
                 },
                 Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {
                     self.timer_manager.fire_expired(timer_id).await;
                 }
-                Some(_) = pending_cmds.next() => {},
+                Some(_) = pendings.next() => {},
             }
 
             if self.quit {
-                println!(">>>>>>>>>  quit the dht verticle loop ...... ");
                 break;
             }
         }
 
         self.timer_manager.stop_all();
         self.dht.borrow_mut().stop().await;
+        info!("DHT verticle exited run_loop");
     }
 }
 

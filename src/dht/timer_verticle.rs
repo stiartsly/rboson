@@ -1,16 +1,16 @@
+use std::thread::JoinHandle;
 use tokio::{
     runtime,
-    task::{self, JoinHandle},
     sync::mpsc::{self, UnboundedSender}
 };
 use crate::errors::Result;
 use crate::dht::{
+    handler::AsyncHandler,
     timer_manager::AsyncTimerManager as TimerManager,
     timer_client::{
         AsyncTimerClient as TimerClient,
         AsyncTimerCmd as TimerCmd,
-    },
-    handler::AsyncHandler,
+    }
 };
 
 pub(crate) type TimerId = u64;
@@ -40,10 +40,10 @@ impl VerticleClient {
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {
-        self.timer_client.stop().await;
+        self.timer_client.stop().await?;
 
         if let Some(handle) = self.handle.take() {
-            let _ = handle.await;
+            let _ = handle.join();
         }
         Ok(())
     }
@@ -85,8 +85,8 @@ impl Verticle {
     async fn run_loop(&mut self) {
         loop {
             tokio::select! {
-                Some(timer_cmd) = self.receiver.recv() => {
-                    self.handle_timer_cmd(timer_cmd);
+                Some(cmd) = self.receiver.recv() => {
+                    self.handle_timer_cmd(cmd);
                 }
 
                 Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {
@@ -101,17 +101,23 @@ impl Verticle {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct VerticleOptions {}
+
 pub(crate) fn deploy(option: VerticleOptions) -> Result<VerticleClient> {
     let (sender, receiver) = mpsc::unbounded_channel::<TimerCmd>();
-    let handle = task::spawn_blocking(move || {
-        runtime::Builder::new_current_thread()
+    let handle = std::thread::spawn(move || {
+        let rt = runtime::Builder::new_current_thread()
             .enable_time()
-            .build().expect("timer runtime should build")
-            .block_on(async move {
-                let mut verticle = Verticle::new(option, receiver);
-                verticle.run_loop().await;
-            });
+            .enable_io()
+            .build()
+            .expect("dht verticle runtime should build");
+
+        let local = tokio::task::LocalSet::new();
+        rt.block_on(local.run_until(async move {
+            let mut vert = Verticle::new(option, receiver);
+            vert.run_loop().await;
+        }));
     });
     Ok(VerticleClient::new(sender, handle))
 }

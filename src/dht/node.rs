@@ -6,11 +6,10 @@ use std::{
     time::{Duration, SystemTime}
 };
 use futures::{
-    future::LocalBoxFuture,
     stream::FuturesUnordered,
-    FutureExt,
     StreamExt
 };
+use tokio::task;
 use log::{warn, info, debug};
 
 use crate::{
@@ -79,7 +78,7 @@ pub struct Node {
 
 impl Node {
     pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
-        Self::check_config(&cfg)?;
+        Self::check_config(cfg.as_ref())?;
 
         // Setup logger before any log is generated.
         logger::setup(
@@ -109,7 +108,7 @@ impl Node {
 
         // Cache the node id to a file for quick access in the future.
         let bs58 = identity.id().to_base58();
-        let path = data_dir.clone().join("id");
+        let path = data_dir.join("id");
         File::create(&path).map_err(|e| IOError::new(
                 format!("Creating node id cache file error: {e}")))?
             .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
@@ -137,7 +136,7 @@ impl Node {
         }))
     }
 
-    fn check_config(cfg: &Box<dyn NodeConfig>) -> Result<()> {
+    fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
         if cfg.host4().is_none() && cfg.host6().is_none() {
             return Err(ArgumentError::new(
                 "At least one host/address must be specified"));
@@ -200,9 +199,10 @@ impl Node {
     }
 
     async fn persistent_announce(self: Arc<Self>) {
-        info!("Re-announce the persistent values and peers...");
+        info!("Re-announcing persistent values and peers...");
 
         let storage = self.storage.clone();
+        let mut handles = FuturesUnordered::<task::JoinHandle<()>>::new();
 
         // Re-announce values
         let before = crate::as_ms!(SystemTime::now()) as u64
@@ -213,25 +213,22 @@ impl Node {
                 .get_values_announced_before(true, before) {
             Ok(v) => v,
             Err(e) => {
-                warn!("Failed to re-announce the values: {}", e);
+                warn!("Failed to fetch values for re-announcement: {}", e);
                 Vec::new()
             }
         };
 
-        let mut futures = FuturesUnordered::<LocalBoxFuture<'static, ()>>::new();
-
         for value in values {
-            info!("Re-announce the value: {}", value.id());
-
+            info!("Re-announcing value: {}", value.id());
             let node = self.clone();
-            let task: LocalBoxFuture<'static, ()> = async move {
+            let handle = task::spawn_local(async move {
                 let value_id = value.id();
                 match node.store_value(&value, value.sequence_number(), true).await {
-                    Ok(_) => info!("Re-announce the value {} success", value_id),
-                    Err(e) => warn!("Re-announce the value {} failed: {}", value_id, e),
+                    Ok(_)  => info!("Re-announced value {} successfully", value_id),
+                    Err(e) => warn!("Failed to re-announce value {}: {}", value_id, e),
                 }
-            }.boxed_local();
-            futures.push(task);
+            });
+            handles.push(handle);
         }
 
         // Re-announce peers
@@ -239,29 +236,31 @@ impl Node {
             - MAX_PEER_AGE.as_millis() as u64
             + RE_ANNOUNCE_INTERVAL * 2;
 
-        let peers = match storage.lock().unwrap().get_peers_announced_before(true, before_peer) {
+        let peers = match storage.lock().unwrap()
+                .get_peers_announced_before(true, before_peer) {
             Ok(v) => v,
             Err(e) => {
-                warn!("Failed to re-announce the peers: {}", e);
+                warn!("Failed to fetch peers for re-announcement: {}", e);
                 Vec::new()
             }
         };
 
         for peer in peers {
-            info!("Re-announce the peer: {}", peer.id());
-
+            info!("Re-announcing peer: {}", peer.id());
             let node = self.clone();
-            let task: LocalBoxFuture<'static, ()> = async move {
+            let handle = task::spawn_local(async move {
                 let peer_id = peer.id().clone();
                 match node.announce_peer(&peer, -1, true).await {
-                    Ok(_) => info!("Re-announce the peer {} success", peer_id),
-                    Err(e) => warn!("Re-announce the peer {} failed: {}", peer_id, e),
+                    Ok(_)  => info!("Re-announced peer {} successfully", peer_id),
+                    Err(e) => warn!("Failed to re-announce peer {}: {}", peer_id, e),
                 }
-            }.boxed_local();
-            futures.push(task);
+            });
+            handles.push(handle);
         }
 
-        while futures.next().await.is_some() {
+        // Await all announcement tasks
+        while let Some(result) = handles.next().await {
+            let _ = result;
         }
     }
 
@@ -279,15 +278,17 @@ impl Node {
                 })
         }))?;
 
-        //let weak = self.weak.clone();
+        let weak = self.weak.clone();
         let _ = client.add_timer(
             60_000,
             Some(RE_ANNOUNCE_INTERVAL),
             AsyncHandler::new(move |_| {
-                //let weak = weak.clone();
+                let weak = weak.clone();
+                let Some(node) = weak.upgrade() else {
+                    return Box::pin(async move {});
+                };
                 Box::pin(async move {
-                   // weak.upgrade().expect("KadNode instance is dropped")
-                   //     .persistent_announce().await;
+                   node.persistent_announce().await;
                 })
             })
         )?;
@@ -322,7 +323,7 @@ impl Node {
             locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
         }
 
-        let options = timer_verticle::VerticleOptions{};
+        let options = timer_verticle::VerticleOptions::default();
         let client = timer_verticle::deploy(options)?;
         *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
 

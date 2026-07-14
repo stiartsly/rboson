@@ -1,13 +1,13 @@
-use std::sync::{Arc, Mutex};
-
+use std::{
+    rc::Rc,
+    cell::RefCell,
+};
 use crate::{
     Id,
     Network,
     NodeInfo,
     Value,
-    crypto_identity::CryptoIdentity,
 };
-
 use crate::dht::{
     dht::DHT,
     task::{
@@ -19,8 +19,8 @@ use crate::dht::{
 };
 use super::test_utils::make_test_dht;
 
-fn make_dht() -> Arc<Mutex<DHT>> {
-    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
+fn make_dht() -> Rc<RefCell<DHT>> {
+    make_test_dht(Network::IPv4, "127.0.0.1")
 }
 
 fn make_value() -> Value {
@@ -44,7 +44,7 @@ fn make_closestset(token: i32) -> ClosestSet {
     cn.set_token(token);
 
     let mut closest = ClosestSet::new(target, 8);
-    closest.add(Arc::new(Mutex::new(cn)));
+    closest.add(Rc::new(RefCell::new(cn)));
     closest
 }
 
@@ -56,9 +56,9 @@ mod tests {
     fn test_default() {
         let value = make_value();
         let dht   = make_dht();
-        let task = ValueAnnounceTask::new(dht.clone(), value.clone(), 7);
 
-        assert!(task.data().is_done());
+        let task = ValueAnnounceTask::new(dht, value, 7);
+        assert!(task.is_unstarted());
         assert!(task.is_done());
     }
 
@@ -66,7 +66,8 @@ mod tests {
     fn test_task_with_closestset() {
         let value = make_value();
         let dht = make_dht();
-        let task = ValueAnnounceTask::new(dht.clone(), value, -1);
+
+        let task = ValueAnnounceTask::new(dht, value, -1);
         assert!(task.is_done());
 
         task.with_closest(make_closestset(42));
@@ -77,7 +78,7 @@ mod tests {
     fn test_cancel() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
+        let mut task = ValueAnnounceTask::new(dht, value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -99,7 +100,7 @@ mod tests {
     fn test_complete() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
+        let mut task = ValueAnnounceTask::new(dht, value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -121,7 +122,7 @@ mod tests {
     fn test_start() {
         let value = make_value();
         let dht = make_dht();
-        let mut task = ValueAnnounceTask::new(dht.clone(), value, -1);
+        let mut task = ValueAnnounceTask::new(dht, value, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
@@ -134,3 +135,4 @@ mod tests {
         assert!(task.is_completed());
     }
 }
+

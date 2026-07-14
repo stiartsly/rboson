@@ -255,16 +255,16 @@ impl DHT {
 
     fn try_ping_maintenance(&self,
         bucket: Rc<RefCell<KBucket>>,
-        check_all: bool,
-        remove_on_timeout: bool,
+        _check_all: bool,
+        _remove_on_timeout: bool,
         _probe_replacement: bool,
-        name: String
+        _name: String
     ) {
         if !self.rs().borrow().is_reachable() {
             return;
         }
 
-        let (prefix, need_refresh, need_replacement) = {
+        let (prefix, _need_refresh, _need_replacement) = {
             let borrowed = bucket.borrow();
             (
                 borrowed.prefix().clone(),

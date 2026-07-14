@@ -69,7 +69,6 @@ pub struct Node {
     listeners       : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
 
     timer_verticle  : Mutex<Option<Arc<timer_verticle::VerticleClient>>>,
-    //timer_task      : Mutex<Option<JoinHandle<()>>>,
 
     storage         : Arc<Mutex<dyn DataStorage>>,
     token_man       : Arc<TokenManager>,
@@ -90,16 +89,10 @@ impl Node {
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
 
-        let data_dir = {
-            let mut path = PathBuf::new();
-            path.push(cfg.data_dir());
-            path
-        };
-        let database_uri = {
-            let mut path = PathBuf::from(&data_dir);
-            path.push(data_storage::database_name(cfg.database_uri()));
-            path
-        };
+        let data_dir = PathBuf::from(cfg.data_dir());
+        let database_uri = data_dir.join(
+            data_storage::database_name(cfg.database_uri())
+        );
 
         let identity = CachedIdentity::new({
             let kp = signature::KeyPair::from(cfg.private_key());
@@ -185,9 +178,10 @@ impl Node {
 
     #[inline]
     fn check_running(&self) -> Result<()> {
-        match self.is_running() {
-            true => Ok(()),
-            false => Err(StateError::new("kadNode is not running"))
+        if self.is_running() {
+            Ok(())
+        } else {
+            Err(StateError::new("kadNode is not running"))
         }
     }
 
@@ -260,7 +254,9 @@ impl Node {
 
         // Await all announcement tasks
         while let Some(result) = handles.next().await {
-            let _ = result;
+            if let Err(e) = result {
+                warn!("Announcement task panicked: {}", e);
+            }
         }
     }
 
@@ -313,14 +309,15 @@ impl Node {
 
     pub async fn start(&self) -> Result<()> {
         if self.is_running() {
-            return Err(StateError::new(format!("KadNode is already running.")));
+            return Err(StateError::new("KadNode is already running."));
         };
 
         {
-            let db_path = self.database_uri.to_str().unwrap();
+            let db_path = self.database_uri.to_str()
+                .ok_or_else(|| IOError::new("Database path contains invalid UTF-8"))?;
             let mut locked = self.storage.lock().unwrap();
             locked.open(db_path)?;
-            locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?;
+            locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?
         }
 
         let options = timer_verticle::VerticleOptions::default();
@@ -375,17 +372,23 @@ impl Node {
         }
         *self.running.lock().unwrap() = false;
 
+        // Stop DHT verticles concurrently
         let dht4 = self.dht4.lock().unwrap().take();
-        if let Some(dht) = dht4 {
-            let mut c = Arc::try_unwrap(dht).ok().unwrap();
-            let _ = c.stop().await;
-        }
-
         let dht6 = self.dht6.lock().unwrap().take();
-        if let Some(dht) = dht6 {
-            let mut c = Arc::try_unwrap(dht).ok().unwrap();
-            let _ = c.stop().await;
-        }
+        tokio::join!(
+            async {
+                if let Some(dht) = dht4 {
+                    let mut c = Arc::try_unwrap(dht).ok().unwrap();
+                    let _ = c.stop().await;
+                }
+            },
+            async {
+                if let Some(dht) = dht6 {
+                    let mut c = Arc::try_unwrap(dht).ok().unwrap();
+                    let _ = c.stop().await;
+                }
+            }
+        );
 
         let verticle = self.timer_verticle.lock().unwrap().take();
         if let Some(verticle) = verticle {
@@ -657,9 +660,7 @@ impl Node {
         };
 
         // store the value in local node.
-        let _ = self.storage.lock().unwrap().put_value(
-            value.clone(), persistent
-        )?;
+        self.storage.lock().unwrap().put_value(value.clone(), persistent)?;
 
         // store the value to the network.
         let dht4 = self.dht4.lock().unwrap().clone();
@@ -714,9 +715,7 @@ impl Node {
         }
 
         // store the new peer locally.
-        let _ = self.storage.lock().unwrap().put_peer(
-            peer.clone(), persistent
-        )?;
+        self.storage.lock().unwrap().put_peer(peer.clone(), persistent)?;
 
         // announce the peer to the network.
         let dht4 = self.dht4.lock().unwrap().clone();

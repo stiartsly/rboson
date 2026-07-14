@@ -60,7 +60,7 @@ mod task {
     pub(crate) mod value_lookup;
     pub(crate) mod value_announce;
 
-    /*#[cfg(test)]
+    #[cfg(test)]
     mod unitests {
         mod test_utils;
         mod test_closest_candidates;
@@ -71,7 +71,7 @@ mod task {
         mod test_peer_announce;
         mod test_value_lookup;
         mod test_value_announce;
-    }*/
+    }
 
     pub(crate) use {
         task::{Task, TaskData},

@@ -1,10 +1,11 @@
-use std::sync::{Arc, Mutex};
-
+use std::{
+    rc::Rc,
+    cell::RefCell,
+};
 use crate::{
     Id,
     Network,
     NodeInfo,
-    crypto_identity::CryptoIdentity,
 };
 use crate::dht::{
     dht::DHT,
@@ -13,8 +14,8 @@ use crate::dht::{
 };
 use super::test_utils::make_test_dht;
 
-fn make_dht() -> Arc<Mutex<DHT>> {
-    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
+fn make_dht() -> Rc<RefCell<DHT>> {
+    make_test_dht(Network::IPv4, "127.0.0.1")
 }
 
 #[cfg(test)]
@@ -22,7 +23,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_task() {
+    fn test_task_defaults() {
         let target = Id::random();
         let dht = make_dht();
         let task = NodeLookupTask::new(dht.clone(), target.clone(), true);
@@ -33,9 +34,13 @@ mod tests {
         assert!(!task.is_bootstrap());
         assert!(!task.want_token());
         assert!(!task.want_target());
+    }
 
+    #[test]
+    fn test_task_with_options() {
         let target = Id::random();
-        let mut task = NodeLookupTask::new(dht.clone(), target, false);
+        let dht = make_dht();
+        let mut task = NodeLookupTask::new(dht.clone(), target.clone(), false);
 
         task.with_bootstrap(true);
         task.with_want_token(true);
@@ -47,6 +52,13 @@ mod tests {
         assert!(task.is_bootstrap());
         assert!(task.want_token());
         assert!(task.want_target());
+    }
+
+    #[test]
+    fn test_inject_candidates() {
+        let target = Id::random();
+        let dht = make_dht();
+        let mut task = NodeLookupTask::new(dht.clone(), target, false);
 
         let candidate = NodeInfo::new(
             Id::random(),
@@ -56,8 +68,8 @@ mod tests {
         assert_eq!(task.candidate_size(), 1);
 
         let next = task.next_candidate().expect("candidate should be present");
-        let locked_next = next.lock().unwrap();
-        assert_eq!(locked_next.id(), candidate.id());
-        assert_eq!(locked_next.ni(), candidate);
+        let next = next.borrow();
+        assert_eq!(next.id(), candidate.id());
+        assert_eq!(next.socket_addr(), candidate.socket_addr());
     }
 }

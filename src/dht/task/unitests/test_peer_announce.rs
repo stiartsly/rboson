@@ -1,13 +1,13 @@
-use std::sync::{Arc, Mutex};
-
+use std::{
+    rc::Rc,
+    cell::RefCell,
+};
 use crate::{
     Id,
     Network,
     NodeInfo,
     PeerInfo,
-    crypto_identity::CryptoIdentity,
 };
-
 use crate::dht::{
     dht::DHT,
     task::{
@@ -19,8 +19,8 @@ use crate::dht::{
 };
 use super::test_utils::make_test_dht;
 
-fn make_dht() -> Arc<Mutex<DHT>> {
-    make_test_dht(Arc::new(CryptoIdentity::new()), Network::IPv4, "127.0.0.1")
+fn make_dht() -> Rc<RefCell<DHT>> {
+    make_test_dht(Network::IPv4, "127.0.0.1")
 }
 
 fn make_peer() -> PeerInfo {
@@ -47,7 +47,7 @@ fn make_closestset(token: i32) -> ClosestSet {
     cn.set_token(token);
 
     let mut closest = ClosestSet::new(target, 8);
-    closest.add(Arc::new(Mutex::new(cn)));
+    closest.add(Rc::new(RefCell::new(cn)));
     closest
 }
 
@@ -59,9 +59,9 @@ mod tests {
     fn test_default() {
         let peer = make_peer();
         let dht  = make_dht();
-        let task = PeerAnnounceTask::new(dht.clone(), peer.clone(), 7);
-
-        assert!(task.data().is_done());
+        // With no closest set the todo queue is empty — task reports nothing to do.
+        let task = PeerAnnounceTask::new(dht.clone(), peer, 7);
+        assert!(task.is_unstarted());
         assert!(task.is_done());
     }
 
@@ -78,25 +78,21 @@ mod tests {
 
     #[test]
     fn test_cancel() {
-        println!(">>>> test_cancel line:{}", line!());
         let peer = make_peer();
         let dht  = make_dht();
         let mut task = PeerAnnounceTask::new(dht.clone(), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());
 
-        println!(">>>> test_cancel line:{}", line!());
         task.with_closest(make_closestset(0));
         assert!(task.is_unstarted());
         assert!(!task.is_done());
 
-        println!(">>>> test_cancel line:{}", line!());
         task.set_state_if(&State::Initialized, State::Running);
         task.iterate();
         assert!(task.is_done());
         assert!(task.is_running());
 
-        println!(">>>> test_cancel line:{}", line!());
         task.cancel();
         assert!(task.is_done());
         assert!(task.is_canceled());
@@ -141,3 +137,4 @@ mod tests {
         assert!(task.is_completed());
     }
 }
+

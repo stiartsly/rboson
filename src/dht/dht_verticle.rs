@@ -292,7 +292,7 @@ impl Verticle {
         });
 
         let (tmr_tx, tmr_rx) = mpsc::unbounded_channel::<TimerCmd>();
-        let timer_client = Arc::new(TimerClient::new(tmr_tx));
+        let timer_client = Rc::new(TimerClient::new(tmr_tx));
         let timer_manager = TimerManager::new();
 
         let dht = DHT::new(options, network, host, port, persist_file, timer_client)?;
@@ -420,7 +420,7 @@ impl Verticle {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
                 self.timer_manager.add_timer(timer_id, delay, interval, cb),
 
-            TimerCmd::_Cancel { timer_id } =>
+            TimerCmd::Cancel { timer_id } =>
                 self.timer_manager.cancel_timer(timer_id),
 
             TimerCmd::Stop { complete } => {
@@ -443,6 +443,8 @@ impl Verticle {
         }
         let socket = result.unwrap();
         drop(borrowed_server);
+
+        cloned_server.borrow_mut().prepare();
 
         loop {
             tokio::select! {

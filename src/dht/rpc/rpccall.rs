@@ -1,17 +1,16 @@
 use std::{
-    rc::Rc,
+    rc::{Rc, Weak},
+    cell::RefCell,
     time::SystemTime
 };
 use log::error;
-use crate::{
-    Id,
-    errors::{ProtocolError},
-};
+use crate::Id;
 use crate::dht::{
-    msg::{Body, Message, msg::Kind},
+    msg::{Message, msg::Kind},
+    timer_client::LocalTimerClient as TimerClient,
+    handler::LocalHandler as AsyncHandler,
     rpc::{
         Target,
-        rpc_server::RpcServer,
         Listener as CallListener,
     },
 };
@@ -37,7 +36,8 @@ impl State {
 pub(crate) struct RpcCall {
     target      : Target,
 
-     // a tricky field to store req message before becoming Arc<Message> object.
+    // a transient field to store request message before
+    // being nailed as Arc<Message> object.
     transient   : Option<Message>,
 
     req         : Option<Rc<Message>>,
@@ -50,9 +50,12 @@ pub(crate) struct RpcCall {
 
     listener    : Option<CallListener>,
 
-    cause: Option<Box<dyn std::error::Error + Send>>,
+    // cause: Option<Box<dyn std::error::Error + Send>>,
 
-    _timeout_timer: Option<u64>
+    timer_id    : Option<u64>,
+    timer_client: Option<Rc<TimerClient>>,
+
+    cloned      : Weak<RefCell<RpcCall>>,
 }
 
 impl RpcCall {
@@ -70,9 +73,15 @@ impl RpcCall {
             resp_time       : None,
             state           : State::Unsent,
             listener        : None,
-            cause           : None,
-            _timeout_timer   : None,
+            timer_id        : None,
+            timer_client    : None,
+
+            cloned          : Weak::new(),
         }
+    }
+
+    pub(crate) fn set_cloned(&mut self, cloned: Weak<RefCell<RpcCall>>) {
+        self.cloned = cloned;
     }
 
     pub(crate) fn target_id(&self) -> Id {
@@ -133,27 +142,12 @@ impl RpcCall {
         self.sent_time
     }
 
-    #[allow(unused)]
-    pub(crate) fn resp_time(&self) -> Option<SystemTime> {
-        self.resp_time
-    }
-
     pub(crate) fn set_listener(&mut self, listener: CallListener) {
         if self.state != State::Unsent {
             return;
         }
         self.listener = Some(listener);
     }
-
-    /*
-    pub(crate) fn set_simple_listener<F>(
-        &mut self,
-        state_changed_cb: F
-    ) -> &mut Self
-    where F: Fn(&RpcCall, State, State) +'static {
-        self.set_listener(CallListener::new(state_changed_cb));
-        self
-    }*/
 
     pub(crate) fn update_state(&mut self, new_state: State) {
         let prev = self.state;
@@ -173,38 +167,49 @@ impl RpcCall {
         self.listener = Some(l);
     }
 
-    fn set_timeout_timer(&mut self, _timeout: u64) {
-        // TODO: self.timeout_task = None;
-        // TODO:
+    fn set_timeout_timer(&mut self, timeout: u64, timer_client: Rc<TimerClient>)
+    {
+        let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
+        let result = timer_client.add_timer(timeout, None,
+            AsyncHandler::new(move |_| {
+                let cloned = cloned.clone();
+                Box::pin(async move {
+                    cloned.borrow_mut().check_timeout();
+                })
+        }));
+        let Ok(timer_id) = result else {
+            error!("Failed to set timeout timer: {}", result.unwrap_err());
+            return;
+        };
+
+        self.timer_id = Some(timer_id);
+        self.timer_client = Some(timer_client);
     }
 
     fn cancel_timeout_timer(&mut self) {
-        // TODO: self.timeout_task = None;
+        let Some(timer_client) = self.timer_client.take() else {
+            return;
+        };
+        let Some(timer_id) = self.timer_id.take() else {
+            return;
+        };
+        timer_client.cancel_timer(timer_id);
     }
 
     fn check_timeout(&mut self) {
-        self._timeout_timer = None;
-
         if self.state != State::Sent && self.state != State::Stalled {
             return;
         }
+        self.update_state(State::Timeout);
 
-        let sent_time = self.sent_time.unwrap_or(SystemTime::UNIX_EPOCH);
-        let elapsed = crate::elapsed_ms!(&sent_time) as u64;
-        if RpcServer::RPC_CALL_TIMEOUT_MAX <= elapsed {
-            self.update_state(State::Timeout);
-            return;
-        }
-
-        let remaining = RpcServer::RPC_CALL_TIMEOUT_MAX.saturating_sub(elapsed);
-        self.update_state(State::Stalled);
-        self.set_timeout_timer(remaining);
+        self.timer_id = None;
+        self.timer_client = None;
     }
 
-    pub(crate) fn sent(&mut self) {
+    pub(crate) fn sent(&mut self, timer_client: Rc<TimerClient>) {
         self.sent_time = Some(SystemTime::now());
         self.update_state(State::Sent);
-        self.set_timeout_timer(10_000);
+        self.set_timeout_timer(10_000, timer_client);
     }
 
     pub(crate) fn respond(&mut self, rsp: Rc<Message>) {
@@ -214,15 +219,8 @@ impl RpcCall {
         self.cancel_timeout_timer();
         self.rsp = Some(rsp.clone());
 
-        if rsp.is_err() {
-            self.cause = match rsp.body() {
-                Some(Body::Error(err)) => Some(ProtocolError::new(err.to_string())),
-                _ => None,
-            };
-        }
-
         match rsp.kind() {
-            Kind::Request  => error!("Error: should not be request message!!"),
+            Kind::Request  => error!("Should not be request message!!"),
             Kind::Response => self.update_state(State::Responded),
             Kind::Error    => self.update_state(State::Err)
         };

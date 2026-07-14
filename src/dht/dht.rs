@@ -93,7 +93,7 @@ use crate::dht::{
     last_maintenance    : SystemTime,
     maintenance_tasks   : HashSet<Prefix>,
 
-    timer_client        : Arc<TimerClient>,
+    timer_client        : Rc<TimerClient>,
 
     rpc_server          : Option<Rc<RefCell<RpcServer>>>,
 
@@ -116,7 +116,7 @@ impl DHT {
         options: VerticleOptions,
         network: Network, host: String, port: u16,
         persist_file: Option<PathBuf>,
-        tclient: Arc<TimerClient>
+        timer_client: Rc<TimerClient>
     ) -> Result<Self>
     {
         assert!(options.identity.is_some());
@@ -153,7 +153,7 @@ impl DHT {
             last_maintenance    : SystemTime::UNIX_EPOCH,
             maintenance_tasks   : HashSet::new(),
             bootstrapping       : AtomicBool::new(false),
-            timer_client        : tclient,
+            timer_client,
             suspicious_detector : None,
             rpc_server          : None,
 
@@ -430,6 +430,7 @@ impl DHT {
         let mut server = RpcServer::new(
             self.ni(),
             self.identity.clone(),
+            self.timer_client.clone(),
             self.suspicious_detector.clone()
         );
 
@@ -475,7 +476,10 @@ impl DHT {
             })
         }));
 
-        self.rpc_server = Some(Rc::new(RefCell::new(server)));
+        let rpc_server = Rc::new(RefCell::new(server));
+        rpc_server.borrow_mut().set_cloned(Rc::downgrade(&rpc_server));
+
+        self.rpc_server = Some(rpc_server);
         self.set_status(ConnectionStatus::Connecting);
 
         self.setup_periodic_tasks().await?;

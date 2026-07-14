@@ -1,36 +1,35 @@
 use std::{
     fmt,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
     cell::RefCell,
     collections::HashMap,
-    time::{Duration, SystemTime},
+    time::SystemTime,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
 };
 use log::{info, warn, error, debug};
-use tokio::{
-    net::UdpSocket,
-    task::JoinHandle,
-};
+use tokio::net::UdpSocket;
 use crate::{
     CryptoBox,
     CryptoIdentity,
     Id, Identity,
     NodeInfo,
     cryptobox::Nonce,
+
     errors::{
         Error,
         Result,
         CryptoError,
         NetworkError,
         ProtocolError,
-    },
-    dht::{
-        suspicious_node_detector::SuspiciousNodeDetector,
-        handler::{Handler, LocalHandler as AsyncHandler},
-        rpc::RpcCall,
-        msg::Message
     }
+};
+use crate::dht::{
+    timer_client::LocalTimerClient as TimerClient,
+    suspicious_node_detector::SuspiciousNodeDetector,
+    handler::{Handler, LocalHandler as AsyncHandler},
+    rpc::RpcCall,
+    msg::Message
 };
 
 #[allow(dead_code)]
@@ -53,21 +52,26 @@ pub(crate) struct RpcServer {
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
-    reachable_check_task: Option<JoinHandle<()>>,
+
+    timer_client        : Rc<TimerClient>,
+    reachable_check_task: Option<u64>,
 
     tx_socket           : Option<Rc<StdUdpSocket>>,
     rx_socket           : Option<Rc<StdUdpSocket>>,
+
+    cloned              : Weak<RefCell<RpcServer>>,
 }
 
 impl RpcServer {
     const MAX_ACTIVE_CALLS: usize = 64;
     pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
-    const REACHABILITY_CHECK_INTERVAL: Duration = Duration::from_millis(5_000);
-    const REACHABILITY_TIMEOUT: Duration = Duration::from_millis(60_000);
+    const REACHABILITY_CHECK_INTERVAL   :u64 = 5_000;
+    const REACHABILITY_TIMEOUT          :u64 = 60_000;
 
     pub(crate) fn new(
         ni: NodeInfo,
         identity: Arc<CryptoIdentity>,
+        timer_client: Rc<TimerClient>,
         suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
     ) -> Self {
 
@@ -86,11 +90,18 @@ impl RpcServer {
             calltimeout_handler : None,
             start_time          : None,
             is_running          : false,
+            timer_client,
             reachable_check_task: None,
 
             tx_socket           : None,
             rx_socket           : None,
+
+            cloned              : Weak::new(),
         }
+    }
+
+    pub(crate) fn set_cloned(&mut self, cloned: Weak<RefCell<RpcServer>>) {
+        self.cloned = cloned;
     }
 
     async fn check_reachability(&mut self) {
@@ -103,7 +114,7 @@ impl RpcServer {
             return;
         }
 
-        if crate::elapsed_ms!(&self.last_reachable_check) > Self::REACHABILITY_TIMEOUT.as_millis() &&
+        if crate::elapsed_ms!(self.last_reachable_check) > Self::REACHABILITY_TIMEOUT as u128 &&
             self.recv_packets != 0 &&
             self.recv_packets_at_last_reachable_check != 0 {
             self.set_reachable(false).await;
@@ -169,15 +180,35 @@ impl RpcServer {
         self.rx_socket = Some(socket.clone());
         self.tx_socket = Some(socket.clone());
 
+        Ok(())
+    }
+
+    pub(crate) fn prepare(&mut self) -> bool {
         let now = SystemTime::now();
-        self.start_time     = Some(now);
-        self.is_running     = true;
+        self.start_time = Some(now);
+        self.is_running = true;
+
         self.is_reachable   = true;
         self.last_reachable_check = now;
-        self.recv_packets   = 0;
-        self.recv_packets_at_last_reachable_check = 0;
 
-        Ok(())
+        let cloned = self.cloned.upgrade().expect("RpcServer weak reference not set");
+        let result = self.timer_client.add_timer(
+            Self::REACHABILITY_CHECK_INTERVAL,
+            Some(Self::REACHABILITY_CHECK_INTERVAL),
+            AsyncHandler::new(move |_| {
+                let server = cloned.clone();
+                Box::pin(async move {
+                    server.borrow_mut().check_reachability().await;
+                })
+            })
+        );
+
+        let Ok(timer_id) = result else {
+            error!("Failed to set reachability check timer.");
+            return false;
+        };
+        self.reachable_check_task = Some(timer_id);
+        true
     }
 
     pub(crate) async fn stop(&mut self) {
@@ -188,15 +219,13 @@ impl RpcServer {
 
         self.pending_calls.clear();
 
-        if let Some(task) = self.reachable_check_task.take() {
-            task.abort();
-        }
-
         self.tx_socket  = None;
         self.rx_socket  = None;
         self.start_time = None;
         self.is_running = false;
+
         self.is_reachable = false;
+        self.reachable_check_task = None;
 
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
@@ -212,6 +241,7 @@ impl RpcServer {
         msg.set_nodeid(*self.ni.id());
 
         let call = Rc::new(RefCell::new(call));
+        call.borrow_mut().set_cloned(Rc::downgrade(&call));
         msg.set_associated_call(call.clone());
         self.pending_calls.insert(txid, call.clone());
 
@@ -222,7 +252,8 @@ impl RpcServer {
 
         match self.send_msg(msg.as_ref()) {
             Ok(_) => {
-                locked.sent();
+                let timer_client = self.timer_client.clone();
+                locked.sent(timer_client);
                 if let Some(handler) = self.callsent_handler.as_ref() {
                     handler.cb(&locked);
                 }
@@ -415,58 +446,6 @@ impl RpcServer {
         // TODO: handle metrics.
     }
 }
-
-/*
-pub(crate) async fn run_loop(
-    server      : Rc<RefCell<RpcServer>>,
-    taskman     : Rc<TaskManager>,
-    quit_flag   : Arc<Mutex<bool>>,
-) {
-    let rx_socket = {
-        let locked = server.borrow();
-        info!("RPC server started at {}", locked.ni.socket_addr());
-
-        let std_socket = locked.rx_socket.as_ref()
-            .expect("RPC server socket not initialized")
-            .clone();
-
-        let std_socket = std_socket.as_ref().try_clone().expect("Failed to clone UDP socket");
-        if let Err(_) = std_socket.set_nonblocking(true) {
-            return;
-        }
-
-        UdpSocket::from_std(std_socket)
-            .expect("Failed to create Tokio UdpSocket from std UdpSocket")
-    };
-
-    let notified = taskman.notified();
-
-    let mut buf = vec![0u8; 2048];
-    loop {
-        tokio::select!(
-            packet = rx_socket.recv_from(&mut buf) => {
-                if let Err(e) = packet.as_ref() {
-                    error!("Receiving data error: {e}");
-                    if *quit_flag.lock().unwrap() {
-                        break;
-                    } else {
-                        continue;
-                    }
-                }
-                let (len, from) = packet.unwrap();
-                handle_packet(&server, &buf[..len], from).await;
-            },
-            _ = notified.notified() => {
-                if *quit_flag.lock().unwrap() {
-                    break;
-                } else {
-                    taskman.dequeue();
-                }
-            }
-        );
-    }
-}
-*/
 
 impl fmt::Display for RpcServer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -16,7 +16,7 @@ pub(crate) enum GenericTimerCmd<H> {
         interval: Option<u64>,
         cb: H,
     },
-    _Cancel {
+    Cancel {
         timer_id: TimerId,
     },
     Stop {
@@ -65,12 +65,12 @@ impl<H> GenericTimerClient<H> {
         )
     }
 
-    pub(crate) fn _cancel_timer(
+    pub(crate) fn cancel_timer(
         &self,
         timer_id: TimerId,
     ) -> Result<()> {
         self.sender.send(
-            GenericTimerCmd::_Cancel { timer_id }
+            GenericTimerCmd::Cancel { timer_id }
         ).map_err(|_| {
             StateError::new("timer channel closed")
         }).map(|_| ())

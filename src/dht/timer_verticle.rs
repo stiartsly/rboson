@@ -72,7 +72,7 @@ impl Verticle {
         match cmd {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
                 self.timer_manager.add_timer(timer_id, delay, interval, cb),
-            TimerCmd::_Cancel { timer_id } =>
+            TimerCmd::Cancel { timer_id } =>
                 self.timer_manager.cancel_timer(timer_id),
             TimerCmd::Stop { complete } => {
                 self.quit = true;

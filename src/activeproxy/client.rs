@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
 use std::fs::File;
 
-use ciborium::value::Value as CVal;
 use tokio::runtime::Runtime;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use log::{error, warn, info, debug};
 
 use crate::{
@@ -15,8 +13,8 @@ use crate::{
     PeerInfo,
     NodeInfo,
     signature,
-    Error,
-    core::{cbor, Result, config::Config},
+    Result,
+    core::errors::{ArgumentError, StateError},
     dht::Node,
 };
 
@@ -25,8 +23,18 @@ use super::{
     worker::{self, ManagedWorker},
 };
 
+pub struct ActiveProxyOptions {
+    pub cached_dir: PathBuf,
+    pub server_peerid: Id,
+    pub user_keypair: signature::KeyPair,
+    pub peer_keypair: Option<signature::KeyPair>,
+    pub upstream_host: String,
+    pub upstream_port: u16,
+    pub upstream_domain: Option<String>,
+}
+
 pub struct ProxyClient {
-    node:               Arc<Mutex<Node>>,
+    node:               Arc<Node>,
     cached_dir:         PathBuf,
 
     remote_peerid:      Id,
@@ -45,79 +53,32 @@ pub struct ProxyClient {
 }
 
 impl ProxyClient {
-    pub fn new(node: Arc<Mutex<Node>>, cfg: &Box<dyn Config>) -> Result<Self> {
-        let Some(ap) = cfg.activeproxy() else {
-            error!("The configuration for ActiveProxy is missing, preventing the use of the ActiveProxy feature!!!
-                Please check the config file later.");
-            return Err(Error::Argument(format!("ActiveProxy configuration is missing")));
-        };
-
-        let Some(user) = cfg.user() else {
-            error!("The configuration for User is missing, preventing the use of the ActiveProxy feature!!!
-                Please check the config file later.");
-            return Err(Error::Argument(format!("User configuration is missing")));
-        };
-
-        let cached_dir = {
-            let path = cfg.data_dir();
-            let mut path = if path.is_empty() {
-                PathBuf::from(".")
-            } else {
-                PathBuf::from(path)
-            };
-
-            path.push("activeproxy.cache");
-            path
-        };
-
-        let keypair = ap.peer_private_key().map(|v| {
-            let sk = v.try_into().map(|v| {
-                signature::PrivateKey::from(v)
-            }).map_err(|e| {
-                error!("Failed to convert peer private key, error: {e}");
-                Error::Argument(format!("Invalid peer private key"))
-            });
-
-            sk.map(|v| signature::KeyPair::from(&v)).unwrap()
-        });
-
-        let upstream_name = format!("{}:{}", ap.upstream_host(), ap.upstream_port());
+    pub fn new(node: Arc<Node>, options: ActiveProxyOptions) -> Result<Self> {
+        let upstream_name = format!("{}:{}", options.upstream_host, options.upstream_port);
         let upstream_addr = upstream_name.to_socket_addrs()
             .map_err(|e| {
                 error!("Failed to resolve address '{upstream_name}', network error: {e}");
-                Error::Argument(format!("Bad upstream {upstream_name}"))
+                ArgumentError::new(format!("Bad upstream {upstream_name}"))
             })?
             .next()
             .ok_or_else(|| {
                 error!("No valid address found for '{upstream_name}', network error!!!");
-                Error::Argument(format!("Network error!"))
+                ArgumentError::new("Network error!")
             })?;
 
-        let user_sk: signature::PrivateKey = user.private_key().try_into()
-        .map_err(|e| {
-            error!("Failed to convert user private key, error: {e}");
-            Error::Argument(format!("Invalid user private key"))
-        })?;
-
-        let user_keypair = signature::KeyPair::try_from(user_sk.as_bytes())
-        .map_err(|e| {
-            error!("Failed to convert user private key to KeyPair, error: {e}");
-            Error::Argument(format!("Invalid user private key"))
-        })?;
-
         let managed = {
-            let mut fields = ManagedFields::new(&user_keypair);
-            fields.peer_keypair  = keypair;
+            let mut fields = ManagedFields::new(&options.user_keypair);
+            fields.peer_keypair  = options.peer_keypair;
             fields.upstream_addr = Some(upstream_addr.clone());
             fields.upstream_name = Some(upstream_name.clone());
-            fields.peer_domain   = ap.domain_name().map(|v|v.to_string());
+            fields.peer_domain   = options.upstream_domain.clone();
 
             Arc::new(Mutex::new(fields))
         };
 
-        let peerid = Id::try_from(ap.server_peerid())?;
+        let peerid = options.server_peerid.clone();
         let worker = Arc::new(Mutex::new(ManagedWorker::new(
-            cached_dir.clone(),
+            options.cached_dir.clone(),
             node.clone(),
             managed.clone(),
             peerid.clone(),
@@ -125,17 +86,17 @@ impl ProxyClient {
 
         Ok(Self {
             node,
-            cached_dir,
+            cached_dir: options.cached_dir,
 
             remote_peerid:  peerid,
             remote_peer:    None,
             remote_node:    None,
 
-            upstream_host:  ap.upstream_host().to_string(),
-            upstream_port:  ap.upstream_port(),
+            upstream_host:  options.upstream_host,
+            upstream_port:  options.upstream_port,
             upstream_endpoint:  upstream_name,
             upstream_addr:  upstream_addr,
-            upstream_domain:    ap.domain_name().map(|v|v.to_string()),
+            upstream_domain:    options.upstream_domain,
 
             managed,
             worker,
@@ -144,10 +105,10 @@ impl ProxyClient {
     }
 
     pub fn nodeid(&self) -> Id {
-        self.node.lock().unwrap().id().clone()
+        self.node.id().clone()
     }
 
-    pub fn node(&self) -> Arc<Mutex<Node>> {
+    pub fn node(&self) -> Arc<Node> {
         self.node.clone()
     }
 
@@ -203,15 +164,16 @@ impl ProxyClient {
 
         let Some(peer) = result.0 else {
             error!("No available peers with peer ID {} were found.", self.remote_peerid);
-            return Err(Error::State(format!("No available peers with peerid {} found", self.remote_peerid)));
+            return Err(StateError::new(format!("No available peers with peerid {} found", self.remote_peerid)));
         };
 
         let Some(node) = result.1 else {
             error!("No available nodes hosting peer ID {} were found.", self.remote_peerid);
-            return Err(Error::State(format!("No available nodes hosting peerid {} found", self.remote_peerid)));
+            return Err(StateError::new(format!("No available nodes hosting peerid {} found", self.remote_peerid)));
         };
 
-        let remote_addr = SocketAddr::new(node.ip(), peer.port());
+        let remote_addr = peer.endpoint().to_socket_addrs().ok().and_then(|mut addrs| addrs.next())
+            .unwrap_or_else(|| SocketAddr::new(node.ip(), 0));
         info!("ActiveProxy found the peer serivce {} on server {}.", peer.id(), remote_addr);
 
         if let Ok(mut managed) = self.managed.lock() {
@@ -251,38 +213,12 @@ fn load_peer(path: &Path, peerid: &Id) -> Option<(PeerInfo, NodeInfo)> {
         None::<File>
     }).ok()?;
 
-    let reader = cbor::Reader::new(&buf);
-    let val: CVal = ciborium::de::from_reader(reader).map_err(|e| {
+    let cached: (PeerInfo, NodeInfo) = ciborium::de::from_reader(buf.as_slice()).map_err(|e| {
         warn!("Failed to parse data from cached file {} with error: {e} - \
                cached file might be broken", path.display());
-        None::<CVal>
+        None::<(PeerInfo, NodeInfo)>
     }).ok()?;
-
-    let mut peer = None;
-    let mut node = None;
-
-    if let Some(root) = val.as_map() {
-        for (k,v) in root {
-            let Some(k) = k.as_text() else {
-                break;
-            };
-            match k {
-                "peer" => peer = PeerInfo::from_cbor(v),
-                "node" => node = NodeInfo::from_cbor(v),
-                _ => {},
-            }
-        }
-    }
-
-    let Some(peer) = peer else {
-        warn!("The information of peer {peerid} is missing.");
-        return None;
-    };
-
-    let Some(node) = node else {
-        warn!("The information of node hosting peer {peerid} is missing.");
-        return None;
-    };
+    let (peer, node) = cached;
 
     if !peer.is_valid() || peer.id() != peerid {
         warn!("The cached peer {} is invalid or outdated since it does not match the expected {peerid}", peer.id());
@@ -301,20 +237,8 @@ pub(crate) fn save_peer(path: &Path, input: (PeerInfo, NodeInfo)) {
     debug!("ActiveProxy is trying to persist peer {} and its host node into cached file...",
         input.0.id());
 
-    let val = CVal::Map(vec![
-        (
-            CVal::Text(String::from("peer")),
-            input.0.to_cbor(),
-        ),
-        (
-            CVal::Text(String::from("node")),
-            input.1.to_cbor(),
-        )
-    ]);
-
     let mut buf = vec![];
-    let writer = cbor::Writer::new(&mut buf);
-    if let Err(e) = ciborium::ser::into_writer(&val, writer) {
+    if let Err(e) = ciborium::ser::into_writer(&input, &mut buf) {
         warn!("Failed to persist peer {} and its host node error {e}", input.0.id());
         return;
     }
@@ -326,11 +250,10 @@ pub(crate) fn save_peer(path: &Path, input: (PeerInfo, NodeInfo)) {
     });
 }
 
-pub(crate) async fn lookup_peer(node: Arc<Mutex<Node>>, peerid: &Id) -> Option<(PeerInfo, NodeInfo)> {
+pub(crate) async fn lookup_peer(node: Arc<Node>, peerid: &Id) -> Option<(PeerInfo, NodeInfo)> {
     info!("ActiveProxy is trying to find peer {} and its host node via DHT network...", peerid);
 
-    let node = node.lock().unwrap();
-    let result = node.find_peer(peerid, Some(4), None).await;
+    let result = node.find_peer(peerid, -1, 4, None).await;
     if let Err(e) = result {
         warn!("Trying to find peer but error: {}, please try it later!!!", e);
         return None;
@@ -344,9 +267,12 @@ pub(crate) async fn lookup_peer(node: Arc<Mutex<Node>>, peerid: &Id) -> Option<(
 
     debug!("Discovered {} satisfied peers, extracting each node's infomation...", peers.len());
 
-    peers.shuffle(&mut thread_rng());
+    let mut rng = rand::rng();
+    peers.shuffle(&mut rng);
     while let Some(peer) = peers.pop() {
-        let nodeid = peer.nodeid();
+        let Some(nodeid) = peer.nodeid() else {
+            continue;
+        };
         debug!("Trying to lookup node {} hosting the peer {} ...", nodeid, peerid);
 
         let result = node.find_node(nodeid, None).await;

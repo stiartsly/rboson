@@ -1,0 +1,2159 @@
+use std::collections::{LinkedList, HashMap};
+use std::time::{SystemTime, Duration};
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
+use unicode_normalization::UnicodeNormalization;
+use log::{error, warn, info, debug, trace};
+use serde_cbor;
+use md5;
+use url::Url;
+use tokio::{
+    task::JoinHandle,
+    sync::Notify
+};
+use rumqttc::{
+    MqttOptions,
+    AsyncClient,
+    QoS::AtLeastOnce,
+    SubscribeFilter,
+    Event,
+    Packet,
+    Outgoing //, Incoming
+};
+
+use crate::{
+    lock,
+    Id,
+    Identity,
+    PeerInfo,
+    cryptobox::Nonce,
+    signature,
+    core::{
+        Error,
+        Result,
+        CryptoIdentity,
+        CryptoContext
+    }
+};
+
+use crate::messaging::{
+    ClientDevice,
+    ServiceIds,
+    UserAgentCaps,
+    UserAgent,
+    InviteTicket,
+    Contact,
+    ClientBuilder,
+    MessagingAgent,
+    ConnectionListener,
+    ContactListener,
+    ProfileListener,
+    profile::Profile,
+    api_client::{self, APIClient},
+    channel::{self, Role, Permission, Channel},
+    message_listener::{
+        MessageListenerMut,
+    },
+    channel_listener::{
+        ChannelListenerMut
+    },
+    rpc::{
+        method::RPCMethod,
+        request::RPCRequest,
+        response::RPCResponse,
+        notif::{events, Notification, ChannelMembersRoleUpdated},
+        params::{self, Parameters},
+        promise::{self, Ack, Promise, Waiter},
+    },
+    message::{
+        MessageType,
+        Message as Msg,
+        Builder as MsgBuilder
+    },
+    internal::contacts_update::ContactsUpdate,
+};
+
+#[allow(dead_code)]
+pub struct MessagingClient {
+    peer            : PeerInfo,
+    user            : CryptoIdentity,
+    device          : CryptoIdentity,
+    client_id       : String,
+
+    inbox           : String,
+    outbox          : String,
+    broadcast       : String,
+
+    base_index      : RefCell<u32>,
+
+    service_info    : Option<api_client::MessagingServiceInfo>,
+
+    server_context  : Arc<Mutex<CryptoContext>>,
+    self_context    : Arc<Mutex<CryptoContext>>,
+
+    api_url         : Url,
+    api_client      : Option<APIClient>,
+    disconnect      : bool,
+
+    connected       : Arc<Mutex<bool>>,
+    stopping        : Arc<Mutex<bool>>,
+
+    worker_task     : Option<JoinHandle<()>>,
+    worker_client   : Option<Arc<Mutex<AsyncClient>>>,
+
+    notifier        : Arc<Notify>,
+    requests        : Arc<Mutex<LinkedList<RPCRequest>>>,
+
+    mqttc           : Option<rumqttc::AsyncClient>,
+    eventloop       : Option<rumqttc::EventLoop>,
+
+    ua              : Arc<Mutex<UserAgent>>,
+}
+
+#[allow(dead_code)]
+impl MessagingClient {
+    pub(crate) fn new(b: &ClientBuilder) -> Result<Self> {
+        let ua = b.ua();
+        if !lock!(ua).is_configured() {
+            return Err(Error::State("User agent is not configured".into()));
+        }
+
+        let peer = lock!(ua).peer().unwrap().clone();
+        let user = lock!(ua).user().unwrap().identity().clone();
+        let device = lock!(ua).device().unwrap().identity().unwrap().clone();
+
+        lock!(ua).harden();
+        drop(ua);
+
+        let userid = user.id().to_base58();
+        let clientid = bs58::encode({
+            md5::compute(device.id().as_bytes()).0
+        }).into_string();
+
+        Ok(Self {
+            service_info    : None,
+
+            client_id       : clientid,
+            inbox           : format!("inbox/{userid}",),
+            outbox          : format!("outbox/{userid}",),
+            broadcast       : format!("broadcast"),
+
+            base_index      : RefCell::new(0),
+
+            api_url         : b.api_url().clone(),
+            api_client      : None,
+            disconnect      : false,
+            connected       : Arc::new(Mutex::new(false)),
+            stopping        : Arc::new(Mutex::new(false)),
+
+            worker_client   : None,
+            worker_task     : None,
+
+            self_context    : Arc::new(Mutex::new(user.create_crypto_context(user.id())?)),
+            server_context  : Arc::new(Mutex::new(user.create_crypto_context(peer.id())?)),
+
+            peer,
+            user,
+            device,
+
+            notifier        : Arc::new(Notify::new()),
+            requests        : Arc::new(Mutex::new(LinkedList::new())),
+
+            mqttc           : None,
+            eventloop       : None,
+
+            ua              : b.ua().clone(),
+        })
+    }
+
+    pub(crate) fn next_index(&self) -> u32 {
+        self.base_index.replace_with(|&mut v| v + 1);
+        *self.base_index.borrow()
+    }
+
+    pub fn load_access_token(&mut self) -> Result<Option<String>> {
+        // TODO:
+        Ok(Some("TODO".into()))
+    }
+
+    pub fn deviceid(&self) -> &Id {
+        self.device.id()
+    }
+
+    pub fn messaging_peer(&self) -> &PeerInfo {
+        &self.peer
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        info!("Messaging client Started!");
+
+        _ = self.load_access_token()?;
+
+        let mut api_client = api_client::Builder::new()
+            .with_base_url(&self.api_url)
+            .with_home_peerid(self.peer.id())
+            .with_user_identity(&self.user)
+            .with_device_identity(&self.device)
+            //.with_access_token(self.load_access_token().ok()) // TODO:
+            .with_access_token_refresh_handler(|_| {})
+            .build()?;
+
+        let version = match lock!(self.ua).contacts_version() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                warn!("Error retrieving contact version from local agent: {e}, ignored.");
+                None
+            }
+        };
+
+        if version.is_none() {
+            let mut version = api_client.fetch_contacts_update(
+                version.as_deref()
+            ).await?;
+
+            if let Some(version_id) = version.version_id() {
+                _ = lock!(self.ua).put_contacts_update(
+                    &version_id,
+                    version.contacts().as_slice()
+                ).map_err(|e|{
+                    warn!("Error putting contacts update to local agent: {e}, ignored.");
+                });
+            }
+        }
+
+        self.service_info = Some(api_client.service_info().await?);
+        self.api_client = Some(api_client);
+
+        Ok(())
+    }
+
+    pub async fn stop(&mut self, forced: bool) {
+        *lock!(self.stopping) = true;
+        _ = self.disconnect().await;
+
+        if let Some(task) = self.worker_task.take() {
+            if forced {
+                task.abort()
+            };
+            _ = task.await;
+        };
+
+        info!("Messaging client stopped ...");
+        self.worker_task = None;
+        self.worker_client = None;
+    }
+
+    pub async fn service_ids(url: &Url) -> Result<ServiceIds> {
+        APIClient::service_ids(url).await
+    }
+
+    async fn attempt_connect(&mut self, url: &Url) -> Result<()> {
+       let options = {
+            let mut options = MqttOptions::new(
+                &self.client_id,
+                url.host().unwrap().to_string(),
+                url.port().unwrap_or(1883) as u16
+            );
+            options.set_credentials(
+                self.user.id().to_base58(),
+                password(&self.user, &self.device)
+            );
+            options.set_max_packet_size(16*1024, 18*1024);
+            options.set_keep_alive(Duration::from_secs(60));
+            options.set_clean_session(false);
+            options
+        };
+
+        if url.scheme() == "ssl" {
+            //mqtt_options.set_transport(true);
+            // TODO:
+        }
+
+        let result = AsyncClient::new(options, 10);
+        self.mqttc = Some(result.0);
+        self.eventloop = Some(result.1);
+
+        let topics = vec![
+            SubscribeFilter::new(self.inbox.clone(), AtLeastOnce),
+            SubscribeFilter::new(self.outbox.clone(), AtLeastOnce),
+            SubscribeFilter::new(self.broadcast.clone(), AtLeastOnce)
+        ];
+
+        debug!("Subscribing topics to messaging server ....");
+
+        crate::unwrap!(self.mqttc).subscribe_many(topics).await.map(|_| {
+            info!("Subscribed topics successfully");
+        }).map_err(|e| {
+            let errstr = format!("Error subscribing topics to messaging server: {}", e);
+            error!("{}", errstr);
+            Error::State(errstr)
+        })
+    }
+
+    async fn do_connect(&mut self) -> Result<()> {
+        if let Some(_) = self.worker_client.as_ref() {
+            if self.is_connected() {
+                info!("Already connected to the messaging server");
+                return Ok(());
+            }
+        }
+
+        info!("Connecting to the messaging server ...");
+        self.disconnect = false;
+        lock!(self.ua).on_connecting();
+
+        let urls = vec![
+            Url::parse("tcp://155.138.245.211:1883").unwrap(),  // TODO:
+        ];
+        self.attempt_connect(&urls[0]).await?;
+
+        // TODO:
+
+        let mqttc = self.mqttc.take().unwrap();
+        let mut eventloop = self.eventloop.take().unwrap();
+
+        let mut worker = MessagingWorker::new(self, mqttc);
+
+        let quit = self.stopping.clone();
+        let notifier = self.notifier.clone();
+
+        _ = Some(std::thread::spawn(move ||{
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+
+
+            let requests = worker.requests.clone();
+            let mut running = true;
+            while running {
+                tokio::select! {
+                    res = eventloop.poll() => {
+                        let event = match res {
+                            Ok(event) => event,
+                            Err(e) => {
+                                error!("MQTT eventloop polling error: {e}, break the loop.");
+                                break;
+                            },
+                        };
+
+                        match event {
+                            Event::Incoming(packet) => worker.on_incoming_msg(packet).await,
+                            Event::Outgoing(packet) => worker.on_outgoing_msg(packet).await,
+                        }
+                    }
+
+                    _ = notifier.notified() => {
+                        if let Some(_req) = lock!(requests).pop_front() {
+                            _ = worker.send_rpc_request(_req).await;
+                        }
+                    }
+                }
+
+                if *lock!(quit) {
+                    running = false
+                }
+            }
+        })}));
+
+        Ok(())
+    }
+
+    async fn push_contacts_update(&mut self,
+        updated_contacts: Vec<Contact>
+    ) -> Result<String> {
+
+        let current_version = crate::lock!(self.ua).contacts_version()?;
+        let update = ContactsUpdate::new(Some(current_version), updated_contacts);
+
+        let arc = Arc::new(Mutex::new(promise::StringVal::new()));
+        let fut = Promise::PushContactsUpdate(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ContactPush
+        )
+        .with_recipient(self.peer.id().clone())
+        .with_params(Parameters::ContactsUpdate(update))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    fn is_started(&self) -> bool {
+        self.api_client.is_some()
+    }
+}
+
+impl MessagingAgent for MessagingClient {
+    fn userid(&self) -> &Id {
+        self.user.id()
+    }
+
+    fn user_agent(&self) -> Arc<Mutex<UserAgent>> {
+        self.ua.clone()
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        // TODO:
+        Ok(())
+    }
+
+    async fn connect(&mut self) -> Result<()> {
+        self.do_connect().await
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        info!("Disconnected !!!");
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        *lock!(self.connected)
+    }
+
+    /*
+    fn message(&mut self) -> MessageBuilder {
+        MessageBuilder::new(self, MessageType::Message)
+    }
+    */
+
+    async fn update_profile(&mut self,
+        name: Option<&str>,
+        avatar: bool
+    ) -> Result<()> {
+        let Some(client) = self.api_client.as_mut() else {
+            return Err(Error::State("Client is not started yet".into()));
+        };
+        client.update_profile(
+            name.map(|n| n.nfc().collect::<String>()).as_deref(),
+            avatar
+        ).await
+    }
+
+    async fn upload_avatar(&mut self,
+        content_type: &str,
+        avatar: &[u8]
+    ) -> Result<String> {
+        let Some(client) = self.api_client.as_mut() else {
+            return Err(Error::State("Client is not started yet".into()));
+        };
+        client.upload_avatar(
+            content_type,
+            avatar
+        ).await
+    }
+
+    async fn upload_avatar_from_file(
+        &mut self,
+        content_type: &str,
+        file_name: &str
+    ) -> Result<String> {
+        let Some(client) = self.api_client.as_mut() else {
+            return Err(Error::State("Client is not started yet".into()));
+        };
+        client.upload_avatar_from_file(
+            content_type,
+            file_name.into()
+        ).await
+    }
+
+    async fn devices(&mut self) -> Result<Vec<ClientDevice>> {
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::DevicesVal::new()));
+        let fut = Promise::GetDeviceList(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::DeviceList
+        )
+        .with_recipient(self.peer.id().clone())
+        .with_promise(fut.clone());
+
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn revoke_device(
+        &mut self,
+        device_id: &Id
+    ) -> Result<()> {
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::RevokeDevice(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::DeviceRevoke
+        )
+        .with_recipient(self.peer.id().clone())
+        .with_params(Parameters::RevokeDevice(device_id.clone()))
+        .with_promise(fut.clone());
+
+        lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn create_channel(&self,
+        permission: Option<channel::Permission>,
+        name: &str,
+        notice: Option<&str>
+    ) -> Result<Channel> {
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let keypair = signature::KeyPair::random();
+        let session_id = Id::from(keypair.public_key());
+        let params = params::ChannelCreate::new(
+            session_id,
+            permission.unwrap_or(channel::Permission::OwnerInvite),
+            Some(name.into()),
+            notice.map(|n| n.into()),
+        );
+
+        let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
+        let fut = Promise::CreateChannel(arc.clone());
+        let cookie = crate::lock!(self.self_context).encrypt_into(
+            keypair.private_key().as_ref()
+        )?;
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelCreate
+        )
+        .with_params(Parameters::CreateChannel(params))
+        .with_recipient(crate::unwrap!(self.service_info).peerid().clone()) // why not peerid.
+        .with_cookie(cookie)
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn remove_channel(&self,
+        channel_id: &Id
+    ) -> Result<()> {
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::RemoveChannel(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelDelete
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn join_channel(&mut self,
+        ticket: &InviteTicket
+    ) -> Result<Channel> {
+        if ticket.session_key().is_none() {
+            Err(Error::Argument("Invite ticket does not contain session key".into()))?
+        }
+        if ticket.is_expired() {
+            Err(Error::Argument("Invite ticket is expired".into()))?
+        }
+
+        if !ticket.is_valid(self.user.id()) {
+            Err(Error::Argument("Invite ticket is not valid for this user".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        // check session key
+        let session_key = match ticket.is_public() {
+            true => ticket.session_key().unwrap().to_vec(),
+            false => {
+                self.user.decrypt_into(
+                    ticket.inviter(),
+                    ticket.session_key().unwrap()
+                )?
+            }
+        };
+        _ = signature::KeyPair::try_from(
+            session_key.as_slice()
+        ).map_err(|_| {
+            Error::Argument(format!("Invalid member private key"))
+        })?;
+
+        let arc = Arc::new(Mutex::new(promise::ChannelVal::new()));
+        let fut = Promise::JoinChannel(arc.clone());
+        let cookie = crate::lock!(self.self_context).encrypt_into(
+            session_key.as_ref()
+        )?;
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelJoin
+        )
+        .with_recipient(ticket.channel_id().clone())
+        .with_params(Parameters::JoinChannel(ticket.proof()))
+        .with_cookie(cookie)
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn leave_channel(&mut self, channel_id: &Id) -> Result<()> {
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::LeaveChannel(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelLeave
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn create_invite_ticket(&mut self,
+        channel_id: &Id,
+        invitee: Option<&Id>
+    ) -> Result<InviteTicket> {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
+            return Err(Error::Argument("No channel {} found in user agent.".into()));
+        };
+
+        let expire = crate::as_ms!(
+            SystemTime::now() + Duration::from_millis(InviteTicket::EXPIRATION)
+        ) as u64;
+
+        let shasum = InviteTicket::digest(
+            channel_id,
+            self.user.id(),
+            invitee.unwrap(),
+            false,
+            expire as u64
+        );
+
+        let sig = self.user.sign_into(&shasum)?;
+        let sk = channel.session_keypair().unwrap().private_key();
+        let sk = match invitee {
+            Some(invitee) => self.user.encrypt_into(invitee, sk.as_bytes())?,
+            None => sk.as_bytes().to_vec()
+        };
+
+        Ok(InviteTicket::new(
+            channel_id.clone(),
+            self.user.id().clone(),
+            invitee.is_none(),
+            expire,
+            sig,
+            Some(sk)
+        ))
+    }
+
+    async fn set_channel_owner(&mut self,
+        channel_id: &Id,
+        new_owner: &Id
+    ) -> Result<()> {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {channel_id} found from user agent".into()))?
+        };
+        if !channel.is_owner(self.user.id()) {
+            Err(Error::Argument("Not channel owner".into()))?
+        }
+        if !channel.is_member(new_owner) {
+            Err(Error::Argument("Not channel member".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::SetChannelOwner(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelOwner
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelOwner(new_owner.clone()))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn set_channel_permission(&mut self,
+        channel_id: &Id,
+        permission: Permission
+    ) -> Result<()> {
+        let Some(channel) = crate::lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
+        };
+        if !channel.is_owner(self.user.id()) {
+            Err(Error::Argument("Not channel owner".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::SetChannelPerm(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelPermission
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelPermission(permission))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn set_channel_name(&mut self,
+        channel_id: &Id,
+        name: Option<&str>
+    ) -> Result<()> {
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+        };
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::SetChannelName(arc.clone());
+        let mut req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelName
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
+
+        if let Some(v) = name.filter(|v| !v.is_empty()) {
+            let nfc = v.nfc().collect::<String>();
+            req = req.with_params(Parameters::SetChannelName(nfc));
+        }
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn set_channel_notice(&mut self,
+        channel_id: &Id,
+        notice: Option<&str>
+    ) -> Result<()> {
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
+        };
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::SetChannelNotice(arc.clone());
+        let mut req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelNotice
+        )
+        .with_recipient(channel_id.clone())
+        .with_promise(fut.clone());
+
+        if let Some(v) = notice.filter(|v| !v.is_empty()) {
+            let nfc = v.nfc().collect::<String>();
+            req = req.with_params(Parameters::SetChannelNotice(nfc));
+        }
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn set_channel_member_role(&mut self,
+        channel_id: &Id,
+        members: Vec<&Id>,
+        role: Role
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+        let Some(ch) = crate::lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {{{channel_id}}} was found".into()))?
+        };
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let role = params::ChannelMemberRole::new(
+            members.into_iter().map(|id| id.clone()).collect::<Vec<Id>>(),
+            role,
+        );
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::SetChannelMemberRole(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelRole
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::SetChannelMemberRole(role))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn ban_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<&Id>,
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(())
+        }
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument("No channel {channel_id} was found".into()))?
+        };
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::BanChannelMembers(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelBan
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::BanChannelMembers(members))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn unban_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<&Id>
+    ) -> Result<()> {
+        if members.is_empty() {
+            return Ok(());
+        }
+        let Some(ch) = lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument(format!("No channel {channel_id} was found")))?
+        };
+        if !ch.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let fut = Promise::UnbanChannelMembers(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelUnban
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::UnbanChannelMembers(members))
+        .with_promise(fut.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(fut).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn remove_channel_members(&mut self,
+        channel_id: &Id,
+        members: Vec<&Id>
+    ) -> Result<()> {
+        if members.is_empty() {
+            Err(Error::Argument(format!("No members to remove")))?;
+        }
+        let Some(channel) = lock!(self.ua).channel(channel_id)? else {
+            Err(Error::Argument(format!("No channel {channel_id} was found")))?
+        };
+        if !channel.is_owner_or_moderator(self.user.id()) {
+            Err(Error::State("Not channel owner or moderator".into()))?
+        }
+
+        if !self.is_connected() {
+            return Err(Error::State("Client is not connected yet".into()));
+        }
+
+        let members = members.into_iter()
+            .map(|id| id.clone())
+            .collect::<Vec<Id>>();
+
+        let arc = Arc::new(Mutex::new(promise::BoolVal::new()));
+        let promise = Promise::RemoveChannelMembers(arc.clone());
+        let req = RPCRequest::new(
+            self.next_index(),
+            RPCMethod::ChannelRemove
+        )
+        .with_recipient(channel_id.clone())
+        .with_params(Parameters::RemoveChannelMembers(members))
+        .with_promise(promise.clone());
+
+        crate::lock!(self.requests).push_back(req);
+        self.notifier.notify_one();
+
+        match Waiter::new(promise).await {
+            Ok(_) => crate::lock!(arc).result(),
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn add_contact(&mut self,
+        id: &Id,
+        home_peer_id: Option<&Id>,
+        session_key: &[u8],
+        remark: Option<&str>
+    ) -> Result<Contact> {
+        _ = signature::KeyPair::try_from(
+            session_key
+        ).map_err(|_| {
+            Error::Argument(format!("Invalid session private key"))
+        })?;
+
+        let contact = Contact::new1(
+            id.clone(),
+            home_peer_id.cloned(),
+            session_key.to_vec(),
+            remark.map(|r| r.nfc().collect::<String>())
+        )?;
+
+        self.push_contacts_update(vec![contact.clone()]).await
+            .map(|_| contact)
+    }
+
+    async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
+        let ua = self.ua.clone();
+        let id = id.clone();
+
+        tokio::spawn(async move {
+            lock!(ua).contact(&id)
+        }).await.unwrap()
+    }
+
+    async fn channel(&self, id: &Id) -> Result<Option<Channel>> {
+        let ua = self.ua.clone();
+        let id = id.clone();
+
+        tokio::spawn(async move {
+            lock!(ua).channel(&id)
+        }).await.unwrap()
+    }
+
+    async fn contacts(&self) -> Result<Vec<Contact>> {
+        let ua = self.ua.clone();
+
+        tokio::spawn(async move {
+            lock!(ua).contacts()
+        }).await.unwrap()
+    }
+
+    async fn update_contact(&mut self,
+        contact: Contact
+    ) -> Result<Contact> {
+        if !contact.is_modified() {
+            Err(Error::Argument("Contact is not modified".into()))?;
+        }
+
+        self.push_contacts_update(vec![contact.clone()]).await
+            .map(|_| contact)
+    }
+
+    async fn remove_contact(&mut self, id: &Id) -> Result<()> {
+        self.remove_contacts(vec![id]).await
+    }
+
+    async fn remove_contacts(&mut self, _ids: Vec<&Id>) -> Result<()> {
+        unimplemented!()
+    }
+}
+
+struct MessagingWorker {
+    ua              : Arc<Mutex<UserAgent>>,
+    //_worker_client   : Arc<Mutex<AsyncClient>>,
+    mqttc           : AsyncClient,
+
+    self_context    : Arc<Mutex<CryptoContext>>,
+    server_context  : Arc<Mutex<CryptoContext>>,
+
+    failures        : u32,
+    connected       : Arc<Mutex<bool>>,
+    stopping        : Arc<Mutex<bool>>,
+
+    peer            : PeerInfo,
+
+    inbox           : String,
+    outbox          : String,
+    broadcast       : String,
+
+    // notifier        : Arc<Notify>,
+    requests        : Arc<Mutex<LinkedList<RPCRequest>>>,
+    pending_calls   : HashMap<u32, RPCRequest>,
+
+    user            : CryptoIdentity
+}
+
+impl MessagingWorker {
+    fn new(client: &MessagingClient,  mqttc: AsyncClient) -> Self {
+        Self {
+            ua              : client.ua.clone(),
+            mqttc,
+
+            user            : client.user.clone(),
+            self_context    : client.self_context.clone(),
+            server_context  : client.server_context.clone(),
+
+            peer            : client.peer.clone(),
+
+            failures        : 0,
+            connected       : client.connected.clone(),
+            stopping        : client.stopping.clone(),
+
+            inbox           : client.inbox.clone(),
+            outbox          : client.outbox.clone(),
+            broadcast       : client.broadcast.clone(),
+
+            requests        : client.requests.clone(),
+            pending_calls   : HashMap::new(),
+        }
+    }
+
+    fn is_me(&self, id: &Id) -> bool {
+        self.user.id() == id
+    }
+
+    async fn send_rpc_request(&mut self, req: RPCRequest) -> Result<()> {
+        let msg = MsgBuilder::new(MessageType::Call)
+            .with_from(self.user.id().clone())
+            .with_to(req.recipient())
+            .with_body(serde_cbor::to_vec(&req).unwrap())
+            .with_serial_number(req.id())
+            .build();
+
+        self.pending_calls.insert(req.id(), req);
+        self.send_msg(msg).await
+    }
+
+    async fn send_msg(&self, msg: Msg) -> Result<()> {
+        let need_encryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.to() != self.peer.id()
+        };
+
+        let encrypt_msg = |msg: &Msg| -> Result<Vec<u8>> {
+            let recipient = crate::lock!(self.ua).contact(msg.to())?;
+            let Some(rec) = recipient else {
+                let estr = format!("Interal Error: unknown recipient {}", msg.to());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            };
+
+            let Some(sid) = rec.session_id() else {
+                let estr = format!("Internal error: recipient {} has no session key.", msg.to());
+                error!("{}", estr);
+                return Err(Error::State(estr));
+            };
+
+            self.user.create_crypto_context(&sid)?
+                .encrypt_into(crate::unwrap!(msg.body()))
+        };
+
+        let encrypt_call = |msg: &Msg| -> Result<Vec<u8>> {
+            self.user.create_crypto_context(msg.to())?
+                .encrypt_into(crate::unwrap!(msg.body()))
+        };
+
+        let msg = if need_encryption(&msg) {
+            let msg_type = msg.message_type();
+            let encrypted = match msg_type {
+                MessageType::Message    => encrypt_msg(&msg)?,
+                MessageType::Call       => encrypt_call(&msg)?,
+                _ => {
+                    panic!("INTERNAL fatal: unsupported msg type {:?}", msg.message_type());
+                }
+            };
+            msg.dup_from(encrypted)
+        } else {
+            msg
+        };
+
+        self.publish_msg(&msg).await
+    }
+
+    async fn publish_msg(&self, msg: &Msg) -> Result<()> {
+        let outbox = self.outbox.as_str();
+        let payload = serde_cbor::to_vec(msg).unwrap();
+        let payload = lock!(self.server_context).encrypt_into(&payload)?;
+
+        self.mqttc.publish(
+            outbox,
+            rumqttc::QoS::AtLeastOnce,
+            false,
+            payload
+        ).await.map_err(|e| {
+            Error::State(format!("Internal error: error publishing message: {}", e))
+        })?;
+
+        debug!("Message published to outbox {}", outbox);
+
+        // TODO: pending messages.
+        // TODO: sending messages;
+        Ok(())
+    }
+
+    async fn on_incoming_msg(&mut self, packet: Packet) {
+        match packet {
+            Packet::Publish(p)  => self.on_publish(p).await,
+            Packet::PubAck(_)   => {},
+            Packet::SubAck(_)   => {},
+            Packet::UnsubAck(_) => {},
+            Packet::Disconnect  => self.on_disconnect(),
+            Packet::PingResp    => self.on_ping_rsp(),
+            Packet::ConnAck(_)  => self.on_connected(),
+            _ => {
+                error!("Fatail error: unexpected MQTT event: {:?}", packet);
+                panic!();
+            }
+        }
+    }
+
+    async fn on_outgoing_msg(&mut self, _packet: Outgoing) {
+        match _packet {
+            Outgoing::Publish(_pktid) => {},
+            _ => {},
+        }
+    }
+
+    fn on_disconnect(&mut self) {
+        self.failures += 1;
+        *lock!(self.connected) = false;
+
+        crate::lock!(self.ua).on_disconnected();
+        info!("Disconnected from messaging server!");
+
+        if *crate::lock!(self.stopping) {
+            return;
+        } else {
+            error!("Connection lost, attempt to reconnect in {} seconds...", 5);
+            // TODO: timer to reconnect.
+        }
+    }
+
+    fn on_ping_rsp(&mut self) {
+        trace!("Ping response received");
+    }
+
+    fn on_connected(&mut self) {
+        self.failures = 0;
+        *crate::lock!(self.connected) = true;
+
+        info!("Connected to messaging server");
+        crate::lock!(self.ua).on_connected();
+    }
+
+    async fn on_publish(&mut self, data: rumqttc::Publish) {
+        let topic = data.topic.as_str();
+        debug!("Got message on topic: {}", topic);
+
+        let decrypted = match crate::lock!(self.server_context).decrypt_into(&data.payload) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Error decrypting message payload from {topic}: {e}, ignored");
+                return;
+            }
+        };
+        let mut msg = match serde_cbor::from_slice::<Msg>(&decrypted) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Error deserializing message from {topic}: {e}, ignored");
+                return;
+            }
+        };
+        if !msg.is_valid() {
+            error!("Received invalid message from {topic}, ignored");
+            return;
+        }
+        msg.mark_encrypted(true);
+
+        if topic == self.inbox {
+            self.on_inbox_msg(msg).await;
+        } else if topic == self.outbox {
+            self.on_outbox_msg(msg).await;
+        } else if topic == self.broadcast {
+            self.on_broadcast_msg(msg).await;
+        } else {
+            error!("Received message with unknown topic: {topic}, ignored");
+            return;
+        }
+    }
+
+    async fn on_inbox_msg(&mut self, mut msg: Msg) {
+        let need_decryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.from() != self.peer.id()
+        };
+
+        if !need_decryption(&msg) {
+            msg.mark_encrypted(false);
+            return self.process_msg(msg).await;
+        }
+
+        if self.is_me(msg.to()){
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: sender -> me
+                    // The body is encrypted using the sender's private key
+                    // and the session public key associated with that sender.
+                    let sender = crate::lock!(self.ua).contact(msg.from());
+                    let Ok(Some(sender)) = sender else {
+                        warn!("Sender {} not in contact list, ignored", msg.from());
+                        return;
+                    };
+                    if sender.session_keypair().is_none() {
+                        warn!("No session key attached to sender {}, ignored", msg.from());
+                        return;
+                    }
+
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(sender.rx_crypto_context())) {
+                        warn!("Error decrypting message body: {}, ignored", e);
+                        return;
+                    };
+                },
+                MessageType::Call => {
+                    // Call: sender(user | channel) -> me
+                    // The body is encrypted using the sender's private key
+                    // and my public key.
+
+					// TODO: CHECKME - cache the CryptoContext?
+                    let ctxt = self.user.create_crypto_context(msg.from());
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(ctxt)) {
+                        warn!("Error decrypting call body: {}, ignored", e);
+                        return;
+                    };
+                },
+                _ => {
+                    // Notification: !homePeer -> me
+					// The body is encrypted using the sender's private key
+					// and my public key.
+
+					// TODO: CHECKME - cache the CryptoContext?
+                    let ctxt = self.user.create_crypto_context(msg.from());
+                    if let Err(e) = msg.decrypt_body(crate::unwrap!(ctxt)) {
+                        warn!("Error decrypting notitification body: {}, ignored", e);
+                        return;
+                    };
+                }
+            }
+        } else {
+            let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                warn!("No channel {{{}}} found, ignored", msg.to());
+                return;
+            };
+            if channel.session_keypair().is_none() {
+                warn!("No session key for channel {{{}}}, ignored", msg.to());
+                return;
+            };
+
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: sender -> channel
+                    // The body is encrypted using the sender's private key
+                    // and the session public key of channel.
+                    let Some(ctxt) = channel.rx_crypto_context_by(msg.from()) else {
+                        warn!("No crypto context found for sender {{{}}} in channel {{{}}}, ignored",
+                            msg.from(), msg.to());
+                        return;
+                    };
+                    if let Err(e) = msg.decrypt_body(ctxt) {
+                        warn!("Error decrypting message body: {}, ignored", e);
+                        return;
+                    }
+                },
+                MessageType::Notification => {
+                    // Message: channel -> channel
+                    // The body is encrypted using the channel's private key
+                    // and the channel session's public key
+
+                    let Ok(ctxt) = channel.rx_crypto_context() else {
+                        warn!("No crypto context found for channel {{{}}}, ignored", msg.to());
+                        return;
+                    };
+                    if let Err(e) = msg.decrypt_body(ctxt) {
+                        warn!("Error decrypting notification body: {}, ignored", e);
+                        return;
+                    }
+                },
+                MessageType::Call => {
+                    panic!("Should be no call message sent to channel")
+                }
+            }
+        }
+
+        if msg.is_encrypted() {
+            warn!("Message from unknow sender {}, keep in encrypted", msg.from());
+        }
+        self.process_msg(msg).await
+    }
+
+    async fn on_outbox_msg(&mut self, mut msg: Msg) {
+        let need_decryption = |v: &Msg| {
+            let with_body = match v.body() {
+                Some(b) => !b.is_empty(),
+                None => false
+            };
+            with_body && v.from() != self.peer.id()
+        };
+
+        if true { // TODO:
+            warn!("Outgoing message received on outbox, ignored");
+            return;
+        } else if need_decryption(&msg) {
+            match msg.message_type() {
+                MessageType::Message => {
+                    // Message: me -> recipient
+                    // The body is encrypted using my private key
+                    // and the session public key associated with the recipient.
+                    let recipient = lock!(self.ua).contact(msg.to());
+                    let Ok(Some(recipient)) = recipient else {
+                        warn!("Recipient {} not in contact list, ignored", msg.to());
+                        return;
+                    };
+                    if recipient.session_keypair().is_none() {
+                        warn!("No session key attached to recipient {}, ignored", msg.to());
+                        return;
+                    }
+                },
+                MessageType::Call => {
+                    // Call: me -> recipient (user | channel)
+                    // The body is encrypted using my private key
+                    // and the recipient's public key.
+                },
+                _ => {}
+            }
+        } else {
+            // service RPC requests: me -> servicePeer
+            // body is encrypted together with the message envelope.
+            // Or: empty body
+            msg.mark_encrypted(false);
+        }
+
+        match msg.message_type() {
+            MessageType::Message => self.on_sent(msg).await,
+            MessageType::Call => self.on_rpc_request(msg).await,
+            _ => warn!("Unexpected message type on outbox, ignored")
+        }
+    }
+
+    async fn on_sent(&mut self, _msg: Msg) {
+        unimplemented!()
+    }
+
+    async fn on_broadcast_msg(&mut self, mut msg: Msg) {
+        // Broadcast notifications from the service peer.
+		// Message body is encrypted with the message envelope,
+		// it was already decrypted here
+
+        msg.mark_encrypted(false);
+        crate::lock!(self.ua).on_broadcast(msg);
+    }
+
+    async fn process_msg(&mut self, msg: Msg) {
+        match msg.message_type() {
+            MessageType::Message => {
+                self.on_msg(msg).await;
+            },
+            MessageType::Call => {
+                self.on_rpc_response(msg).await;
+            },
+            MessageType::Notification => {
+                self.on_notification(msg).await;
+            }
+        }
+    }
+
+    async fn on_msg(&mut self, msg: Msg) {
+        let need_refresh = |contact: Option<&Contact>| {
+            match contact {
+                Some(c) => c.is_staled(),
+                None => true
+            }
+        };
+        let conversation_id = match !self.is_me(msg.to()) {
+            true => msg.to().clone(),
+            false => msg.from().clone()
+        };
+
+        lock!(self.ua).on_message(msg);
+
+        let ua = self.ua.clone();
+        _ = tokio::spawn(async move {
+            let Ok(contact) = lock!(ua).contact(&conversation_id) else {
+                error!("Error retrieving contact {} from user agent", conversation_id);
+                return;
+            };
+            // check if the contact need to be update
+            if need_refresh(contact.as_ref()) {
+                //self.arefresh_profile(&conv_id).await.on_success(|profile| {
+                //    self.ua().lock().unwrap().on_contact_profile(&conv_id, profile);
+                //});
+            }
+        }).await;
+    }
+
+    async fn on_rpc_response(&mut self, msg: Msg) {
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Empty RPC response received from {}, ignored", msg.from());
+            return;
+        };
+
+        crate::dump_hex("RPC response body", body);
+
+        let Ok(mut preparsed) = RPCResponse::from(body) else {
+            error!("Error parsing RPC response from {}, ignored", msg.from());
+            return;
+        };
+        let Some(call) = self.pending_calls.remove(preparsed.id()) else {
+            error!("Unexpected RPC response from {}, ignored", msg.from());
+            return;
+        };
+
+        match call.method() {
+            RPCMethod::DeviceList => {
+                let complete = |rc: Result<Vec<ClientDevice>>| {
+                    if let Some(Promise::GetDeviceList(arc)) = call.promise() {
+                        crate::lock!(arc).complete(rc)
+                    }
+                };
+                complete(match preparsed.result() {
+                    Ok(v) => Ok(v),
+                    Err(e) => err_from(e)
+                })
+            },
+            RPCMethod::DeviceRevoke => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RevokeDevice(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                complete(match preparsed.result() {
+                    Ok(v) => Ok(v),
+                    Err(e) => err_from(e)
+                })
+            },
+            RPCMethod::ContactPush => {
+                // TODO:
+            },
+            RPCMethod::ContactClear => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::ContactClear(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                complete(match preparsed.result() {
+                    Ok(v) => {
+                        crate::lock!(self.ua).on_contacts_cleared();
+                        Ok(v)
+                    },
+                    Err(e) => err_from(e)
+                })
+            },
+            RPCMethod::ChannelCreate => {
+                let complete = |rc: Result<Channel>| {
+                    if let Some(Promise::CreateChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let mut channel = match preparsed.result::<Channel>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+
+                let borrowed = crate::lock!(self.self_context);
+                let session_key = match borrowed.decrypt_into(call.cookie().unwrap()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return
+                    }
+                };
+                if let Err(e) = channel.set_session_key(&session_key) {
+                    complete(err_from(e));
+                    return
+                }
+
+                //let channel_id = channel.id().clone();
+                lock!(self.ua).on_joined_channel(&channel);
+                complete(Ok(channel));
+
+               // if call.is_initiator() {
+               //     _ = self.channel_members(&channel_id).await;
+               // }
+            },
+            RPCMethod::ChannelDelete => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RemoveChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => {
+                        let estr = format!("Internal error: no channel {} found", msg.from());
+                        complete(Err(Error::State(estr)));
+                        return;
+                    },
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                lock!(self.ua).on_channel_deleted(&channel);
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelJoin => {
+                let complete = |rc: Result<Channel>| {
+                    if let Some(Promise::JoinChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                let mut channel = match preparsed.result::<Channel>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                let session_key = match crate::lock!(self.self_context).decrypt_into(
+                    crate::unwrap!(call.cookie())) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        complete(err_from(e));
+                        return
+                    }
+                };
+                if let Err(e) = channel.set_session_key(&session_key) {
+                    complete(err_from(e));
+                    return
+                }
+
+                //let channel_id = channel.id().clone();
+                lock!(self.ua).on_joined_channel(&channel);
+                complete(Ok(channel));
+
+               // if call.is_initiator() {
+               //     _ = self.channel_members(&channel_id).await;
+               // }
+            },
+            RPCMethod::ChannelLeave => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::LeaveChannel(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => {
+                        let estr = format!("Internal error: no channel {} found", msg.from());
+                        complete(Err(Error::State(estr)));
+                        return;
+                    },
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                lock!(self.ua).on_left_channel(&channel);
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelOwner => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelOwner(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelOwner(new_owner) = crate::unwrap!(call.params()) {
+                    channel.set_owner(new_owner.clone());
+                    crate::lock!(self.ua).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelPermission => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelOwner(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelPermission(new_permission) = crate::unwrap!(call.params()) {
+                    channel.set_permission(new_permission.clone());
+                    crate::lock!(self.ua).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelName => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelName(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelName(name) = crate::unwrap!(call.params()) {
+                    channel.set_name(name.as_str());
+                    lock!(self.ua).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelNotice => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelNotice(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let mut channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelNotice(notice) = crate::unwrap!(call.params()) {
+                    channel.set_notice(notice.as_str());
+                    crate::lock!(self.ua).on_channel_updated(&channel);
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelRole => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::SetChannelMemberRole(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::SetChannelMemberRole(member_role) = crate::unwrap!(call.params()) {
+                    let role = member_role.role();
+                    let changed_members = member_role.members().iter()
+                        .map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    lock!(self.ua).on_channel_members_role_changed(&channel, changed_members.as_ref(), role);
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelBan => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::BanChannelMembers(arc)) = call.promise() {
+                        lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::BanChannelMembers(ids) = crate::unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    crate::lock!(self.ua).on_channel_members_banned(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelUnban => {
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::UnbanChannelMembers(arc)) = call.promise() {
+                        crate::lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match crate::lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::UnbanChannelMembers(ids) = crate::unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    crate::lock!(self.ua).on_channel_members_unbanned(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
+            },
+            RPCMethod::ChannelRemove =>{
+                let complete = |rc: Result<()>| {
+                    if let Some(Promise::RemoveChannelMembers(arc)) = call.promise() {
+                        crate::lock!(arc).complete(rc)
+                    }
+                };
+                if let Err(e) = preparsed.result::<bool>() {
+                    complete(err_from(e));
+                    return;
+                }
+                let channel = match crate::lock!(self.ua).channel(msg.from()) {
+                    Ok(Some(channel)) => channel,
+                    Ok(None) => Channel::auto(msg.from()),
+                    Err(e) => {
+                        complete(err_from(e));
+                        return;
+                    }
+                };
+                if let Parameters::RemoveChannelMembers(ids) = crate::unwrap!(call.params()) {
+                    let changed = ids.iter().map(|id| match channel.member(id) {
+                            Some(m) => m,
+                            None => channel::Member::unknown(id)
+                        })
+                        .collect::<Vec<channel::Member>>();
+                    crate::lock!(self.ua).on_channel_members_removed(&channel, changed.as_ref());
+                }
+                complete(Ok(()))
+            },
+            _ => {
+                error!("Internal Error: invalid RPC call {:?}", call.method());
+                return;
+            }
+        }
+    }
+
+    async fn on_notification(&mut self, msg: Msg) {
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Empty notification received from {}, ignored", msg.from());
+            return;
+        };
+
+        crate::dump_hex("Notification body", body);
+
+        let Ok(mut preparsed) = Notification::from(body) else {
+            error!("Error parsing notification from {}, message ignored", msg.from());
+            return;
+        };
+
+        match preparsed.event() {
+            events::USER_PROFILE => {
+                let profile = match preparsed.data::<Profile>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing profile data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if !self.is_me(&profile.id()) && !profile.is_genuine() {
+                    warn!("User updated its profile, but the Profile invalid, ignored");
+                    return;
+                } else {
+                    info!("User updated its profile: {}", profile.id());
+                }
+                let name = profile.name();
+                lock!(self.ua).on_user_profile_changed(name, profile.has_avatar());
+            },
+            events::CHANNEL_PROFILE => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let updated = match preparsed.data::<Channel>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if let Ok(Some(mut channel)) = lock!(self.ua).channel(msg.to()) {
+                    channel.update_channel(&updated);
+                    lock!(self.ua).on_channel_deleted(&channel)
+                }
+            },
+            events::CHANNEL_DELETED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                if let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) {
+                    lock!(self.ua).on_channel_deleted(&channel)
+                }
+            },
+            events::CHANNEL_MEMBER_JOINED => {
+                let member = match preparsed.data::<channel::Member>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel member data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                if let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) {
+                    lock!(self.ua).on_channel_member_joined(&channel, &member);
+                }
+            },
+            events::CHANNEL_MEMBER_LEFT => {
+                let memberid = preparsed.operator();
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let member = match channel.member(&memberid) {
+                    Some(m) => m,
+                    None => channel::Member::unknown(&memberid)
+                };
+                lock!(self.ua).on_channel_member_left(&channel, &member);
+            },
+            events::CHANNEL_MEMBERS_ROLE => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let updated = match preparsed.data::<ChannelMembersRoleUpdated>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members role data in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let role = updated.role();
+                let ids = updated.members();
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_role_changed(&channel, members.as_ref(), role);
+            },
+            events::CHANNEL_MEMBERS_BANNED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_banned(&channel, members.as_ref());
+            },
+            events::CHANNEL_MEMBERS_UNBANNED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_unbanned(&channel, members.as_ref());
+            },
+            events::CHANNEL_MEMBERS_REMOVED => {
+                if self.is_me(preparsed.operator()) {
+                    return;
+                }
+                let ids = match preparsed.data::<Vec<Id>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("Error parsing channel members IDs in notification from {}: {}, ignored", msg.from(), e);
+                        return;
+                    }
+                };
+                let Ok(Some(channel)) = lock!(self.ua).channel(msg.to()) else {
+                    warn!("No channel {{{}}} found, ignored", msg.to());
+                    return;
+                };
+                let members = ids.iter()
+                    .map(|id| match channel.member(id) {
+                        Some(m) => m,
+                        None => channel::Member::unknown(id)
+                    })
+                    .collect::<Vec<channel::Member>>();
+                lock!(self.ua).on_channel_members_removed(&channel, members.as_ref());
+            },
+            _ => {
+                error!("Internal Error: invalid notification {:?}, ignored", preparsed.event());
+                return;
+            }
+        }
+    }
+
+    async fn on_rpc_request(&mut self, msg: Msg) {
+        let Some(body) = msg.body().filter(|b| !b.is_empty()) else {
+            warn!("Empty RPC request received from {}, ignored", msg.from());
+            return;
+        };
+
+        if msg.has_original_body() {
+            // TODO
+            return;
+        }
+
+        crate::dump_hex("RPC request body", body);
+
+        let Ok(preparsed) = RPCRequest::from(body) else {
+            error!("Error parsing RPC request from {}, ignored", msg.from());
+            return;
+        };
+
+        match preparsed.method() {
+            RPCMethod::DeviceList   => {},  // ignored
+            RPCMethod::DeviceRevoke => {}   // ignored
+            RPCMethod::ContactPush  => {},
+            RPCMethod::ContactClear => {},
+            RPCMethod::ChannelCreate => {},
+            RPCMethod::ChannelRemove => {},
+            RPCMethod::ChannelJoin  => {},
+            RPCMethod::ChannelLeave => {},
+            RPCMethod::ChannelOwner => {},
+            RPCMethod::ChannelPermission => {},
+            RPCMethod::ChannelName  => {},
+            RPCMethod::ChannelNotice => {},
+            RPCMethod::ChannelRole  => {},
+            RPCMethod::ChannelBan   => {},
+            RPCMethod::ChannelUnban => {},
+            _ => {
+                error!("Unknown RPC method for response from {}, discarded", msg.from());
+                return;
+            }
+        }
+    }
+
+    #[allow(unused)]
+    async fn try_refresh_profile(&self, _id: &Id) -> Result<Profile> {
+        unimplemented!()
+    }
+}
+
+fn password(user: &CryptoIdentity, device: &CryptoIdentity) -> String {
+    let nonce = Nonce::random();
+    let usign = user.sign_into(nonce.as_bytes()).unwrap();
+    let dsign = device.sign_into(nonce.as_bytes()).unwrap();
+
+    let mut password = Vec::<u8>::with_capacity(
+        nonce.size() + usign.len() + dsign.len()
+    );
+
+    password.extend_from_slice(nonce.as_bytes());
+    password.extend_from_slice(&usign);
+    password.extend_from_slice(&dsign);
+
+    bs58::encode(password).into_string()
+}
+
+fn err_from<T>(e: Error) -> crate::core::Result<T> {
+    let estr = format!("Internal error: {e}");
+    warn!("{}", estr);
+    Err(Error::State(estr))
+}

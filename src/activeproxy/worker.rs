@@ -15,11 +15,8 @@ use log::{info, debug, error};
 
 use crate::{
     elapsed_ms,
-    srv_addr,
-    unwrap,
     Id,
     core::Result,
-    Error,
     signature,
     dht::Node,
 };
@@ -37,7 +34,7 @@ const RE_ANNOUNCE_INTERVAL:     u128 = 60 * 60 * 1000;      // 1hour
 const PERSISTENCE_INTERVAL:     u128 = 60 * 60 * 1000;      // 1hour
 
 pub(crate) struct ManagedWorker {
-    node:               Arc<Mutex<Node>>,
+    node:               Arc<Node>,
     cached_dir:         PathBuf,
     managed:            Arc<Mutex<ManagedFields>>,
 
@@ -46,7 +43,7 @@ pub(crate) struct ManagedWorker {
 
 impl ManagedWorker {
     pub fn new(cached_dir: PathBuf,
-        node: Arc<Mutex<Node>>,
+        node: Arc<Node>,
         managed: Arc<Mutex<ManagedFields>>,
         peerid: Id,
     ) -> Self {
@@ -77,24 +74,10 @@ impl ManagedWorker {
         };
 
        info!("Announce peer {}: {}", peer.id(), peer);
-        if let Some(url) = peer.alternative_url() {
-            info!("-**- ActiveProxy: peer server: {}:{}, domain: {} -**-",
-                srv_addr!(self.managed).ip(),
-                peer.port(),
-                url
-            );
-        } else {
-            info!("-**- ActiveProxy: peer server: {}:{} -**-",
-                srv_addr!(self.managed).ip(),
-                peer.port()
-            );
-        }
+        info!("-**- ActiveProxy: peer server endpoint: {} -**-", peer.endpoint());
 
         let node = self.node.clone();
-        _ = node.lock()
-            .unwrap()
-            .announce_peer(&peer, None)
-            .await;
+        _ = node.announce_peer(&peer, -1, false).await;
     }
 }
 
@@ -120,13 +103,13 @@ pub(crate) async fn run_loop(
             _ = conn.connect_server().await;
 
             managed.lock().unwrap().connections += 1;
-            task::spawn(async move {
+            task::spawn_local(async move {
                 _ = run_connection(conn).await;
             });
         } else {
             _ = interval.tick().await;
             let worker = worker.clone();
-            task::spawn(async move {
+            task::spawn_local(async move {
                 _ = run_iteraction(worker);
             });
         }
@@ -224,7 +207,7 @@ async fn read_stream(mut stream: Option<&mut ReadHalf<TcpStream>>, data: &mut [u
         None => return Ok(0)
     };
 
-    stream.read(data).await.map_err(|e| Error::from(e))
+    stream.read(data).await.map_err(|e| e.into())
 }
 
 async fn run_iteraction(worker: Arc<Mutex<ManagedWorker>>) {

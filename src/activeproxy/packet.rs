@@ -1,7 +1,7 @@
 use std::fmt;
 use crate::{
-    Error,
-    error::Result,
+    Result,
+    core::errors::StateError,
 };
 
 const AUTH_MIN          :u8 = 0x00;
@@ -114,7 +114,7 @@ fn create_packet<T: Default>(ack: bool,
 
 fn create_packet_on_err<T: Default>(ack: bool,
     with_ack: fn(T) -> Packet,
-    no_ack_err: Error
+    no_ack_err: crate::Error
 ) -> Result<Packet> {
 
     match ack {
@@ -139,13 +139,13 @@ impl Packet {
                                     => create_packet::<DisconnType>(ack, Packet::DisconnectAck, Packet::Disconnect),
             DATA_MIN..=DATA_MAX     => {
                 create_packet_on_err::<DataType>(ack, Packet::Data,
-                    Error::State(format!("Should never happen: Data type should not be with ack"))
+                    StateError::new("Should never happen: Data type should not be with ack")
                 )
             },
             ERROR_MIN..=ERROR_MAX   => create_packet_on_err::<ErrType>(ack, Packet::Error,
-                Error::State(format!("Should never happen: Error type should not be with ack"))
+                StateError::new("Should never happen: Error type should not be with ack")
             ),
-            _ => Err(Error::State(format!("Invalid packet type: {}", input)))
+            _ => Err(StateError::new(format!("Invalid packet type: {}", input)))
         }
     }
 

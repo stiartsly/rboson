@@ -1,6 +1,7 @@
 pub(crate) mod logger;
 pub(crate) mod version;
 
+pub mod config;
 pub mod id;
 pub mod joint_result;
 pub mod network;
@@ -27,6 +28,13 @@ pub use crate::core::{
 
     joint_result::JointResult,
     network::Network,
+    config::{
+        Config,
+        UserConfig,
+        DeviceConfig,
+        ActiveProxyConfig,
+        MessagingConfig,
+    },
     node_info::NodeInfo,
     peer_info::{PeerInfo, PeerBuilder},
     value::{Value, ImmutableBuilder, SignedBuilder, EncryptedBuilder},

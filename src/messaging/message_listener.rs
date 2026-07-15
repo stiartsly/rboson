@@ -6,5 +6,5 @@ pub trait MessageListener: Send + Sync {
     fn on_message(&self, message: &dyn Message);
 
     /// Called when an outbound message was successfully delivered.
-    fn on_sent(&self, message: &dyn Message) {}
+    fn on_sent(&self, _message: &dyn Message) {}
 }

@@ -46,7 +46,7 @@ impl ContentDisposition {
     }
 
     /// An inline disposition carrying a filename hint.
-    pub fn inline_with_name(filename: impl Into<String>) -> Self {
+    pub fn inline_with_name(_filename: impl Into<String>) -> Self {
         ContentDisposition::Inline // simplified: ignore filename for inline
     }
 
@@ -76,10 +76,12 @@ impl fmt::Display for ContentDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ContentDisposition::Inline => f.write_str("inline"),
-            ContentDisposition::Attachment { filename: None }       => f.write_str("attachment"),
             ContentDisposition::Attachment { filename: Some(name) } => {
                 write!(f, "attachment; filename=\"{}\"", name)
-            }
+            },
+            ContentDisposition::Attachment { filename: _ } => {
+                f.write_str("attachment")
+            },
         }
     }
 }
@@ -129,7 +131,7 @@ pub struct Content {
 }
 
 impl Content {
-    pub(crate) fn new(
+    pub(crate) fn _new(
         headers:      HashMap<String, String>,
         content_type: Option<String>,
         disposition:  Option<ContentDisposition>,

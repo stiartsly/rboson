@@ -1,8 +1,8 @@
 pub mod core;
 pub mod did;
 pub mod dht;
-//pub mod activeproxy;
-//pub mod messaging;
+pub mod activeproxy;
+pub mod messaging;
 
 pub use crate::core::{
     id::{

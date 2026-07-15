@@ -95,13 +95,13 @@ mod routing {
     pub(crate) mod kclosest_nodes;
     pub(crate) mod routing_table;
 
-    /*#[cfg(test)]
+    #[cfg(test)]
     mod unitests {
         mod test_prefix;
         mod test_kclosest_nodes;
         mod test_routing_table;
         mod test_kbucket_entry;
-    }*/
+    }
 
     pub(crate) use {
         prefix::Prefix,
@@ -237,7 +237,6 @@ pub(crate) mod utils {
     }
 }
 
-/*
 #[cfg(test)]
 mod unitests {
     mod test_addr;
@@ -251,4 +250,3 @@ mod unitests {
     // storage
     mod test_storage;
 }
-*/

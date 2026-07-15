@@ -1,7 +1,9 @@
 use std::{
+    cell::RefCell,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    rc::Rc,
 };
+use tokio::sync::mpsc;
 
 use crate::{Id, NodeInfo};
 use crate::dht::{
@@ -11,7 +13,8 @@ use crate::dht::{
         RpcCall, rpccall::State,
         Reachability,
         Listener
-    }
+    },
+    timer_client::{LocalTimerClient, LocalTimerCmd},
 };
 
 fn make_nodeinfo(addr: &str) -> NodeInfo {
@@ -38,9 +41,20 @@ fn make_response(call: &RpcCall) -> msg::Message {
     rsp
 }
 
+fn finalize_call(call: &mut RpcCall) {
+    let req = Rc::new(call.take_transient());
+    call.set_request(req);
+}
+
+fn make_timer_client() -> Rc<LocalTimerClient> {
+    let (tx, _rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
+    Rc::new(LocalTimerClient::new(tx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_with_node() {
         let target = make_nodeinfo("127.0.0.1:40001");
@@ -49,21 +63,14 @@ mod tests {
         req.set_nodeid(local_nodeid.clone());
 
         let txid = req.txid();
-        let call = RpcCall::new(target.clone(), req);
-
-        //call.set_local_id(local_nodeid);
-        // call.set_expected_rtt_if_absent(40);
+        let mut call = RpcCall::new(target.clone(), req);
+        finalize_call(&mut call);
 
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-        // assert_eq!(call.expected_rtt(), 40);
         assert_eq!(call.state(), State::Unsent);
-
-        // call.set_expected_rtt(90);
-        // assert_eq!(call.expected_rtt(), 90);
         assert_eq!(call.state(), State::Unsent);
-       // assert_eq!(call.is_pending(), true);
     }
 
     #[test]
@@ -73,136 +80,125 @@ mod tests {
         let mut req = msg::ping_request();
         req.set_nodeid(local_nodeid.clone());
         let txid = req.txid();
-        let call = RpcCall::new(target.clone(), req);
-
-        //  call.set_local_id(local_nodeid);
-        //  call.set_expected_rtt_if_absent(42);
+        let mut call = RpcCall::new(target.clone(), req);
+        finalize_call(&mut call);
 
         assert_eq!(call.req().nodeid(), &local_nodeid);
         assert_eq!(call.txid(), txid);
         assert_eq!(call.target_id(), target.id().clone());
-       // assert_eq!(call.expected_rtt(), 42);
         assert_eq!(call.state(), State::Unsent);
-
-      //  call.set_expected_rtt(91);
-      //  assert_eq!(call.expected_rtt(), 91);
         assert_eq!(call.state(), State::Unsent);
-        //assert_eq!(call.is_pending(), true);
     }
 
     #[test]
     fn test_update_state() {
-        let mut entry = make_entry("127.0.0.1:40002");
-        entry.set_reachable(true);
-
         let req = msg::ping_request();
-        let call = RpcCall::new(entry.clone(), req);
-        let call = Arc::new(Mutex::new(call));
-       // call.lock().unwrap().set_expected_rtt(50);
+        let mut call = RpcCall::new(make_entry("127.0.0.1:40002"), req);
+        finalize_call(&mut call);
+        let call = Rc::new(RefCell::new(call));
+        call.borrow_mut().set_cloned(Rc::downgrade(&call));
+        let timer_client = make_timer_client();
 
-        let state_changes = Arc::new(Mutex::new(State::Unsent));
-        let responded = Arc::new(Mutex::new(0usize));
+        let state_changes = Rc::new(RefCell::new(State::Unsent));
+        let responded = Rc::new(RefCell::new(0usize));
         let mut listener = Listener::new({
             let state_changes_cb = state_changes.clone();
             move |_, _, cur| {
-                *state_changes_cb.lock().unwrap() = cur;
+                *state_changes_cb.borrow_mut() = cur;
         }});
 
         listener.response_fn({
             let state_changes_cb = state_changes.clone();
             let responded_cb = responded.clone();
             move |_| {
-                *state_changes_cb.lock().unwrap() = State::Responded;
-                *responded_cb.lock().unwrap() += 1;
+                *state_changes_cb.borrow_mut() = State::Responded;
+                *responded_cb.borrow_mut() += 1;
         }});
         listener.stall_fn({
             let state_changes_cb = state_changes.clone();
             move|_| {
-                *state_changes_cb.lock().unwrap() = State::Stalled;
+                *state_changes_cb.borrow_mut() = State::Stalled;
         }});
         listener.timeout_fn({
             let state_changes_cb = state_changes.clone();
             move |_| {
-                *state_changes_cb.lock().unwrap() = State::Timeout;
+                *state_changes_cb.borrow_mut() = State::Timeout;
         }});
-        call.lock().unwrap().set_listener(listener);
+        call.borrow_mut().set_listener(listener);
 
-        call.lock().unwrap().sent();
-        assert_eq!(call.lock().unwrap().state(), State::Sent);
-        assert_eq!(state_changes.lock().unwrap().to_owned(), State::Sent);
+        call.borrow_mut().sent(timer_client);
+        assert_eq!(call.borrow().state(), State::Sent);
+        assert_eq!(*state_changes.borrow(), State::Sent);
 
-        let rsp = Arc::new(make_response(&call.lock().unwrap()));
-        call.lock().unwrap().respond(rsp);
-        assert_eq!(call.lock().unwrap().state(), State::Responded);
-        assert_eq!(responded.lock().unwrap().to_owned(), 1);
-        assert_eq!(state_changes.lock().unwrap().to_owned(), State::Responded);
+        let rsp = Rc::new(make_response(&call.borrow()));
+        call.borrow_mut().respond(rsp);
+        assert_eq!(call.borrow().state(), State::Responded);
+        assert_eq!(*responded.borrow(), 1);
+        assert_eq!(*state_changes.borrow(), State::Responded);
 
-        let locked = call.lock().unwrap();
+        let locked = call.borrow();
         assert_eq!(locked.state(), State::Responded);
-        assert_eq!(locked.rsp().is_none(), true);
-        assert_eq!(locked.nodeid_mismatched(), true);
-        assert_eq!(locked.addr_mismatched(), true);
-        // assert_eq!(locked.rtt().is_some(), true);
-        assert_eq!(*responded.lock().unwrap(), 1);
-        assert_eq!(*state_changes.lock().unwrap(), State::Responded);
+        assert!(locked.rsp().is_some());
+        assert_eq!(locked.nodeid_mismatched(), false);
+        assert_eq!(locked.addr_mismatched(), false);
+        assert_eq!(*responded.borrow(), 1);
+        assert_eq!(*state_changes.borrow(), State::Responded);
         drop(locked);
 
-        // test error response
         let target = make_nodeinfo("127.0.0.1:40003");
         let req = msg::ping_request();
-        let error_call = Arc::new(Mutex::new(RpcCall::new(target.clone(), req)));
-       // error_call.lock().unwrap().set_cloned(error_call.clone());
+        let mut error_call = RpcCall::new(target.clone(), req);
+        finalize_call(&mut error_call);
 
-        let mut err = msg::error_msg(Method::Ping, error_call.lock().unwrap().txid(), 500, "boom".into());
+        let mut err = msg::error_msg(Method::Ping, error_call.txid(), 500, "boom".into());
         err.set_nodeid(target.id().clone());
         err.set_remote(target.id().clone(), *target.socket_addr());
-        error_call.lock().unwrap().respond(Arc::new(err));
-
-        let locked = error_call.lock().unwrap();
-        assert_eq!(locked.state(), State::Err);
+        error_call.respond(Rc::new(err));
+        assert_eq!(error_call.state(), State::Err);
     }
 
     #[test]
     fn test_stall_timeout_cancel() {
         let target = make_nodeinfo("127.0.0.1:40004");
         let req = msg::ping_request();
-        let call = Arc::new(Mutex::new(RpcCall::new(target.clone(), req)));
-       // call.lock().unwrap().set_expected_rtt(25);
+        let mut call = RpcCall::new(target.clone(), req);
+        finalize_call(&mut call);
+        let call = Rc::new(RefCell::new(call));
+        call.borrow_mut().set_cloned(Rc::downgrade(&call));
+        let timer_client = make_timer_client();
 
-        let stalled = Arc::new(Mutex::new(0usize));
-        let timed_out = Arc::new(Mutex::new(0usize));
+        let stalled = Rc::new(RefCell::new(0usize));
+        let timed_out = Rc::new(RefCell::new(0usize));
         let mut listener = Listener::new(|_, _, _| {});
         listener.stall_fn({
             let stalled_cb = stalled.clone();
-            move |_| { *stalled_cb.lock().unwrap() += 1; }
+            move |_| { *stalled_cb.borrow_mut() += 1; }
         });
         listener.timeout_fn({
             let timed_out_cb = timed_out.clone();
-            move |_| { *timed_out_cb.lock().unwrap() += 1; }
+            move |_| { *timed_out_cb.borrow_mut() += 1; }
         });
-        call.lock().unwrap().set_listener(listener);
+        call.borrow_mut().set_listener(listener);
 
-        call.lock().unwrap().sent();
-        call.lock().unwrap().respond_inconsistent_socket();
-        assert_eq!(call.lock().unwrap().state(), State::Stalled);
-        assert_eq!(*stalled.lock().unwrap(), 1);
+        call.borrow_mut().sent(timer_client);
+        call.borrow_mut().respond_inconsistent_socket();
+        assert_eq!(call.borrow().state(), State::Stalled);
+        assert_eq!(*stalled.borrow(), 1);
 
-        call.lock().unwrap().update_state(State::Timeout);
-        assert_eq!(call.lock().unwrap().state(), State::Timeout);
-        assert_eq!(*timed_out.lock().unwrap(), 1);
+        call.borrow_mut().update_state(State::Timeout);
+        assert_eq!(call.borrow().state(), State::Timeout);
+        assert_eq!(*timed_out.borrow(), 1);
 
         let target2 = make_nodeinfo("127.0.0.1:40005");
         let req2 = msg::ping_request();
         let mut wrong_method = RpcCall::new(target2.clone(), req2);
-        let mut rsp = msg::store_value_response(wrong_method.txid());
-        rsp.set_nodeid(target2.id().clone());
-        rsp.set_remote(target2.id().clone(), *target2.socket_addr());
+        finalize_call(&mut wrong_method);
         wrong_method.respond_wrong_method();
         assert_eq!(wrong_method.state(), State::Err);
 
         let req3 = msg::ping_request();
         let mut failed = RpcCall::new(target2.clone(), req3);
-        //let err = ProtocolError::new("failed") as Box<dyn std::error::Error + Send + Sync>;
+        finalize_call(&mut failed);
         failed.fail();
         assert_eq!(failed.state(), State::Err);
     }

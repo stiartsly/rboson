@@ -65,7 +65,7 @@ mod tests {
         let bucket = buckets.first();
         assert!(bucket.is_some());
         let bucket = bucket.unwrap();
-        let prefix = bucket.lock().unwrap().prefix().clone();
+        let prefix = bucket.borrow().prefix().clone();
         assert!(rt.is_home_bucket(&prefix));
         assert!(rt.random_entry().is_none());
         assert!(rt.number_of_entries() == 0);
@@ -104,8 +104,8 @@ mod tests {
 
         assert_eq!(low_idx, 0);
         assert_eq!(high_idx, 1);
-        assert_eq!(buckets[low_idx].lock().unwrap().prefix().is_prefix_of(&low_id), true);
-        assert_eq!(buckets[high_idx].lock().unwrap().prefix().is_prefix_of(&high_id), true);
+        assert_eq!(buckets[low_idx].borrow().prefix().is_prefix_of(&low_id), true);
+        assert_eq!(buckets[high_idx].borrow().prefix().is_prefix_of(&high_id), true);
     }
 
     #[test]

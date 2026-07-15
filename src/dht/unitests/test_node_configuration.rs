@@ -22,7 +22,7 @@ mod tests {
         let data_dir = "./tmp_data";
         let database_uri = "storage.db";
         let yaml = format!(
-            "ipv4: true\nport: 39001\nprivateKey: \"{private_key}\"\ndataDir: {data_dir}\ndatabaseUri: {database_uri}\nbootstraps:\n  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k\n    - 203.0.113.5\n    - 39001\nlogger:\n  logLevel: debug\n  logFile: node.log\nenableDeveloperMode: true\n"
+            "ipv4: true\nport: 39001\nprivateKey: \"{private_key}\"\ndataDir: {data_dir}\ndatabaseUri: {database_uri}\nbootstraps:\n  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k\n    - 203.0.113.5\n    - 39001\nlogLevel: debug\nlogFile: node.log\nenableDeveloperMode: true\n"
         );
 
         let cfg = NodeConfiguration::from(&yaml).unwrap();

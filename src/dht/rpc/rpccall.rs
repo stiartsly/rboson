@@ -142,6 +142,11 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
+    #[cfg(test)]
+    pub(crate) fn state(&self) -> State {
+        self.state
+    }
+
     pub(crate) fn update_state(&mut self, new_state: State) {
         let prev = self.state;
         self.state = new_state;

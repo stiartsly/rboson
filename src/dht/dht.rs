@@ -11,10 +11,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
     }
 };
-use futures::stream::{
-    FuturesUnordered,
-    StreamExt
-};
+use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::task;
 use log::{trace, debug, info, warn, error};
 
 use crate::{
@@ -210,11 +208,9 @@ impl DHT {
         task.with_name("Bootstrap: filling home bucket".into());
         task.with_bootstrap(true);
         task.with_inject_candidates(nodes);
-        task.with_listener(
-            TaskListener::default().ended_fn(
-                move |_| promise.complete(Ok(()))
-            )
-        );
+        task.with_listener(TaskListener::default().ended_fn(
+            move |_| promise.complete(Ok(()))
+        ));
         self.task_man.add(task);
     }
 
@@ -238,33 +234,32 @@ impl DHT {
                 self.dht(), target, false
             ));
             task.with_name(format!("Bootstrap: filling Bucket - {}", prefix));
-            task.with_listener(
-                TaskListener::default().ended_fn(
-                    move |_| promise.complete(Ok(()))
-                )
-            );
+            task.with_listener(TaskListener::default().ended_fn(
+                move |_| promise.complete(Ok(()))
+            ));
             self.task_man.add(task);
             unordered.push(future);
         }
 
-        tokio::task::spawn_local(async move {
+        task::spawn_local(async move {
             futures::future::join_all(unordered).await;
             promise.complete(Ok(()));
         });
     }
 
-    fn try_ping_maintenance(&self,
+    fn try_ping_maintenance(
+        &mut self,
         bucket: Rc<RefCell<KBucket>>,
-        _check_all: bool,
-        _remove_on_timeout: bool,
+        check_all: bool,
+        remove_on_timeout: bool,
         _probe_replacement: bool,
-        _name: String
+        name: String
     ) {
         if !self.rs().borrow().is_reachable() {
             return;
         }
 
-        let (prefix, _need_refresh, _need_replacement) = {
+        let (prefix, need_refresh, need_replacement) = {
             let borrowed = bucket.borrow();
             (
                 borrowed.prefix().clone(),
@@ -277,7 +272,6 @@ impl DHT {
             return;
         }
 
-        /*
         if need_refresh || need_replacement  {
             let mut task = Box::new(PingRefreshTask::new(self.dht()));
             task.with_name(name);
@@ -295,7 +289,6 @@ impl DHT {
                 self.task_man.add(task);
             }
         }
-        */
     }
 
     pub(crate) fn random_lookup(&self) {
@@ -312,8 +305,7 @@ impl DHT {
     }
 
     pub(crate) fn random_ping(&self) {
-        let has_pending_calls = self.rs().borrow().has_pending_calls();
-        if has_pending_calls {
+        if self.rs().borrow().has_pending_calls() {
             info!("Periodic: not performing random ping, server has pending calls.");
             return;
         }
@@ -344,40 +336,40 @@ impl DHT {
             ids.as_slice(),
             Handler::new(move |bucket: &Rc<RefCell<KBucket>>| {
                 let prefix = bucket.borrow().prefix().clone();
-                dht.borrow().try_ping_maintenance(bucket.clone(), false, false, false,
+                dht.borrow_mut().try_ping_maintenance(bucket.clone(), false, false, false,
                         format!("Routing table maintenance: refreshing bucket {}", prefix)
                     );
             })
         );
     }
 
-    async fn update(dht: Rc<RefCell<Self>>) {
+    async fn update(&mut self) {
         let bootstrap_nodes = {
-            let mut borrowed_dht = dht.borrow_mut();
-            if !borrowed_dht.is_running {
+            if !self.is_running {
                 return;
             }
 
-            debug!("Periodic: DHT update...");
-            borrowed_dht.routing_table_maintenance();
+            debug!("Periodic: DHT/{} update...", self.network());
+            self.routing_table_maintenance();
 
-            let rt = borrowed_dht.rt();
+            let rt = self.rt();
             let borrowed_rt = rt.borrow();
 
             let entry_sz = borrowed_rt.number_of_entries();
             if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
-                crate::elapsed_ms!(borrowed_dht.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
+                crate::elapsed_ms!(self.last_bootstrap) <= Self::SELF_LOOKUP_INTERVAL {
                 return;
             }
 
             if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
-                borrowed_dht.bootstrap_nodes.clone()
+                self.bootstrap_nodes.clone()
             } else {
                 Vec::new()
             }
         };
 
-        let _ = tokio::task::spawn_local(async move {
+        let dht = self.dht();
+        let _ = task::spawn_local(async move {
             Self::do_bootstrap(dht, bootstrap_nodes).await;
         });
     }
@@ -389,9 +381,9 @@ impl DHT {
         let old = self.status;
         self.status = status;
 
-        info!("DHT {}:{} connection status changed: {} => {}",
+        info!("DHT/{}:{} connection status changed: {} => {}",
             self.network,
-            self.identity.id(),old, self.status
+            self.identity.id(), old, self.status
         );
 
         let l = &self.listener;
@@ -410,7 +402,7 @@ impl DHT {
 
         info!("Starting DHT/{}:{} on {}:{} ...", self.network, self.id(), self.host, self.port);
 
-        let mut rt = RoutingTable::new(self.id().clone());
+        let mut rt = RoutingTable::new(*self.id());
         let mut _need_ping_from_cached_rt = false;
         if let Some(ref path) = self.persist_file {
             let file = path.display();
@@ -476,10 +468,10 @@ impl DHT {
             })
         }));
 
-        let rpc_server = Rc::new(RefCell::new(server));
-        rpc_server.borrow_mut().set_cloned(Rc::downgrade(&rpc_server));
+        let rs = Rc::new(RefCell::new(server));
+        rs.borrow_mut().set_cloned(Rc::downgrade(&rs));
 
-        self.rpc_server = Some(rpc_server);
+        self.rpc_server = Some(rs);
         self.set_status(ConnectionStatus::Connecting);
 
         self.setup_periodic_tasks().await?;
@@ -501,10 +493,8 @@ impl DHT {
         self.bootstrapping.store(false, Ordering::SeqCst);
         self.set_status(ConnectionStatus::Disconnected);
 
-        let rpc_server = self.rpc_server.take();
-
-        if let Some(s) = rpc_server {
-            s.borrow_mut().stop().await;
+        if let Some(rs) = self.rpc_server.take() {
+            rs.borrow_mut().stop().await;
         }
 
         {
@@ -519,11 +509,11 @@ impl DHT {
             let _ = rt.borrow_mut().save(&path);
         }
 
-        if let Some(detector) = self.suspicious_detector.take() {
-            detector.borrow_mut().purge();
+        if let Some(sd) = self.suspicious_detector.take() {
+            sd.borrow_mut().purge();
         }
 
-        info!("Stopped DHT {}:{} on {}:{}.",
+        info!("Stopped DHT/{}:{} on {}:{}.",
             self.network, self.id(), self.host, self.port);
     }
 
@@ -533,7 +523,7 @@ impl DHT {
             AsyncHandler::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
-                    Self::update(dht).await;
+                    dht.borrow_mut().update().await;
                 })
             })
         )?;

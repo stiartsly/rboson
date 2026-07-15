@@ -1,0 +1,103 @@
+# ==============================================================================
+# Boson DHT Node Configuration Template
+# ==============================================================================
+# This file defines the operational parameters for a Boson DHT node.
+#
+# Configuration Lookup Order (if no explicit path is provided):
+#
+# Unix-like (Linux/macOS):
+#   1. ./node.yaml
+#   2. ~/.config/boson/node.yaml
+#   3. /usr/local/etc/boson/node.yaml
+#   4. /etc/boson/node.yaml
+#
+# Windows:
+#   1. .\node.yaml
+#   2. %APPDATA%\boson\node.yaml
+#   3. %ProgramData%\boson\node.yaml
+# ==============================================================================
+
+# IPv4 address to bind for DHT protocol communication.
+#
+# IMPORTANT: The node MUST be reachable from the public internet.
+# Binding to 127.0.0.1 or private network addresses (unless in developer mode)
+# will prevent the node from participating in the global network.
+#
+# Using 0.0.0.0 (wildcard) is generally discouraged as the node needs a
+# deterministic external IP to advertise its presence to peers.
+ipv4: true
+
+# IPv6 address to bind.
+# Uncomment and set to a globally reachable IPv6 address to enable IPv6 support.
+# host6: 2001:db8:85a3::8a2e:370:7334
+
+# Port number for DHT UDP traffic.
+# The default port is 39001. Ensure this port is open in your firewall (UDP).
+port: 39001
+
+# Node private key
+# This key defines your node's long-term identity on the network.
+# If lost, your node's reputation and stable ID will be lost.
+#
+# Supported formats:
+#   - Base58 string (standard format)
+#   - Hex string (double-quoted string, must start with "0x")
+#
+# CAUTION: Keep this key secret. Never share it.
+#
+privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
+
+logLevel: debug
+logFile: shell.log
+
+# Root directory for persistent data.
+# Stores routing tables, caches, and database files.
+# If omitted, defaults to the current working directory.
+#
+# Recommended locations for user deployments:
+#   - Unix-like: ~/.local/share/boson/node
+#   - Windows:   %LOCALAPPDATA%\boson\node
+#
+# Recommended locations for system-wide deployments:
+#   - Unix-like: /var/lib/boson/node
+#   - Windows:   %ProgramData%\boson\node
+# dataDir: ~/.local/share/boson/node
+
+# Persistence Layer Configuration.
+#
+# Boson supports multiple database backends:
+#   - SQLite: Ideal for lightweight or personal nodes. (e.g., jdbc:sqlite:node.db)
+#   - PostgreSQL: Recommended for high-performance or super nodes.
+#
+#database:
+#  # Database connection URI.
+#  uri: jdbc:sqlite:node.db
+
+dataDir: .shell_data
+databaseUri: jdbc:sqlite:node.db
+
+  # Connection pool size. 0 uses the default for the specific driver.
+  # poolSize: 0
+
+  # Database schema name (PostgreSQL only).
+  # schema: kademlia
+
+# Initial entry points to the DHT network.
+# These nodes are contacted during startup to discover other peers.
+# Format: [ NodeID (Base58), IPAddress, Port ]
+#bootstraps:
+#  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k
+#    - 203.0.113.5
+#    - 39001
+#  - - 7jFV8w7eivjGEpaDu4V38EZ16CDhn4JutEdtGBWC67rF
+#    - 198.51.100.8
+#    - 39001
+
+# Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
+# Default: true
+enableSuspiciousNodeDetector: true
+
+# Development: Allows participation in the DHT using local/private IPs (RFC1918).
+# WARNING: Setting this to 'true' in a public or production deployment may lead to routing issues.
+# Default: false
+enableDeveloperMode: false

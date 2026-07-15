@@ -6,11 +6,12 @@ mod core {
     mod node_info;
     mod peer_info;
     mod value;
-   // mod config;
+
 }
 
 #[cfg(test)]
 mod dht {
+    mod config;
     mod node;
 }
 

@@ -68,22 +68,23 @@ impl KBucketEntry {
         &self.created
     }
 
-    #[cfg(test)]
+
+    #[allow(unused)]
     pub(crate) fn last_seen(&self) -> &SystemTime {
         &self.last_seen
     }
 
-    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn set_last_seen(&mut self, last_seen: SystemTime) {
         self.last_seen = last_seen;
     }
 
-    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn last_sent(&self) -> &SystemTime {
         &self.last_sent
     }
 
-    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) const fn failed_reqs(&self) -> i32 {
         self.failed_reqs
     }
@@ -237,7 +238,7 @@ impl KBucketEntry {
     fn update_avg_rtt(&mut self, sample: f64) {
         self.avg_rtt = Some(match self.avg_rtt {
             Some(avg_rtt) => avg_rtt + Self::RTT_EMA_WEIGHT * (sample - avg_rtt),
-            None => sample,
+            _ => sample,
         });
     }
 }
@@ -272,10 +273,6 @@ impl Reachability for KBucketEntry {
 impl NodeInfoLike for KBucketEntry {
     fn ni(&self) -> NodeInfo {
         self.ni.clone()
-    }
-
-    fn id(&self) -> &Id {
-        self.ni.id()
     }
 
     fn socket_addr(&self) -> &SocketAddr {

@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    time::Duration,
-    sync::atomic::AtomicU64,
+    time::Duration
 };
 use futures::StreamExt;
 use tokio_util::time::{
@@ -19,7 +18,6 @@ struct GenericTimerEntry<H> {
 }
 
 pub struct GenericTimerManager<H> {
-    next_id     : AtomicU64,
     delay_queue : DelayQueue<TimerId>,
     timers      : HashMap<TimerId, GenericTimerEntry<H>>,
 }
@@ -27,7 +25,6 @@ pub struct GenericTimerManager<H> {
 impl<H: Callable<()>> GenericTimerManager<H> {
     pub fn new() -> Self {
         Self {
-            next_id: AtomicU64::new(1),
             delay_queue: DelayQueue::new(),
             timers: HashMap::new(),
         }

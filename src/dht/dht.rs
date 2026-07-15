@@ -247,10 +247,10 @@ impl DHT {
             unordered.push(future);
         }
 
-        let _ = async move {
+        tokio::task::spawn_local(async move {
             futures::future::join_all(unordered).await;
             promise.complete(Ok(()));
-        };
+        });
     }
 
     fn try_ping_maintenance(&self,
@@ -833,7 +833,9 @@ impl DHT {
 
     fn on_ping(&mut self, req: &Message) {
         if req.body().is_some() {
-            panic!("Panic: ping request should have no body");
+            warn!("Ignoring ping request with unexpected body from {}/{}",
+                req.remote_addr(), req.remote_id());
+            return;
         }
 
         let rsp = {
@@ -1093,7 +1095,8 @@ impl DHT {
                 return;
             }
         }
-        _ = self.storage.lock().unwrap().put_peer(peer.clone(), false);
+
+        let _ = self.storage.lock().unwrap().put_peer(peer.clone(), false);
 
         let rsp = {
             let mut msg = announce_peer_response(req.txid());

@@ -30,6 +30,7 @@ impl<T: 'static> AsyncHandler<T> {
         Self {cb: Box::new(handler) }
     }
 
+    #[allow(unused)]
     pub(crate) async fn cb(&self, value: T) {
         (self.cb)(value).await;
     }

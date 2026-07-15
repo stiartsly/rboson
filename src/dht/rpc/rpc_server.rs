@@ -63,10 +63,9 @@ pub(crate) struct RpcServer {
 }
 
 impl RpcServer {
-    const MAX_ACTIVE_CALLS: usize = 64;
-    pub(crate) const RPC_CALL_TIMEOUT_MAX: u64 = 10 * 1000;
-    const REACHABILITY_CHECK_INTERVAL   :u64 = 5_000;
-    const REACHABILITY_TIMEOUT          :u64 = 60_000;
+    const MAX_ACTIVE_CALLS              : usize = 64;
+    const REACHABILITY_CHECK_INTERVAL   : u64 = 5_000;
+    const REACHABILITY_TIMEOUT          : u64 = 60_000;
 
     pub(crate) fn new(
         ni: NodeInfo,
@@ -230,9 +229,8 @@ impl RpcServer {
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
 
-    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()>{
+    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()> {
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
-       // return Err(StateError::new("Too many active calls pending in the queue.") as Box<dyn Error>);
             return Ok(());
         }
 
@@ -291,15 +289,15 @@ impl RpcServer {
         }
 
         // Send message to remote node
-        let rc = self.tx_socket.as_ref().unwrap().send_to(
+        let tx = self.tx_socket.as_ref().ok_or_else(|| -> Error {
+            NetworkError::new("RPC server socket not initialized")
+        })?;
+        let sent_len = tx.send_to(
             &buf[..cipher_len + Id::BYTES], msg.remote_addr()
-        );
+        ).map_err(|e| -> Error {
+            NetworkError::new(format!("Failed to send message: {e}"))
+        })?;
 
-        let sent_len = match rc {
-            Ok(len) => len,
-            Err(e) => return Err(NetworkError::new(
-                                format!("Failed to send message: {e}")))
-        };
         if sent_len != buf.len() {
             return Err(NetworkError::new(
                 format!("Error: sent length {} does not match expected {}", sent_len, buf.len())));
@@ -308,28 +306,28 @@ impl RpcServer {
         debug!("Message <{}@{} to {}@{}> was sent : {}",
             msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
 
-        Ok(rc.unwrap())
+        Ok(sent_len)
     }
 
     #[inline]
     fn malformed_message(&self, from: SocketAddr) {
-        self.suspicious_node_detector.as_ref().map(|v| {
-            v.borrow_mut().malformed_message(from);
-        });
+        if let Some(detector) = &self.suspicious_node_detector {
+            detector.borrow_mut().malformed_message(from);
+        }
     }
 
     #[inline]
     fn observe_message(&self, from: SocketAddr, id: Id) {
-        self.suspicious_node_detector.as_ref().map(|v| {
-            v.borrow_mut().observe(from, id);
-        });
+        if let Some(detector) = &self.suspicious_node_detector {
+            detector.borrow_mut().observe(from, id);
+        }
     }
 
     #[inline]
     fn inconsistent_socket(&self, from: SocketAddr, id: Id) {
-        self.suspicious_node_detector.as_ref().map(|v| {
-            v.borrow_mut().inconsistent(from, Some(id));
-        });
+        if let Some(detector) = &self.suspicious_node_detector {
+            detector.borrow_mut().inconsistent(from, Some(id));
+        }
     }
 
     pub(crate) async fn handle_packet(server: Rc<RefCell<Self>>, data: &[u8], from: SocketAddr) {
@@ -341,37 +339,37 @@ impl RpcServer {
         }
 
         // Decrypting remote node ID
-        let rc = Id::try_from(&data[0.. Id::BYTES]);
-        if let Err(e) = rc.as_ref() {
-            warn!("Ignored invalid packet from {}: invalid nodeid {e}", from);
-            server.borrow().malformed_message(from);
-            return;
-        }
-
-        let from_id = rc.unwrap();
+        let from_id = match Id::try_from(&data[0..Id::BYTES]) {
+            Ok(id) => id,
+            Err(e) => {
+                warn!("Ignored invalid packet from {}: invalid nodeid {e}", from);
+                server.borrow().malformed_message(from);
+                return;
+            }
+        };
 
         // TODO: blacklist checking.
 
         // Decrypting message data.
         let identity = server.borrow().identity.clone();
-        let rc = identity.decrypt_into(&from_id, &data[Id::BYTES ..]);
-        if let Err(e) = rc.as_ref() {
-            warn!("Ignored invalid packet from {}: decrypting error {e}", from);
-            server.borrow().malformed_message(from);
-            return;
+        let decrypted = match identity.decrypt_into(&from_id, &data[Id::BYTES..]) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Ignored invalid packet from {}: decrypting error {e}", from);
+                server.borrow().malformed_message(from);
+                return;
+            }
         };
-        let decrypted = rc.unwrap();
 
         // Deserializing message
-        let rc = serde_cbor::from_slice::<Message>(&decrypted);
-        if let Err(e) = rc.as_ref() {
-            warn!("Ignored invalid packet from {}: deserializing error {e}", from);
-            server.borrow().malformed_message(from);
-            return;
-        }
-
-        // Assembling message.
-        let mut msg = rc.unwrap();
+        let mut msg = match serde_cbor::from_slice::<Message>(&decrypted) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Ignored invalid packet from {}: deserializing error {e}", from);
+                server.borrow().malformed_message(from);
+                return;
+            }
+        };
         msg.set_nodeid(from_id);
         msg.set_remote(from_id, from);
 

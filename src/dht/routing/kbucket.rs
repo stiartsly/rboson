@@ -205,11 +205,13 @@ impl KBucket {
         key.map(|ref k| self.entries.remove(k)).flatten()
     }
 
+    /*
     pub(crate) fn filter<F>(&self, test: F) -> usize
     where F: Fn(&KBucketEntry) -> bool,
     {
         self.entries.iter().filter(|(_, v)| test(v)).count()
     }
+    */
 
     pub(crate) fn cleanup(&mut self,
         _local_id: &Id,

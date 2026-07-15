@@ -20,7 +20,7 @@ use crate::dht::storage::{
     put_value,
     get_value,
     get_values,
-    //get_values_announced_before,
+    get_values_announced_before,
     //get_values_paginated,
     update_value_announced_time,
     remove_value,
@@ -30,7 +30,7 @@ use crate::dht::storage::{
     get_peers_by_id,
     get_peers_with_expected_seq,
     get_peers_authenticated_by,
-    //get_peers_announced_before,
+    get_peers_announced_before,
     //get_peers_paginated,
     //get_peers_paginated_and_announced_before,
     get_peers_all,
@@ -178,10 +178,12 @@ impl DataStorage for SqliteStorage {
 
     fn get_values_announced_before(
         &self,
-        _persistent: bool,
-        _announced_before: u64
+        persistent: bool,
+        announced_before: u64
     ) -> Result<Vec<Value>> {
-        unimplemented!()
+        get_values_announced_before(self.conn(), persistent, announced_before as i64)
+            .map(|vs| vs.into_iter().map(valore_to_value).collect())
+            .map_err(db_err)
     }
 
     fn get_values_paginated(
@@ -263,10 +265,12 @@ impl DataStorage for SqliteStorage {
     }
 
     fn get_peers_announced_before(&self,
-        _persistent: bool,
-        _announced_before: u64
+        persistent: bool,
+        announced_before: u64
     ) -> Result<Vec<PeerInfo>> {
-        unimplemented!()
+        get_peers_announced_before(self.conn(), persistent, announced_before as i64)
+            .map(|vs| vs.into_iter().map(db_peer_to_info).collect())
+            .map_err(db_err)
     }
 
     fn get_peers_paginated(&self,

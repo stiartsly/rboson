@@ -127,10 +127,6 @@ impl NodeInfoLike for CandidateNode {
         self.ni.clone()
     }
 
-    fn id(&self) -> &Id {
-        self.ni.id()
-    }
-
     fn socket_addr(&self) -> &SocketAddr {
         self.ni.socket_addr()
     }

@@ -1,7 +1,7 @@
 use std::{
-    net::SocketAddr,
     rc::Rc,
     cell::RefCell,
+    net::SocketAddr
 };
 
 use crate::{Id, NodeInfo};
@@ -36,7 +36,6 @@ pub(crate) trait Reachability {
 
 pub(crate) trait NodeInfoLike {
     fn ni(&self) -> NodeInfo;
-    fn id(&self) -> &Id;
     fn socket_addr(&self) -> &SocketAddr;
 }
 
@@ -106,10 +105,6 @@ impl Reachability for NodeInfo {}
 impl NodeInfoLike for NodeInfo {
     fn ni(&self) -> NodeInfo {
         self.clone()
-    }
-
-    fn id(&self) -> &Id {
-        self.id()
     }
 
     fn socket_addr(&self) -> &SocketAddr {

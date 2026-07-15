@@ -44,13 +44,11 @@ pub(crate) struct RpcCall {
     rsp         : Option<Rc<Message>>,
 
     sent_time   : Option<SystemTime>,
-    resp_time   : Option<SystemTime>,
+    rsp_time    : Option<SystemTime>,
 
     state       : State,
 
     listener    : Option<CallListener>,
-
-    // cause: Option<Box<dyn std::error::Error + Send>>,
 
     timer_id    : Option<u64>,
     timer_client: Option<Rc<TimerClient>>,
@@ -70,7 +68,7 @@ impl RpcCall {
             req             : None,
             rsp             : None,
             sent_time       : None,
-            resp_time       : None,
+            rsp_time        : None,
             state           : State::Unsent,
             listener        : None,
             timer_id        : None,
@@ -119,11 +117,6 @@ impl RpcCall {
     }
     pub(crate) fn rsp(&self) -> Option<Rc<Message>> {
         self.rsp.as_ref().cloned()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn state(&self) -> State {
-        self.state
     }
 
     pub(crate) fn nodeid_mismatched(&self) -> bool {
@@ -193,7 +186,7 @@ impl RpcCall {
         let Some(timer_id) = self.timer_id.take() else {
             return;
         };
-        timer_client.cancel_timer(timer_id);
+        let _ = timer_client.cancel_timer(timer_id);
     }
 
     fn check_timeout(&mut self) {
@@ -213,7 +206,7 @@ impl RpcCall {
     }
 
     pub(crate) fn respond(&mut self, rsp: Rc<Message>) {
-        self.resp_time = Some(SystemTime::now());
+        self.rsp_time = Some(SystemTime::now());
         // rsp.set_associated_call(self.weak.clone());
 
         self.cancel_timeout_timer();
@@ -239,7 +232,7 @@ impl RpcCall {
 
     // Handles a response with an incorrect method, treating it as a protocol error.
     pub(crate) fn respond_wrong_method(&mut self) {
-        self.resp_time = Some(SystemTime::now());
+        self.rsp_time = Some(SystemTime::now());
         self.cancel_timeout_timer();
         self.update_state(State::Err);
     }

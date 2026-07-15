@@ -9,10 +9,7 @@ use std::{
     future::Future,
 };
 use futures::{
-    stream::{
-        FuturesUnordered,
-        StreamExt,
-    },
+    stream::{FuturesUnordered, StreamExt },
     FutureExt,
 };
 use log::{error, info};
@@ -39,6 +36,8 @@ use crate::dht::{
     token_manager::TokenManager,
     rpc::rpc_server::RpcServer,
 };
+
+const CHANNEL_CLOSED: &str = "verticle channel closed";
 
 enum Cmd {
     Bootstrap {
@@ -112,7 +111,7 @@ impl VerticleClient {
         if self.command_tx.send(
             Cmd::Bootstrap { nodes, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -128,7 +127,7 @@ impl VerticleClient {
         if self.command_tx.send(
             Cmd::FindNode { target, option, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -148,7 +147,7 @@ impl VerticleClient {
             option,
             complete: tx,
         }).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -164,7 +163,7 @@ impl VerticleClient {
         if self.command_tx.send(
             Cmd::StoreValue { value, expected_seq, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -186,7 +185,7 @@ impl VerticleClient {
             option,
             complete: tx,
         }).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -202,7 +201,7 @@ impl VerticleClient {
         if self.command_tx.send(
             Cmd::AnnouncePeer { peer, expected_seq, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new("vertice channel closed")));
+            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
             return;
         }
         self.complete_promise(promise, rx).await;
@@ -211,10 +210,9 @@ impl VerticleClient {
     pub(crate) async fn stop(&mut self) {
         info!("Stopping DHT verticle");
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(Cmd::StopAll { complete: tx }).is_err() {
-            return;
+        if self.command_tx.send(Cmd::StopAll { complete: tx }).is_ok() {
+            let _ = rx.await;
         }
-        let _ = rx.await;
 
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
@@ -410,6 +408,7 @@ impl Verticle {
             }
             Cmd::StopAll { complete } => {
                 self.quit = true;
+                self.timer_manager.stop_all();
                 let _ = complete.send(Ok(()));
             }
         }
@@ -435,16 +434,19 @@ impl Verticle {
         let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output=()>>>>::new();
 
         let cloned_server = self.dht.borrow().rs();
-        let borrowed_server = cloned_server.borrow();
-        let result = borrowed_server.rx_tokio_socket();
-        if let Err(e) = result {
-            error!("Failed to get rx socket: {e}");
+        let socket = match cloned_server.borrow().rx_tokio_socket() {
+            Ok(socket) => socket,
+            Err(e) => {
+                error!("Failed to get rx socket: {e}");
+                return;
+            }
+        };
+
+        if !cloned_server.borrow_mut().prepare() {
+            error!("Failed to prepare RPC server");
+            self.dht.borrow_mut().stop().await;
             return;
         }
-        let socket = result.unwrap();
-        drop(borrowed_server);
-
-        cloned_server.borrow_mut().prepare();
 
         loop {
             tokio::select! {
@@ -455,12 +457,16 @@ impl Verticle {
                     self.handle_timer_cmd(cmd);
                 }
                 packet = socket.recv_from(&mut buf) => {
-                    let Ok((len, from)) = packet else {
-                        error!("Receiving data error: {:?}", packet.err());
-                        continue;
-                    };
-                    let rs = self.dht.borrow().rs();
-                    RpcServer::handle_packet(rs, &buf[..len], from).await;
+                    match packet {
+                        Ok((len, from)) => {
+                            let rs = self.dht.borrow().rs();
+                            RpcServer::handle_packet(rs, &buf[..len], from).await;
+                        }
+                        Err(e) => {
+                            error!("Receiving data error: {e}");
+                            continue;
+                        }
+                    }
 
                 },
                 Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {

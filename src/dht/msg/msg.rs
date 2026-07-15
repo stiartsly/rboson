@@ -269,6 +269,7 @@ impl Message {
         self.kind == Kind::Response
     }
 
+    #[allow(unused)]
     pub(crate) fn is_err(&self) -> bool {
         self.kind == Kind::Error
     }

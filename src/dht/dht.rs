@@ -437,8 +437,7 @@ impl DHT {
         let rt = self.rt();
         server.callsent_handler(Handler::new({
             let rt = rt.clone();
-            move |call: &RpcCall|{
-                let nodeid = call.target_id();
+            move |nodeid: &Id|{
                 rt.borrow_mut().on_request_sent(&nodeid);
             }
         }));
@@ -446,8 +445,7 @@ impl DHT {
         let rt = self.rt();
         server.calltimeout_handler(Handler::new({
             let rt = rt.clone();
-            move |call: &RpcCall| {
-                let nodeid = call.target_id();
+            move |nodeid: &Id| {
                 rt.borrow_mut().on_timeout(&nodeid);
             }
         }));

@@ -47,8 +47,8 @@ pub(crate) struct RpcServer {
 
     reachable_handler   : Option<AsyncHandler<bool>>,
     message_handler     : Option<AsyncHandler<Rc<Message>>>,
-    callsent_handler    : Option<Handler<RpcCall>>,
-    calltimeout_handler : Option<Handler<RpcCall>>,
+    callsent_handler    : Option<Handler<Id>>,
+    calltimeout_handler : Option<Handler<Id>>,
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
@@ -107,6 +107,7 @@ impl RpcServer {
         let now = SystemTime::now();
 
         if self.recv_packets != self.recv_packets_at_last_reachable_check {
+            println!("RpcServer check_reachability, line:{}", line!());
             self.set_reachable(true).await;
             self.last_reachable_check = now;
             self.recv_packets_at_last_reachable_check = self.recv_packets;
@@ -125,8 +126,10 @@ impl RpcServer {
             return;
         }
         self.is_reachable = reachable;
-        if let Some(handler) = self.reachable_handler.as_ref() {
-            handler.cb(reachable).await;
+        if let Some(h) = self.reachable_handler.take() {
+            println!("RpcServer set_reachable, line:{}", line!());
+            h.cb(reachable).await;
+            self.reachable_handler = Some(h);
         }
     }
 
@@ -146,11 +149,11 @@ impl RpcServer {
         self.message_handler = Some(consumer);
     }
 
-    pub(crate) fn callsent_handler(&mut self, consumer: Handler<RpcCall>) {
+    pub(crate) fn callsent_handler(&mut self, consumer: Handler<Id>) {
         self.callsent_handler = Some(consumer);
     }
 
-    pub(crate) fn calltimeout_handler(&mut self, consumer: Handler<RpcCall>) {
+    pub(crate) fn calltimeout_handler(&mut self, consumer: Handler<Id>) {
         self.calltimeout_handler = Some(consumer);
     }
 
@@ -229,38 +232,53 @@ impl RpcServer {
         info!("RPC server stopped at {}", self.ni.socket_addr());
     }
 
-    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()> {
+    pub(crate) fn send_call(&mut self, call: RpcCall) -> Result<()> {
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
             return Ok(());
         }
 
-
-        let mut msg  = call.take_transient();
         let txid = call.txid();
-        msg.set_nodeid(*self.ni.id());
+        let target_id = call.target_id();
+        let rs = self.cloned.upgrade().expect("RpcServer weak reference not set");
+
+        let handler = Handler::new(move |_| {
+            let exists = rs.borrow_mut().pending_calls.remove(&txid);
+            if exists.is_none() {
+                return;
+            }
+
+            let handler = rs.borrow_mut().calltimeout_handler.take();
+            if let Some(h) = handler {
+                h.cb(&target_id);
+                rs.borrow_mut().calltimeout_handler = Some(h);
+            }
+        });
 
         let call = Rc::new(RefCell::new(call));
         call.borrow_mut().set_cloned(Rc::downgrade(&call));
+        call.borrow_mut().set_timeout_handler(handler);
         call.borrow_mut().set_timer_client(self.timer_client.clone());
 
+        let mut msg  = call.borrow_mut().take_transient();
+        msg.set_nodeid(self.identity.id().clone());
         msg.set_associated_call(call.clone());
+
         self.pending_calls.insert(txid, call.clone());
 
-        let mut locked = call.borrow_mut();
-
         let msg = Rc::new(msg);
-        locked.set_request(msg.clone());
+        call.borrow_mut().set_request(msg.clone());
 
-        match self.send_msg(msg.as_ref()) {
+        match self.send_msg(&msg) {
             Ok(_) => {
-                locked.sent();
-                if let Some(handler) = self.callsent_handler.as_ref() {
-                    handler.cb(&locked);
+                call.borrow_mut().sent();
+                if let Some(h) = self.callsent_handler.as_ref() {
+                    let target_id = call.borrow().target_id();
+                    h.cb(&target_id);
                 }
             },
             Err(e) => {
                 let _ = self.pending_calls.remove(&txid);
-                locked.fail();
+                call.borrow_mut().fail();
                 return Err(e);
             }
         }

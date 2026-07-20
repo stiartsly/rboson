@@ -9,6 +9,7 @@ use crate::dht::{
     msg::{Message, msg::Kind},
     timer_client::LocalTimerClient as TimerClient,
     handler::LocalHandler as AsyncHandler,
+    handler::Handler,
     rpc::{
         Target,
         Listener as CallListener,
@@ -53,8 +54,9 @@ pub(crate) struct RpcCall {
 
     timer_id        : Option<u64>,
     timer_client    : Option<Rc<TimerClient>>,
+    timeout_handler : Option<Handler<()>>,
 
-    cloned          : Weak<RefCell<RpcCall>>,
+    cloned          : Weak<RefCell<Self>>,
 }
 
 impl RpcCall {
@@ -74,6 +76,7 @@ impl RpcCall {
             listener        : None,
             timer_id        : None,
             timer_client    : None,
+            timeout_handler : None,
 
             cloned          : Weak::new(),
         }
@@ -137,6 +140,10 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
+    pub(crate) fn set_timeout_handler(&mut self, handler: Handler<()>) {
+        self.timeout_handler = Some(handler);
+    }
+
     pub(crate) fn set_timer_client(&mut self, timer_client: Rc<TimerClient>) {
         self.timer_client = Some(timer_client);
     }
@@ -149,6 +156,12 @@ impl RpcCall {
     pub(crate) fn update_state(&mut self, new_state: State) {
         let prev = self.state;
         self.state = new_state;
+
+        if new_state == State::Timeout {
+            if let Some(h) = self.timeout_handler.take() {
+                h.cb(&());
+            }
+        }
 
         let Some(l) = self.listener.take() else {
             return;
@@ -166,12 +179,12 @@ impl RpcCall {
 
     fn set_timeout_timer(&mut self, timeout: u64)
     {
-        let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
-
         let Some(timer_client) = self.timer_client.clone() else {
-            error!("Timer client not set for this RPCCall");
+            error!("Timer client not set for RpcCall");
             return;
         };
+
+        let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
         let result = timer_client.add_timer(timeout, None,
             AsyncHandler::new(move |_| {
                 let cloned = cloned.clone();
@@ -185,7 +198,6 @@ impl RpcCall {
         };
 
         self.timer_id = Some(timer_id);
-        self.timer_client = Some(timer_client);
     }
 
     fn cancel_timeout_timer(&mut self) {

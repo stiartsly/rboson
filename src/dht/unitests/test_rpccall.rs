@@ -125,8 +125,9 @@ mod tests {
                 *state_changes_cb.borrow_mut() = State::Timeout;
         }});
         call.borrow_mut().set_listener(listener);
+        call.borrow_mut().set_timer_client(timer_client.clone());
 
-        call.borrow_mut().sent(timer_client);
+        call.borrow_mut().sent();
         assert_eq!(call.borrow().state(), State::Sent);
         assert_eq!(*state_changes.borrow(), State::Sent);
 
@@ -179,8 +180,9 @@ mod tests {
             move |_| { *timed_out_cb.borrow_mut() += 1; }
         });
         call.borrow_mut().set_listener(listener);
+        call.borrow_mut().set_timer_client(timer_client.clone());
 
-        call.borrow_mut().sent(timer_client);
+        call.borrow_mut().sent();
         call.borrow_mut().respond_inconsistent_socket();
         assert_eq!(call.borrow().state(), State::Stalled);
         assert_eq!(*stalled.borrow(), 1);

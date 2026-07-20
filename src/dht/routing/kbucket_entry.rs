@@ -189,7 +189,7 @@ impl KBucketEntry {
             return;
         }
 
-        if entry.last_seen > self.last_seen {
+        if entry.last_seen >= self.last_seen {
             self.failed_reqs = entry.failed_reqs;
         }
         if entry.is_reachable() {

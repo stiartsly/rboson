@@ -34,26 +34,27 @@ impl State {
 }
 
 pub(crate) struct RpcCall {
-    target      : Target,
+    txid            : i32,
+    target          : Target,
 
     // a transient field to store request message before
     // being nailed as Arc<Message> object.
-    transient   : Option<Message>,
+    transient       : Option<Message>,
 
-    req         : Option<Rc<Message>>,
-    rsp         : Option<Rc<Message>>,
+    req             : Option<Rc<Message>>,
+    rsp             : Option<Rc<Message>>,
 
-    sent_time   : Option<SystemTime>,
-    rsp_time    : Option<SystemTime>,
+    sent_time       : Option<SystemTime>,
+    rsp_time        : Option<SystemTime>,
 
-    state       : State,
+    state           : State,
 
-    listener    : Option<CallListener>,
+    listener        : Option<CallListener>,
 
-    timer_id    : Option<u64>,
-    timer_client: Option<Rc<TimerClient>>,
+    timer_id        : Option<u64>,
+    timer_client    : Option<Rc<TimerClient>>,
 
-    cloned      : Weak<RefCell<RpcCall>>,
+    cloned          : Weak<RefCell<RpcCall>>,
 }
 
 impl RpcCall {
@@ -62,7 +63,7 @@ impl RpcCall {
         req.set_remote(target.id(),target.socket_addr());
 
         Self {
-            // target_reachable,
+            txid            : req.txid(),
             target,
             transient       : Some(req),
             req             : None,
@@ -103,13 +104,7 @@ impl RpcCall {
     //}
 
     pub(crate) fn txid(&self) -> i32 {
-        if let Some(req) = self.req.as_ref() {
-            return req.txid();
-        } else if let Some(msg) = self.transient.as_ref() {
-            return msg.txid();
-        } else {
-            -1
-        }
+        self.txid
     }
 
     pub(crate) fn req(&self) -> Rc<Message> {
@@ -142,6 +137,10 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
+    pub(crate) fn set_timer_client(&mut self, timer_client: Rc<TimerClient>) {
+        self.timer_client = Some(timer_client);
+    }
+
     #[cfg(test)]
     pub(crate) fn state(&self) -> State {
         self.state
@@ -165,9 +164,14 @@ impl RpcCall {
         self.listener = Some(l);
     }
 
-    fn set_timeout_timer(&mut self, timeout: u64, timer_client: Rc<TimerClient>)
+    fn set_timeout_timer(&mut self, timeout: u64)
     {
         let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
+
+        let Some(timer_client) = self.timer_client.clone() else {
+            error!("Timer client not set for this RPCCall");
+            return;
+        };
         let result = timer_client.add_timer(timeout, None,
             AsyncHandler::new(move |_| {
                 let cloned = cloned.clone();
@@ -204,10 +208,10 @@ impl RpcCall {
         self.timer_client = None;
     }
 
-    pub(crate) fn sent(&mut self, timer_client: Rc<TimerClient>) {
+    pub(crate) fn sent(&mut self) {
         self.sent_time = Some(SystemTime::now());
         self.update_state(State::Sent);
-        self.set_timeout_timer(10_000, timer_client);
+        self.set_timeout_timer(10_000);
     }
 
     pub(crate) fn respond(&mut self, rsp: Rc<Message>) {

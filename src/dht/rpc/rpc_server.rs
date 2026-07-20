@@ -234,12 +234,15 @@ impl RpcServer {
             return Ok(());
         }
 
-        let txid = call.txid();
+
         let mut msg  = call.take_transient();
+        let txid = call.txid();
         msg.set_nodeid(*self.ni.id());
 
         let call = Rc::new(RefCell::new(call));
         call.borrow_mut().set_cloned(Rc::downgrade(&call));
+        call.borrow_mut().set_timer_client(self.timer_client.clone());
+
         msg.set_associated_call(call.clone());
         self.pending_calls.insert(txid, call.clone());
 
@@ -250,8 +253,7 @@ impl RpcServer {
 
         match self.send_msg(msg.as_ref()) {
             Ok(_) => {
-                let timer_client = self.timer_client.clone();
-                locked.sent(timer_client);
+                locked.sent();
                 if let Some(handler) = self.callsent_handler.as_ref() {
                     handler.cb(&locked);
                 }

@@ -47,6 +47,9 @@ port: 39008
 #
 privateKey: 4h6M3ySLfG3VDLsYdCshDyLzb9547HMEJg6JqCmk3DymmwX4p3jRGXZ5bU87NY6Qhv3bV4pyCJRGTiCStyp2fpFY
 
+logLevel: debug
+logFile: shell.log
+
 # Root directory for persistent data.
 # Stores routing tables, caches, and database files.
 # If omitted, defaults to the current working directory.
@@ -84,11 +87,8 @@ databaseUri: jdbc:sqlite:node.db
 # Format: [ NodeID (Base58), IPAddress, Port ]
 bootstraps:
   - - 3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
-    - 172.20.10.3
+    - 192.168.1.115
     - 39001
-#  - - 7jFV8w7eivjGEpaDu4V38EZ16CDhn4JutEdtGBWC67rF
-#    - 198.51.100.8
-#    - 39001
 
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true

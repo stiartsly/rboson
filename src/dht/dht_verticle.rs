@@ -327,7 +327,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
-                    DHT::bootstrap(dht, nodes, promise).await;
+                    dht.borrow_mut().bootstrap(nodes, promise).await;
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );

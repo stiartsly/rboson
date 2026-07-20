@@ -1099,29 +1099,29 @@ impl DHT {
     }
 
     pub(crate) async fn bootstrap(
-        dht: Rc<RefCell<DHT>>,
+        &mut self,
         nodes: Vec<NodeInfo>,
         promise: Promise<()>
     ) {
-        {
-            let mut dht = dht.borrow_mut();
-            if !dht.is_running {
-                warn!("Bootstrapping skipped: the DHT/{} instance is not running.", dht.network);
-                promise.complete(Ok(()));
-                return;
-            }
-            if nodes.is_empty() {
-                warn!("Bootstrapping skipped: no bootstrapping nodes provided.");
-                promise.complete(Ok(()));
-                return;
-            }
-
-            dht.add_bootstrap_nodes(&nodes);
-            dht.last_bootstrap = SystemTime::UNIX_EPOCH;
+        if !self.is_running {
+            warn!("DHT/{} instance is not running.", self.network);
+            promise.complete(Ok(()));
+            return;
+        }
+        if nodes.is_empty() {
+            warn!("Bootstrapping skipped: no bootstrapping nodes provided.");
+            promise.complete(Ok(()));
+            return;
         }
 
-        Self::do_bootstrap(dht, nodes).await;
-        promise.complete(Ok(()));
+        self.add_bootstrap_nodes(&nodes);
+        self.last_bootstrap = SystemTime::UNIX_EPOCH;
+
+        let dht = self.dht();
+        task::spawn_local(async move {
+            Self::do_bootstrap(dht, nodes).await;
+            promise.complete(Ok(()));
+        });
     }
 
     fn find_closest_nodes(&mut self, nodes: Vec<NodeInfo>)

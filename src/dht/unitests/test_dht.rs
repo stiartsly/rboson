@@ -13,7 +13,6 @@ use crate::dht::{
     connection_status_listener::ConnectionStatusListener,
     dht::DHT,
     dht_verticle::VerticleOptions,
-    promise::Promise,
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
@@ -106,9 +105,7 @@ mod tests {
                 let identity = Arc::new(CryptoIdentity::new());
                 let (dht, _timer_rx) = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
 
-                //let (promise, future) = Promise::<()>::pair();
                 let _ = dht.borrow_mut().start().await;
-                //future.await.expect("Failed to deploy DHT");
 
                 assert_eq!(dht.borrow().network().is_ipv4(), true);
                 assert_eq!(dht.borrow().id(), identity.id());
@@ -117,9 +114,7 @@ mod tests {
 
                 dht.borrow_mut().stop().await;
 
-                //let (promise, future) = Promise::<()>::pair();
                 let _ = dht.borrow_mut().start().await;
-                //future.await.expect("Failed to restart DHT");
 
                 assert_eq!(dht.borrow().network().is_ipv4(), true);
                 assert_eq!(dht.borrow().id(), identity.id());

@@ -30,7 +30,6 @@ use crate::dht::{
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
     handler::AsyncHandler,
-    promise::Promise,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
     storage::{
@@ -445,15 +444,13 @@ impl Node {
         self.check_running()?;
 
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<()>::pair();
             let nodes = nodes.to_vec();
 
             if let Some(dht) = dht {
-                dht.bootstrap(nodes, promise).await;
+                dht.bootstrap(nodes).await
             } else {
-                promise.complete(Ok(()));
+                Ok(())
             }
-            future
         };
 
         let dht4 = self.dht4.lock().unwrap().clone();
@@ -464,7 +461,7 @@ impl Node {
             cb(dht6)
         );
         for item in [result.0, result.1] {
-            let _ = item.await?;
+            item?;
         }
         Ok(())
     }
@@ -478,16 +475,14 @@ impl Node {
         self.check_running()?;
 
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<Option<NodeInfo>>::pair();
             let target  = target.clone();
             let option  = self.option(lookup_option);
 
             if let Some(dht) = dht {
-                dht.find_node(target, option, promise).await;
+                dht.find_node(target, option).await
             } else {
-                promise.complete(Ok(None));
+                Ok(None)
             }
-            future
         };
 
         let dht4 = self.dht4.lock().unwrap().clone();
@@ -499,7 +494,7 @@ impl Node {
         );
 
         let mut joint = JointResult::<NodeInfo>::new();
-        if let Some(ni) = result.1.await? {
+        if let Some(ni) = result.1? {
             joint.set_value(result.0, ni);
         }
         Ok(joint)
@@ -540,15 +535,11 @@ impl Node {
         }
 
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<Option<Value>>::pair();
-
             if let Some(dht) = dht {
-                dht.find_value(
-                    target, expected_seq, option, promise).await;
+                dht.find_value(target, expected_seq, option).await
             } else {
-                promise.complete(Ok(None));
+                Ok(None)
             }
-            future
         };
 
         let rc = tokio::select!(
@@ -556,7 +547,7 @@ impl Node {
             v = cb(dht6), if dht6.is_some() => v,
         );
 
-        if let Some(value) = rc.await? {
+        if let Some(value) = rc? {
             ev.update(value, true);
         }
 
@@ -612,15 +603,11 @@ impl Node {
         }
 
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
-
             if let Some(dht) = dht {
-                dht.find_peer(
-                    target, expected_seq , expected_count, option, promise).await;
+                dht.find_peer(target, expected_seq, expected_count, option).await
             } else {
-                promise.complete(Ok(Vec::new()));
+                Ok(Vec::new())
             }
-            future
         };
 
         let rc = tokio::select!(
@@ -628,7 +615,7 @@ impl Node {
             v = cb(dht6), if dht6.is_some() => v,
         );
 
-        ep.add(rc.await?, true);
+        ep.add(rc?, true);
         ep.prune();
 
         if !ep.is_empty() && ep.is_latest() {
@@ -667,15 +654,13 @@ impl Node {
         let dht6 = self.dht6.lock().unwrap().clone();
 
         let cb = async move|dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<()>::pair();
             let value   = value.clone();
 
             if let Some(dht) = dht {
-                dht.store_value(value, expected_seq, promise).await;
+                dht.store_value(value, expected_seq).await
             } else {
-                promise.complete(Ok(()));
+                Ok(())
             }
-            future
         };
         let result = tokio::join!(
             cb(dht4),
@@ -683,7 +668,7 @@ impl Node {
         );
 
         for item in [result.0, result.1] {
-            let _ = item.await?;
+            item?;
         }
 
         let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
@@ -722,15 +707,13 @@ impl Node {
         let dht6 = self.dht6.lock().unwrap().clone();
 
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
-            let (promise, future) = Promise::<()>::pair();
             let peer = peer.clone();
 
             if let Some(dht) = dht {
-                dht.announce_peer(peer, expected_seq, promise).await;
+                dht.announce_peer(peer, expected_seq).await
             } else {
-                promise.complete(Ok(()));
+                Ok(())
             }
-            future
         };
 
         let result = tokio::join!(
@@ -738,7 +721,7 @@ impl Node {
             cb(dht6),
         );
         for item in [result.0, result.1] {
-            let _ = item.await?;
+            item?;
         }
 
         let _ = self.storage.lock().unwrap()

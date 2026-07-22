@@ -37,7 +37,8 @@ use crate::dht::{
     rpc::rpc_server::RpcServer,
 };
 
-const CHANNEL_CLOSED: &str = "verticle channel closed";
+const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
+const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
 
 enum Cmd {
     Bootstrap {
@@ -89,57 +90,50 @@ impl VerticleClient {
         self.ni.clone()
     }
 
-    async fn complete_promise<T>(
+    async fn rx_result<T>(
         &self,
-        promise: Promise<T>,
         rx: oneshot::Receiver<CmdResult<T>>,
-    ) {
-        let result = match rx.await {
-            Ok(Ok(value)) => Ok(value),
+    ) -> Result<T> {
+        match rx.await {
+            Ok(Ok(v)) => Ok(v),
             Ok(Err(msg)) => Err(StateError::new(msg)),
-            Err(_) => Err(StateError::new("dht verticle response channel closed")),
-        };
-        promise.complete(result);
+            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED)),
+        }
     }
 
     pub(crate) async fn bootstrap(
         &self,
-        nodes: Vec<NodeInfo>,
-        promise: Promise<()>
-    ) {
+        nodes: Vec<NodeInfo>
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(
             Cmd::Bootstrap { nodes, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn find_node(
         &self,
         target: Id,
-        option: LookupOption,
-        promise: Promise<Option<NodeInfo>>,
-    ) {
+        option: LookupOption
+    ) -> Result<Option<NodeInfo>> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(
             Cmd::FindNode { target, option, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn find_value(
         &self,
         target: Id,
         expected_seq: i32,
-        option: LookupOption,
-        promise: Promise<Option<Value>>,
-    ) {
+        option: LookupOption
+    ) -> Result<Option<Value>> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(Cmd::FindValue {
             target,
@@ -147,26 +141,23 @@ impl VerticleClient {
             option,
             complete: tx,
         }).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn store_value(
         &self,
         value: Value,
-        expected_seq: i32,
-        promise: Promise<()>
-    ) {
+        expected_seq: i32
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(
             Cmd::StoreValue { value, expected_seq, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn find_peer(
@@ -174,9 +165,8 @@ impl VerticleClient {
         target: Id,
         expected_seq: i32,
         expected_count: usize,
-        option: LookupOption,
-        promise: Promise<Vec<PeerInfo>>,
-    ) {
+        option: LookupOption
+    ) -> Result<Vec<PeerInfo>> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(Cmd::FindPeer {
             target,
@@ -185,26 +175,23 @@ impl VerticleClient {
             option,
             complete: tx,
         }).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn announce_peer(
         &self,
         peer: PeerInfo,
         expected_seq: i32,
-        promise: Promise<()>
-    ) {
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         if self.command_tx.send(
             Cmd::AnnouncePeer { peer, expected_seq, complete: tx }
         ).is_err() {
-            promise.complete(Err(StateError::new(CHANNEL_CLOSED)));
-            return;
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
-        self.complete_promise(promise, rx).await;
+        self.rx_result(rx).await
     }
 
     pub(crate) async fn stop(&mut self) {

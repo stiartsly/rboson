@@ -329,6 +329,8 @@ impl Node {
             listeners: self.listeners.clone()
         });
 
+
+
         let options = VerticleOptions::default()
             .with_identity(self.identity.identity())
             .with_storage(self.storage.clone())
@@ -337,26 +339,39 @@ impl Node {
             .with_datadir(self.data_dir.clone())
             .with_listener(listener);
 
-        let port = self.cfg.port();
-        if let Some(host4) = self.cfg.host4() {
-            let verticle = dht_verticle::deploy(
-                options.clone(),
-                Network::IPv4,
-                host4.to_string(),
-                port
-            )?;
 
-            *self.dht4.lock().unwrap() = Some(Arc::new(verticle));
+        let port  = self.cfg.port();
+        let host4 = self.cfg.host4();
+        let host6 = self.cfg.host6();
+
+        let cb = async move|host: Option<&str> | {
+            if let Some(host) = host {
+                dht_verticle::deploy(
+                    options.clone(), Network::IPv4, host.into(), port
+                ).map(|v| Some(v))
+            } else {
+                Ok(None)
+            }
+        };
+
+        let result = tokio::join!(
+            cb(host4),
+            cb(host6)
+        );
+
+        match result.0 {
+            Ok(Some(v)) => {
+                *self.dht4.lock().unwrap() = Some(Arc::new(v));
+            },
+            Err(e) => return Err(e),
+            _ => {}
         }
-        if let Some(host6) = self.cfg.host6() {
-            let verticle = dht_verticle::deploy(
-                options.clone(),
-                Network::IPv6,
-                host6.to_string(),
-                port
-            )?;
-
-            *self.dht6.lock().unwrap() = Some(Arc::new(verticle));
+        match result.1 {
+            Ok(Some(v)) => {
+                *self.dht6.lock().unwrap() = Some(Arc::new(v));
+            },
+            Err(e) => return Err(e),
+            _ => {}
         }
 
         *self.running.lock().unwrap() = true;

@@ -73,6 +73,9 @@ enum Cmd {
         expected_seq: i32,
         complete: oneshot::Sender<CmdResult<()>>,
     },
+    Start {
+        complete: oneshot::Sender<CmdResult<()>>,
+    },
     StopAll {
         complete: oneshot::Sender<CmdResult<()>>,
     },
@@ -194,6 +197,14 @@ impl VerticleClient {
         self.rx_result(rx).await
     }
 
+    async fn start(&mut self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        if self.command_tx.send(Cmd::Start { complete: tx }).is_err() {
+            return Err(StateError::new(CHANNEL_REQ_CLOSED));
+        }
+        self.rx_result(rx).await
+    }
+
     pub(crate) async fn stop(&mut self) {
         info!("Stopping DHT verticle");
         let (tx, rx) = oneshot::channel();
@@ -293,8 +304,8 @@ impl Verticle {
         })
     }
 
-    async fn start(&mut self) -> Result<()> {
-        self.dht.borrow_mut().start().await
+    async fn start0(&mut self) -> Result<()> {
+        self.dht.borrow_mut().start0().await
     }
 
     fn ni(&self) -> NodeInfo {
@@ -393,6 +404,16 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
+            Cmd::Start { complete } => {
+                let dht = self.dht.clone();
+                pending.push(async move {
+                    let (promise, future) = Promise::<()>::pair();
+                    let _ = dht.borrow_mut().start(promise).await;
+                    let _ = complete.send(
+                        future.await.map_err(|e| format!("{e}"))
+                    );
+                }.boxed_local());
+            }
             Cmd::StopAll { complete } => {
                 self.quit = true;
                 self.timer_manager.stop_all();
@@ -474,7 +495,7 @@ impl Verticle {
 }
 
 type StartupResult = StdResult<NodeInfo, String>;
-pub(crate) fn deploy(
+pub(crate) async fn deploy(
     options: VerticleOptions,
     network: Network,
     host: String,
@@ -501,7 +522,7 @@ pub(crate) fn deploy(
                     }
                 };
 
-                let result = vert.start().await;
+                let result = vert.start0().await;
                 match result {
                     Ok(()) => {
                         let _ = startup_tx.send(Ok(vert.ni()));
@@ -515,9 +536,11 @@ pub(crate) fn deploy(
             }));
     });
 
-    match startup_rx.recv() {
-        Ok(Ok(ni)) => Ok(VerticleClient {ni, command_tx, handle: Some(handle)}),
-        Ok(Err(msg)) => Err(StateError::new(msg)),
-        Err(_) => Err(StateError::new("dht verticle startup channel closed")),
-    }
+    let mut vert = match startup_rx.recv() {
+        Ok(Ok(ni)) => VerticleClient {ni, command_tx, handle: Some(handle)},
+        Ok(Err(msg)) => return Err(StateError::new(msg)),
+        Err(_) => return Err(StateError::new("dht verticle startup channel closed")),
+    };
+
+    vert.start().await.map(|_| vert)
 }

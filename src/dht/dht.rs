@@ -396,31 +396,33 @@ impl DHT {
         }
     }
 
-    pub(crate) async fn start(&mut self) -> Result<()> {
+    pub(crate) async fn start0(&mut self) -> Result<()> {
         if self.is_running {
             return Ok(());
         }
 
-        info!("Starting DHT/{}:{} on {}:{} ...", self.network, self.id(), self.host, self.port);
+        info!("Starting DHT/{}:{} on {}:{} ...",
+            self.network,
+            self.id(),
+            self.host,
+            self.port
+        );
 
-        let mut rt = RoutingTable::new(*self.id());
-        let mut _need_ping_from_cached_rt = false;
+        let mut rt = RoutingTable::new(self.id().clone());
         if let Some(ref path) = self.persist_file {
             let file = path.display();
             let suc_cb = |_| debug!("Loaded routing table from {}.", file);
             let err_cb = |e| warn! ("Loading routing table from {} error: {e}", file);
 
             debug!("Loading routing table from {}.", file);
-            let result = rt.load(&path)
+            let _ = rt.load(&path)
                 .map(suc_cb)
                 .map_err(err_cb);
-
-            _need_ping_from_cached_rt = result.is_ok() && !rt.is_empty();
         };
         self.rt = Some(Rc::new(RefCell::new(rt)));
 
         // initialize RPC server
-        let mut server = RpcServer::new(
+        let mut rs = RpcServer::new(
             self.ni(),
             self.identity.clone(),
             self.timer_client.clone(),
@@ -428,7 +430,7 @@ impl DHT {
         );
 
         let dht = self.dht();
-        server.message_handler(AsyncHandler::new(move |msg: Rc<Message>| {
+        rs.message_handler(AsyncHandler::new(move |msg: Rc<Message>| {
             let dht = dht.clone();
             Box::pin(async move {
                 dht.borrow_mut().on_message(&msg);
@@ -436,7 +438,7 @@ impl DHT {
         }));
 
         let rt = self.rt();
-        server.callsent_handler(Handler::new({
+        rs.callsent_handler(Handler::new({
             let rt = rt.clone();
             move |nodeid: &Id|{
                 rt.borrow_mut().on_request_sent(&nodeid);
@@ -444,40 +446,106 @@ impl DHT {
         }));
 
         let rt = self.rt();
-        server.calltimeout_handler(Handler::new({
+        rs.calltimeout_handler(Handler::new({
             let rt = rt.clone();
             move |nodeid: &Id| {
                 rt.borrow_mut().on_timeout(&nodeid);
             }
         }));
 
-        server.start().await?;
+        let _ = rs.start().await?;
 
-        let dht = self.dht();
-        server.reachable_handler(AsyncHandler::new(move |reachable: bool|{
-            let dht = dht.clone();
-            Box::pin(async move {
-                let mut borrowed_mut = dht.borrow_mut();
-                if reachable {
-                    borrowed_mut.set_status(ConnectionStatus::Connected);
-                } else {
-                    borrowed_mut.random_ping();
-                    borrowed_mut.set_status(ConnectionStatus::Disconnected);
-                }
-            })
-        }));
-
-        let rs = Rc::new(RefCell::new(server));
+        let rs = Rc::new(RefCell::new(rs));
         rs.borrow_mut().set_cloned(Rc::downgrade(&rs));
-
         self.rpc_server = Some(rs);
+
+        return Ok(());
+    }
+
+    pub(crate) async fn start(&mut self, promise: Promise<()>) {
+        if self.is_running {
+            promise.complete(Ok(()));
+            return;
+        }
+
         self.set_status(ConnectionStatus::Connecting);
 
-        self.setup_periodic_tasks().await?;
-        self.is_running = true;
+        let dht     = self.dht();
+        let handler = AsyncHandler::new(move |reachable: bool|{
+            let dht = dht.clone();
+            Box::pin(async move {
+                let mut borrowed = dht.borrow_mut();
+                if reachable {
+                    borrowed.set_status(ConnectionStatus::Connected);
+                } else {
+                    borrowed.random_ping();
+                    borrowed.set_status(ConnectionStatus::Disconnected);
+                }
+            })
+        });
 
-        info!("Started DHT/{}:{} on {}:{}", self.network, self.id(), self.host, self.port);
-        Ok(())
+        let rs  = self.rs();
+        rs.borrow_mut().reachable_handler(handler);
+
+        let rt  = self.rt();
+        let buckets = if rt.borrow().is_empty() {
+            rt.borrow().buckets()
+        } else {
+            vec![]
+        };
+
+        let task_man = self.task_man.clone();
+        let network  = self.network;
+        let id       = self.id().clone();
+        let dht      = self.dht();
+
+        let unordered = FuturesUnordered::new();
+        for bucket in buckets {
+            let prefix = bucket.borrow().prefix().clone();
+            let (task_promise, task_future) = Promise::<()>::pair();
+
+            let mut task = Box::new(PingRefreshTask::new(dht.clone()));
+            task.with_name(format!("Ping cached routing table - {}", prefix));
+            task.with_bucket(bucket.clone());
+            task.with_remove_on_timeout(true);
+            task.with_listener(TaskListener::default().ended_fn(move |_| {
+                task_promise.complete(Ok(()));
+            }));
+            task_man.add(task);
+            unordered.push(task_future);
+        }
+
+        let (bootstrap_promise, bootstrap_future) = Promise::<()>::pair();
+        let bootstrap_nodes = self.bootstrap_nodes.clone();
+        task::spawn_local(async move {
+            Self::do_bootstrap(dht, bootstrap_nodes).await;
+            bootstrap_promise.complete(Ok(()));
+        });
+        unordered.push(bootstrap_future);
+
+        let dht = self.dht();
+        task::spawn_local(async move {
+            println!(" unordered.len() = {}", unordered.len());
+            futures::future::join_all(unordered).await;
+            info!("DHT/{}:{} startup bootstrap finished", network, id);
+
+            if rt.borrow().number_of_entries() > 0 {
+               dht.borrow_mut().set_status(ConnectionStatus::Connected);
+            } else {
+                dht.borrow_mut().set_status(ConnectionStatus::Disconnected);
+            }
+
+            if let Err(e) = dht.borrow_mut().setup_periodic_tasks().await {
+                promise.complete(Err(e));
+                return;
+            }
+
+            dht.borrow_mut().is_running = true;
+            info!("Started DHT/{}:{} on {}:{}",
+                network, id, dht.borrow().host, dht.borrow().port);
+
+            promise.complete(Ok(()));
+        });
     }
 
     pub(crate) async fn stop(&mut self) {

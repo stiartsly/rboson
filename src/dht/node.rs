@@ -348,7 +348,7 @@ impl Node {
             if let Some(host) = host {
                 dht_verticle::deploy(
                     options.clone(), Network::IPv4, host.into(), port
-                ).map(|v| Some(v))
+                ).await.map(|v| Some(v))
             } else {
                 Ok(None)
             }

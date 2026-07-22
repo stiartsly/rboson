@@ -89,7 +89,7 @@ use crate::dht::{
     bootstrapping       : AtomicBool,
 
     last_maintenance    : SystemTime,
-    maintenance_tasks   : HashSet<Prefix>,
+    maintenance_tasks   : Rc<RefCell<HashSet<Prefix>>>,
 
     timer_client        : Rc<TimerClient>,
 
@@ -149,7 +149,7 @@ impl DHT {
             bootstrap_ids       : Vec::new(),
             last_bootstrap      : SystemTime::UNIX_EPOCH,
             last_maintenance    : SystemTime::UNIX_EPOCH,
-            maintenance_tasks   : HashSet::new(),
+            maintenance_tasks   : Rc::new(RefCell::new(HashSet::new())),
             bootstrapping       : AtomicBool::new(false),
             timer_client,
             suspicious_detector : None,
@@ -248,14 +248,14 @@ impl DHT {
     }
 
     fn try_ping_maintenance(
-        &mut self,
+        dht: Rc<RefCell<Self>>,
         bucket: Rc<RefCell<KBucket>>,
         check_all: bool,
         remove_on_timeout: bool,
         _probe_replacement: bool,
         name: String
     ) {
-        if !self.rs().borrow().is_reachable() {
+        if !dht.borrow().rs().borrow().is_reachable() {
             return;
         }
 
@@ -268,25 +268,26 @@ impl DHT {
             )
         };
 
-        if self.maintenance_tasks.contains(&prefix) {
+        let maintenance_tasks = dht.borrow().maintenance_tasks.clone();
+        if maintenance_tasks.borrow().contains(&prefix) {
             return;
         }
 
         if need_refresh || need_replacement  {
-            let mut task = Box::new(PingRefreshTask::new(self.dht()));
+            let mut task = Box::new(PingRefreshTask::new(dht.clone()));
             task.with_name(name);
             task.with_check_all(check_all);
             task.with_remove_on_timeout(remove_on_timeout);
             task.with_bucket(bucket);
 
-            if self.maintenance_tasks.insert(prefix) {
-                let dht = self.dht();
+            if maintenance_tasks.borrow_mut().insert(prefix) {
+                let dht = dht.clone();
                 let prefix_to_remove = prefix;
                 task.with_listener(
                     TaskListener::default().ended_fn(move |_| {
-                        dht.borrow_mut().maintenance_tasks.remove(&prefix_to_remove);
+                        maintenance_tasks.borrow_mut().remove(&prefix_to_remove);
                 }));
-                self.task_man.add(task);
+                dht.borrow().task_man.add(task);
             }
         }
     }
@@ -336,7 +337,7 @@ impl DHT {
             ids.as_slice(),
             Handler::new(move |bucket: &Rc<RefCell<KBucket>>| {
                 let prefix = bucket.borrow().prefix().clone();
-                dht.borrow_mut().try_ping_maintenance(bucket.clone(), false, false, false,
+                Self::try_ping_maintenance(dht.clone(), bucket.clone(), false, false, false,
                         format!("Routing table maintenance: refreshing bucket {}", prefix)
                     );
             })
@@ -348,9 +349,6 @@ impl DHT {
             if !self.is_running {
                 return;
             }
-
-            debug!("Periodic: DHT/{} update...", self.network());
-            self.routing_table_maintenance();
 
             let rt = self.rt();
             let borrowed_rt = rt.borrow();
@@ -367,6 +365,9 @@ impl DHT {
                 Vec::new()
             }
         };
+
+        debug!("Periodic: DHT/{} update...", self.network());
+        self.routing_table_maintenance();
 
         let dht = self.dht();
         let _ = task::spawn_local(async move {
@@ -655,7 +656,7 @@ impl DHT {
 
                     info!("Checking bucket {} after ID change was detected", prefix);
 
-                    self.try_ping_maintenance(bucket.clone(), true, false, false,
+                    Self::try_ping_maintenance(self.dht(), bucket.clone(), true, false, false,
                         format!("Checking bucket {} after ID change was detected", prefix));
                 }
 
@@ -679,7 +680,7 @@ impl DHT {
                     };
 
                     info!("Checking bucket {} after ID change was detected", prefix);
-                    self.try_ping_maintenance(bucket.clone(), true, false, false,
+                    Self::try_ping_maintenance(self.dht(), bucket.clone(), true, false, false,
                         format!("Checking bucket {} after ID change was detected", prefix));
                 }
 

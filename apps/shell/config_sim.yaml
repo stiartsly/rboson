@@ -87,8 +87,12 @@ databaseUri: jdbc:sqlite:node.db
 # Format: [ NodeID (Base58), IPAddress, Port ]
 bootstraps:
   - - 3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
-    - 192.168.1.115
+    - 192.168.1.118
     - 39001
+
+  #- -3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
+  #  - 10.148.47.34
+  #  - 39003
 
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true

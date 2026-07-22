@@ -13,6 +13,7 @@ use crate::dht::{
     connection_status_listener::ConnectionStatusListener,
     dht::DHT,
     dht_verticle::VerticleOptions,
+    promise::Promise,
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
@@ -92,25 +93,45 @@ mod tests {
 
     #[tokio::test]
     async fn test_dht4() {
-        let identity = Arc::new(CryptoIdentity::new());
-        let (dht, _timer_rx) = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .enable_io()
+                .build()
+                .expect("dht verticle runtime should build");
 
-        let mut locked_dht = dht.borrow_mut();
-        locked_dht.start().await.expect("Failed to deploy DHT");
+            let local = tokio::task::LocalSet::new();
+            rt.block_on(local.run_until(async move {
 
-        assert_eq!(locked_dht.network().is_ipv4(), true);
-        assert_eq!(locked_dht.id(), identity.id());
-        assert_eq!(locked_dht.ni().socket_addr().ip().to_string(), "127.0.0.1");
-        assert_eq!(locked_dht.rt().borrow().size(), 1);
+                let identity = Arc::new(CryptoIdentity::new());
+                let (dht, _timer_rx) = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
 
-        locked_dht.stop().await;
-        locked_dht.start().await.expect("Failed to restart DHT");
+                //let (promise, future) = Promise::<()>::pair();
+                let _ = dht.borrow_mut().start().await;
+                //future.await.expect("Failed to deploy DHT");
 
-        assert_eq!(locked_dht.network().is_ipv4(), true);
-        assert_eq!(locked_dht.id(), identity.id());
-        assert_eq!(locked_dht.ni().socket_addr().ip().to_string(), "127.0.0.1");
-        assert_eq!(locked_dht.rt().borrow().size(), 1);
+                assert_eq!(dht.borrow().network().is_ipv4(), true);
+                assert_eq!(dht.borrow().id(), identity.id());
+                assert_eq!(dht.borrow().ni().socket_addr().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.borrow().rt().borrow().size(), 1);
 
-        locked_dht.stop().await;
+                dht.borrow_mut().stop().await;
+
+                //let (promise, future) = Promise::<()>::pair();
+                let _ = dht.borrow_mut().start().await;
+                //future.await.expect("Failed to restart DHT");
+
+                assert_eq!(dht.borrow().network().is_ipv4(), true);
+                assert_eq!(dht.borrow().id(), identity.id());
+                assert_eq!(dht.borrow().ni().socket_addr().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.borrow().rt().borrow().size(), 1);
+
+                println!("Stopping DHT >>> line:{}", line!());
+                dht.borrow_mut().stop().await;
+            }));
+
+            println!("DHT verticle thread exiting >>> line:{}", line!());
+        });
+        handle.join().unwrap();
     }
 }

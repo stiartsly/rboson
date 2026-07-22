@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 pub(crate) const NODE_TAG_NAME: &str = "MK";
 pub(crate) const NODE_VERSION: i32 = 1;
 
+#[allow(unused)]
 static NAMES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     let mut map = HashMap::new();
     map.insert("OR".to_string(), "Orca".to_string());
@@ -36,7 +37,8 @@ pub(crate) fn format_version(ver: i32) -> String {
     let v = (ver & 0x0000FFFF).to_string();
 
     let mut str = String::new();
-    str.push_str(NAMES.get(&n).map_or(NAMES.get("MK"), |v|Some(v)).unwrap());
+    //str.push_str(NAMES.get(&n).map_or(NAMES.get("MK"), |v|Some(v)).unwrap());
+    str.push_str(n.as_str());
     str.push_str("/");
     str.push_str(&v);
     str

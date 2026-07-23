@@ -7,7 +7,7 @@ use std::{
     time::SystemTime,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
 };
-use log::{info, warn, error, debug};
+use log::{info, warn, error, debug, trace};
 use tokio::net::UdpSocket;
 use crate::{
     CryptoBox,
@@ -15,7 +15,6 @@ use crate::{
     Id, Identity,
     NodeInfo,
     cryptobox::Nonce,
-
     errors::{
         Error,
         Result,
@@ -29,7 +28,7 @@ use crate::dht::{
     suspicious_node_detector::SuspiciousNodeDetector,
     handler::{Handler, LocalHandler as AsyncHandler},
     rpc::RpcCall,
-    msg::Message
+    msg::{Message, msg::Method},
 };
 
 #[allow(dead_code)]
@@ -323,8 +322,13 @@ impl RpcServer {
                 format!("Error: sent length {} does not match expected {}", sent_len, buf.len())));
         }
 
-        debug!("Message <{}@{} to {}@{}> was sent : {}",
-            msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
+        if msg.method() == Method::Ping {
+            trace!("Message {}_{} to {}@{} was sent: {}",
+                msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
+        } else {
+            debug!("Message {}_{} to {}@{} was sent: {}",
+                msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
+        }
 
         Ok(sent_len)
     }
@@ -393,7 +397,7 @@ impl RpcServer {
         msg.set_nodeid(from_id);
         msg.set_remote(from_id, from);
 
-        debug!("Received message <{}-{} from {}@{}>: {}",
+        debug!("Received message {}_{} from {}@{}: {}",
             msg.method(), msg.kind(), from_id, from, msg);
 
         // Handle request message.

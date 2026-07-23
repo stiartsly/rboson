@@ -370,7 +370,9 @@ impl Serialize for Message {
     where S: serde::Serializer,
     {
         if !se.is_human_readable() {
-            return SerdeCborMessage::from(self.clone()).serialize(se);
+            let message = SerdeCborMessage::try_from(self)
+                .map_err(serde::ser::Error::custom)?;
+            return message.serialize(se);
         }
 
         let body = self.body();
@@ -385,32 +387,32 @@ impl Serialize for Message {
     }
 }
 
-impl From<Message> for SerdeCborMessage {
-    fn from(msg: Message) -> Self {
-        let typo = msg.composite_type();
+impl TryFrom<&Message> for SerdeCborMessage {
+    type Error = serde_cbor::Error;
+
+    fn try_from(msg: &Message) -> SResult<Self, Self::Error> {
+        let type_ = msg.composite_type();
         let txid = msg.txid;
         let ver  = msg.ver;
         let body = msg.body();
 
         let req = if msg.kind() == Kind::Request {
-            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+            body.map(serde_cbor::value::to_value).transpose()?
         } else {
             None
         };
         let rsp = if msg.kind() == Kind::Response {
-            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+            body.map(serde_cbor::value::to_value).transpose()?
         } else {
             None
         };
         let err = if msg.kind() == Kind::Error {
-            body.and_then(|v| serde_cbor::value::to_value(v).ok())
+            body.map(serde_cbor::value::to_value).transpose()?
         } else {
             None
         };
 
-        Self {
-            type_: typo, txid, ver, req, rsp, err
-        }
+        Ok(Self { type_, txid, ver, req, rsp, err })
     }
 }
 
@@ -431,17 +433,17 @@ impl TryFrom<SerdeCborMessage> for Message {
         let method = Method::from(type_);
 
         let err =  if kind == Kind::Error {
-            s.err.and_then(|v| Body::from_err(v).ok().flatten())
+            s.err.map(Body::from_err).transpose()?.flatten()
         } else {
             None
         };
         let req = if kind == Kind::Request {
-            s.req.and_then(|v| Body::from_req(method, v).ok().flatten())
+            s.req.map(|v| Body::from_req(method, v)).transpose()?.flatten()
         } else {
             None
         };
         let rsp = if kind == Kind::Response {
-            s.rsp.and_then(|v| Body::from_rsp(method, v).ok().flatten())
+            s.rsp.map(|v| Body::from_rsp(method, v)).transpose()?.flatten()
         } else {
             None
         };

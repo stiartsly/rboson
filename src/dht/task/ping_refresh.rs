@@ -28,7 +28,6 @@ pub(crate) struct PingRefreshTask {
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
-#[allow(unused)]
 impl PingRefreshTask {
     pub(crate) fn new(dht: Rc<RefCell<DHT>>) -> Self {
         Self {

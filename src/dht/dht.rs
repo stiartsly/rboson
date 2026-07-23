@@ -42,7 +42,7 @@ use crate::dht::{
     msg::{
         Message,
         LookupRequest, LookupResponse,
-        msg::{*, Kind, Method, Body},
+        msg::{self, Kind, Method, Body},
     },
     routing::{
         routing_table::RoutingTable,
@@ -318,7 +318,7 @@ impl DHT {
 
         debug!("Periodic: random ping ...");
 
-        let call = RpcCall::new(entry, ping_request());
+        let call = RpcCall::new(entry, msg::ping_request());
         let _ = self.send_call(call);
     }
 
@@ -788,13 +788,13 @@ impl DHT {
         if existing_opt.is_none() && !new_entry.is_reachable(){
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
 			// only if the new entry is unreachable and the bucket is not full yet
-            let call = RpcCall::new(new_entry, ping_request());
+            let call = RpcCall::new(new_entry, msg::ping_request());
             let _ = self.send_call(call);
         }
     }
 
     fn send_err(&mut self, method: Method, code: i32, str: &str) {
-        let msg = error_msg(method, 0, code, str.into());
+        let msg = msg::error_msg(method, 0, code, str.into());
         // TODO: set remote id and addr
         self.send_msg(msg);
     }
@@ -809,6 +809,24 @@ impl DHT {
             return;
         }
 
+        if msg.method() == Method::Ping {
+            trace!("Received a {}_{} message from {}@{}, txid {}",
+                msg.method(),
+                msg.kind(),
+                msg.remote_id(),
+                msg.remote_addr(),
+                msg.txid()
+            )
+        } else {
+            debug!("Received a {}_{} message from {}@{}, txid {}",
+                msg.method(),
+                msg.kind(),
+                msg.remote_id(),
+                msg.remote_addr(),
+                msg.txid()
+            )
+        }
+
         match msg.kind() {
             Kind::Error    => self.on_error(&msg),
             Kind::Request  => self.on_request(&msg),
@@ -819,22 +837,6 @@ impl DHT {
     }
 
     fn on_request(&mut self, msg: &Message) {
-        if msg.method() == Method::Ping {
-            trace!("Received a {} request message from {}@{}, txid {}",
-                msg.method(),
-                msg.remote_id(),
-                msg.remote_addr(),
-                msg.txid()
-            );
-        } else {
-            debug!("Received a {} request message from {}@{}, txid {}",
-                msg.method(),
-                msg.remote_id(),
-                msg.remote_addr(),
-                msg.txid()
-            );
-        }
-
         let method = msg.method();
         match method {
             Method::Ping        => self.on_ping(msg),
@@ -847,23 +849,7 @@ impl DHT {
         }
     }
 
-    fn on_response(&mut self, msg: &Message) {
-        if msg.method() == Method::Ping {
-            trace!("Received a {} response message from {}@{}, txid {}",
-                msg.method(),
-                msg.remote_id(),
-                msg.remote_addr(),
-                msg.txid()
-            );
-        } else {
-            debug!("Received a {} response message from {}@{}, txid {}",
-                msg.method(),
-                msg.remote_id(),
-                msg.remote_addr(),
-                msg.txid()
-            );
-        }
-    }
+    fn on_response(&mut self, _msg: &Message) {}
 
     fn on_error(&mut self, msg: &Message) {
         let Some(Body::Error(err)) = msg.body() else {
@@ -896,7 +882,7 @@ impl DHT {
         }
 
         let rsp = {
-            let mut msg = ping_response(req.txid());
+            let mut msg = msg::ping_response(req.txid());
             msg.set_remote(*req.remote_id(), *req.remote_addr());
             msg.set_nodeid(*self.id());
             msg
@@ -937,7 +923,7 @@ impl DHT {
 
         let rsp = {
             let txid = req.txid();
-            let mut msg = find_node_response(txid, nodes4, nodes6, token);
+            let mut msg = msg::find_node_response(txid, nodes4, nodes6, token);
             msg.set_remote(*req.remote_id(), *req.remote_addr());
             msg.set_nodeid(*self.id());
             msg
@@ -969,7 +955,7 @@ impl DHT {
 
         let txid = req.txid();
         let mut rsp = if let Some(value) = value {
-            find_value_response(txid, value)
+            msg::find_value_response(txid, value)
         } else {
             let network = self.network();
             let target = body.target().clone();
@@ -981,7 +967,7 @@ impl DHT {
                 true  => Some(self.fill_closest_nodes(target)),
                 false => None
             };
-            find_value_response_with_nodes(txid, nodes4, nodes6)
+            msg::find_value_response_with_nodes(txid, nodes4, nodes6)
         };
 
         rsp.set_remote(*req.remote_id(), *req.remote_addr());
@@ -1051,7 +1037,7 @@ impl DHT {
         _ = self.storage.lock().unwrap().put_value(value.clone(), false);
 
         let rsp = {
-            let mut msg = store_value_response(req.txid());
+            let mut msg = msg::store_value_response(req.txid());
             msg.set_remote(*req.remote_id(), *req.remote_addr());
             msg.set_nodeid(*self.id());
             msg
@@ -1088,9 +1074,9 @@ impl DHT {
                 true  => Some(self.fill_closest_nodes(target)),
                 false => None
             };
-            find_peer_response_with_nodes(txid, nodes4, nodes6)
+            msg::find_peer_response_with_nodes(txid, nodes4, nodes6)
         } else {
-            find_peer_response(txid, peers)
+            msg::find_peer_response(txid, peers)
         };
 
         rsp.set_remote(*req.remote_id(), *req.remote_addr());
@@ -1156,7 +1142,7 @@ impl DHT {
         let _ = self.storage.lock().unwrap().put_peer(peer.clone(), false);
 
         let rsp = {
-            let mut msg = announce_peer_response(req.txid());
+            let mut msg = msg::announce_peer_response(req.txid());
             msg.set_remote(*req.remote_id(), *req.remote_addr());
             msg.set_nodeid(*self.id());
             msg
@@ -1201,7 +1187,7 @@ impl DHT {
             if item.id() == self.id() {
                 continue;
             }
-            let msg = find_node_request(
+            let msg = msg::find_node_request(
                 Id::random(),
                 network.is_ipv4(),
                 network.is_ipv6(),

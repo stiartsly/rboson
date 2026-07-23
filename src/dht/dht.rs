@@ -820,17 +820,17 @@ impl DHT {
 
     fn on_request(&mut self, msg: &Message) {
         if msg.method() == Method::Ping {
-            trace!("Received a {} request message from {}/{}, txid {}",
+            trace!("Received a {} request message from {}@{}, txid {}",
                 msg.method(),
-                msg.remote_addr(),
                 msg.remote_id(),
+                msg.remote_addr(),
                 msg.txid()
             );
         } else {
-            debug!("Received a {} request message from {}/{}, txid {}",
+            debug!("Received a {} request message from {}@{}, txid {}",
                 msg.method(),
-                msg.remote_addr(),
                 msg.remote_id(),
+                msg.remote_addr(),
                 msg.txid()
             );
         }
@@ -849,17 +849,17 @@ impl DHT {
 
     fn on_response(&mut self, msg: &Message) {
         if msg.method() == Method::Ping {
-            trace!("Received a {} response message from {}/{}, txid {}",
+            trace!("Received a {} response message from {}@{}, txid {}",
                 msg.method(),
-                msg.remote_addr(),
                 msg.remote_id(),
+                msg.remote_addr(),
                 msg.txid()
             );
         } else {
-            debug!("Received a {} response message from {}/{}, txid {}",
+            debug!("Received a {} response message from {}@{}, txid {}",
                 msg.method(),
-                msg.remote_addr(),
                 msg.remote_id(),
+                msg.remote_addr(),
                 msg.txid()
             );
         }
@@ -870,9 +870,9 @@ impl DHT {
             return;
         };
 
-        warn!("Received an error message from {}/{} - {}:{}, txid {}",
-            msg.remote_addr(),
+        warn!("Received an error message from {}@{} - {}:{}, txid {}",
             msg.remote_id(),
+            msg.remote_addr(),
             err.code(),
             err.description(),
             msg.txid()
@@ -880,18 +880,18 @@ impl DHT {
     }
 
     fn on_unknown_req(&mut self, msg: &Message) {
-        warn!("Received unknown request {} from {}/{}, txid {}, ignoring it",
+        warn!("Received unknown request {} from {}@{}, txid {}, ignoring it",
             msg.method(),
-            msg.remote_addr(),
             msg.remote_id(),
+            msg.remote_addr(),
             msg.txid()
         );
     }
 
     fn on_ping(&mut self, req: &Message) {
         if req.body().is_some() {
-            warn!("Ignoring ping request with unexpected body from {}/{}",
-                req.remote_addr(), req.remote_id());
+            warn!("Ignoring ping request with unexpected body from {}@{}",
+                req.remote_id(), req.remote_addr());
             return;
         }
 

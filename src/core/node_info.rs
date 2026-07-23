@@ -1,11 +1,13 @@
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::result::Result as SResult;
-use std::net::{
-    SocketAddr,
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    result::Result as SResult,
+    net::{
+        SocketAddr,
+        IpAddr,
+        Ipv4Addr,
+        Ipv6Addr
+    },
 };
 use serde::{
     Serialize,
@@ -15,7 +17,6 @@ use serde::{
     de::{self, Visitor, SeqAccess},
     ser::{SerializeTuple},
 };
-
 use super::{
     Id,
     version,
@@ -113,14 +114,18 @@ impl Serialize for NodeInfo {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
     where S: Serializer,
     {
+        let serde_as_json = se.is_human_readable();
         let mut s = se.serialize_tuple(3)?;
-        let addr = match self.addr.ip() {
-            IpAddr::V4(addr4) => addr4.octets().to_vec(),
-            IpAddr::V6(addr6) => addr6.octets().to_vec(),
-        };
-
         s.serialize_element(&self.id)?;
-        s.serialize_element(&addr)?;
+        if serde_as_json {
+            s.serialize_element(&self.addr.ip().to_string())?;
+        } else {
+            let addr = match self.addr.ip() {
+                IpAddr::V4(addr4) => addr4.octets().to_vec(),
+                IpAddr::V6(addr6) => addr6.octets().to_vec(),
+            };
+            s.serialize_element(&addr)?;
+        }
         s.serialize_element(&self.addr.port())?;
         s.end()
     }

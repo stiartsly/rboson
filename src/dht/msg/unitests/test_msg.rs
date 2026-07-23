@@ -47,4 +47,36 @@ mod tests {
         //assert!(decoded.remote_id().is_none());
         //assert!(decoded.remote_addr().is_none());
     }
+
+    #[test]
+    fn test_serde_find_peer_request() {
+        let target = Id::random();
+        let message = msg::find_peer_request(target, true, false, -1, 1);
+
+        let json = serde_json::to_value(&message).expect("JSON serialization failed");
+        assert_eq!(json["q"]["t"], target.to_base58());
+
+        println!("JSON: {}", message);
+
+        let cbor = serde_cbor::to_vec(&message).expect("CBOR serialization failed");
+        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor)
+            .expect("CBOR decoding failed");
+        let message_entries = match value {
+            serde_cbor::Value::Map(entries) => entries,
+            _ => panic!("expected a CBOR message map"),
+        };
+        let body = message_entries.iter()
+            .find(|(key, _)| *key == &serde_cbor::Value::Text("q".to_string()))
+            .map(|(_, value)| value)
+            .expect("missing request body");
+        let body_entries = match body {
+            serde_cbor::Value::Map(entries) => entries,
+            _ => panic!("expected a CBOR request map"),
+        };
+        let encoded_target = body_entries.iter()
+            .find(|(key, _)| *key == &serde_cbor::Value::Text("t".to_string()))
+            .map(|(_, value)| value)
+            .expect("missing target field");
+        assert!(matches!(encoded_target, serde_cbor::Value::Bytes(bytes) if bytes.len() == Id::BYTES));
+    }
 }

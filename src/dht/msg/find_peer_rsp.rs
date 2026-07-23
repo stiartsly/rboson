@@ -90,14 +90,14 @@ impl TryFrom<SerdeFindPeerResponse> for FindPeerResponse {
 
         Ok(match s.peers {
             Some(peers) => FindPeerResponse::with_peers(peers),
-            None => FindPeerResponse::with_nodes(s.nodes4, s.nodes6)
+            _ => FindPeerResponse::with_nodes(s.nodes4, s.nodes6)
         })
     }
 }
 
 impl fmt::Display for FindPeerResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }

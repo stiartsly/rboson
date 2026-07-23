@@ -1,4 +1,5 @@
 mod msg {
+    mod utils;
     pub(crate) mod msg;
     pub(crate) mod error;
     pub(crate) mod lookup_req;
@@ -12,7 +13,6 @@ mod msg {
     pub(crate) mod announce_peer_req;
     pub(crate) mod store_value_req;
 
-    /*
     #[cfg(test)]
     mod unitests {
         mod test_find_node_req;
@@ -22,10 +22,10 @@ mod msg {
         mod test_find_peer_rsp;
         mod test_find_value_req;
         mod test_find_value_rsp;
-        mod test_message;
+        mod test_msg;
         mod test_store_value_req;
         mod test_error;
-    }*/
+    }
 
     pub(crate) use {
         lookup_req::LookupRequest,

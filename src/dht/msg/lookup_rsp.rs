@@ -1,7 +1,4 @@
-use crate::{
-    Network,
-    NodeInfo,
-};
+use crate::{Network, NodeInfo};
 
 #[derive(Clone)]
 pub(crate) struct Data {

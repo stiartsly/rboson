@@ -66,7 +66,7 @@ impl From<SerdeFindNodeResponse> for FindNodeResponse {
 
 impl fmt::Display for FindNodeResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }

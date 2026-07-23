@@ -2,6 +2,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
     Id,
+    dht::msg::utils,
     dht::msg::lookup_req::{
         LookupRequest,
         Data as LookupData,
@@ -37,7 +38,11 @@ impl LookupRequest for FindNodeRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindNodeRequest {
-    #[serde(rename = "t")]
+    #[serde(
+        rename = "t",
+        serialize_with = "utils::serialize_id",
+        deserialize_with = "utils::deserialize_id"
+    )]
     target: Id,
     #[serde(rename = "w")]
     want: i32,
@@ -65,7 +70,7 @@ impl From<SerdeFindNodeRequest> for FindNodeRequest {
 
 impl fmt::Display for FindNodeRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }

@@ -58,4 +58,27 @@ mod tests {
         assert_eq!(decoded.expected_seq(), -1);
         assert_eq!(decoded.expected_count(), expected_count);
     }
+
+    #[test]
+    fn test_serde_json_and_cbor() {
+        let peerid = Id::random();
+        let request = FindPeerRequest::new(peerid, true, false, -1, 1);
+
+        let json = serde_json::to_value(&request).expect("JSON serialization failed");
+        println!("JSON: {}", json);
+        assert_eq!(json["t"], peerid.to_base58());
+
+        let cbor = serde_cbor::to_vec(&request).expect("CBOR serialization failed");
+        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor)
+            .expect("CBOR decoding failed");
+        let entries = match value {
+            serde_cbor::Value::Map(entries) => entries,
+            _ => panic!("expected a CBOR map"),
+        };
+        let target = entries.iter()
+            .find(|(key, _)| *key == &serde_cbor::Value::Text("t".to_string()))
+            .map(|(_, value)| value)
+            .expect("missing target field");
+        assert!(matches!(target, serde_cbor::Value::Bytes(bytes) if bytes.len() == Id::BYTES));
+    }
 }

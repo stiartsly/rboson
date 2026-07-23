@@ -5,8 +5,11 @@ use crate::{
     Value,
     NodeInfo,
     cryptobox::Nonce,
-    errors::{Error, Result, ProtocolError},
-    dht::msg::lookup_rsp::{
+    errors::{Error, Result, ProtocolError}
+};
+use super::{
+    utils,
+    lookup_rsp::{
         LookupResponse,
         Data
     }
@@ -136,28 +139,8 @@ impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
 
 impl fmt::Display for FindValueResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
-    }
-}
-
-mod utils {
-    use serde::{Deserialize, de::Deserializer};
-    use std::result::Result as SResult;
-
-    pub(crate) fn is_default_seq(v: &i32) -> bool {
-        *v < 0
-    }
-
-    pub(crate) fn default_seq() -> i32 { -1 }
-    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
-    where  D: Deserializer<'de>,
-    {
-        let seq = i32::deserialize(de)?;
-        if seq < -1 {
-            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
-        }
-        Ok(seq)
     }
 }

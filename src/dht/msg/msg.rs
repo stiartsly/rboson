@@ -3,6 +3,7 @@ use std::{
     rc::Rc,
     cell::RefCell,
     net::SocketAddr,
+    result::Result as SResult,
     sync::atomic::{AtomicI32, Ordering}
 };
 use serde_cbor::value::{Value as CborValue, from_value};
@@ -17,6 +18,7 @@ use crate::{
     core::version,
     dht::rpc::RpcCall,
     dht::msg::{
+        utils,
         ErrorBody,
         FindNodeRequest,
         FindNodeResponse,
@@ -40,7 +42,8 @@ pub(crate) enum Kind {
 impl Kind {
     const MASK: i32 = 0xE0;
     pub(crate) fn is_valid(_type: i32) -> bool {
-        matches!(_type & Self::MASK, 0x00 | 0x20 | 0x40)
+        let kind = _type & Self::MASK;
+        kind == 0x00 || kind == 0x20 || kind == 0x40
     }
 }
 
@@ -214,8 +217,8 @@ fn next_txid() -> i32 {
 }
 
 #[derive(Clone)]
-#[derive(Serialize, Deserialize)]
-#[serde(into = "SerdeMessage", try_from = "SerdeMessage")]
+#[derive(Deserialize)]
+#[serde(try_from = "SerdeCborMessage")]
 pub(crate) struct Message {
     nodeid  : Option<Id>,        // The DHT node Id of the message sender.
 
@@ -324,7 +327,7 @@ impl Message {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeMessage {
+struct SerdeCborMessage {
     #[serde(rename = "y")]
     type_: i32,
     #[serde(rename = "t")]
@@ -345,43 +348,75 @@ struct SerdeMessage {
     err: Option<CborValue>,
 }
 
-impl Into<SerdeMessage> for Message {
-    fn into(self) -> SerdeMessage {
-        let type_ = self.composite_type();
-        let txid = self.txid;
-        let ver = self.ver;
+#[derive(Serialize)]
+struct SerdeJsonMessage<'a> {
+    #[serde(rename = "y")]
+    type_: i32,
+    #[serde(rename = "t")]
+    txid: i32,
+    #[serde(rename = "v", serialize_with = "utils::serialize_ver")]
+    ver: i32,
+
+    #[serde(rename = "q", skip_serializing_if = "crate::is_default")]
+    req: Option<&'a Body>,
+    #[serde(rename = "r", skip_serializing_if = "crate::is_default")]
+    rsp: Option<&'a Body>,
+    #[serde(rename = "e", skip_serializing_if = "crate::is_default")]
+    err: Option<&'a Body>,
+}
+
+impl Serialize for Message {
+    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    where S: serde::Serializer,
+    {
+        if !se.is_human_readable() {
+            return SerdeCborMessage::from(self.clone()).serialize(se);
+        }
+
         let body = self.body();
+        SerdeJsonMessage {
+            type_: self.composite_type(),
+            txid: self.txid,
+            ver: self.ver,
+            req: (self.kind == Kind::Request).then_some(body).flatten(),
+            rsp: (self.kind == Kind::Response).then_some(body).flatten(),
+            err: (self.kind == Kind::Error).then_some(body).flatten(),
+        }.serialize(se)
+    }
+}
 
-        let req = if self.kind() == Kind::Request {
+impl From<Message> for SerdeCborMessage {
+    fn from(msg: Message) -> Self {
+        let typo = msg.composite_type();
+        let txid = msg.txid;
+        let ver  = msg.ver;
+        let body = msg.body();
+
+        let req = if msg.kind() == Kind::Request {
             body.and_then(|v| serde_cbor::value::to_value(v).ok())
         } else {
             None
         };
-        let rsp = if self.kind() == Kind::Response {
+        let rsp = if msg.kind() == Kind::Response {
             body.and_then(|v| serde_cbor::value::to_value(v).ok())
         } else {
             None
         };
-        let err = if self.kind() == Kind::Error {
+        let err = if msg.kind() == Kind::Error {
             body.and_then(|v| serde_cbor::value::to_value(v).ok())
         } else {
             None
         };
 
-        SerdeMessage {
-            type_,
-            txid,
-            ver,
-            req,
-            rsp,
-            err
+        Self {
+            type_: typo, txid, ver, req, rsp, err
         }
     }
 }
 
-impl TryFrom<SerdeMessage> for Message {
+impl TryFrom<SerdeCborMessage> for Message {
     type Error = Error;
-    fn try_from(s: SerdeMessage) -> Result<Self> {
+    fn try_from(s: SerdeCborMessage) -> Result<Self> {
         let type_ = s.type_;
         if !Kind::is_valid(type_) {
             return Err(ProtocolError::new(
@@ -524,7 +559,7 @@ pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: Strin
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }

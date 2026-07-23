@@ -3,11 +3,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     errors::{Error, Result},
-    dht::msg::lookup_req::{
+};
+use crate::dht::{
+    msg::utils,
+    msg::lookup_req::{
         LookupRequest,
         Data as LookupData,
         WANT4_MASK, WANT6_MASK,
-    }
+    },
 };
 
 #[derive(Clone)]
@@ -50,10 +53,16 @@ impl LookupRequest for FindPeerRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindPeerRequest {
-    #[serde(rename = "t")]
+    #[serde(
+        rename = "t",
+        serialize_with = "utils::serialize_id",
+        deserialize_with = "utils::deserialize_id"
+    )]
     target: Id,
+
     #[serde(rename = "w")]
     want: i32,
+
     #[serde(
         rename = "cas",
         skip_serializing_if = "utils::is_default_seq",
@@ -61,6 +70,7 @@ struct SerdeFindPeerRequest {
         deserialize_with = "utils::deserialize_seq"
     )]
     expected_seq: i32,
+
     #[serde(
         rename = "e",
         skip_serializing_if = "crate::is_default",
@@ -96,39 +106,8 @@ impl TryFrom<SerdeFindPeerRequest> for FindPeerRequest {
 
 impl fmt::Display for FindPeerRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
-    }
-}
-
-mod utils {
-    use serde::{Deserialize, Deserializer};
-    use std::result::Result as SResult;
-
-    pub(crate) fn is_default_seq(v: &i32) -> bool {
-        *v < 0
-    }
-
-    pub(crate) fn default_seq() -> i32 { -1 }
-
-    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
-    where  D: Deserializer<'de>,
-    {
-        let seq = i32::deserialize(de)?;
-        if seq < -1 {
-            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
-        }
-        Ok(seq)
-    }
-
-    pub(crate) fn deserialize_count<'de, D>(de: D) -> SResult<i32, D::Error>
-    where D: Deserializer<'de>,
-    {
-        let count = i32::deserialize(de)?;
-        if count <= 0 {
-            return Err(serde::de::Error::custom("expected_count must be at least larger than 0"));
-        }
-        Ok(count)
     }
 }

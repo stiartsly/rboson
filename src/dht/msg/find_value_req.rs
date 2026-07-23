@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     errors::{Error, Result},
-    dht::msg::lookup_req::{
+};
+use super::{
+    utils,
+    lookup_req::{
         LookupRequest,
         Data as LookupData,
         WANT4_MASK, WANT6_MASK,
@@ -44,7 +47,11 @@ impl LookupRequest for FindValueRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindValueRequest {
-    #[serde(rename = "t")]
+    #[serde(
+        rename = "t",
+        serialize_with = "utils::serialize_id",
+        deserialize_with = "utils::deserialize_id"
+    )]
     target: Id,
     #[serde(rename = "w")]
     want: i32,
@@ -81,28 +88,8 @@ impl TryFrom<SerdeFindValueRequest> for FindValueRequest {
 
 impl fmt::Display for FindValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
+        let json = serde_json::to_value(&self)
             .map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
-    }
-}
-
-mod utils {
-    use serde::{Deserialize, de::Deserializer};
-    use std::result::Result as SResult;
-
-    pub(crate) fn is_default_seq(v: &i32) -> bool {
-        *v < 0
-    }
-
-    pub(crate) fn default_seq() -> i32 { -1 }
-    pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
-    where  D: Deserializer<'de>,
-    {
-        let seq = i32::deserialize(de)?;
-        if seq < -1 {
-            return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
-        }
-        Ok(seq)
     }
 }

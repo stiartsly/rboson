@@ -3,6 +3,7 @@ use std::time::{SystemTime, Duration};
 use boson::{
 	signature,
 	CryptoIdentity,
+	Identity,
 	did::{Vouch, Credential}
 };
 

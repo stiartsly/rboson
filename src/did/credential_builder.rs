@@ -7,6 +7,7 @@ use crate::{
     as_secs,
     Id,
     errors::{Result, ArgumentError},
+    Identity,
     CryptoIdentity,
 };
 

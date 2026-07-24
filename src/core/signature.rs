@@ -377,12 +377,18 @@ impl From<&PrivateKey> for KeyPair {
     }
 }
 
+impl From<PrivateKey> for KeyPair {
+    fn from(sk: PrivateKey) -> Self {
+        Self::from(&sk)
+    }
+}
+
 impl FromStr for KeyPair {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
         let sk = PrivateKey::try_from(s)?;
-        Ok(KeyPair::from(&sk))
+        Ok(KeyPair::from(sk))
     }
 }
 

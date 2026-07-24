@@ -7,6 +7,7 @@ use std::{
 use tokio::sync::mpsc;
 use crate::{
     Network,
+    Identity,
     CryptoIdentity,
 };
 use crate::dht::{

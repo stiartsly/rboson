@@ -96,7 +96,7 @@ mod tests {
     fn test_serde_full() {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
-        let node_identity = CryptoIdentity::from_keypair(node_kp);
+        let node_identity = CryptoIdentity::from(node_kp);
         let node = Arc::new(Mutex::new(node_identity));
         let peer_kp = signature::KeyPair::random();
         let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];

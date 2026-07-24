@@ -5,6 +5,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     Result,
     errors::ArgumentError,
+    Identity,
     CryptoIdentity,
 };
 

@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use boson::CryptoIdentity;
+use boson::{Identity, CryptoIdentity};
 
 #[derive(Parser, Debug)]
 #[command(name = "identity")]
@@ -11,7 +11,7 @@ fn main() {
     Options::parse();
 
     let identity = CryptoIdentity::new();
-    let keypair = identity.keypair();
+    let keypair = identity.signature_keypair();
     let id = identity.id();
 
     println!("+--------------------------------------------------------------+");

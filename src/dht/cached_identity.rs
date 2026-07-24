@@ -55,6 +55,10 @@ impl Identity for CachedIdentity {
         self.identity.sign(data, signature)
     }
 
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.sign_into(data)
+    }
+
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         self.identity.verify(data, signature)
     }

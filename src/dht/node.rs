@@ -95,7 +95,7 @@ impl Node {
 
         let identity = CachedIdentity::new({
             let kp = signature::KeyPair::from(cfg.private_key());
-            CryptoIdentity::from_keypair(kp)
+            CryptoIdentity::from(kp)
         });
 
         // Cache the node id to a file for quick access in the future.
@@ -812,6 +812,10 @@ impl Identity for Node {
         self.identity.sign(data, signature)
     }
 
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.sign_into(data)
+    }
+
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         self.identity.verify(data, signature)
     }
@@ -820,8 +824,16 @@ impl Identity for Node {
         self.identity.encrypt(receiver, data, cipher)
     }
 
+    fn encrypt_into(&self, receiver: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.encrypt_into(receiver, data)
+    }
+
     fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
         self.identity.decrypt(sender, data, plain)
+    }
+
+    fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.decrypt_into(sender, data)
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {

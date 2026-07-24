@@ -311,10 +311,10 @@ impl PeerInfo {
         }
 
         let sequence_number = self.seq + 1;
-        let sk = self.sk.as_ref().unwrap();
+        let sk = self.sk.clone().unwrap();
         let kp = KeyPair::from(sk);
 
-        PeerInfo::new(
+        Self::new(
             Some(&kp),
             node,
             None,

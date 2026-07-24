@@ -4,6 +4,7 @@ use boson::{
     Id,
     signature,
     CryptoIdentity,
+    Identity,
     did::{Card, Credential},
 };
 

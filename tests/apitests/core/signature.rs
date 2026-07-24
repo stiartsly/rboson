@@ -213,7 +213,7 @@ mod tests {
     fn test_keypair_tryfrom_sk1() {
         let bytes = create_random_bytes(PrivateKey::BYTES);
         let sk = PrivateKey::try_from(bytes.as_slice());
-        let kp = KeyPair::from(&sk.unwrap());
+        let kp = KeyPair::from(sk.unwrap());
         assert_eq!(kp.private_key().clone(), kp.to_private_key());
         assert_eq!(kp.public_key().clone(), kp.to_public_key());
     }

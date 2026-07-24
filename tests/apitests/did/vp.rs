@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use boson::{
     CryptoIdentity,
+	Identity,
     did::{
         constants,
         w3c::VerifiablePresentation as VP,

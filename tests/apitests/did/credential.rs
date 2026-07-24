@@ -4,6 +4,7 @@ use std::time::{SystemTime, Duration};
 use boson::{
     Id,
     CryptoIdentity,
+    Identity,
     did::Credential,
 };
 

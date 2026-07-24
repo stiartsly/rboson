@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 use crate::{
     Id,
     errors::{Result, ArgumentError},
+    Identity,
     CryptoIdentity,
 };
 

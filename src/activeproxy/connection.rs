@@ -104,6 +104,11 @@ impl Identity for ProxyConnection {
         signature::sign(data, sig, self.signature_keypair.private_key())
     }
 
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let mut signature = vec![0u8; crate::Signature::BYTES];
+        self.sign(data, &mut signature).map(|_| signature)
+    }
+
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         signature::verify(data, signature, self.signature_keypair.public_key())
     }
@@ -112,8 +117,16 @@ impl Identity for ProxyConnection {
         self.crypto_context.lock().unwrap().encrypt(plain, cipher)
     }
 
+    fn encrypt_into(&self, _recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
+        self.crypto_context.lock().unwrap().encrypt_into(plain)
+    }
+
     fn decrypt(&self, _sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         self.crypto_context.lock().unwrap().decrypt(cipher, plain)
+    }
+
+    fn decrypt_into(&self, _sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
+        self.crypto_context.lock().unwrap().decrypt_into(cipher)
     }
 
     fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {

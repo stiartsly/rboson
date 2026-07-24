@@ -4,6 +4,7 @@ use std::time::Duration;
 use serial_test::serial;
 
 use crate::{
+    Identity,
     CryptoIdentity,
     random_bytes,
     Id,

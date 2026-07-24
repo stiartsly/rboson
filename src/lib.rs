@@ -24,14 +24,15 @@ pub use crate::core::{
         EncryptedBuilder
     },
     network::{self, Network},
-    identity::{self, Identity},
-    crypto_identity::{self, CryptoIdentity},
+    identity::{self, Identity, CryptoIdentity},
     crypto_context::{self, CryptoContext},
     joint_result::{self, JointResult},
 
     //node_config::{self, NodeConfig},
     //default_configuration as configuration,
 };
+
+pub use crate::core::identity as crypto_identity;
 
 pub use crate::did::{
     didurl,

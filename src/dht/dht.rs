@@ -18,6 +18,7 @@ use log::{trace, debug, info, warn, error};
 use crate::{
     Id, Network,
     NodeInfo, PeerInfo, Value,
+    Identity,
     crypto_identity::CryptoIdentity,
     errors::Result
 };

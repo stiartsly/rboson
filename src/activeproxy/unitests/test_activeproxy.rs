@@ -58,7 +58,7 @@ fn test_activeproxy() {
         server_peerid: Id::try_from(
             json.get("activeproxy").and_then(|v| v.get("serverPeerId")).and_then(|v| v.as_str()).unwrap()
         ).unwrap(),
-        user_keypair: signature::KeyPair::from(&user_sk),
+        user_keypair: signature::KeyPair::from(user_sk.clone()),
         peer_keypair: None,
         upstream_host: json.get("activeproxy").and_then(|v| v.get("upstreamHost")).and_then(|v| v.as_str()).unwrap().to_string(),
         upstream_port: json.get("activeproxy").and_then(|v| v.get("upstreamPort")).and_then(|v| v.as_u64()).unwrap_or(8080) as u16,

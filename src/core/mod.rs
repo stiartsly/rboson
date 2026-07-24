@@ -6,7 +6,6 @@ pub mod id;
 pub mod joint_result;
 pub mod network;
 pub mod identity;
-pub mod crypto_identity;
 pub mod crypto_context;
 pub mod signature;
 pub mod cryptobox;
@@ -19,8 +18,7 @@ pub use crate::core::{
     id::{Id, DID_PREFIX},
     errors::{Error, Result},
 
-    identity::Identity,
-    crypto_identity::CryptoIdentity,
+    identity::{Identity, CryptoIdentity},
     crypto_context::CryptoContext,
 
     signature::Signature,

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use boson::{
 	Id,
     CryptoIdentity,
+	Identity,
     did::{
 		constants,
         DIDUrl,

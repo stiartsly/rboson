@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime};
 use boson::{
     Id,
     CryptoIdentity,
+    Identity,
     did::{
         constants,
         w3c::DIDDocument as DIDDoc,

@@ -1,7 +1,8 @@
 use crate::core::{
     Id,
     signature,
-    CryptoIdentity
+    CryptoIdentity,
+    Identity,
 };
 /*
  Testcases for critical methods:
@@ -27,10 +28,10 @@ mod tests {
 
     #[test]
     fn test_sign() {
-        // test CryptoIdentity::from_keypair with valid keypair
+        // Test CryptoIdentity::from with a valid key pair.
         let kp = signature::KeyPair::random();
         let id = Id::from(kp.public_key());
-        let identity = CryptoIdentity::from_keypair(kp);
+        let identity = CryptoIdentity::from(kp);
         assert_eq!(identity.id(), &id);
 
         let data = "Hello, World!".as_bytes();
@@ -77,8 +78,8 @@ mod tests {
     fn test_encrypt2() {
         let kp1 = signature::KeyPair::random();
         let kp2 = signature::KeyPair::random();
-        let identity1 = CryptoIdentity::from_keypair(kp1);
-        let identity2 = CryptoIdentity::from_keypair(kp2);
+        let identity1 = CryptoIdentity::from(kp1);
+        let identity2 = CryptoIdentity::from(kp2);
 
         let plain = "Hello, World!".as_bytes();
         let result = identity1.encrypt_into(identity2.id(), plain);
@@ -117,7 +118,7 @@ mod tests {
         let identity = CryptoIdentity::try_from(kp.private_key().as_bytes()).unwrap();
 
         assert_eq!(identity.id(), &Id::from(kp.public_key()));
-        assert_eq!(identity.keypair().public_key(), kp.public_key());
+        assert_eq!(identity.signature_keypair().public_key(), kp.public_key());
         assert_eq!(
             identity.encryption_keypair().public_key().as_bytes(),
             crate::core::cryptobox::KeyPair::from(&kp).public_key().as_bytes()
@@ -127,9 +128,9 @@ mod tests {
     #[test]
     fn test_from_private_key() {
         let kp = signature::KeyPair::random();
-        let identity = CryptoIdentity::from(kp.private_key());
+        let identity = CryptoIdentity::from(signature::KeyPair::from(kp.private_key().clone()));
         assert_eq!(identity.id(), &Id::from(kp.public_key()));
-        assert_eq!(identity.keypair().public_key(), kp.public_key());
+        assert_eq!(identity.signature_keypair().public_key(), kp.public_key());
     }
 
     #[test]

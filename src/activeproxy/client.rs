@@ -281,20 +281,7 @@ pub(crate) async fn lookup_peer(node: Arc<Node>, peerid: &Id) -> Option<(PeerInf
             return None;
         }
 
-        let join_result = result.unwrap();
-        if join_result.is_empty() {
-            warn!("AcriveProxy can't locate node: {}! Go on next ...", nodeid);
-            continue;
-        }
-
-        let mut node = None;
-        if let Some(v6) = join_result.v6() {
-            node = Some(v6.clone());
-        }
-        if let Some(v4) = join_result.v4() {
-            node = Some(v4.clone());
-        }
-        let Some(node) = node else {
+        let Some(node) = result.unwrap() else {
             continue;
         };
 

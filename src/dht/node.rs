@@ -13,13 +13,16 @@ use tokio::task;
 use log::{warn, info, debug};
 
 use crate::{
+    CryptoContext,
+    Identity,
+    CryptoIdentity,
     Id,
     Network,
-    CryptoContext, CryptoIdentity, Identity,
-    NodeInfo, PeerInfo, Value,
-    JointResult,
+    NodeInfo,
+    PeerInfo,
+    Value,
     core::{logger,version},
-    errors::{Result, ArgumentError, IOError, StateError},
+    errors::{ArgumentError, IOError, Result, StateError},
     signature
 };
 use crate::dht::{
@@ -485,14 +488,13 @@ impl Node {
         &self,
         target: &Id,
         lookup_option: Option<LookupOption>
-    ) -> Result<JointResult<NodeInfo>>
+    ) -> Result<Option<NodeInfo>>
     {
         self.check_running()?;
 
+        let option  = self.option(lookup_option);
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let target  = target.clone();
-            let option  = self.option(lookup_option);
-
             if let Some(dht) = dht {
                 dht.find_node(target, option).await
             } else {
@@ -503,16 +505,33 @@ impl Node {
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
 
-        let result = tokio::select!(
-            v = cb(dht4), if dht4.is_some() => (Network::IPv4, v),
-            v = cb(dht6), if dht6.is_some() => (Network::IPv6, v),
-        );
+        if option == LookupOption::Conservative {
+            let result = tokio::join!(
+                cb(dht4),
+                cb(dht6)
+            );
 
-        let mut joint = JointResult::<NodeInfo>::new();
-        if let Some(ni) = result.1? {
-            joint.set_value(result.0, ni);
+            let mut addr4 = None;
+            let mut addr6 = None;
+            if let Some(n4) = result.0? {
+                addr4 = n4.address4().map(|v|v.clone());
+            }
+            if let Some(n6) = result.1? {
+                addr6 = n6.address6().map(|v|v.clone());
+            }
+
+            if addr4.is_none() && addr6.is_none() {
+                return Ok(None);
+            }
+
+            let id = target.clone();
+            NodeInfo::with_addresses(id, addr4, addr6).map(|v|Some(v))
+        } else {
+            tokio::select!(
+                v = cb(dht4), if dht4.is_some() => v,
+                v = cb(dht6), if dht6.is_some() => v,
+            )
         }
-        Ok(joint)
     }
 
     pub async fn find_value(

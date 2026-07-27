@@ -55,12 +55,6 @@ impl NodeInfo {
     }
 
     /// Constructs a `NodeInfo` with an optional IPv4 and an optional IPv6 socket address.
-    ///
-    /// Mirrors Java's `NodeInfo.of(id, sockAddr4, sockAddr6)`.
-    ///
-    /// # Panics
-    /// Panics if both addresses are `None`, if an address doesn't match its expected
-    /// family, or if a supplied address has port `0`.
     pub fn with_addresses(
         id: Id,
         addr4: Option<SocketAddr>,

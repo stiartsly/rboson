@@ -26,7 +26,6 @@ pub use crate::core::{
     network::{self, Network},
     identity::{self, Identity, CryptoIdentity},
     crypto_context::{self, CryptoContext},
-    joint_result::{self, JointResult},
 
     //node_config::{self, NodeConfig},
     //default_configuration as configuration,

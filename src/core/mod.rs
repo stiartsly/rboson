@@ -3,7 +3,6 @@ pub(crate) mod version;
 
 pub mod config;
 pub mod id;
-pub mod joint_result;
 pub mod network;
 pub mod identity;
 pub mod crypto_context;
@@ -24,7 +23,6 @@ pub use crate::core::{
     signature::Signature,
     cryptobox::CryptoBox,
 
-    joint_result::JointResult,
     network::Network,
     config::{
         Config,

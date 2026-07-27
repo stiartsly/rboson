@@ -13,8 +13,6 @@ pub struct CryptoContext {
     last_peer_nonce: Option<Nonce>,
 }
 
-unsafe impl Send for CryptoContext {}
-
 impl CryptoContext {
     pub(crate) fn new(id: Id, crypto_box: CryptoBox) -> CryptoContext {
         Self {

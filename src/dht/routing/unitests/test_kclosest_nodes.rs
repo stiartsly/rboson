@@ -5,7 +5,7 @@ use std::{
 use crate::{
     Id,
     NodeInfo,
-    dht::rpc::rpc_target::NodeInfoLike,
+    dht::rpc::TargetInfo,
     dht::routing::{
         kbucket::KBucket,
         kbucket_entry::KBucketEntry,

@@ -172,7 +172,7 @@ impl RpcServer {
     }
 
     pub(crate) async fn start(&mut self) -> Result<()> {
-        let socket_addr = self.ni.socket_addr();
+        let socket_addr = self.ni.address();
         let socket = StdUdpSocket::bind(socket_addr).map_err(|e| {
             error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
             NetworkError::new(format!("{e}"))
@@ -228,7 +228,7 @@ impl RpcServer {
         self.is_reachable = false;
         self.reachable_check_task = None;
 
-        info!("RPC server stopped at {}", self.ni.socket_addr());
+        info!("RPC server stopped at {}", self.ni.address());
     }
 
     pub(crate) fn send_call(&mut self, call: RpcCall) -> Result<()> {
@@ -474,7 +474,7 @@ impl fmt::Display for RpcServer {
         write!(
             f,
             "RPC Server[{}]: {}@{}:{}",
-            self.ni.network(),
+            self.ni.default_family(),
             self.ni.id(),
             self.ni.host(),
             self.ni.port()

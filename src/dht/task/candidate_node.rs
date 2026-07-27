@@ -4,7 +4,7 @@ use std::{
 };
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::{Reachability, rpc_target::NodeInfoLike},
+    rpc::TargetInfo,
     routing::KBucketEntry
 };
 
@@ -108,7 +108,7 @@ impl Into<CandidateNode> for KBucketEntry {
     }
 }
 
-impl Reachability for CandidateNode {
+impl TargetInfo for CandidateNode {
     fn is_reachable(&self) -> bool {
         self.reachable
     }
@@ -120,14 +120,12 @@ impl Reachability for CandidateNode {
     fn set_reachable(&mut self, reachable: bool) {
         self.reachable = reachable
     }
-}
 
-impl NodeInfoLike for CandidateNode {
     fn ni(&self) -> NodeInfo {
         self.ni.clone()
     }
 
-    fn socket_addr(&self) -> &SocketAddr {
-        self.ni.socket_addr()
+    fn addr(&self) -> &SocketAddr {
+        self.ni.address()
     }
 }

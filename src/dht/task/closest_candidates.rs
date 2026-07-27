@@ -10,7 +10,7 @@ use indexmap::map::IndexMap;
 
 use crate::Id;
 use crate::dht::{
-    rpc::rpc_target::NodeInfoLike,
+    rpc::TargetInfo,
     task::candidate_node::CandidateNode,
 };
 
@@ -74,7 +74,7 @@ impl ClosestCandidates {
                 continue;
             }
 
-            let key = self.dedup_key(item.socket_addr());
+            let key = self.dedup_key(item.addr());
             if !self.dedups_addrs.insert(key) {
                 self.dedups_ids.remove(item.id());
                 continue;
@@ -109,7 +109,7 @@ impl ClosestCandidates {
                 self.dedups_ids.remove(id);
 
                 let borrowed = removed_cn.borrow();
-                let addr = borrowed.socket_addr();
+                let addr = borrowed.addr();
                 let key = self.dedup_key(addr);
                 self.dedups_addrs.remove(&key);
 

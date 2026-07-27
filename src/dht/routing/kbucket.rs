@@ -8,7 +8,7 @@ use log::info;
 
 use crate::Id;
 use crate::dht::{
-    rpc::Reachability,
+    rpc::TargetInfo,
     handler::Handler,
     routing::{Prefix, KBucketEntry},
 };

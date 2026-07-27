@@ -15,7 +15,7 @@ use log::debug;
 use crate::{Id, Result};
 use crate::dht::{
     handler::Handler,
-    rpc::Reachability,
+    rpc::TargetInfo,
     routing:: {
         Prefix,
         KBucket,

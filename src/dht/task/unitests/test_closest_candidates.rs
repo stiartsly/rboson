@@ -1,6 +1,6 @@
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::rpc_target::NodeInfoLike,
+    rpc::TargetInfo,
     task::closest_candidates::ClosestCandidates
 };
 
@@ -85,7 +85,7 @@ mod tests {
 
         candidates.add(vec![keep.clone().into(), remove_a.clone().into(), remove_b.clone().into()]);
         candidates.remove_if(|cn| {
-            cn.borrow().socket_addr().port() != 39001
+            cn.borrow().addr().port() != 39001
         });
 
         assert_eq!(candidates.size(), 1);

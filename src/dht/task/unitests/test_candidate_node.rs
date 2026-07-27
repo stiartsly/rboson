@@ -1,6 +1,6 @@
 use crate::{Id, NodeInfo};
 use crate::dht::{
-    rpc::{rpc_target::NodeInfoLike, Reachability},
+    rpc::TargetInfo,
     routing::KBucketEntry,
     task::CandidateNode,
 };
@@ -18,6 +18,7 @@ fn make_bucket_entry() -> KBucketEntry {
         "1.1.1.1:39001".parse().unwrap(),
     );
     entry.set_reachable(true);
+    entry.set_ver(1);
     entry
 }
 
@@ -33,7 +34,7 @@ mod tests {
         assert_eq!(cn.id(), node.id());
         assert_eq!(cn.pinged(), 0);
         assert_eq!(cn.token(), 0);
-        assert_eq!(cn.socket_addr(), node.socket_addr());
+        assert_eq!(cn.addr(), node.address());
 
         assert!(!cn.is_sent());
         assert!(!cn.is_replied());
@@ -79,7 +80,7 @@ mod tests {
         assert_eq!(cn.id(), entry.id());
         assert_eq!(cn.pinged(), 0);
         assert_eq!(cn.token(), 0);
-        assert_eq!(cn.socket_addr(), entry.socket_addr());
+        assert_eq!(cn.addr(), entry.addr());
 
         assert!(!cn.is_sent());
         assert!(!cn.is_replied());

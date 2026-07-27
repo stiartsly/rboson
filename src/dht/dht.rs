@@ -18,8 +18,7 @@ use log::{trace, debug, info, warn, error};
 use crate::{
     Id, Network,
     NodeInfo, PeerInfo, Value,
-    Identity,
-    crypto_identity::CryptoIdentity,
+    identity::{Identity, CryptoIdentity},
     errors::Result
 };
 use crate::dht::{
@@ -35,7 +34,7 @@ use crate::dht::{
     storage::data_storage::DataStorage,
     suspicious_node_detector::SuspiciousNodeDetector,
     rpc::{
-        Reachability,
+        TargetInfo,
         RpcCall, rpccall::State as CallState,
         rpc_server::RpcServer,
         listener::Listener as CallListener
@@ -1311,7 +1310,7 @@ impl DHT {
             dedup.insert(*item.id(), item);
         }
         for item in nodes.to_vec() {
-            if !self.network.can_use_address(item.socket_addr()) {
+            if !self.network.can_use_address(item.address()) {
                 continue;
             }
             if item.id() == &self_id {

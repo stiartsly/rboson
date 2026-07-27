@@ -4,10 +4,7 @@ use std::{
 };
 use crate::Id;
 use crate::dht::{
-    rpc::{
-        rpc_target::Reachability,
-        rpc_target::NodeInfoLike,
-    },
+    rpc::TargetInfo,
     routing::kbucket_entry::KBucketEntry,
 };
 
@@ -68,8 +65,6 @@ mod tests {
         assert_eq!(first.created_time(), second.created_time());
         assert_eq!(first.last_seen(), second.last_seen());
         assert_eq!(first.last_sent(), second.last_sent());
-        //assert!(first.rtt() < 100);
-        //assert!(first.rtt() > 40);
     }
 
     #[test]
@@ -79,6 +74,8 @@ mod tests {
         entry.update_last_sent(SystemTime::now() - Duration::from_secs(2));
         entry.on_timeout();
         entry.on_responded(75);
+
+        println!("id: {}", entry.id());
 
         let encoded = serde_cbor::to_vec(&entry)
             .expect("Failed to serialize KBucketEntry");
@@ -91,7 +88,6 @@ mod tests {
         assert_eq!(decoded.socket_addr(), entry.socket_addr());
         assert_eq!(decoded.failed_reqs(), entry.failed_reqs());
         assert_eq!(decoded.is_reachable(), entry.is_reachable());
-        //assert_eq!(decoded.rtt(), entry.rtt());
-        assert_eq!(decoded.ni().version(), entry.ni().version());
+        assert_eq!(decoded.ver(), entry.ver());
     }
 }

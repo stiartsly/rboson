@@ -1,7 +1,7 @@
 use std::fmt;
 use std::net::SocketAddr;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Network {
     IPv4 = 4,

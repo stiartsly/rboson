@@ -37,10 +37,9 @@ mod tests {
         assert_eq!(node.id(), &id);
         assert_eq!(node.ip(), Ipv4Addr::new(127, 0, 0, 1));
         assert_eq!(node.port(), 12345);
-        assert_eq!(node.socket_addr(), &addr);
-        assert_eq!(node.version(), 0);
-        assert_eq!(node.is_ipv4(), true);
-        assert_eq!(node.is_ipv6(), false);
+        assert_eq!(node.address(), &addr);
+        assert_eq!(node.has_address4(), true);
+        assert_eq!(node.has_address6(), false);
     }
 
     #[test]
@@ -54,10 +53,9 @@ mod tests {
         assert_eq!(node.id(), &id);
         assert_eq!(node.ip(), IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
         assert_eq!(node.port(), 12345);
-        assert_eq!(node.socket_addr(), &addr);
-        assert_eq!(node.version(), 0);
-        assert_eq!(node.is_ipv4(), false);
-        assert_eq!(node.is_ipv6(), true);
+        assert_eq!(node.address(), &addr);
+        assert_eq!(node.has_address4(), false);
+        assert_eq!(node.has_address6(), true);
     }
 
     #[test]
@@ -69,8 +67,7 @@ mod tests {
         let node2 = NodeInfo::new(id.clone(), addr2.clone());
         assert_eq!(node1.matches(&node2), true);
         assert_eq!(node1.id(), node2.id());
-        assert_ne!(node1.socket_addr(), node2.socket_addr());
-        assert_eq!(node1.version(), node2.version());
+        assert_ne!(node1.address(), node2.address());
     }
 
     #[test]
@@ -82,20 +79,17 @@ mod tests {
         let ni2 = NodeInfo::new(id2.clone(), addr.clone());
         assert_eq!(ni1.matches(&ni2), true);
         assert_ne!(ni1.id(), ni2.id());
-        assert_eq!(ni1.socket_addr(), ni2.socket_addr());
-        assert_eq!(ni1.version(), ni2.version());
+        assert_eq!(ni1.address(), ni2.address());
     }
 
     #[test]
     fn test_version() {
         let id = Id::random();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-        let mut ni = NodeInfo::new(id, addr.clone());
-        ni.set_version(5);
+        let ni = NodeInfo::new(id, addr.clone());
 
         assert_eq!(ni.id(), &id);
-        assert_eq!(ni.socket_addr(), &addr);
-        assert_eq!(ni.version(), 5);
+        assert_eq!(ni.address(), &addr);
     }
 
     #[test]
@@ -106,7 +100,6 @@ mod tests {
         let ni2 = NodeInfo::new(id.clone(), addr.clone());
         assert_eq!(ni1, ni2);
         assert_eq!(ni1.id(), ni2.id());
-        assert_eq!(ni1.socket_addr(), ni2.socket_addr());
-        assert_eq!(ni1.version(), ni2.version());
+        assert_eq!(ni1.address(), ni2.address());
     }
 }

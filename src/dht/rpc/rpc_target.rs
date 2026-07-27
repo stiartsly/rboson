@@ -28,15 +28,13 @@ impl Into<Target> for Rc<RefCell<CandidateNode>> {
     }
 }
 
-pub(crate) trait Reachability {
+pub(crate) trait TargetInfo {
     fn is_reachable(&self) -> bool { false }
     fn is_unreachable(&self) -> bool { false }
     fn set_reachable(&mut self, _: bool) {}
-}
 
-pub(crate) trait NodeInfoLike {
     fn ni(&self) -> NodeInfo;
-    fn socket_addr(&self) -> &SocketAddr;
+    fn addr(&self) -> &SocketAddr;
 }
 
 #[derive(Clone)]
@@ -68,14 +66,14 @@ impl Target {
     #[allow(unused)]
     pub(crate) fn socket_addr(&self) -> SocketAddr {
         match self {
-            Target::Candidate(v) => *v.borrow().socket_addr(),
-            Target::KBucketEntry(v) => *v.socket_addr(),
-            Target::NodeInfo(v) => *v.socket_addr()
+            Target::Candidate(v) => *v.borrow().addr(),
+            Target::KBucketEntry(v) => *v.addr(),
+            Target::NodeInfo(v) => *v.address()
         }
     }
 }
 
-impl Reachability for Target {
+impl TargetInfo for Target {
     fn is_reachable(&self) -> bool {
         match self {
             Target::Candidate(v) => v.borrow().is_reachable(),
@@ -99,15 +97,32 @@ impl Reachability for Target {
             _ => {}
         }
     }
+
+    fn ni(&self) -> NodeInfo {
+        match self {
+            Target::Candidate(v) => v.borrow().ni(),
+            Target::KBucketEntry(v) => v.ni(),
+            Target::NodeInfo(v) => v.clone(),
+        }
+    }
+
+    fn addr(&self) -> &SocketAddr {
+        match self {
+            Target::Candidate(_v) => {
+                panic!("N/A");
+                #[allow(unused)]_v.borrow().addr()
+            },
+            Target::KBucketEntry(v) => v.addr(),
+            Target::NodeInfo(v) => v.address(),
+        }
+    }
 }
 
-impl Reachability for NodeInfo {}
-impl NodeInfoLike for NodeInfo {
+impl TargetInfo for NodeInfo {
     fn ni(&self) -> NodeInfo {
         self.clone()
     }
-
-    fn socket_addr(&self) -> &SocketAddr {
-        self.socket_addr()
+    fn addr(&self) -> &SocketAddr {
+        self.address()
     }
 }

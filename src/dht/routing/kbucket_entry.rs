@@ -1,7 +1,7 @@
 use std::{
     fmt,
     cmp::{min, max},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     time::{Duration, SystemTime}
 };
 use serde::{Serialize, Deserialize};
@@ -9,7 +9,7 @@ use crate::{
     Id,
     NodeInfo,
     core::version,
-    dht::rpc::{Reachability, rpc_target::NodeInfoLike}
+    dht::rpc::TargetInfo,
 };
 
 /**
@@ -18,7 +18,7 @@ use crate::{
  */
 #[derive(Clone, Debug)]
 #[derive(Serialize, Deserialize)]
-#[serde(into = "SerializableKbucketEntry", from = "SerializableKbucketEntry")]
+#[serde(into = "SerdeKbucketEntry", from = "SerdeKbucketEntry")]
 pub(crate) struct KBucketEntry {
     ni          : NodeInfo,
 
@@ -28,7 +28,8 @@ pub(crate) struct KBucketEntry {
 
     reachable   : bool,
     failed_reqs : i32,
-    avg_rtt     : Option<f64>,
+
+    ver         : i32,
 }
 
 impl KBucketEntry {
@@ -37,7 +38,6 @@ impl KBucketEntry {
 
     const OLD_AND_STALE_TIME: u64 = 15 * 60 * 1000; // 15 minutes
     const PING_BACKOFF_BASE_INTERVAL: u64 = 60 * 1000; // 1 minute
-    const RTT_EMA_WEIGHT: f64 = 0.3;
 
     pub(crate) fn new(id: Id, addr: SocketAddr) -> Self {
         let now = SystemTime::now();
@@ -47,21 +47,26 @@ impl KBucketEntry {
             last_seen   : now,
             last_sent   : SystemTime::UNIX_EPOCH,
             reachable   : false,
-            failed_reqs: 0,
-            avg_rtt     : None,
+            failed_reqs : 0,
+            ver         : 0,
         }
     }
 
     pub(crate) fn set_ver(&mut self, ver: i32) {
-        self.ni.set_version(ver);
+        self.ver = ver;
+    }
+
+    #[allow(unused)]
+    pub(crate) fn ver(&self) -> i32 {
+        self.ver
     }
 
     pub(crate) fn id(&self) -> &Id {
-        &self.ni.id()
+        self.ni.id()
     }
 
     pub(crate) fn socket_addr(&self) -> &SocketAddr {
-        self.ni.socket_addr()
+        self.ni.address()
     }
 
     pub(crate) fn created_time(&self) -> &SystemTime {
@@ -196,10 +201,6 @@ impl KBucketEntry {
             self.set_reachable(true);
         }
 
-        if let Some(avg_rtt) = entry.avg_rtt {
-            self.update_avg_rtt(avg_rtt);
-        }
-
         self.created    = self.created.min(entry.created);
         self.last_seen  = self.last_seen.max(entry.last_seen);
         self.last_sent  = self.last_sent.max(entry.last_sent);
@@ -213,14 +214,10 @@ impl KBucketEntry {
         self.last_sent = SystemTime::max(self.last_sent, last_sent);
     }
 
-    pub(crate) fn on_responded(&mut self, rtt: u64) {
+    pub(crate) fn on_responded(&mut self, _: u64) {
         self.last_seen = SystemTime::now();
         self.failed_reqs = 0;
         self.reachable = true;
-
-        if rtt > 0 {
-            self.update_avg_rtt(rtt as f64);
-        }
     }
 
     pub(crate) fn on_timeout(&mut self) {
@@ -233,13 +230,6 @@ impl KBucketEntry {
 
     pub(crate) fn equals(&self, other: &Self) -> bool {
         self.ni == other.ni
-    }
-
-    fn update_avg_rtt(&mut self, sample: f64) {
-        self.avg_rtt = Some(match self.avg_rtt {
-            Some(avg_rtt) => avg_rtt + Self::RTT_EMA_WEIGHT * (sample - avg_rtt),
-            _ => sample,
-        });
     }
 }
 
@@ -256,7 +246,7 @@ impl Into<NodeInfo> for KBucketEntry {
     }
 }
 
-impl Reachability for KBucketEntry {
+impl TargetInfo for KBucketEntry {
     fn is_reachable(&self) -> bool {
         self.reachable
     }
@@ -268,24 +258,21 @@ impl Reachability for KBucketEntry {
     fn set_reachable(&mut self, reachable: bool) {
         self.reachable = reachable
     }
-}
 
-impl NodeInfoLike for KBucketEntry {
     fn ni(&self) -> NodeInfo {
         self.ni.clone()
     }
 
-    fn socket_addr(&self) -> &SocketAddr {
-        self.ni.socket_addr()
+    fn addr(&self) -> &SocketAddr {
+        self.ni.address()
     }
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerializableKbucketEntry {
-    id: Id,
-    addr: Vec<u8>,
-    port: u16,
+struct SerdeKbucketEntry {
+    #[serde(rename="nodeinfo")]
+    ni: NodeInfo,
     #[serde(rename="created", skip_serializing_if = "crate::is_default")]
     created: u64,
     #[serde(rename="lastSeen", skip_serializing_if = "crate::is_default")]
@@ -294,65 +281,38 @@ struct SerializableKbucketEntry {
     last_sent: u64,
     #[serde(rename="reachable", skip_serializing_if = "crate::is_default")]
     reachable: bool,
-   // #[serde(rename="failedRequests", skip_serializing_if = "crate::is_default")]
-   // failed_reqs: i32,
-    #[serde(rename="avgRtt", skip_serializing_if = "crate::is_default")]
-    avg_rtt: Option<f64>,
     #[serde(rename="version", skip_serializing_if = "crate::is_default")]
     ver: i32,
 }
 
-impl Into<SerializableKbucketEntry> for KBucketEntry {
-    fn into(self) -> SerializableKbucketEntry {
-        let addr = match self.socket_addr().ip() {
-            IpAddr::V4(addr4) => addr4.octets().to_vec(),
-            IpAddr::V6(addr6) => addr6.octets().to_vec(),
-        };
-
-        SerializableKbucketEntry {
-            id: self.id().clone(),
-            addr,
-            port        : self.socket_addr().port(),
+impl Into<SerdeKbucketEntry> for KBucketEntry {
+    fn into(self) -> SerdeKbucketEntry {
+        SerdeKbucketEntry {
+            ni: self.ni,
             created     : crate::as_ms!(self.created) as u64,
             last_seen   : crate::as_ms!(self.last_seen) as u64,
             last_sent   : crate::as_ms!(self.last_sent) as u64,
             reachable   : self.reachable,
-            // failed_reqs: self.failed_reqs,
-            avg_rtt     : self.avg_rtt,
-            ver         : self.ni.version(),
+            ver         : self.ver
         }
     }
 }
 
-impl From<SerializableKbucketEntry> for KBucketEntry {
-    fn from(ser: SerializableKbucketEntry) -> Self {
+impl From<SerdeKbucketEntry> for KBucketEntry {
+    fn from(ser: SerdeKbucketEntry) -> Self {
         let convert_cb = |ms | -> SystemTime {
             SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
         };
 
-        let ip = match ser.addr.len() {
-            4 => {
-                let bytes: [u8; 4] = ser.addr.as_slice().try_into()
-                    .expect("invalid IPv4 address length");
-                IpAddr::V4(Ipv4Addr::from(bytes))
-            },
-            16 => {
-                let bytes: [u8; 16] = ser.addr.as_slice().try_into()
-                    .expect("invalid IPv6 address length");
-                IpAddr::V6(Ipv6Addr::from(bytes))
-            },
-            _ => panic!("invalid IP address byte length"),
-        };
-
-        let mut entry = KBucketEntry::new(ser.id, SocketAddr::new(ip, ser.port));
-        entry.set_ver(ser.ver);
-        entry.created = convert_cb(ser.created);
-        entry.last_seen = convert_cb(ser.last_seen);
-        entry.last_sent = convert_cb(ser.last_sent);
-        entry.reachable = ser.reachable;
-        // entry.failed_reqs = ser.failed_reqs;
-        entry.avg_rtt = ser.avg_rtt.filter(|rtt| rtt.is_finite() && *rtt >= 0.0);
-        entry
+        Self {
+            ni          : ser.ni,
+            created     : convert_cb(ser.created),
+            last_seen   : convert_cb(ser.last_seen),
+            last_sent   : convert_cb(ser.last_sent),
+            reachable   : ser.reachable,
+            failed_reqs : 0,
+            ver         : ser.ver
+        }
     }
 }
 
@@ -361,7 +321,7 @@ impl fmt::Display for KBucketEntry {
         write!(f,
             "{}@{};seen:{}; age:{}",
             self.ni.id(),
-            self.ni.socket_addr(),
+            self.ni.address(),
             crate::as_secs!(self.last_seen),
             crate::as_secs!(self.created)
         )?;
@@ -375,10 +335,10 @@ impl fmt::Display for KBucketEntry {
         if self.reachable {
             write!(f, "; reachable")?;
         }
-        if self.ni.version() != 0 {
+        if self.ver != 0 {
             write!(f,
                 "; ver: {}",
-                version::format_version(self.ni.version())
+                version::format_version(self.ver)
             )?;
         }
         Ok(())

@@ -114,7 +114,7 @@ mod tests {
 
                 assert_eq!(dht.borrow().network().is_ipv4(), true);
                 assert_eq!(dht.borrow().id(), identity.id());
-                assert_eq!(dht.borrow().ni().socket_addr().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.borrow().ni().address().ip().to_string(), "127.0.0.1");
                 assert_eq!(dht.borrow().rt().borrow().size(), 1);
 
                 dht.borrow_mut().stop().await;
@@ -126,7 +126,7 @@ mod tests {
 
                 assert_eq!(dht.borrow().network().is_ipv4(), true);
                 assert_eq!(dht.borrow().id(), identity.id());
-                assert_eq!(dht.borrow().ni().socket_addr().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.borrow().ni().address().ip().to_string(), "127.0.0.1");
                 assert_eq!(dht.borrow().rt().borrow().size(), 1);
 
                 println!("Stopping DHT >>> line:{}", line!());

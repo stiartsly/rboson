@@ -120,7 +120,7 @@ mod rpc {
 
     pub(crate) use {
         rpccall::RpcCall,
-        rpc_target::{Reachability, Target},
+        rpc_target::{Target, TargetInfo},
         listener::Listener,
     };
 }

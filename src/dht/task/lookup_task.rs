@@ -8,8 +8,7 @@ use crate::dht::{
     dht::DHT,
     utils::{is_any_unicast, is_bogon},
     rpc::{
-        Target, rpc_target::NodeInfoLike,
-        Reachability,
+        Target, rpc_target::TargetInfo,
         RpcCall
     },
     msg::{Body,LookupResponse},
@@ -77,14 +76,14 @@ pub(crate) trait LookupTask {
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();
             let bogon = if cfg!(feature = "devp") {
-                !is_any_unicast(&candidate.socket_addr().ip())
+                !is_any_unicast(&candidate.addr().ip())
             } else {
-                is_bogon(candidate.socket_addr())
+                is_bogon(candidate.addr())
             };
 
             if bogon ||self.data().closest.contains(candidate.id()) ||
                 ni.id() == candidate.id() ||
-                ni.socket_addr() == candidate.socket_addr() {
+                ni.address() == candidate.addr() {
                 continue;
             }
             todo.push(candidate);

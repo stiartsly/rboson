@@ -10,7 +10,7 @@ use crate::{
 use crate::dht::{
     dht::DHT,
     task::{NodeLookupTask, LookupTask},
-    rpc::rpc_target::NodeInfoLike,
+    rpc::rpc_target::TargetInfo,
 };
 use super::test_utils::make_test_dht;
 
@@ -70,6 +70,6 @@ mod tests {
         let next = task.next_candidate().expect("candidate should be present");
         let next = next.borrow();
         assert_eq!(next.id(), candidate.id());
-        assert_eq!(next.socket_addr(), candidate.socket_addr());
+        assert_eq!(next.addr(), candidate.addr());
     }
 }

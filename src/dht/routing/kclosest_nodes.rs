@@ -11,7 +11,7 @@ use crate::dht::{
         KBucketEntry,
         RoutingTable
     },
-    rpc::rpc_target::NodeInfoLike,
+    rpc::TargetInfo,
 };
 
 pub(crate) struct KClosestNodes {

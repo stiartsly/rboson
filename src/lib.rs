@@ -32,8 +32,6 @@ pub use crate::core::{
     //default_configuration as configuration,
 };
 
-pub use crate::core::identity as crypto_identity;
-
 pub use crate::did::{
     didurl,
     verification_method,

@@ -11,7 +11,7 @@ use crate::dht::{
     routing::KBucketEntry,
     rpc::{
         RpcCall, rpccall::State,
-        Reachability,
+        TargetInfo,
         Listener
     },
     timer_client::{LocalTimerClient, LocalTimerCmd},
@@ -28,7 +28,7 @@ fn make_entry(addr: &str) -> KBucketEntry {
     let target = make_nodeinfo(addr);
     let mut entry = KBucketEntry::new(
         target.id().clone(),
-        *target.socket_addr()
+        *target.address()
     );
     entry.set_reachable(true);
     entry
@@ -153,7 +153,7 @@ mod tests {
 
         let mut err = msg::error_msg(Method::Ping, error_call.txid(), 500, "boom".into());
         err.set_nodeid(target.id().clone());
-        err.set_remote(target.id().clone(), *target.socket_addr());
+        err.set_remote(target.id().clone(), *target.address());
         error_call.respond(Rc::new(err));
         assert_eq!(error_call.state(), State::Err);
     }

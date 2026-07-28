@@ -284,12 +284,15 @@ mod tests {
         );
 
         match result.0 {
-            Ok(found) => {
-                found.map(|ni| {
-                    assert!(ni.id() == node2.id());
-                    println!("\x1b[31mfound target {} on node {}\x1b[0m",
-                        node2.id(), node1.id());
-                });
+            Ok(Some(ni)) => {
+                assert!(ni.id() == node2.id());
+                println!("\x1b[32mfound target {} on node {}\x1b[0m",
+                        ni.id(), node1.id());
+            }
+            Ok(_) => {
+                assert!(true);
+                println!("\x1b[31mnot found target {} on node {}\x1b[0m",
+                        ni.id(), node2.id());
             }
             _ => {
                 assert!(false);
@@ -297,12 +300,15 @@ mod tests {
         }
 
         match result.1 {
-            Ok(found) => {
-                found.map(|ni| {
-                    assert!(ni.id() == node3.id());
-                    println!("\x1b[32mfound target {} on node {}\x1b[0m",
-                        node3.id(), node2.id());
-                });
+            Ok(Some(ni)) => {
+                assert!(ni.id() == node3.id());
+                println!("\x1b[32mfound target {} on node {}\x1b[0m",
+                        ni.id(), node2.id());
+            }
+            Ok(_) => {
+                assert!(true);
+                println!("\x1b[31mnot found target {} on node {}\x1b[0m",
+                        ni.id(), node2.id());
             }
             _ => {
                 assert!(false);

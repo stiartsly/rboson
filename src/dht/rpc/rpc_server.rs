@@ -465,7 +465,6 @@ impl RpcServer {
             handler.cb(msg).await;
             server.borrow_mut().message_handler = Some(handler);
         };
-        // TODO: handle metrics.
     }
 }
 

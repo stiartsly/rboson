@@ -6,7 +6,7 @@ use crate::{
     core::Result
 };
 
-pub(crate) trait DataStorage: Send + Sync {
+pub(crate) trait DataStorage: Send {
     fn open(&mut self,
         path: &str
     ) -> Result<()>;
@@ -19,9 +19,6 @@ pub(crate) trait DataStorage: Send + Sync {
     fn close(&mut self);
     fn purge(&mut self);
 
-    // parameters listed:
-    // - value: Value;
-    // - persistent: Option<bool>,
     fn put_value(
         &mut self,
         _value: Value,

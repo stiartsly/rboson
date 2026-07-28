@@ -206,8 +206,7 @@ impl DataStorage for SqliteStorage {
             .map_err(db_err)
     }
 
-    // ── peers ────────────────────────────────────────────────────────────────
-
+    // ── peers ───
     fn put_peer(&mut self, peer: PeerInfo, persistent: bool) -> Result<()> {
         if !peer.is_valid() {
             return Err(ArgumentError::new("peer signature validation failed"));

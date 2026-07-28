@@ -148,10 +148,9 @@ pub(crate) fn remove_expired_values(
     conn: &mut SqliteConnection,
     expired_before: i64,
 ) -> Result<bool, Error> {
-    diesel::delete(
-        valores
-            .filter(val_persistent.eq(false))
-            .filter(val_updated.le(expired_before))
+    diesel::delete(valores
+        .filter(val_persistent.eq(false))
+        .filter(val_updated.le(expired_before))
     )
     .execute(conn)
     .and_then(|deleted| Ok(deleted > 0))

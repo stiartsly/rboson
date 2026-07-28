@@ -144,7 +144,6 @@ mod tests {
         assert_eq!(decoded_peer.id(), peer.id());
         assert_eq!(decoded_peer.endpoint(), peer.endpoint());
         assert_eq!(decoded_peer.signature(), peer.signature());
-        assert_eq!(decoded_peer.nonce(), peer.nonce());
     }
 
     #[test]
@@ -179,12 +178,10 @@ mod tests {
         assert_eq!(decoded_peer1.id(), peer1.id());
         assert_eq!(decoded_peer1.endpoint(), peer1.endpoint());
         assert_eq!(decoded_peer1.signature(), peer1.signature());
-        assert_eq!(decoded_peer1.nonce(), peer1.nonce());
 
         let decoded_peer2 = &decoded.peers().unwrap()[1];
         assert_eq!(decoded_peer2.id(), peer2.id());
         assert_eq!(decoded_peer2.endpoint(), peer2.endpoint());
         assert_eq!(decoded_peer2.signature(), peer2.signature());
-        assert_eq!(decoded_peer2.nonce(), peer2.nonce());
     }
 }

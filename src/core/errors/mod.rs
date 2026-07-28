@@ -1,5 +1,6 @@
 pub mod not_implemented;
 pub mod argument_error;
+pub mod operation;
 pub mod signature_error;
 pub mod permission_error;
 pub mod protocol_error;
@@ -18,6 +19,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub use {
     not_implemented::NotImplementedError,
     argument_error::ArgumentError,
+    operation::OperationError,
     signature_error::SignatureError,
     permission_error::PermissionError,
     protocol_error::ProtocolError,

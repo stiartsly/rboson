@@ -52,8 +52,6 @@ struct SerdeAnnouncePeerRequest {
     expected_seq: i32,
     #[serde(rename = "k")]
     id: Id,
-    #[serde(rename = "n")]
-    nonce: Vec<u8>,
     #[serde(rename = "seq")]
     #[serde(skip_serializing_if = "crate::is_default")]
     #[serde(default = "utils::default_seq")]
@@ -83,7 +81,6 @@ impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
             token   : self.token,
             expected_seq: self.expected_seq,
             id      : peer.id().clone(),
-            nonce   : peer.nonce().to_vec(),
             seq     : peer.sequence_number(),
             node_id : if peer.is_authenticated() {
                 peer.nodeid().cloned()
@@ -108,7 +105,6 @@ impl TryFrom<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
     fn try_from(s: SerdeAnnouncePeerRequest) -> Result<Self> {
         let peer = PeerInfo::packed(
             s.id,
-            s.nonce,
             s.seq,
             s.node_id,
             s.node_sig,

@@ -275,14 +275,11 @@ impl Serialize for NodeInfo {
     fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
     where S: Serializer,
     {
-        // Wire format carries a single address per NodeInfo
-        // (the DHT protocol already segregates entries into separate v4/v6 lists),
-        // so we serialize the default one.
         let addr = self.address();
-        let serde_as_json = se.is_human_readable();
+        let as_json = se.is_human_readable();
         let mut s = se.serialize_tuple(3)?;
         s.serialize_element(&self.id)?;
-        if serde_as_json {
+        if as_json {
             s.serialize_element(&addr.ip().to_string())?;
         } else {
             let octets = match addr.ip() {

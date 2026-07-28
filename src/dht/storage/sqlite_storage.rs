@@ -90,7 +90,6 @@ fn valore_to_value(v: Valore) -> Value {
 fn db_peer_to_info(p: DbPeer) -> PeerInfo {
     PeerInfo::packed(
         Id::try_from(p.id.as_slice()).unwrap(),
-        p.nonce,
         p.sequenceNumber,
         p.nodeId.map(|n| Id::try_from(n.as_slice()).unwrap()),
         p.nodeSignature,
@@ -218,7 +217,6 @@ impl DataStorage for SqliteStorage {
             id:             peer.id().as_bytes(),
             fingerprint:    peer.fingerprint() as i64,
             privateKey:     peer.private_key().map(|sk| sk.as_bytes()),
-            nonce:          peer.nonce(),
             sequenceNumber: peer.sequence_number(),
             nodeId:         peer.nodeid().map(|n| n.as_bytes()),
             nodeSignature:  peer.node_signature(),

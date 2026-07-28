@@ -7,7 +7,6 @@ use crate::{
 fn make_peer() -> PeerInfo {
     PeerInfo::packed(
         Id::random(),
-        vec![7; PeerInfo::NONCE_BYTES],
         5,
         None,
         None,

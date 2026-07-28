@@ -253,24 +253,25 @@ mod serde_id_as_bytes {
 */
 mod serde_option_id_as_base58 {
     use crate::Id;
+    use std::result::Result as SResult;
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};
     use bs58;
 
-    pub fn serialize<S>(id: &Option<Id>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(id: &Option<Id>, serializer: S) -> SResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match id.as_ref() {
-            None => serializer.serialize_none(),
-            Some(id) => {
-                let s = bs58::encode(id.as_bytes()).into_string();
+            Some(v) => {
+                let s = bs58::encode(v.as_bytes()).into_string();
                 serializer.serialize_str(&s)
-            }
+            },
+            _ => serializer.serialize_none(),
         }
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Id>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> SResult<Option<Id>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -284,15 +285,16 @@ mod serde_bytes_base64 {
     use serde::{Deserializer, Serializer};
     use serde::de::{Error, Deserialize};
     use base64::{engine::general_purpose, Engine as _};
+    use std::result::Result as SResult;
 
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> SResult<S::Ok, S::Error>
     where S: Serializer,
     {
         let encoded = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
         serializer.serialize_str(&encoded)
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> SResult<Vec<u8>, D::Error>
     where D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;

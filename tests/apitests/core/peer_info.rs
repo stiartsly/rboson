@@ -93,11 +93,8 @@ mod tests {
         let node_identity = CryptoIdentity::from(node_kp);
         let node = Arc::new(Mutex::new(node_identity));
         let peer_kp = signature::KeyPair::random();
-        let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
-        rand::fill(&mut nonce);
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_nonce(&nonce)
             .with_node(node.clone())
             .with_sequence_number(101)
             .with_fingerprint(100)
@@ -113,7 +110,6 @@ mod tests {
         assert_eq!(peer.node_signature().unwrap().len(), 64);
         assert_eq!(peer.is_authenticated(), true);
         assert_eq!(peer.endpoint(), endpoint);
-        assert_eq!(peer.nonce(), nonce);
         assert_eq!(peer.sequence_number(), 101);
         assert_eq!(peer.fingerprint(), 100);
         assert_eq!(peer.has_extra(), false);
@@ -130,13 +126,11 @@ mod tests {
         rand::fill(&mut nonce);
         let rc1 = PeerBuilder::new(endpoint)
             .with_key(kp.clone())
-            .with_nonce(&nonce)
             .build();
         let peer1 = rc1.unwrap();
 
         let rc2 = PeerBuilder::new(endpoint)
             .with_key(kp)
-            .with_nonce(&nonce)
             .build();
         let peer2 = rc2.unwrap();
 
@@ -163,7 +157,6 @@ mod tests {
         rand::fill(&mut nonce);
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_nonce(&nonce)
             .with_node(node.clone())
             .with_sequence_number(101)
             .with_fingerprint(100)
@@ -172,7 +165,6 @@ mod tests {
 
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_nonce(&nonce)
             .with_node(node.clone())
             .with_sequence_number(101)
             .with_fingerprint(100)

@@ -27,7 +27,6 @@ pub(crate) const CREATE_PEERS_TABLE: &str = "
         fingerprint INTEGER NOT NULL, \
         persistent BOOLEAN NOT NULL DEFAULT FALSE, \
         privateKey BLOB, \
-        nonce BLOB NOT NULL, \
         sequenceNumber INTEGER NOT NULL DEFAULT 0, \
         nodeId BLOB, \
         nodeSignature BLOB, \

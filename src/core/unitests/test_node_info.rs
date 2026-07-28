@@ -15,10 +15,14 @@ mod tests {
         let id = Id::random();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
         let ni = NodeInfo::new(id.clone(), addr);
-        let ser = serde_cbor::to_vec(&ni).expect("Failed to serialize NodeInfo");
-        let des: NodeInfo = serde_cbor::from_slice(&ser).expect("Failed to deserialize NodeInfo");
-        assert_eq!(des, ni);
-        assert_eq!(des.id(), &id);
+
+        let encoded = serde_cbor::to_vec(&ni)
+            .expect("Failed to serialize NodeInfo");
+        let decoded: NodeInfo = serde_cbor::from_slice(&encoded)
+            .expect("Failed to deserialize NodeInfo");
+
+        assert_eq!(decoded, ni);
+        assert_eq!(decoded.id(), &id);
     }
 
     #[test]

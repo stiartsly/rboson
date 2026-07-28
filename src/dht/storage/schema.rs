@@ -18,7 +18,6 @@ diesel::table! {
         id -> Binary,
         fingerprint -> BigInt,
         privateKey -> Nullable<Binary>,
-        nonce -> Binary,
         sequenceNumber -> Integer,
         nodeId -> Nullable<Binary>,
         nodeSignature -> Nullable<Binary>,

@@ -32,7 +32,6 @@ mod tests {
     #[test]
     fn test_packed() {
         let pk = Id::random();
-        let nonce = crate::random_bytes(24);
         let seq = 1;
         let nodeid = Some(Id::random());
         let node_sig = Some(crate::random_bytes(64));
@@ -43,7 +42,6 @@ mod tests {
 
         let peer = PeerInfo::packed(
             pk.clone(),
-            nonce.clone(),
             seq,
             nodeid.clone(),
             node_sig.clone(),
@@ -54,7 +52,6 @@ mod tests {
         );
 
         assert_eq!(peer.id(), &pk);
-        assert_eq!(peer.nonce(), &nonce);
         assert_eq!(peer.sequence_number(), seq);
         assert_eq!(peer.nodeid(), nodeid.as_ref());
         assert_eq!(peer.node_signature(), node_sig.as_deref());
@@ -80,7 +77,6 @@ mod tests {
 
         assert_eq!(peer.id(), des.id());
         assert_eq!(peer.endpoint(), des.endpoint());
-        assert_eq!(peer.nonce(), des.nonce());
         assert_eq!(peer.signature(), des.signature());
         assert_eq!(des.sequence_number(), 0);
         assert_eq!(des.fingerprint(), 0);
@@ -99,11 +95,8 @@ mod tests {
         let node_identity = CryptoIdentity::from(node_kp);
         let node = Arc::new(Mutex::new(node_identity));
         let peer_kp = signature::KeyPair::random();
-        let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
-        rand::fill(&mut nonce);
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_nonce(&nonce)
             .with_node(node.clone())
             .with_sequence_number(101)
             .with_fingerprint(100)

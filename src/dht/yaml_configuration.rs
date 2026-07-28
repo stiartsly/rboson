@@ -29,7 +29,8 @@ pub struct NodeConfiguration {
     bootstrap_nodes: Vec<NodeInfo>,
     log_level   : LevelFilter,
     log_file    : Option<String>,
-    devp        : bool,
+    log_console : bool,
+    devmode     : bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,8 +51,10 @@ struct YamlNodeConfig {
     log_level   : Option<String>,
     #[serde(rename = "logFile")]
     log_file    : Option<String>,
+    #[serde(rename = "logConsole", default)]
+    log_console : bool,
     #[serde(rename = "enableDeveloperMode", default)]
-    devp        : bool,
+    devmode     : bool,
 }
 
 impl TryFrom<YamlNodeConfig> for NodeConfiguration {
@@ -76,16 +79,17 @@ impl TryFrom<YamlNodeConfig> for NodeConfiguration {
         };
 
         Ok(NodeConfiguration {
-            host4   : addr4,
-            host6   : addr6,
-            port    : yaml.port,
-            private_key: sk,
-            data_dir: expand_datadir(yaml.data_dir),
+            host4       : addr4,
+            host6       : addr6,
+            port        : yaml.port,
+            private_key : sk,
+            data_dir    : expand_datadir(yaml.data_dir),
             database_uri: yaml.database_uri,
             bootstrap_nodes,
-            log_level: log_level(yaml.log_level.as_deref()),
-            log_file: yaml.log_file,
-            devp    : yaml.devp,
+            log_level   : log_level(yaml.log_level.as_deref()),
+            log_file    : yaml.log_file,
+            log_console : yaml.log_console,
+            devmode     : yaml.devmode,
         })
     }
 }
@@ -179,8 +183,12 @@ impl NodeConfig for NodeConfiguration {
         self.log_file.as_deref()
     }
 
+    fn log_console(&self) -> bool {
+        self.log_console
+    }
+
     fn enable_devp(&self) -> bool {
-        self.devp
+        self.devmode
     }
 
     fn dump(&self) {
@@ -272,19 +280,20 @@ fn config_paths() -> Vec<PathBuf> {
 impl fmt::Display for NodeConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "node config:")?;
-        write!(f, "\n\thost4: {}", self.host4.as_deref().unwrap_or("<none>"))?;
-        write!(f, "\n\thost6: {}", self.host6.as_deref().unwrap_or("<none>"))?;
-        write!(f, "\n\tport: {}", self.port)?;
-        write!(f, "\n\tprivateKey: {}", self.private_key)?;
-        write!(f, "\n\tataDir: {}", self.data_dir)?;
-        write!(f, "\n\tlogLevel: {:?}", self.log_level)?;
-        write!(f, "\n\tlogFile: {}", self.log_file.as_deref().unwrap_or("<none>"))?;
-        write!(f, "\n\tenableDeveloperMode: {}", self.devp)?;
+        write!(f, "\n\thost4\t:{}", self.host4.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\thost6\t:{}", self.host6.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\tport\t:{}", self.port)?;
+        write!(f, "\n\tsk\t:{}", self.private_key)?;
+        write!(f, "\n\tataDir\t:{}", self.data_dir)?;
+        write!(f, "\n\tlogLevel\t:{:?}", self.log_level)?;
+        write!(f, "\n\tlogFile\t:{}", self.log_file.as_deref().unwrap_or("<none>"))?;
+        write!(f, "\n\tlogConsole\t:{}", self.log_console)?;
+        write!(f, "\n\tenableDeveloperMode\t:{}", self.devmode)?;
 
         if self.bootstrap_nodes.is_empty() {
-            write!(f, "\n\tbootstraps: []")?;
+            write!(f, "\n\tbootstraps\t:[]")?;
         } else {
-            write!(f, "\n\tbootstraps:")?;
+            write!(f, "\n\tbootstraps\t:")?;
             for node in &self.bootstrap_nodes {
                 write!(f, "\n\t- {} {} {}", node.id(), node.host(), node.port())?;
             }

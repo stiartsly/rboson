@@ -81,12 +81,21 @@ impl Node {
     pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
         Self::check_config(cfg.as_ref())?;
 
-        // Setup logger before any log is generated.
+        let path: Option<PathBuf> = cfg.as_ref().log_file().map(|v|{
+            let mut path = PathBuf::from(cfg.as_ref().data_dir());
+            path.push(v);
+            Some(path)
+        }).unwrap_or(None);
+
         logger::setup(
             cfg.as_ref().log_level(),
-            cfg.as_ref().log_file()
+            path.as_ref().map(|v| v.to_str().unwrap())
         );
-        logger::enable_console_output();
+        if cfg.as_ref().log_console() {
+            logger::enable_console_output();
+        } else {
+            logger::disable_console_output();
+        }
 
         #[cfg(feature = "devp")]
         info!("DHT node running in development mode!!!");
@@ -109,7 +118,7 @@ impl Node {
             .write_all(bs58.as_bytes()).map_err(|e| IOError::new(
                 format!("Writing node id cache file error: {e}")))?;
 
-        info!("The Kad node ID: {}", identity.id());
+        info!("The Kademlia node ID: {}", identity.id());
 
         Ok(Arc::new_cyclic(|weak| Self {
             cfg,
@@ -305,8 +314,8 @@ impl Node {
         Ok(())
     }
 
-    pub fn add_listener(&self, listener: Box<dyn ConnectionStatusListener>) {
-        self.listeners.lock().unwrap().push(listener);
+    pub fn add_listener(&self, listener: impl ConnectionStatusListener + 'static) {
+        self.listeners.lock().unwrap().push(Box::new(listener));
     }
 
     pub async fn start(&self) -> Result<()> {

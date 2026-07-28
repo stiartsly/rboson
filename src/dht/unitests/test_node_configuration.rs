@@ -38,6 +38,7 @@ mod tests {
         assert_eq!(cfg.bootstrap_nodes()[0].port(), 39001);
         assert_eq!(cfg.log_level(), LevelFilter::Debug);
         assert_eq!(cfg.log_file(), Some("node.log"));
+        assert_eq!(cfg.log_console(), false);
         assert_eq!(cfg.enable_devp(), true);
     }
 

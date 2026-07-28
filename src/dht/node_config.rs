@@ -16,6 +16,7 @@ pub trait NodeConfig: Send + Sync {
 
     fn log_level(&self) -> LevelFilter { LevelFilter::Info }
     fn log_file(&self) -> Option<&str> { None }
+    fn log_console(&self) -> bool { false }
 
     fn enable_devp(&self) -> bool { false }
 

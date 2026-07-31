@@ -15,7 +15,7 @@ const MAX_ACTIVE_TASKS: usize = 8;
 
 pub(crate) struct TaskManager {
     queued      : RefCell<VecDeque<Rc<RefCell<Box<dyn Task>>>>>,
-    running     : RefCell<HashSet<TaskId>>,
+    running     : Rc<RefCell<HashSet<TaskId>>>,
     canceling   : AtomicBool,
 }
 
@@ -23,7 +23,7 @@ impl TaskManager {
     pub(crate) fn new() -> Self {
         Self {
             queued      : RefCell::new(VecDeque::new()),
-            running     : RefCell::new(HashSet::new()),
+            running     : Rc::new(RefCell::new(HashSet::new())),
             canceling   : AtomicBool::new(false),
         }
     }
@@ -44,7 +44,7 @@ impl TaskManager {
         let running = self.running.clone();
         task.with_ended_handler(
             Handler::new(move |_| {
-                running.borrow_mut().remove(&taskid);
+                let _ = running.borrow_mut().remove(&taskid);
             })
         );
 
@@ -67,7 +67,7 @@ impl TaskManager {
 
     fn enqueue(&self, task: Box<dyn Task>, priori: bool) {
         let task = Rc::new(RefCell::new(task));
-        task.borrow_mut().set_cloned(std::rc::Rc::downgrade(&task));
+        task.borrow_mut().set_cloned(Rc::downgrade(&task));
         let mut queue = self.queued.borrow_mut();
         match priori {
             true => queue.push_front(task),
@@ -88,7 +88,6 @@ impl TaskManager {
 
             let taskid = task.borrow().task_id();
             let _ = self.running.borrow_mut().insert(taskid);
-
             task.borrow_mut().start();
         }
     }

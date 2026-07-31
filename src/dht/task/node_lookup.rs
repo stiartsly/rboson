@@ -172,7 +172,7 @@ impl Task for NodeLookupTask {
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
-                Some(self.want_token)
+                self.want_token
             );
 
             let cb = Handler::new(move |_| {

@@ -23,7 +23,7 @@ pub(crate) enum State {
     Sent,       // Call has been sent, awaiting response
     Stalled,    // Call is delayed, possibly due to network issues
     Timeout,    // Call timed out without a response
-    // Canceled,   // Call was canceled before completion
+    _Canceled,   // Call was canceled before completion
     Err,        // Call failed due to an error
     Responded,  // Call received a valid response
 }

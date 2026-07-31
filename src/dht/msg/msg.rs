@@ -474,9 +474,9 @@ pub(crate) fn ping_response(txid: i32) -> Message {
     Message::new( Kind::Response, Method::Ping, txid, None)
 }
 
-pub(crate) fn find_node_request(target: Id, want4: bool, want6: bool, want_token: Option<bool>) -> Message {
+pub(crate) fn find_node_request(target: Id, want4: bool, want6: bool, want_token: bool) -> Message {
     let body = Body::FindNodeRequest(
-        FindNodeRequest::new(target, want4, want6, want_token.unwrap_or(false))
+        FindNodeRequest::new(target, want4, want6, want_token)
     );
     Message::new(Kind::Request, Method::FindNode, next_txid(), Some(body))
 }

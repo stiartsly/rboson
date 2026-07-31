@@ -1191,7 +1191,7 @@ impl DHT {
                 Id::random(),
                 network.is_ipv4(),
                 network.is_ipv6(),
-                Some(true)
+                false
             );
 
             let mut call = RpcCall::new(item, msg);

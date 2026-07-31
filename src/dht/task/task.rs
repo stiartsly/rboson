@@ -3,8 +3,7 @@ use std::{
     any::Any,
     rc::{Rc, Weak},
     cell::RefCell,
-    collections::HashSet,
-    sync::atomic::{Ordering, AtomicI32},
+    collections::HashSet
 };
 use log::{warn, debug};
 use crate::core::Network;
@@ -52,13 +51,14 @@ impl fmt::Display for State {
 }
 
 pub(crate) type TaskId = i32;
-static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
+static mut NEXT_TASKID: i32 = 0;
 fn next_taskid() -> TaskId {
-    let id = NEXT_TASKID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-    if id == 0 {
-        NEXT_TASKID.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
-    } else {
-        id
+    unsafe {
+        NEXT_TASKID += 1;
+        if NEXT_TASKID == 0 {
+            NEXT_TASKID += 1;
+        }
+        NEXT_TASKID
     }
 }
 
@@ -321,29 +321,7 @@ pub(crate) trait Task {
     fn is_done(&self) -> bool {
         self.data().inflights.is_empty()
     }
-/*
-    #[allow(unused)]
-    fn started_time(&self) -> SystemTime {
-        self.data().started
-    }
 
-    #[allow(unused)]
-    fn ended_time(&self) -> SystemTime {
-        self.data().ended
-    }
-
-    #[allow(unused)]
-    fn leading_time(&self) -> Option<Duration> {
-        self.data().ended.duration_since(
-            self.data().started
-        ).ok()
-    }
-
-    #[allow(unused)]
-    fn age(&self) -> Option<Duration> {
-        self.data().created.elapsed().ok()
-    }
-*/
     fn can_dorequest(&self) -> bool {
         self.is_running() &&
             self.inflight_size() < 16

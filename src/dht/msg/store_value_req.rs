@@ -41,25 +41,67 @@ impl StoreValueRequest {
 struct SerdeStoreValueRequest {
     #[serde(rename = "tok")]
     token: i32,
-    #[serde(rename = "cas")]
-    #[serde(skip_serializing_if = "utils::is_default_seq")]
-    #[serde(default = "utils::default_seq")]
-    #[serde(deserialize_with = "utils::deserialize_seq")]
+
+    #[serde(
+        rename = "cas",
+        default = "utils::default_seq",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq",
+        skip_serializing_if = "utils::is_default_seq"
+    )]
     expected_seq: i32,
-    #[serde(rename = "seq")]
-    #[serde(default = "utils::default_seq")]
-    #[serde(skip_serializing_if = "crate::is_default")]
-    #[serde(deserialize_with = "utils::deserialize_seq")]
+
+    #[serde(
+        rename = "seq",
+        default = "utils::default_seq",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq",
+        skip_serializing_if = "utils::is_default_seq"
+    )]
     seq: i32,
-    #[serde(rename = "k", skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "k",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     public_key: Option<Id>,
-    #[serde(rename = "rec", skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "rec",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     recipient: Option<Id>,
-    #[serde(rename = "n", skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "n",
+        default,
+        serialize_with = "utils::serialize_nonce_opt",
+        deserialize_with = "utils::deserialize_nonce_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     nonce: Option<Vec<u8>>,
-    #[serde(rename = "sig", skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "sig",
+        default,
+        serialize_with = "utils::serialize_sig_opt",
+        deserialize_with = "utils::deserialize_sig_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     signature: Option<Vec<u8>>,
-    #[serde(rename = "v")]
+
+    #[serde(
+        rename = "v",
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes",
+        skip_serializing_if = "crate::is_default"
+    )]
     data: Vec<u8>,
 }
 

@@ -48,7 +48,12 @@ impl log::Log for Logger {
             }
 
             if self.console_output_enabled {
-                println!("{log}");
+                match record.level() {
+                    log::Level::Error => eprintln!("\x1b[31m{log}\x1b[0m"),
+                    log::Level::Warn => eprintln!("\x1b[33m{log}\x1b[0m"),
+                    log::Level::Info => println!("\x1b[32m{log}\x1b[0m"),
+                    _ => println!("{log}"),
+                }
             }
         }
     }

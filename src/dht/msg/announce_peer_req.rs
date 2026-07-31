@@ -45,32 +45,66 @@ impl AnnouncePeerRequest {
 struct SerdeAnnouncePeerRequest {
     #[serde(rename = "tok")]
     token: i32,
-    #[serde(rename = "cas")]
-    #[serde(skip_serializing_if = "utils::is_default_seq")]
-    #[serde(default = "utils::default_seq")]
-    #[serde(deserialize_with = "utils::deserialize_seq")]
+
+    #[serde(
+        rename = "cas",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq"
+    )]
     expected_seq: i32,
-    #[serde(rename = "k")]
+
+    #[serde(
+        rename = "k",
+        serialize_with = "utils::serialize_id",
+        deserialize_with = "utils::deserialize_id"
+    )]
     id: Id,
-    #[serde(rename = "seq")]
-    #[serde(skip_serializing_if = "crate::is_default")]
-    #[serde(default = "utils::default_seq")]
-    #[serde(deserialize_with = "utils::deserialize_seq")]
+
+    #[serde(
+        rename = "seq",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq"
+    )]
     seq: i32,
-    #[serde(rename = "o")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "o",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "crate::is_default",
+    )]
     node_id: Option<Id>,
-    #[serde(rename = "os")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "os",
+        default,
+        serialize_with = "utils::serialize_sig_opt",
+        deserialize_with = "utils::deserialize_sig_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     node_sig: Option<Vec<u8>>,
-    #[serde(rename = "sig")]
+
+    #[serde(
+        rename = "sig",
+        serialize_with = "utils::serialize_sig",
+        deserialize_with = "utils::deserialize_sig"
+    )]
     sig: Vec<u8>,
+
     #[serde(rename = "f")]
     fingerprint: u64,
+
     #[serde(rename = "e")]
     endpoint: String,
-    #[serde(rename = "ex")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+
+    #[serde(
+        rename = "ex",
+        default,
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
     extra: Option<Vec<u8>>,
 }
 

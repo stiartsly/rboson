@@ -53,12 +53,13 @@ struct SerdeFindValueRequest {
         deserialize_with = "utils::deserialize_id"
     )]
     target: Id,
+
     #[serde(rename = "w")]
     want: i32,
+
     #[serde(
         rename = "cas",
-        skip_serializing_if = "utils::is_default_seq",
-        default = "utils::default_seq",
+        serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq"
     )]
     expected_seq: i32

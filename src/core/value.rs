@@ -1,12 +1,9 @@
-use std::fmt;
-use std::result::Result as SResult;
-use sha2::{Digest, Sha256};
-use serde::{
-    Serialize, Deserialize,
-    Serializer, Deserializer,
-    ser::SerializeStruct,
-    de::{self, Visitor, MapAccess}
+use std::{
+    fmt,
+    result::Result as SResult
 };
+use sha2::{Digest, Sha256};
+use serde::{Serialize, Deserialize};
 
 use super::{
     Id,
@@ -15,7 +12,8 @@ use super::{
     signature::{KeyPair, PrivateKey},
     cryptobox::Nonce,
     Result,
-    errors::ArgumentError
+    errors::{Error, ArgumentError},
+    utils
 };
 
 #[derive(Clone)]
@@ -122,6 +120,8 @@ impl<'a> EncryptedBuilder<'a> {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdeValue", try_from = "SerdeValue")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Value {
     pk: Option<Id>,
@@ -183,7 +183,7 @@ impl Value {
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
-            None => &KeyPair::random()
+            _ => &KeyPair::random()
         };
 
         let mut value = Value {
@@ -239,7 +239,7 @@ impl Value {
     pub fn id(&self) -> Id {
         let input = match self.pk.as_ref() {
             Some(pk) => pk.as_bytes(),
-            None => self.data.as_slice()
+            _ => self.data.as_slice()
         };
 
         Id::try_from({
@@ -369,118 +369,108 @@ pub fn value_id(value: &Value) -> Id {
     value.id()
 }
 
-impl Serialize for Value {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut len = 2; // seq + data
-        if self.pk.is_some() { len += 1; }
-        if self.recipient.is_some() { len += 1; }
-        if self.nonce.is_some() { len += 1; }
-        if self.sig.is_some() { len += 1; }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdeValue {
+    #[serde(
+        rename = "k",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
+    pk: Option<Id>,
 
-        let mut state = serializer.serialize_struct("Value", len)?;
+    #[serde(
+        rename = "rec",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
+    recipient: Option<Id>,
 
-        if let Some(pk) = &self.pk {
-            state.serialize_field("k", pk)?;
-        }
-        if let Some(rec) = &self.recipient {
-            state.serialize_field("rec", rec)?;
-        }
-        if let Some(n) = &self.nonce {
-            state.serialize_field("n", n.as_ref())?;
-        }
-        if let Some(s) = &self.sig {
-             state.serialize_field("s", s)?;
-        }
+    #[serde(
+        rename = "n",
+        default,
+        serialize_with = "utils::serialize_nonce_opt",
+        deserialize_with = "utils::deserialize_nonce_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
+    nonce: Option<Nonce>,
 
-        state.serialize_field("seq", &self.seq)?;
-        state.serialize_field("v", &self.data)?;
+    #[serde(
+        rename = "s",
+        default,
+        serialize_with = "utils::serialize_sig_opt",
+        deserialize_with = "utils::deserialize_sig_opt",
+        skip_serializing_if = "crate::is_default"
+    )]
+    sig: Option<Vec<u8>>,
 
-        state.end()
+    #[serde(
+        rename = "v",
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
+    )]
+    data: Vec<u8>,
+
+    #[serde(
+        rename = "seq",
+        default = "utils::default_seq",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq",
+        skip_serializing_if = "utils::is_default_seq"
+    )]
+    seq: i32,
+}
+
+impl From<Value> for SerdeValue {
+    fn from(value: Value) -> Self {
+        Self {
+            pk: value.pk,
+            recipient: value.recipient,
+            nonce: value.nonce,
+            sig: value.sig,
+            data: value.data,
+            seq: value.seq,
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for Value {
-    fn deserialize<D>(deserializer: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Debug)]
-        enum Field {
-            Key,            // "k"
-            Recipient,      // "rec"
-            Nonce,          // "n"
-            Signature,      // "s"
-            SequenceNumber, // "seq"
-            Data,           // "v"
+impl TryFrom<SerdeValue> for Value {
+    type Error = Error;
+
+    fn try_from(v: SerdeValue) -> SResult<Self, Self::Error> {
+        if v.data.is_empty() {
+            return Err(ArgumentError::new("value data cannot be empty"));
         }
 
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> SResult<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let key = String::deserialize(deserializer)?;
-                match key.as_str() {
-                    "k"     => Ok(Field::Key),
-                    "rec"   => Ok(Field::Recipient),
-                    "n"     => Ok(Field::Nonce),
-                    "s"     => Ok(Field::Signature),
-                    "seq"   => Ok(Field::SequenceNumber),
-                    "v"     => Ok(Field::Data),
-                    _ => Err(de::Error::unknown_field(&key, &["k", "rec", "n", "s", "seq", "v"])),
-                }
-            }
+        let mutable = v.pk.is_some();
+        if mutable && (v.sig.is_none() || v.nonce.is_none()) {
+            return Err(ArgumentError::new(
+                "mutable value requires both signature and nonce"
+            ));
+        }
+        if v.recipient.is_some() && !mutable {
+            return Err(ArgumentError::new(
+                "encrypted value requires a public key"
+            ));
         }
 
-        struct ValueVisitor;
-
-        impl<'de> Visitor<'de> for ValueVisitor {
-            type Value = Value;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct Value")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> SResult<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut pk: Option<Id> = None;
-                let mut recipient: Option<Id> = None;
-                let mut raw_nonce: Option<Vec<u8>> = None;
-                let mut sig: Option<Vec<u8>> = None;
-                let mut seq: i32 = 0;
-                let mut data: Option<Vec<u8>> = None;
-
-                while let Some(key) = map.next_key::<Field>()? {
-                    match key {
-                        Field::Key              => pk = Some(map.next_value()?),
-                        Field::Recipient        => recipient = Some(map.next_value()?),
-                        Field::Nonce            => raw_nonce = Some(map.next_value()?),
-                        Field::Signature        => sig = Some(map.next_value()?),
-                        Field::SequenceNumber   => seq = map.next_value()?,
-                        Field::Data             => data = Some(map.next_value()?),
-                    }
-                }
-
-                let nonce = if let Some(raw_nonce) = raw_nonce.as_ref() {
-                    if raw_nonce.len() != Nonce::BYTES {
-                        return Err(de::Error::custom(
-                            format!("Invalid nonce length: expected {} bytes, got {}", Nonce::BYTES, raw_nonce.len())));
-                    }
-                    Some(Nonce::try_from(raw_nonce.as_slice())
-                        .map_err(|e| de::Error::custom(format!("Invalid nonce: {}", e)))?)
-                } else {
-                    None
-                };
-
-                let data = data.ok_or_else(|| de::Error::missing_field("v"))?;
-                Ok(Value::packed(pk, recipient, nonce, sig, data, seq))
-            }
+        let value = Value::packed(
+            v.pk,
+            v.recipient,
+            v.nonce,
+            v.sig,
+            v.data,
+            v.seq,
+        );
+        if !value.is_valid() {
+            return Err(ArgumentError::new(
+                "invalid value: signature verification failed"
+            ));
         }
-        deserializer.deserialize_map(ValueVisitor)
+        Ok(value)
     }
 }

@@ -197,7 +197,6 @@ mod tests {
         );
         assert!(!invalid.is_valid());
 
-        // Serialization produces bytes, but deserializing the invalid peer must fail.
         let encoded = serde_cbor::to_vec(&invalid)
             .expect("Serialization of an invalid PeerInfo should succeed");
         let result: Result<PeerInfo, _> = serde_cbor::from_slice(&encoded);

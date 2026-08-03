@@ -4,11 +4,7 @@ use std::{
     hash::{Hash, Hasher},
     sync::{Arc, Mutex}
 };
-use serde::{
-    Serialize, Deserialize, Serializer, Deserializer,
-    ser::SerializeTuple,
-    de::{self, Visitor, SeqAccess}
-};
+use serde::{Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
@@ -17,8 +13,9 @@ use super::{
     Identity,
     signature,
     Result,
-    errors::StateError,
+    errors::{Error, StateError},
     signature::{KeyPair, PrivateKey},
+    utils,
 };
 
 pub struct PeerBuilder {
@@ -91,6 +88,8 @@ impl PeerBuilder {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(into = "SerdePeerInfo", try_from = "SerdePeerInfo")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
     pk: Id,
@@ -292,6 +291,10 @@ impl PeerInfo {
             if self.node_sig.is_none() {
                 return false;
             }
+            let node_sig = self.node_sig.as_ref().unwrap();
+            if node_sig.len() != signature::Signature::BYTES {
+                return false;
+            }
             let mut sha = Sha256::new();
             sha.update(self.pk.as_bytes());
             sha.update(nodeid.as_bytes());
@@ -299,9 +302,9 @@ impl PeerInfo {
 
             return signature::verify(
                 digest.as_slice(),
-                self.node_sig.as_ref().unwrap().as_slice(),
+                node_sig.as_slice(),
                 &nodeid.to_signature_key()
-            ).is_ok()
+            ).unwrap_or(false)
         } else if self.node_sig.is_some() {
             return false;
         }
@@ -310,7 +313,7 @@ impl PeerInfo {
             self.digest().as_slice(),
             self.sig.as_slice(),
             &self.pk.to_signature_key()
-        ).is_ok()
+        ).unwrap_or(false)
     }
 
     fn digest(&self) -> Vec<u8> {
@@ -350,6 +353,74 @@ impl Hash for PeerInfo {
     }
 }
 
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SerdePeerInfo {
+    #[serde(
+        rename = "id",
+        serialize_with = "utils::serialize_id",
+        deserialize_with = "utils::deserialize_id"
+    )]
+    pk: Id,
+
+    #[serde(
+        rename = "seq",
+        default = "utils::default_seq",
+        serialize_with = "utils::serialize_seq",
+        deserialize_with = "utils::deserialize_seq",
+        skip_serializing_if = "utils::is_default_seq"
+    )]
+    seq: i32,
+
+    #[serde(
+        rename = "o",
+        default,
+        serialize_with = "utils::serialize_id_opt",
+        deserialize_with = "utils::deserialize_id_opt",
+        skip_serializing_if = "utils::is_default"
+    )]
+    nodeid: Option<Id>,
+
+    #[serde(
+        rename = "os",
+        default,
+        serialize_with = "utils::serialize_sig_opt",
+        deserialize_with = "utils::deserialize_sig_opt",
+        skip_serializing_if = "utils::is_default"
+    )]
+    node_sig: Option<Vec<u8>>,
+
+    #[serde(
+        rename = "sig",
+        serialize_with = "utils::serialize_sig",
+        deserialize_with = "utils::deserialize_sig"
+    )]
+    sig: Vec<u8>,
+
+     #[serde(
+        rename = "f",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
+    fingerprint: u64,
+
+     #[serde(
+        rename = "e",
+        skip_serializing_if = "utils::is_default"
+    )]
+    endpoint: String,
+
+     #[serde(
+        rename = "ex",
+        default,
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default"
+    )]
+    extra: Option<Vec<u8>>,
+}
+
 impl fmt::Display for PeerInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "id:{}", self.pk)?;
@@ -364,80 +435,63 @@ impl fmt::Display for PeerInfo {
             write!(f, ",nodeId:{}", nodeid.to_base58())?;
         }
         if let Some(node_sig) = self.node_sig.as_ref() {
-            write!(f, ",nodeSig:{}", hex::encode(node_sig))?;
+            write!(f, ",nodeSig:0x{}", hex::encode(node_sig))?;
         }
-        write!(f, ",sig:{}", hex::encode(&self.sig))?;
+        write!(f, ",sig:0x{}", hex::encode(&self.sig))?;
         Ok(())
     }
 }
 
-impl Serialize for PeerInfo {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
-    where S: Serializer,
-    {
-        const FIELDS: usize = 8;
-
-        let seq = (self.seq != 0).then_some(self.seq);
-        let fingerprint = (self.fingerprint != 0).then_some(self.fingerprint);
-
-        let mut s = se.serialize_tuple(FIELDS)?;
-        s.serialize_element(&self.pk)?;
-        s.serialize_element(&seq)?;
-        s.serialize_element(&self.nodeid)?;
-        s.serialize_element(&self.node_sig)?;
-        s.serialize_element(&self.sig)?;
-        s.serialize_element(&fingerprint)?;
-        s.serialize_element(&self.endpoint)?;
-        s.serialize_element(&self.extra)?;
-        s.end()
+impl From<PeerInfo> for SerdePeerInfo {
+    fn from(peer: PeerInfo) -> Self {
+        Self {
+            pk: peer.pk,
+            seq: peer.seq,
+            nodeid: peer.nodeid,
+            node_sig: peer.node_sig,
+            sig: peer.sig,
+            fingerprint: peer.fingerprint,
+            endpoint: peer.endpoint,
+            extra: peer.extra,
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for PeerInfo {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: usize = 8;
-        const EXPECTED: &str = "a tuple of 8 elements for PeerInfo";
+impl TryFrom<SerdePeerInfo> for PeerInfo {
+    type Error = Error;
 
-        struct PeerVisitor;
-        impl<'de> Visitor<'de> for PeerVisitor {
-            type Value = PeerInfo;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str(EXPECTED)
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> SResult<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let missing = |idx: usize| de::Error::invalid_length(idx, &EXPECTED);
-
-                let pk: Id = seq.next_element()?
-                    .ok_or_else(|| missing(0))?;
-                let seqno = seq.next_element::<Option<i32>>()?
-                    .ok_or_else(|| missing(1))?
-                    .unwrap_or_default();
-                let nodeid = seq.next_element::<Option<Id>>()?
-                    .ok_or_else(|| missing(2))?;
-                let node_sig = seq.next_element::<Option<Vec<u8>>>()?
-                    .ok_or_else(|| missing(3))?;
-                let sig: Vec<u8> = seq.next_element()?
-                    .ok_or_else(|| missing(4))?;
-                let fingerprint = seq.next_element::<Option<u64>>()?
-                    .ok_or_else(|| missing(5))?
-                    .unwrap_or_default();
-                let endpoint: String = seq.next_element()?
-                    .ok_or_else(|| missing(6))?;
-                let extra = seq.next_element::<Option<Vec<u8>>>()?
-                    .ok_or_else(|| missing(7))?;
-                Ok(PeerInfo::packed(
-                    pk, seqno, nodeid, node_sig, sig, fingerprint, endpoint, extra
-                ))
-            }
+    fn try_from(sp: SerdePeerInfo) -> SResult<Self, Self::Error> {
+        if sp.endpoint.is_empty() {
+            return Err(StateError::new("invalid peer info: missing endpoint"));
         }
-        de.deserialize_tuple(FIELDS, PeerVisitor)
+        if sp.sig.len() != signature::Signature::BYTES {
+            return Err(StateError::new(format!(
+                "invalid peer info: invalid signature length {}, expected {}",
+                sp.sig.len(),
+                signature::Signature::BYTES
+            )));
+        }
+        if sp.nodeid.is_some() != sp.node_sig.is_some() {
+            return Err(StateError::new(
+                "invalid peer info: nodeid and node signature must both be present or absent"
+            ));
+        }
+
+        let peer = PeerInfo::packed(
+            sp.pk,
+            sp.seq,
+            sp.nodeid,
+            sp.node_sig,
+            sp.sig,
+            sp.fingerprint,
+            sp.endpoint,
+            sp.extra,
+        );
+        if !peer.is_valid() {
+            return Err(StateError::new(
+                "invalid peer info: signature verification failed"
+            ));
+        }
+        Ok(peer)
     }
 }

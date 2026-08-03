@@ -44,19 +44,19 @@ struct SerdeStoreValueRequest {
 
     #[serde(
         rename = "cas",
-        default = "utils::default_seq",
-        serialize_with = "utils::serialize_seq",
-        deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "utils::is_default_seq"
+        default = "utils::default_expected_seq",
+        serialize_with = "utils::serialize_expected_seq",
+        deserialize_with = "utils::deserialize_expected_seq",
+        skip_serializing_if = "utils::is_default_expected_seq"
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "seq",
-        default = "utils::default_seq",
+        default,
         serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "utils::is_default_seq"
+        skip_serializing_if = "crate::is_default"
     )]
     seq: i32,
 

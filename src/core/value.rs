@@ -153,7 +153,7 @@ impl Value {
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
-            None => &KeyPair::random()
+            _ => &KeyPair::random()
         };
         let mut value = Value {
             pk: Some(Id::from(kp.public_key())),

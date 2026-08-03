@@ -195,4 +195,102 @@ mod tests {
 
         assert_ne!(peer1, peer2);
     }
+
+    #[test]
+    fn test_serde_cbor_simple() {
+        let endpoint = "http://localhost:8080";
+        let keypair = signature::KeyPair::random();
+        let peer = PeerBuilder::new(endpoint)
+            .with_key(keypair.clone())
+            .with_sequence_number(10)
+            .with_fingerprint(20)
+            .build()
+            .expect("Failed to build peer info");
+
+        let serialized = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+        let deserialized: PeerInfo = serde_cbor::from_slice(&serialized)
+            .expect("Failed to deserialize PeerInfo");
+
+        assert_eq!(peer.id(), deserialized.id());
+        assert_eq!(peer.endpoint(), deserialized.endpoint());
+        assert_eq!(peer.signature(), deserialized.signature());
+        assert_eq!(deserialized.sequence_number(), 10);
+        assert_eq!(deserialized.fingerprint(), 20);
+        assert_eq!(deserialized.nodeid(), None);
+        assert_eq!(deserialized.node_signature(), None);
+        assert_eq!(deserialized.extra_data(), None);
+        assert_eq!(deserialized.has_private_key(), false);
+        assert!(deserialized.is_valid());
+    }
+
+    #[test]
+    fn test_serde_cbor_with_node() {
+        let endpoint = "http://localhost:8080";
+        let node_kp = signature::KeyPair::random();
+        let node_identity = CryptoIdentity::from(node_kp);
+        let node = Arc::new(Mutex::new(node_identity));
+        let peer_kp = signature::KeyPair::random();
+        let peer = PeerBuilder::new(endpoint)
+            .with_key(peer_kp.clone())
+            .with_node(node.clone())
+            .with_sequence_number(101)
+            .with_fingerprint(100)
+            .build()
+            .expect("Failed to build peer info");
+
+        let serialized = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+        let deserialized: PeerInfo = serde_cbor::from_slice(&serialized)
+            .expect("Failed to deserialize PeerInfo");
+
+        assert_eq!(peer.id(), deserialized.id());
+        assert_eq!(peer.nodeid(), deserialized.nodeid());
+        assert_eq!(peer.node_signature(), deserialized.node_signature());
+        assert_eq!(peer.is_authenticated(), true);
+        assert_eq!(peer.sequence_number(), deserialized.sequence_number());
+        assert_eq!(peer.endpoint(), deserialized.endpoint());
+        assert_eq!(peer.fingerprint(), deserialized.fingerprint());
+        assert_eq!(deserialized.has_private_key(), false);
+        assert!(deserialized.is_valid());
+    }
+
+    #[test]
+    fn test_serde_json() {
+        let endpoint = "http://localhost:8080";
+        let keypair = signature::KeyPair::random();
+        let peer = PeerBuilder::new(endpoint)
+            .with_key(keypair.clone())
+            .with_sequence_number(5)
+            .with_fingerprint(7)
+            .build()
+            .expect("Failed to build peer info");
+
+        let json = serde_json::to_string(&peer).expect("Failed to serialize PeerInfo to JSON");
+        let deserialized: PeerInfo = serde_json::from_str(&json)
+            .expect("Failed to deserialize PeerInfo from JSON");
+
+        assert_eq!(peer.id(), deserialized.id());
+        assert_eq!(peer.endpoint(), deserialized.endpoint());
+        assert_eq!(peer.signature(), deserialized.signature());
+        assert_eq!(deserialized.sequence_number(), 5);
+        assert_eq!(deserialized.fingerprint(), 7);
+        assert!(deserialized.is_valid());
+    }
+
+    #[test]
+    fn test_serde_rejects_tampered_signature() {
+        let endpoint = "http://localhost:8080";
+        let keypair = signature::KeyPair::random();
+        let peer = PeerBuilder::new(endpoint)
+            .with_key(keypair.clone())
+            .build()
+            .expect("Failed to build peer info");
+
+        let mut serialized = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+        // Flip the last serialized byte; this corrupts the CBOR structure or signature.
+        let last = serialized.len() - 1;
+        serialized[last] = serialized[last].wrapping_add(1);
+
+        let result: Result<PeerInfo, _> = serde_cbor::from_slice(&serialized);
+        assert!(result.is_err(), "Deserializing a tampered PeerInfo should fail");
+    }
 }

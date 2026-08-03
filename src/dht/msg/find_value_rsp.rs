@@ -99,12 +99,12 @@ struct SerdeFindValueResponse {
 
     #[serde(
         rename = "seq",
-        default = "utils::default_seq",
+        default,
         serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "utils::is_default_seq"
+        skip_serializing_if = "crate::is_default"
     )]
-    expected_seq: i32,
+    seq: i32,
 
     #[serde(
         rename = "sig",
@@ -134,7 +134,7 @@ impl Into<SerdeFindValueResponse> for FindValueResponse {
             pk      : self.value.as_ref().and_then(|v| v.public_key().cloned()),
             rec     : self.value.as_ref().and_then(|v| v.recipient().cloned()),
             nonce   : self.value.as_ref().and_then(|v| v.nonce().map(|n| n.as_ref().to_vec())),
-            expected_seq: self.value.as_ref().map(|v| v.sequence_number()).unwrap_or(-1),
+            seq     : self.value.as_ref().map(|v| v.sequence_number()).unwrap_or(-1),
             sig     : self.value.as_ref().and_then(|v| v.signature().map(|s| s.to_vec())),
             value   : self.value.as_ref().map(|v| v.data().to_vec()),
         }
@@ -161,7 +161,7 @@ impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
             if data.is_empty() {
                 return Err(ProtocolError::new("data field \"v\" cannot be empty"));
             }
-            let expected_seq = s.expected_seq;
+            let expected_seq = s.seq;
             if expected_seq < -1 {
                 return Err(ProtocolError::new("sequence number must be larger than or equal to -1"));
             }

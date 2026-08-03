@@ -1,5 +1,6 @@
 pub(crate) mod logger;
 pub(crate) mod version;
+pub(crate) mod utils;
 
 pub mod config;
 pub mod id;

@@ -129,11 +129,33 @@ where S: Serializer,
 pub(crate) fn deserialize_seq<'de, D>(de: D) -> SResult<i32, D::Error>
 where  D: Deserializer<'de>,
 {
+    let seq = Option::<i32>::deserialize(de)?.unwrap_or(0);
+    if seq < -1 {
+        return Err(serde::de::Error::custom("seq must be larger than -1"));
+    }
+    Ok(seq)
+}
+
+pub(crate) fn serialize_expected_seq<S>(expected_seq: &i32, se: S) -> SResult<S::Ok, S::Error>
+where S: Serializer,
+{
+    serialize_seq(expected_seq, se)
+}
+
+pub(crate) fn deserialize_expected_seq<'de, D>(de: D) -> SResult<i32, D::Error>
+where  D: Deserializer<'de>,
+{
     let seq = Option::<i32>::deserialize(de)?.unwrap_or(-1);
     if seq < -1 {
         return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
     }
     Ok(seq)
+}
+
+pub(crate) const fn default_expected_seq() -> i32 { -1 }
+
+pub(crate) fn is_default_expected_seq(seq: &i32) -> bool {
+    *seq == -1
 }
 
 pub(crate) fn serialize_count<S>(count: &i32, se: S) -> SResult<S::Ok, S::Error>
@@ -150,18 +172,12 @@ where S: Serializer,
     }
 }
 
-pub(crate) const fn default_seq() -> i32 { -1 }
-
 pub(crate) fn deserialize_count<'de, D>(de: D) -> SResult<i32, D::Error>
 where  D: Deserializer<'de>,
 {
     let count = i32::deserialize(de)?;
     if count < 0 {
-        return Err(serde::de::Error::custom("expected_count must be larger than or equal to -1"));
+        return Err(serde::de::Error::custom("count must be larger than or equal to -1"));
     }
     Ok(count)
-}
-
-pub(crate) fn is_default_seq(seq: &i32) -> bool {
-    *seq == -1
 }

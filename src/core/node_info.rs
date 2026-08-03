@@ -1,7 +1,7 @@
 use std::{
     fmt,
     hash::{Hash, Hasher},
-    result::Result as SResult,
+    result::Result as StdResult,
     net::{
         SocketAddr,
         IpAddr,
@@ -272,7 +272,7 @@ impl fmt::Display for NodeInfo {
 }
 
 impl Serialize for NodeInfo {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
     where S: Serializer,
     {
         let addr = self.address();
@@ -294,7 +294,7 @@ impl Serialize for NodeInfo {
 }
 
 impl<'de> Deserialize<'de> for NodeInfo {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
     where D: Deserializer<'de>,
     {
         struct ImplVisitor;
@@ -305,7 +305,7 @@ impl<'de> Deserialize<'de> for NodeInfo {
                 formatter.write_str("a tuple of 3 elements: (u64, IpAddr, u16) for NodeInfo")
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> SResult<Self::Value, A::Error>
+            fn visit_seq<A>(self, mut seq: A) -> StdResult<Self::Value, A::Error>
             where
                 A: SeqAccess<'de>,
             {

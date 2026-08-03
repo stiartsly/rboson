@@ -1,18 +1,16 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
+    utils,
     Id,
     Value,
     NodeInfo,
     cryptobox::Nonce,
     errors::{Error, Result, ProtocolError}
 };
-use super::{
-    utils,
-    lookup_rsp::{
-        LookupResponse,
-        Data
-    }
+use super::lookup_rsp::{
+    LookupResponse,
+    Data
 };
 
 #[derive(Clone)]
@@ -57,13 +55,13 @@ impl LookupResponse for FindValueResponse {
 struct SerdeFindValueResponse {
     #[serde(
         rename = "n4",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes4: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "n6",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
@@ -75,7 +73,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default",
+        skip_serializing_if = "utils::is_default",
     )]
     pk: Option<Id>,
 
@@ -84,34 +82,32 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default",
+        skip_serializing_if = "utils::is_default",
     )]
     rec: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::serialize_nonce_opt",
-        deserialize_with = "utils::deserialize_nonce_opt",
-        skip_serializing_if = "crate::is_default",
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default",
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "seq",
         default,
-        serialize_with = "utils::serialize_seq",
-        deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     seq: i32,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::serialize_sig_opt",
-        deserialize_with = "utils::deserialize_sig_opt",
-        skip_serializing_if = "crate::is_default",
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default",
     )]
     sig: Option<Vec<u8>>,
 
@@ -120,7 +116,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_bytes_opt",
         deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "crate::is_default",
+        skip_serializing_if = "utils::is_default",
     )]
     value: Option<Vec<u8>>,
 }

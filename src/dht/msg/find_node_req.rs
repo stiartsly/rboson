@@ -1,8 +1,8 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
+    utils,
     Id,
-    dht::msg::utils,
     dht::msg::lookup_req::{
         LookupRequest,
         Data as LookupData,

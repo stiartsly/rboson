@@ -681,6 +681,11 @@ impl Node {
             return Err(ArgumentError::new(format!(
                 "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
         }
+        if value.sequence_number() < 0 {
+            return Err(ArgumentError::new(format!(
+                "Invalid value sequence number: {}, must be larger than or equal to 0",
+                value.sequence_number())));
+        }
         self.check_running()?;
 
         let value_id = value.id();

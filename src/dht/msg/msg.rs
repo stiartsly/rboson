@@ -3,13 +3,14 @@ use std::{
     rc::Rc,
     cell::RefCell,
     net::SocketAddr,
-    result::Result as SResult,
+    result::Result as StdResult,
     sync::atomic::{AtomicI32, Ordering}
 };
 use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    utils,
     Id,
     Value,
     NodeInfo,
@@ -18,7 +19,6 @@ use crate::{
     core::version,
     dht::rpc::RpcCall,
     dht::msg::{
-        utils,
         ErrorBody,
         FindNodeRequest,
         FindNodeResponse,
@@ -336,15 +336,15 @@ struct SerdeCborMessage {
     ver: i32,
 
     #[serde(rename = "q")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     req: Option<CborValue>,
 
     #[serde(rename = "r")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     rsp: Option<CborValue>,
 
     #[serde(rename = "e")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     err: Option<CborValue>,
 }
 
@@ -357,16 +357,16 @@ struct SerdeJsonMessage<'a> {
     #[serde(rename = "v", serialize_with = "utils::serialize_ver")]
     ver: i32,
 
-    #[serde(rename = "q", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "q", skip_serializing_if = "utils::is_default")]
     req: Option<&'a Body>,
-    #[serde(rename = "r", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "r", skip_serializing_if = "utils::is_default")]
     rsp: Option<&'a Body>,
-    #[serde(rename = "e", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "e", skip_serializing_if = "utils::is_default")]
     err: Option<&'a Body>,
 }
 
 impl Serialize for Message {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
     where S: serde::Serializer,
     {
         if !se.is_human_readable() {
@@ -390,7 +390,7 @@ impl Serialize for Message {
 impl TryFrom<&Message> for SerdeCborMessage {
     type Error = serde_cbor::Error;
 
-    fn try_from(msg: &Message) -> SResult<Self, Self::Error> {
+    fn try_from(msg: &Message) -> StdResult<Self, Self::Error> {
         let type_ = msg.composite_type();
         let txid = msg.txid;
         let ver  = msg.ver;

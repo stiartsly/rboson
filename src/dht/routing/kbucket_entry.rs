@@ -273,15 +273,15 @@ impl TargetInfo for KBucketEntry {
 struct SerdeKbucketEntry {
     #[serde(rename="nodeinfo")]
     ni: NodeInfo,
-    #[serde(rename="created", skip_serializing_if = "crate::is_default")]
+    #[serde(rename="created")]
     created: u64,
-    #[serde(rename="lastSeen", skip_serializing_if = "crate::is_default")]
+    #[serde(rename="lastSeen")]
     last_seen: u64,
-    #[serde(rename="lastSent", skip_serializing_if = "crate::is_default")]
+    #[serde(rename="lastSent")]
     last_sent: u64,
-    #[serde(rename="reachable", skip_serializing_if = "crate::is_default")]
+    #[serde(rename="reachable")]
     reachable: bool,
-    #[serde(rename="version", skip_serializing_if = "crate::is_default")]
+    #[serde(rename="version")]
     ver: i32,
 }
 

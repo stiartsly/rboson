@@ -3,7 +3,7 @@ use std::{
     cmp::Ordering,
     str::FromStr,
     ops::Deref,
-    result::Result as SResult
+    result::Result as StdResult
 };
 use bs58;
 use serde::{
@@ -305,7 +305,7 @@ impl fmt::Binary for Id {
 }
 
  impl Serialize for Id {
-    fn serialize<S>(&self, se: S) -> SResult<S::Ok, S::Error>
+    fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
     where S: Serializer,
     {
         match se.is_human_readable() {
@@ -316,7 +316,7 @@ impl fmt::Binary for Id {
 }
 
 impl<'de> Deserialize<'de> for Id {
-    fn deserialize<D>(de: D) -> SResult<Self, D::Error>
+    fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
     where D: Deserializer<'de>,
     {
         struct IdVisitor;
@@ -327,13 +327,13 @@ impl<'de> Deserialize<'de> for Id {
                 formatter.write_str("a base58 string or 32 byte array")
             }
 
-            fn visit_str<E>(self, value: &str) -> SResult<Self::Value, E>
+            fn visit_str<E>(self, value: &str) -> StdResult<Self::Value, E>
             where E: de::Error,
             {
                 Id::try_from(value).map_err(|e| de::Error::custom(e))
             }
 
-            fn visit_bytes<E>(self, v: &[u8]) -> SResult<Self::Value, E>
+            fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
             where E: de::Error,
             {
                 Id::try_from_bytes(v).map_err(|e| de::Error::custom(e))

@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    utils,
     Id,
     Result,
     errors::ArgumentError,
@@ -173,11 +174,18 @@ pub struct Entity {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     method_type: Option<VerificationMethodType>,
 
-    #[serde(rename = "controller", skip_serializing_if = "Option::is_none")]
-    #[serde(with="crate::serde_option_id_as_base58")]
+    #[serde(
+        rename = "controller",
+        serialize_with = "crate::utils::serialize_id_opt",
+        deserialize_with = "crate::utils::deserialize_id_opt",
+        skip_serializing_if = "utils::is_default"
+    )]
     controller: Option<Id>,
 
-    #[serde(rename = "publicKeyMultibase", skip_serializing_if = "crate::is_default")]
+    #[serde(
+        rename = "publicKeyMultibase",
+        skip_serializing_if = "utils::is_default"
+    )]
     public_key_multibase: Option<String>
 }
 

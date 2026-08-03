@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     as_secs,
+    utils,
     Id,
     Error,
     Result,
@@ -32,17 +33,20 @@ pub struct Card {
     #[serde(rename = "id")]
     id: Id,
 
-    #[serde(rename = "c", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "c", skip_serializing_if = "utils::is_default")]
     credentials: Option<Vec<Credential>>,
 
-    #[serde(rename = "s", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "s", skip_serializing_if = "utils::is_default")]
     services: Option<Vec<Service>>,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "sat", skip_serializing_if = "utils::is_default")]
     signed_at: Option<u64>,
 
-    #[serde(rename = "sig")]
-    #[serde(with = "crate::serde_bytes_base64")]
+    #[serde(
+        rename = "sig",
+        serialize_with = "crate::utils::serialize_bytes",
+        deserialize_with = "crate::utils::deserialize_bytes",
+    )]
     signature: Vec<u8>,
 
     #[serde(skip)]

@@ -1,10 +1,10 @@
 use std::fmt;
 use serde::{Serialize, Deserialize};
 use crate::{
+    utils,
     Id, PeerInfo,
     errors::{Error, Result},
 };
-use super::utils;
 
 #[derive(Clone)]
 #[derive(Serialize, Deserialize)]
@@ -49,7 +49,6 @@ struct SerdeAnnouncePeerRequest {
     #[serde(
         rename = "cas",
         default = "utils::default_expected_seq",
-        serialize_with = "utils::serialize_expected_seq",
         deserialize_with = "utils::deserialize_expected_seq",
         skip_serializing_if = "utils::is_default_expected_seq"
     )]
@@ -65,9 +64,8 @@ struct SerdeAnnouncePeerRequest {
     #[serde(
         rename = "seq",
         default,
-        serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     seq: i32,
 
@@ -76,23 +74,23 @@ struct SerdeAnnouncePeerRequest {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default",
+        skip_serializing_if = "utils::is_default",
     )]
     node_id: Option<Id>,
 
     #[serde(
         rename = "os",
         default,
-        serialize_with = "utils::serialize_sig_opt",
-        deserialize_with = "utils::deserialize_sig_opt",
-        skip_serializing_if = "crate::is_default"
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::serialize_sig",
-        deserialize_with = "utils::deserialize_sig"
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
     )]
     sig: Vec<u8>,
 
@@ -107,7 +105,7 @@ struct SerdeAnnouncePeerRequest {
         default,
         serialize_with = "utils::serialize_bytes_opt",
         deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     extra: Option<Vec<u8>>,
 }

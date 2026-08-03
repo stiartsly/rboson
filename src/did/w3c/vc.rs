@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     as_secs,
+    utils,
     Id,
     Error,
     Result,
@@ -27,33 +28,33 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct VerifiableCredential {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: String,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "name")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     name: Option<String>,
 
     #[serde(rename = "description")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     description: Option<String>,
 
     #[serde(rename = "issuer")]
     issuer: Id,
 
     #[serde(rename = "validFrom")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     valid_from: Option<u64>,
 
     #[serde(rename = "validUntil")]
-    #[serde(skip_serializing_if = "crate::is_default")]
+    #[serde(skip_serializing_if = "utils::is_default")]
     valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]

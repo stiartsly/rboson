@@ -1,10 +1,11 @@
 use std::{
     fmt,
-    result::Result as SResult
+    result::Result as StdResult
 };
 use sha2::{Digest, Sha256};
 use serde::{Serialize, Deserialize};
 
+use crate::utils;
 use super::{
     Id,
     cryptobox,
@@ -13,7 +14,6 @@ use super::{
     cryptobox::Nonce,
     Result,
     errors::{Error, ArgumentError},
-    utils
 };
 
 #[derive(Clone)]
@@ -377,7 +377,7 @@ struct SerdeValue {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     pk: Option<Id>,
 
@@ -386,7 +386,7 @@ struct SerdeValue {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     recipient: Option<Id>,
 
@@ -395,16 +395,16 @@ struct SerdeValue {
         default,
         serialize_with = "utils::serialize_nonce_opt",
         deserialize_with = "utils::deserialize_nonce_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nonce: Option<Nonce>,
 
     #[serde(
         rename = "s",
         default,
-        serialize_with = "utils::serialize_sig_opt",
-        deserialize_with = "utils::deserialize_sig_opt",
-        skip_serializing_if = "crate::is_default"
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     sig: Option<Vec<u8>>,
 
@@ -417,10 +417,7 @@ struct SerdeValue {
 
     #[serde(
         rename = "seq",
-        default = "utils::default_seq",
-        serialize_with = "utils::serialize_seq",
-        deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "utils::is_default_seq"
+        deserialize_with = "utils::deserialize_seq"
     )]
     seq: i32,
 }
@@ -441,7 +438,7 @@ impl From<Value> for SerdeValue {
 impl TryFrom<SerdeValue> for Value {
     type Error = Error;
 
-    fn try_from(v: SerdeValue) -> SResult<Self, Self::Error> {
+    fn try_from(v: SerdeValue) -> StdResult<Self, Self::Error> {
         if v.data.is_empty() {
             return Err(ArgumentError::new("value data cannot be empty"));
         }

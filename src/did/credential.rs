@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     as_secs,
+    utils,
     Id,
     errors::{Result, ArgumentError, BeforeValidPeriodError, ExpiredError, SignatureError},
     signature,
@@ -24,32 +25,38 @@ pub struct Credential {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "t", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "t", skip_serializing_if = "utils::is_default")]
     types: Option<Vec<String>>,
 
-    #[serde(rename = "n", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "n", skip_serializing_if = "utils::is_default")]
     name: Option<String>,
 
-    #[serde(rename = "d", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "d", skip_serializing_if = "utils::is_default")]
     description: Option<String>,
 
     #[serde(rename = "i")]
     issuer: Id,
 
-    #[serde(rename = "v", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "v", skip_serializing_if = "utils::is_default")]
     valid_from: Option<u64>,
 
-    #[serde(rename = "e", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "e", skip_serializing_if = "utils::is_default")]
     valid_until: Option<u64>,
 
     #[serde(rename = "s")]
     subject: Subject,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
+    #[serde(
+        rename = "sat",
+        skip_serializing_if = "utils::is_default"
+    )]
     signed_at: Option<u64>,
 
-    #[serde(rename = "sig", skip_serializing_if = "crate::is_default")]
-    #[serde(with="crate::serde_bytes_base64")]
+    #[serde(
+        rename = "sig",
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
+    )]
     signature: Vec<u8>,
 
     #[serde(skip_serializing, skip_deserializing)]

@@ -1,16 +1,15 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
+    utils,
     Id,
     errors::{Error, Result},
 };
-use crate::dht::{
-    msg::utils,
-    msg::lookup_req::{
-        LookupRequest,
-        Data as LookupData,
-        WANT4_MASK, WANT6_MASK,
-    },
+use crate::dht::msg::lookup_req::{
+    LookupRequest,
+    Data as LookupData,
+    WANT4_MASK,
+    WANT6_MASK,
 };
 
 #[derive(Clone)]
@@ -66,7 +65,6 @@ struct SerdeFindPeerRequest {
     #[serde(
         rename = "cas",
         default = "utils::default_expected_seq",
-        serialize_with = "utils::serialize_expected_seq",
         deserialize_with = "utils::deserialize_expected_seq",
         skip_serializing_if = "utils::is_default_expected_seq"
     )]
@@ -74,10 +72,8 @@ struct SerdeFindPeerRequest {
 
     #[serde(
         rename = "e",
-        default,
-        serialize_with = "utils::serialize_count",
         deserialize_with = "utils::deserialize_count",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     expected_count: i32,
 }

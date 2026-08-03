@@ -1,5 +1,4 @@
 mod msg {
-    mod utils;
     pub(crate) mod msg;
     pub(crate) mod error;
     pub(crate) mod lookup_req;

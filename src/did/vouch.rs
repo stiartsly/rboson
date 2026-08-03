@@ -14,6 +14,7 @@ use crate::{
         ArgumentError,
         SignatureError
     },
+    utils,
 };
 
 use crate::did::{
@@ -24,10 +25,10 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
-    #[serde(rename = "id", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "id", skip_serializing_if = "utils::is_default")]
     id: Option<String>,
 
-    #[serde(rename = "t", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "t", skip_serializing_if = "utils::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
@@ -36,11 +37,14 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "sat", skip_serializing_if = "utils::is_default")]
     signed_at: Option<u64>,
 
-    #[serde(rename = "sig", skip_serializing_if = "Vec::is_empty")]
-    #[serde(with="crate::serde_bytes_base64")]
+    #[serde(
+        rename = "sig",
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
+    )]
     signature: Vec<u8>,
 
     #[serde(skip)]

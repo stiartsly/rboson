@@ -1,13 +1,14 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
+    utils,
     NodeInfo,
     PeerInfo,
     errors::{Error, Result, ProtocolError},
-    dht::msg::lookup_rsp::{
-        LookupResponse,
-        Data
-    }
+};
+use crate::dht::msg::lookup_rsp::{
+    LookupResponse,
+    Data
 };
 
 #[derive(Clone)]
@@ -50,13 +51,13 @@ impl LookupResponse for FindPeerResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindPeerResponse {
-    #[serde(rename = "n4", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
     nodes4: Option<Vec<NodeInfo>>,
-    #[serde(rename = "n6", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
     nodes6: Option<Vec<NodeInfo>>,
     #[serde(rename = "tok")]
     token: i32,
-    #[serde(rename = "p", skip_serializing_if = "crate::is_default")]
+    #[serde(rename = "p", skip_serializing_if = "utils::is_default")]
     peers: Option<Vec<PeerInfo>>,
 }
 

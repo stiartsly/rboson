@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     as_secs,
+    utils,
     Id,
     signature,
 };
@@ -62,9 +63,12 @@ pub struct Proof {
     #[serde(rename = "proofPurpose")]
     proof_purpose: ProofPurpose,
 
-    #[serde(rename = "proofValue")]
-    #[serde(with = "crate::serde_bytes_base64")]
-    proof_value: Vec<u8>,
+    #[serde(
+        rename = "proofValue",
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
+    )]
+    proof_value: Vec<u8>
 }
 
 impl Proof {

@@ -1,12 +1,12 @@
 use std::fmt;
 use serde::{Serialize, Deserialize};
 use crate::{
+    utils,
     Id,
     Value,
     cryptobox::Nonce,
     errors::{Error, Result, ProtocolError},
 };
-use super::utils;
 
 #[derive(Clone)]
 #[derive(Serialize, Deserialize)]
@@ -45,7 +45,6 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "cas",
         default = "utils::default_expected_seq",
-        serialize_with = "utils::serialize_expected_seq",
         deserialize_with = "utils::deserialize_expected_seq",
         skip_serializing_if = "utils::is_default_expected_seq"
     )]
@@ -54,9 +53,8 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "seq",
         default,
-        serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     seq: i32,
 
@@ -65,7 +63,7 @@ struct SerdeStoreValueRequest {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     public_key: Option<Id>,
 
@@ -74,25 +72,25 @@ struct SerdeStoreValueRequest {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     recipient: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::serialize_nonce_opt",
-        deserialize_with = "utils::deserialize_nonce_opt",
-        skip_serializing_if = "crate::is_default"
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::serialize_sig_opt",
-        deserialize_with = "utils::deserialize_sig_opt",
-        skip_serializing_if = "crate::is_default"
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     signature: Option<Vec<u8>>,
 
@@ -100,7 +98,7 @@ struct SerdeStoreValueRequest {
         rename = "v",
         serialize_with = "utils::serialize_bytes",
         deserialize_with = "utils::deserialize_bytes",
-        skip_serializing_if = "crate::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     data: Vec<u8>,
 }
@@ -142,9 +140,10 @@ impl TryFrom<SerdeStoreValueRequest> for StoreValueRequest {
             s.data,
             s.seq
         );
-        // if !value.is_valid() {
-        //     return Err(ProtocolError::new("The value is invalid"));
-        // }
+
+        if !value.is_valid() {
+             return Err(ProtocolError::new("The value is invalid"));
+        }
 
         Ok(StoreValueRequest::new(
             value,

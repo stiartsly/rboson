@@ -1,16 +1,14 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::{
+    utils,
     Id,
     errors::{Error, Result},
 };
-use super::{
-    utils,
-    lookup_req::{
-        LookupRequest,
-        Data as LookupData,
-        WANT4_MASK, WANT6_MASK,
-    }
+use super::lookup_req::{
+    LookupRequest,
+    Data as LookupData,
+    WANT4_MASK, WANT6_MASK,
 };
 
 #[derive(Clone)]
@@ -60,7 +58,6 @@ struct SerdeFindValueRequest {
     #[serde(
         rename = "cas",
         default = "utils::default_expected_seq",
-        serialize_with = "utils::serialize_expected_seq",
         deserialize_with = "utils::deserialize_expected_seq",
         skip_serializing_if = "utils::is_default_expected_seq"
     )]

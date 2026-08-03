@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
+	utils,
     Id,
 	errors::{Result, SignatureError, ArgumentError},
 	CryptoIdentity,
@@ -28,34 +29,34 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct DIDDocument {
     #[serde(rename = "@context")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: Id,
 
     #[serde(rename = "verificationMethod")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     verification_methods: Option<Vec<VM>>,
 
     #[serde(rename = "authentication")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     authentications: Option<Vec<VM>>,
 
     #[serde(rename = "assertion")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     assertions: Option<Vec<VM>>,
 
     #[serde(rename = "verifiableCredential")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     credentials: Option<Vec<VC>>,
 
     #[serde(rename = "service")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     services: Option<Vec<Service>>,
 
     #[serde(rename = "proof")]
-	#[serde(skip_serializing_if = "crate::is_default")]
+	#[serde(skip_serializing_if = "utils::is_default")]
     proof: Option<Proof>,
 }
 

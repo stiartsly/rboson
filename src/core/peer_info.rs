@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    result::Result as SResult,
+    result::Result as StdResult,
     hash::{Hash, Hasher},
     sync::{Arc, Mutex}
 };
@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::utils;
 use super::{
     Id,
     Identity,
@@ -15,7 +16,6 @@ use super::{
     Result,
     errors::{Error, StateError},
     signature::{KeyPair, PrivateKey},
-    utils,
 };
 
 pub struct PeerBuilder {
@@ -92,17 +92,17 @@ impl PeerBuilder {
 #[serde(into = "SerdePeerInfo", try_from = "SerdePeerInfo")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
-    pk: Id,
-    sk: Option<PrivateKey>,
-    seq: i32,
+    pk          : Id,
+    sk          : Option<PrivateKey>,
+    seq         : i32,
 
-    nodeid: Option<Id>,
-    node_sig: Option<Vec<u8>>,
+    nodeid      : Option<Id>,
+    node_sig    : Option<Vec<u8>>,
 
-    sig: Vec<u8>,
-    fingerprint: u64,
-    endpoint: String,
-    extra: Option<Vec<u8>>,
+    sig         : Vec<u8>,
+    fingerprint : u64,
+    endpoint    : String,
+    extra       : Option<Vec<u8>>,
 }
 
 impl PeerInfo {
@@ -366,10 +366,7 @@ struct SerdePeerInfo {
 
     #[serde(
         rename = "seq",
-        default = "utils::default_seq",
-        serialize_with = "utils::serialize_seq",
         deserialize_with = "utils::deserialize_seq",
-        skip_serializing_if = "utils::is_default_seq"
     )]
     seq: i32,
 
@@ -385,16 +382,16 @@ struct SerdePeerInfo {
     #[serde(
         rename = "os",
         default,
-        serialize_with = "utils::serialize_sig_opt",
-        deserialize_with = "utils::deserialize_sig_opt",
+        serialize_with = "utils::serialize_bytes_opt",
+        deserialize_with = "utils::deserialize_bytes_opt",
         skip_serializing_if = "utils::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::serialize_sig",
-        deserialize_with = "utils::deserialize_sig"
+        serialize_with = "utils::serialize_bytes",
+        deserialize_with = "utils::deserialize_bytes"
     )]
     sig: Vec<u8>,
 
@@ -445,14 +442,14 @@ impl fmt::Display for PeerInfo {
 impl From<PeerInfo> for SerdePeerInfo {
     fn from(peer: PeerInfo) -> Self {
         Self {
-            pk: peer.pk,
-            seq: peer.seq,
-            nodeid: peer.nodeid,
+            pk      : peer.pk,
+            seq     : peer.seq,
+            nodeid  : peer.nodeid,
             node_sig: peer.node_sig,
-            sig: peer.sig,
+            sig     : peer.sig,
             fingerprint: peer.fingerprint,
             endpoint: peer.endpoint,
-            extra: peer.extra,
+            extra   : peer.extra,
         }
     }
 }
@@ -460,20 +457,20 @@ impl From<PeerInfo> for SerdePeerInfo {
 impl TryFrom<SerdePeerInfo> for PeerInfo {
     type Error = Error;
 
-    fn try_from(sp: SerdePeerInfo) -> SResult<Self, Self::Error> {
+    fn try_from(sp: SerdePeerInfo) -> StdResult<Self, Self::Error> {
         if sp.endpoint.is_empty() {
-            return Err(StateError::new("invalid peer info: missing endpoint"));
+            return Err(StateError::new("invalid peer: missing endpoint"));
         }
         if sp.sig.len() != signature::Signature::BYTES {
             return Err(StateError::new(format!(
-                "invalid peer info: invalid signature length {}, expected {}",
+                "invalid peer: invalid signature length {}, expected {}",
                 sp.sig.len(),
                 signature::Signature::BYTES
             )));
         }
         if sp.nodeid.is_some() != sp.node_sig.is_some() {
             return Err(StateError::new(
-                "invalid peer info: nodeid and node signature must both be present or absent"
+                "invalid peer: nodeid and node signature must both be present or absent"
             ));
         }
 
@@ -489,7 +486,7 @@ impl TryFrom<SerdePeerInfo> for PeerInfo {
         );
         if !peer.is_valid() {
             return Err(StateError::new(
-                "invalid peer info: signature verification failed"
+                "invalid peer: signature verification failed"
             ));
         }
         Ok(peer)

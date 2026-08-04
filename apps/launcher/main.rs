@@ -1,84 +1,176 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::thread;
+use std::path::PathBuf;
 use std::process::exit;
+use std::sync::Arc;
+use std::time::Duration;
+
 use clap::Parser;
+use serde::Deserialize;
+use tokio::sync::Notify;
 
 use boson::{
-    dht::Node,
-    configuration as cfg,
-    ActiveProxyClient as ActiveProxy,
+    Id,
+    Network,
+    signature,
+    dht::{Node, NodeConfig, NodeConfiguration, ConnectionStatus, ConnectionStatusListener},
+    activeproxy::{ActiveProxyClient as ActiveProxy, client::ActiveProxyOptions},
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "Laucnher")]
+#[command(name = "launcher")]
 #[command(version = "1.0")]
 #[command(about = "Boson launcher service", long_about = None)]
 struct Options {
-    /// The configuration file
-    #[arg(short, long, value_name = "FILE")]
+    /// The configuration file (YAML)
+    #[arg(short, long, value_name = "FILE", default_value = "default.yaml")]
     config: String,
-
-    /// IPv4 address used for listening.
-    #[arg(short = '4', long, value_name = "IPv4")]
-    addr4: Option<String>,
-
-    /// IPv6 address used for listening.
-    #[arg(short = '6', long, value_name = "IPv6")]
-    addr6: Option<String>,
-
-    /// The directory for storing node data
-    #[arg(short, long, value_name = "PATH")]
-    storage: Option<String>,
-
-    /// The port used for listening
-    #[arg(short, long, default_value_t = 39011)]
-    port: u16,
-
-    /// Run this program in daemon mode
-    #[arg(short='D', long)]
-    daemonize: bool
 }
 
-fn main() {
+/// The `activeproxy:` section of the launcher's YAML config file.
+#[derive(Debug, Deserialize)]
+struct ActiveProxySection {
+    #[serde(rename = "serverPeerId")]
+    server_peerid: String,
+    #[serde(rename = "peerPrivateKey")]
+    peer_private_key: Option<String>,
+    #[serde(rename = "upstreamHost")]
+    upstream_host: String,
+    #[serde(rename = "upstreamPort")]
+    upstream_port: u16,
+    #[serde(rename = "upstreamDomain")]
+    upstream_domain: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LauncherConfig {
+    activeproxy: Option<ActiveProxySection>,
+}
+
+/// Reads the launcher's own `activeproxy:` section, which sits alongside but
+/// outside of `NodeConfiguration`'s schema.
+fn load_activeproxy_section(path: &str) -> Option<ActiveProxySection> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_yaml::from_str::<LauncherConfig>(&raw).ok()?.activeproxy
+}
+
+fn build_activeproxy_options(
+    section: ActiveProxySection,
+    data_dir: &str,
+    user_keypair: signature::KeyPair,
+) -> Result<ActiveProxyOptions, String> {
+    let server_peerid = Id::try_from(section.server_peerid.as_str())
+        .map_err(|e| format!("Invalid activeproxy.serverPeerId: {e}"))?;
+
+    let peer_keypair = section.peer_private_key.as_deref()
+        .map(|key| signature::PrivateKey::try_from(key)
+            .map(|sk| signature::KeyPair::from(&sk))
+            .map_err(|e| format!("Invalid activeproxy.peerPrivateKey: {e}"))
+        )
+        .transpose()?;
+
+    Ok(ActiveProxyOptions {
+        cached_dir: PathBuf::from(data_dir).join("activeproxy.cache"),
+        server_peerid,
+        user_keypair,
+        peer_keypair,
+        upstream_host: section.upstream_host,
+        upstream_port: section.upstream_port,
+        upstream_domain: section.upstream_domain,
+    })
+}
+
+/// Notifies once the node has connected to the Boson network.
+struct ReadyListener(Arc<Notify>);
+impl ConnectionStatusListener for ReadyListener {
+    fn status_changed(&self, network: Network, new_status: ConnectionStatus, old_status: ConnectionStatus) {
+        println!("Connection status changed for network {network}: {old_status}->{new_status}");
+    }
+    fn connecting(&self, network: Network) {
+        println!("Connecting to network {network}...");
+    }
+    fn connected(&self, network: Network) {
+        println!("Connected to network {network}.");
+        self.0.notify_one();
+    }
+    fn disconnected(&self, network: Network) {
+        println!("Disconnected from network {network}.");
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let opts = Options::parse();
-    let cfg  = cfg::Builder::new()
-        .load(&opts.config).map_err(|e| {
-            println!("Error loading configuration: {}", e);
-            exit(-1)
-        }).unwrap()
-        .with_data_dir(
-            opts.storage.as_deref().unwrap_or("~/.boson")
-        ).build().map_err(|e| {
-            println!("Error building configuration: {}", e);
-            exit(-1)
-        }).unwrap();
 
-    let result = Node::new(&cfg);
-    if let Err(e) = result {
-        panic!("Creating Node instance error: {e}")
+    let node_cfg = match NodeConfiguration::load(&opts.config) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error loading configuration: {e}");
+            exit(1);
+        }
+    };
+
+    #[cfg(feature = "inspect")]
+    node_cfg.dump();
+
+    let data_dir = node_cfg.data_dir().to_string();
+    let user_keypair = signature::KeyPair::from(node_cfg.private_key());
+
+    let node = match Node::new(Box::new(node_cfg)) {
+        Ok(node) => node,
+        Err(e) => {
+            eprintln!("Creating Node instance error: {e}");
+            exit(1);
+        }
+    };
+
+    let ready = Arc::new(Notify::new());
+    node.add_listener(ReadyListener(ready.clone()));
+
+    if let Err(e) = node.start().await {
+        eprintln!("Starting node failed: {e}");
+        exit(1);
+    }
+    println!("Boson node {} is up and running.", node.id());
+
+    println!("Waiting for the node to connect to the Boson network...");
+    if tokio::time::timeout(Duration::from_secs(30), ready.notified()).await.is_err() {
+        println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
-    let node = Arc::new(Mutex::new(result.unwrap()));
-    let _ = node.lock()
-        .unwrap()
-        .start();
+    let ap = match load_activeproxy_section(&opts.config) {
+        Some(section) => {
+            let options = match build_activeproxy_options(section, &data_dir, user_keypair) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("Error building activeproxy options: {e}");
+                    exit(1);
+                }
+            };
+            match ActiveProxy::new(node.clone(), options) {
+                Ok(ap) => Some(Arc::new(ap)),
+                Err(e) => {
+                    eprintln!("Creating ActiveProxy client error: {e}");
+                    exit(1);
+                }
+            }
+        }
+        None => None,
+    };
 
-    thread::sleep(Duration::from_secs(2));
+    // `ProxyClient::start` drives its own single-threaded runtime and blocks
+    // until stopped, so it needs its own OS thread.
+    let ap_thread = ap.map(|ap| std::thread::spawn(move || {
+        if let Err(e) = ap.start() {
+            eprintln!("ActiveProxy client stopped with error: {e}");
+        }
+    }));
 
-    let result = ActiveProxy::new(node.clone(), &cfg);
-    if let Err(e) = result {
-        panic!("Creating ActiveProxy client error: {e}")
+    if tokio::signal::ctrl_c().await.is_err() {
+        eprintln!("Failed to listen for shutdown signal.");
     }
 
-    let ap = result.unwrap();
-    match ap.start() {
-        Ok(_) => {},
-        Err(e) => panic!("{e}")
+    println!("Shutting down...");
+    let _ = node.stop().await;
+    if let Some(handle) = ap_thread {
+        let _ = handle.join();
     }
-
-    thread::sleep(Duration::from_secs(60*100));
-    let _ = node.lock()
-        .unwrap()
-        .stop();
 }

@@ -51,11 +51,9 @@ pub use crate::dht::{
     connection_status_listener::{self, ConnectionStatusListener}
 };
 
-/*
 pub use crate::activeproxy::{
     ActiveProxyClient
 };
-*/
 
 #[macro_export]
 macro_rules! locked {

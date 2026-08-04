@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
 use std::fs::File;
 
-use tokio::runtime::Runtime;
 use rand::seq::SliceRandom;
 use log::{error, warn, info, debug};
 
@@ -149,52 +148,52 @@ impl ProxyClient {
     }
 
     pub fn start(&self) -> Result<()> {
-        let result = load_peer(self.cached_path(), self.remote_peerid()).or_else(||{
-            if self.cached_path().exists() {
-                _ = std::fs::remove_file(self.cached_path());
-            }
-
-            Runtime::new().unwrap().block_on(async {
-                lookup_peer(self.node(), self.remote_peerid()).await
-            }).map(|v| {
-                _ = save_peer(self.cached_path(), v.clone());
-                v
-            })
-        }).unzip();
-
-        let Some(peer) = result.0 else {
-            error!("No available peers with peer ID {} were found.", self.remote_peerid);
-            return Err(StateError::new(format!("No available peers with peerid {} found", self.remote_peerid)));
-        };
-
-        let Some(node) = result.1 else {
-            error!("No available nodes hosting peer ID {} were found.", self.remote_peerid);
-            return Err(StateError::new(format!("No available nodes hosting peerid {} found", self.remote_peerid)));
-        };
-
-        let remote_addr = peer.endpoint().to_socket_addrs().ok().and_then(|mut addrs| addrs.next())
-            .unwrap_or_else(|| SocketAddr::new(node.ip(), 0));
-        info!("ActiveProxy found the peer serivce {} on server {}.", peer.id(), remote_addr);
-
-        if let Ok(mut managed) = self.managed.lock() {
-            managed.remote_peer = Some(Arc::new(Mutex::new(peer)));
-            managed.remote_node = Some(Arc::new(Mutex::new(node)));
-            managed.remote_addr = Some(remote_addr);
-            managed.remote_name = Some(remote_addr.to_string());
-        }
-
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        // The whole worker pipeline runs on a single-threaded runtime and relies
+        // on `task::spawn_local`, so it must be driven from within a `LocalSet`.
+        let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
+        let local = tokio::task::LocalSet::new();
 
-        let worker = self.worker.clone();
-        let quit = self.quit.clone();
-        rt.block_on(async {
-            _ = worker::run_loop(worker, quit).await
-        });
+        rt.block_on(local.run_until(async {
+            let cached = load_peer(self.cached_path(), self.remote_peerid());
+            let found = match cached {
+                Some(v) => Some(v),
+                None => {
+                    if self.cached_path().exists() {
+                        _ = std::fs::remove_file(self.cached_path());
+                    }
+                    let looked_up = lookup_peer(self.node(), self.remote_peerid()).await;
+                    if let Some(v) = looked_up.as_ref() {
+                        save_peer(self.cached_path(), v.clone());
+                    }
+                    looked_up
+                }
+            };
 
-        Ok(())
+            let Some((peer, node)) = found else {
+                error!("No available peers hosting peer ID {} were found.", self.remote_peerid);
+                return Err(StateError::new(format!("No available peers with peerid {} found", self.remote_peerid)));
+            };
+
+            let remote_addr = peer.endpoint().to_socket_addrs().ok().and_then(|mut addrs| addrs.next())
+                .unwrap_or_else(|| SocketAddr::new(node.ip(), 0));
+            info!("ActiveProxy found the peer serivce {} on server {}.", peer.id(), remote_addr);
+
+            if let Ok(mut managed) = self.managed.lock() {
+                managed.remote_peer = Some(Arc::new(Mutex::new(peer)));
+                managed.remote_node = Some(Arc::new(Mutex::new(node)));
+                managed.remote_addr = Some(remote_addr);
+                managed.remote_name = Some(remote_addr.to_string());
+            }
+
+            let worker = self.worker.clone();
+            let quit = self.quit.clone();
+            _ = worker::run_loop(worker, quit).await;
+
+            Ok(())
+        }))
     }
 
     pub fn stop(&self) {

@@ -19,6 +19,7 @@ use tokio::net::{
     TcpStream,
     TcpSocket
 };
+use tokio::task;
 use log::{warn, error,info, debug, trace};
 
 use crate::{
@@ -315,7 +316,7 @@ impl ProxyConnection {
         assert!(writer.is_some());
 
         let mut stream = reader.unwrap().unsplit(writer.unwrap());
-        _ = tokio::spawn(async move {
+        _ = task::spawn_local(async move {
             _ = stream.flush().await;
             _ = stream.shutdown().await;
         }).await;
@@ -327,7 +328,7 @@ impl ProxyConnection {
             assert!(writer.is_some());
 
             let mut stream = reader.unsplit(writer.unwrap());
-            _ = tokio::spawn(async move {
+            _ = task::spawn_local(async move {
                 _ = stream.flush().await;
                 _ = stream.shutdown().await;
             }).await
@@ -379,7 +380,7 @@ impl ProxyConnection {
         if let Some(reader) = reader {
             assert!(writer.is_some());
             let mut stream = reader.unsplit(writer.unwrap());
-            _ = tokio::spawn(async move {
+            _ = task::spawn_local(async move {
                 _ = stream.flush().await;
                 _ = stream.shutdown().await;
             }).await

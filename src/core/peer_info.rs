@@ -353,6 +353,26 @@ impl Hash for PeerInfo {
     }
 }
 
+impl fmt::Display for PeerInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "id:{}", self.pk)?;
+        write!(f, ",endpoint:{}", self.endpoint)?;
+        if self.fingerprint != 0 {
+            write!(f, ",sn:{}", self.fingerprint)?;
+        }
+        if self.seq > 0 {
+            write!(f, ",seq:{}", self.seq)?;
+        }
+        if let Some(nodeid) = self.nodeid.as_ref() {
+            write!(f, ",nodeId:{}", nodeid.to_base58())?;
+        }
+        if let Some(node_sig) = self.node_sig.as_ref() {
+            write!(f, ",nodeSig:0x{}", hex::encode(node_sig))?;
+        }
+        write!(f, ",sig:0x{}", hex::encode(&self.sig))?;
+        Ok(())
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -416,27 +436,6 @@ struct SerdePeerInfo {
         skip_serializing_if = "utils::is_default"
     )]
     extra: Option<Vec<u8>>,
-}
-
-impl fmt::Display for PeerInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "id:{}", self.pk)?;
-        write!(f, ",endpoint:{}", self.endpoint)?;
-        if self.fingerprint != 0 {
-            write!(f, ",sn:{}", self.fingerprint)?;
-        }
-        if self.seq > 0 {
-            write!(f, ",seq:{}", self.seq)?;
-        }
-        if let Some(nodeid) = self.nodeid.as_ref() {
-            write!(f, ",nodeId:{}", nodeid.to_base58())?;
-        }
-        if let Some(node_sig) = self.node_sig.as_ref() {
-            write!(f, ",nodeSig:0x{}", hex::encode(node_sig))?;
-        }
-        write!(f, ",sig:0x{}", hex::encode(&self.sig))?;
-        Ok(())
-    }
 }
 
 impl From<PeerInfo> for SerdePeerInfo {

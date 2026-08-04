@@ -33,7 +33,7 @@ ipv4: true
 
 # Port number for DHT UDP traffic.
 # The default port is 39001. Ensure this port is open in your firewall (UDP).
-port: 39008
+port: 39103
 
 # Node private key
 # This key defines your node's long-term identity on the network.
@@ -45,10 +45,11 @@ port: 39008
 #
 # CAUTION: Keep this key secret. Never share it.
 #
-privateKey: 4h6M3ySLfG3VDLsYdCshDyLzb9547HMEJg6JqCmk3DymmwX4p3jRGXZ5bU87NY6Qhv3bV4pyCJRGTiCStyp2fpFY
+privateKey: 0x02171e1f0001b3ecb5a923f4c1469b228ea7a956c32600614e2d94aa3c7d657b19257d0b624fc72851d2651009f1435087eb7ab23f88d0788bfc835c3cefffd1
 
 logLevel: debug
 logFile: shell.log
+logConsole: true
 
 # Root directory for persistent data.
 # Stores routing tables, caches, and database files.
@@ -73,7 +74,7 @@ logFile: shell.log
 #  # Database connection URI.
 #  uri: jdbc:sqlite:node.db
 
-dataDir: .shell_sim_data
+dataDir: .announce_value_data
 databaseUri: jdbc:sqlite:node.db
 
   # Connection pool size. 0 uses the default for the specific driver.
@@ -86,13 +87,9 @@ databaseUri: jdbc:sqlite:node.db
 # These nodes are contacted during startup to discover other peers.
 # Format: [ NodeID (Base58), IPAddress, Port ]
 bootstraps:
-  - - 3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
+  - - 42Q5zvkSYT6rsbJG7KWv5cyNBYDDmQJmpKvm4nGj2EiN
     - 192.168.1.118
-    - 39001
-
-  #- -3ZNFhqPkALnjtP32YhYHqhiADqe7bxv6cJ4rM9fbsWR9
-  #  - 10.148.47.34
-  #  - 39003
+    - 39101
 
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true

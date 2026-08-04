@@ -17,7 +17,19 @@ path = "tests/apitests/lib.rs"
 
 [[bin]]
 name = "shell"
-path = "apps/shell/main.rs"
+path = "apps/shell/shell.rs"
+
+#[[bin]]
+#name = "announce_peer"
+#path = "apps/shell/announce_peer/main.rs"
+
+#[[bin]]
+#name = "announce_value"
+#path = "apps/shell/announce_value/main.rs"
+
+#[[bin]]
+#name = "query"
+#path = "apps/shell/query/main.rs"
 
 [[bin]]
 name = "identity"

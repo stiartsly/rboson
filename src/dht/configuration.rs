@@ -1,7 +1,5 @@
 use std::{
-    fmt,
-    env,
-    fs,
+    fmt, fs, env, mem,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
@@ -16,82 +14,28 @@ use crate::{
     dht::{NodeConfig, node_config::DEFAULT_DHT_PORT},
 };
 
-#[derive(Debug, Clone)]
-#[derive(Deserialize)]
-#[serde(try_from = "YamlNodeConfig")]
-pub struct NodeConfiguration {
-    host4       : Option<String>,
-    host6       : Option<String>,
-    port        : u16,
-    private_key : signature::PrivateKey,
-    data_dir    : String,
-    database_uri: String,
-    bootstrap_nodes: Vec<NodeInfo>,
-    log_level   : LevelFilter,
-    log_file    : Option<String>,
-    log_console : bool,
-    devmode     : bool,
-}
-
 #[derive(Debug, Deserialize)]
 struct YamlNodeConfig {
-    ipv4        : Option<bool>,
-    ipv6        : Option<bool>,
+    ipv4            : Option<bool>,
+    ipv6            : Option<bool>,
     #[serde(default = "default_port")]
-    port        : u16,
+    port            : u16,
     #[serde(rename = "privateKey")]
-    private_key : String,
+    private_key     : String,
     #[serde(rename = "dataDir")]
-    data_dir    : Option<String>,
+    data_dir        : Option<String>,
     #[serde(rename = "databaseUri")]
-    database_uri: String,
+    database_uri    : String,
     #[serde(default)]
-    bootstraps  : Vec<YamlNodeEntry>,
+    bootstraps      : Vec<YamlNodeEntry>,
     #[serde(rename = "logLevel")]
-    log_level   : Option<String>,
+    log_level       : Option<String>,
     #[serde(rename = "logFile")]
-    log_file    : Option<String>,
+    log_file        : Option<String>,
     #[serde(rename = "logConsole", default)]
-    log_console : bool,
+    log_console     : bool,
     #[serde(rename = "enableDeveloperMode", default)]
-    devmode     : bool,
-}
-
-impl TryFrom<YamlNodeConfig> for NodeConfiguration {
-    type Error = crate::Error;
-    fn try_from(yaml: YamlNodeConfig) -> Result<Self> {
-        let sk = signature::PrivateKey::try_from(yaml.private_key.as_str())?;
-        let bootstrap_nodes = yaml.bootstraps.into_iter()
-            .map(|entry| NodeInfo::try_from(entry))
-            .collect::<Result<Vec<_>>>()?;
-
-        let addr4 = if yaml.ipv4.unwrap_or(false) {
-            use crate::local_addr;
-            Some(local_addr(true)?.to_string())
-        } else {
-            None
-        };
-        let addr6 = if yaml.ipv6.unwrap_or(false) {
-            use crate::local_addr;
-            Some(local_addr(false)?.to_string())
-        } else {
-            None
-        };
-
-        Ok(NodeConfiguration {
-            host4       : addr4,
-            host6       : addr6,
-            port        : yaml.port,
-            private_key : sk,
-            data_dir    : expand_datadir(yaml.data_dir),
-            database_uri: yaml.database_uri,
-            bootstrap_nodes,
-            log_level   : log_level(yaml.log_level.as_deref()),
-            log_file    : yaml.log_file,
-            log_console : yaml.log_console,
-            devmode     : yaml.devmode,
-        })
-    }
+    devmode         : bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,23 +59,162 @@ fn default_port() -> u16 {
     DEFAULT_DHT_PORT
 }
 
-impl NodeConfiguration {
-    pub fn from(yaml: &str) -> Result<Self> {
-        let expanded = expand_env(yaml)?;
-        let config   = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
-                .map_err(|e| ArgumentError::new(format!("invalid yaml format: {e}")))?;
-        Self::try_from(config)
+#[derive(Debug, Clone)]
+pub struct NodeConfiguration {
+    host4           : Option<String>,
+    host6           : Option<String>,
+    port            : u16,
+    private_key     : signature::PrivateKey,
+    data_dir        : String,
+    database_uri    : String,
+    bootstrap_nodes : Vec<NodeInfo>,
+    log_level       : LevelFilter,
+    log_file        : Option<String>,
+    log_console     : bool,
+    devmode         : bool,
+}
+
+#[derive(Debug, Default)]
+pub struct Builder {
+    host4           : Option<String>,
+    host6           : Option<String>,
+    port            : Option<u16>,
+    private_key     : Option<signature::PrivateKey>,
+    data_dir        : Option<String>,
+    database_uri    : Option<String>,
+    bootstrap_nodes : Vec<NodeInfo>,
+    log_level       : Option<LevelFilter>,
+    log_file        : Option<String>,
+    log_console     : bool,
+    devmode         : bool,
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+    fn apply(&mut self, yaml: YamlNodeConfig) -> Result<()> {
+        self.private_key = Some(signature::PrivateKey::try_from(
+            yaml.private_key.as_str()
+        )?);
+        self.bootstrap_nodes = yaml.bootstraps.into_iter()
+            .map(NodeInfo::try_from)
+            .collect::<Result<Vec<_>>>()?;
+
+        self.host4 = if yaml.ipv4.unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(true)?.to_string())
+        } else {
+            None
+        };
+        self.host6 = if yaml.ipv6.unwrap_or(false) {
+            use crate::local_addr;
+            Some(local_addr(false)?.to_string())
+        } else {
+            None
+        };
+
+        self.port           = Some(yaml.port);
+        self.data_dir       = Some(expand_datadir(yaml.data_dir));
+        self.database_uri   = Some(yaml.database_uri);
+        self.log_level      = Some(log_level(yaml.log_level.as_deref()));
+        self.log_file       = yaml.log_file;
+        self.log_console    = yaml.log_console;
+        self.devmode        = yaml.devmode;
+        Ok(())
+    }
+
+    pub fn with_host4(&mut self, host: impl Into<String>) -> &mut Self {
+        self.host4 = Some(host.into());
+        self
+    }
+
+    pub fn with_host6(&mut self, host: impl Into<String>) -> &mut Self {
+        self.host6 = Some(host.into());
+        self
+    }
+
+    pub fn with_port(&mut self, port: u16) -> &mut Self {
+        self.port = Some(port);
+        self
+    }
+
+    pub fn with_private_key(&mut self, private_key: signature::PrivateKey) -> &mut Self {
+        self.private_key = Some(private_key);
+        self
+    }
+
+    pub fn with_data_dir(&mut self, data_dir: impl Into<String>) -> &mut Self {
+        self.data_dir = Some(expand_datadir(Some(data_dir.into())));
+        self
+    }
+
+    pub fn with_database_uri(&mut self, database_uri: impl Into<String>) -> &mut Self {
+        self.database_uri = Some(database_uri.into());
+        self
+    }
+
+    pub fn with_bootstrap_nodes(&mut self, nodes: Vec<NodeInfo>) -> &mut Self {
+        self.bootstrap_nodes = nodes;
+        self
+    }
+
+    pub fn add_bootstrap_node(&mut self, node: NodeInfo) -> &mut Self {
+        self.bootstrap_nodes.push(node);
+        self
+    }
+
+    pub fn with_log_level(&mut self, log_level: LevelFilter) -> &mut Self {
+        self.log_level = Some(log_level);
+        self
+    }
+
+    pub fn with_log_file(&mut self, log_file: impl Into<String>) -> &mut Self {
+        self.log_file = Some(log_file.into());
+        self
+    }
+
+    pub fn with_log_console(&mut self, enabled: bool) -> &mut Self {
+        self.log_console = enabled;
+        self
+    }
+
+    pub fn with_devmode(&mut self, enabled: bool) -> &mut Self {
+        self.devmode = enabled;
+        self
+    }
+
+    fn check_valid(&self) -> Result<()> {
+        if self.host4.is_none() && self.host6.is_none() {
+            return Err(ArgumentError::new("At least one of host4 or host6 must be set"));
+        }
+        if self.private_key.is_none() {
+            return Err(ArgumentError::new("Private key is missing"));
+        }
+        if self.database_uri.is_none() {
+            return Err(ArgumentError::new("Database URI is missing"));
+        }
+        Ok(())
+    }
+
+    pub fn from(&mut self, yaml: &str) -> Result<&mut Self> {
+        let expanded = expand_env(yaml)?;
+        let parsed = serde_yaml::from_str::<YamlNodeConfig>(&expanded)
+            .map_err(|e| ArgumentError::new(format!("invalid yaml format: {e}")))?;
+        self.apply(parsed)?;
+        Ok(self)
+    }
+
+    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<&mut Self> {
         let path  = path.as_ref();
         let input = fs::read_to_string(path).map_err(|e|
             IOError::new(format!("Reading config {} failed: {e}", path.display()))
         )?;
-        Self::from(&input)
+        self.from(&input)
     }
 
-    pub fn load_default() -> Result<Self> {
+    pub fn load_default(&mut self) -> Result<&mut Self> {
         let paths = config_paths();
         let Some(path) = paths.iter().find(|path| path.exists()) else {
             return Err(ArgumentError::new(format!(
@@ -142,7 +225,25 @@ impl NodeConfiguration {
             )));
         };
 
-        Self::load(path)
+        self.load(path)
+    }
+
+    pub fn build(&mut self) -> Result<NodeConfiguration> {
+        self.check_valid()?;
+
+        Ok(NodeConfiguration {
+            host4           : self.host4.take(),
+            host6           : self.host6.take(),
+            port            : self.port.take().unwrap_or_else(default_port),
+            private_key     : self.private_key.take().unwrap(),
+            data_dir        : self.data_dir.take().unwrap_or_else(|| ".".to_string()),
+            database_uri    : self.database_uri.take().unwrap(),
+            bootstrap_nodes : mem::take(&mut self.bootstrap_nodes),
+            log_level       : self.log_level.take().unwrap_or(LevelFilter::Info),
+            log_file        : self.log_file.take(),
+            log_console     : self.log_console,
+            devmode         : self.devmode,
+        })
     }
 }
 

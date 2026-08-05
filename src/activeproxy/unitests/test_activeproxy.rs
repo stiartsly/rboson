@@ -2,8 +2,11 @@ use crate::{
     Id,
     dht::Node,
     signature,
-    activeproxy::{ActiveProxyClient as ActiveProxy, client::ActiveProxyOptions},
-    dht::yaml_configuration::NodeConfiguration,
+    activeproxy::{
+        ActiveProxyClient as ActiveProxy,
+        client::ActiveProxyOptions
+    },
+    dht::configuration,
 };
 
 fn remove_path(input: &str) {
@@ -46,7 +49,7 @@ fn test_activeproxy() {
         data_dir,
     );
 
-    let cfg = Box::new(NodeConfiguration::from(&yaml).unwrap());
+    let cfg = Box::new(configuration::Builder::new().from(&yaml).unwrap().build().unwrap());
 
     let result = Node::new(cfg);
     assert_eq!(result.is_ok(), true);

@@ -48,7 +48,8 @@ pub use crate::did::{
 pub use crate::dht::{
     node::{self, Node},
     connection_status::{self, ConnectionStatus},
-    connection_status_listener::{self, ConnectionStatusListener}
+    connection_status_listener::{self, ConnectionStatusListener},
+    configuration as node_configuration,
 };
 
 pub use crate::activeproxy::{

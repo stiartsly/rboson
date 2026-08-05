@@ -12,7 +12,7 @@ use boson::{
         ImmutableBuilder as ValueBuilder,
     },
     dht::{
-        NodeConfiguration,
+        configuration,
         Node,
     },
 };
@@ -52,7 +52,9 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
     );
 
     fs::write(&config_path, yaml)?;
-    let cfg = NodeConfiguration::load(&config_path).unwrap();
+    let cfg = configuration::Builder::new()
+        .load(&config_path).unwrap()
+        .build().unwrap();
     Ok(Node::new(Box::new(cfg))?)
 }
 

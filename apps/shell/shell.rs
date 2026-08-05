@@ -10,7 +10,7 @@ use boson::{
     dht::{
         Node,
         NodeConfig,
-        NodeConfiguration,
+        configuration,
         ConnectionStatus,
         ConnectionStatusListener,
     },
@@ -63,6 +63,18 @@ struct Options {
     /// The configuration file
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
+
+    /// The data directory
+    #[arg(short, long, value_name = "PATH")]
+    datadir: Option<String>,
+
+    /// The private key
+    #[arg(short = 'k', long, value_name = "STRING")]
+    privatekey: Option<String>,
+
+    /// The port to listen on
+    #[arg(short = 'p', long, value_name = "PORT")]
+    port: Option<u16>,
 }
 
 /// Builds the interactive shell's subcommand tree.
@@ -190,9 +202,28 @@ async fn execute_command(matches: ArgMatches, node: &Node, private_key: &Private
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
-    let config = match NodeConfiguration::load(
-            opts.config.as_deref().unwrap_or("config.yaml")
-    ) {
+
+    let mut builder = configuration::Builder::new();
+    if let Err(e) = builder.load(opts.config.as_deref().unwrap_or("config.yaml")) {
+        println!("Loading configuration failed: {e}");
+        return;
+    }
+    if let Some(datadir) = opts.datadir.as_deref() {
+        builder.with_data_dir(datadir);
+    }
+    if let Some(key) = opts.privatekey.as_deref() {
+        match PrivateKey::try_from(key) {
+            Ok(private_key) => { builder.with_private_key(private_key); }
+            Err(e) => {
+                println!("Invalid private key: {e}");
+                return;
+            }
+        }
+    }
+    if let Some(port) = opts.port {
+        builder.with_port(port);
+    }
+    let config = match builder.build() {
         Ok(v) => v,
         Err(e) => {
             println!("Loading configuration failed: {e}");

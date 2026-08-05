@@ -11,8 +11,17 @@ use boson::{
     Id,
     Network,
     signature,
-    dht::{Node, NodeConfig, NodeConfiguration, ConnectionStatus, ConnectionStatusListener},
-    activeproxy::{ActiveProxyClient as ActiveProxy, client::ActiveProxyOptions},
+    dht::{
+        Node,
+        NodeConfig,
+        configuration,
+        ConnectionStatus,
+        ConnectionStatusListener
+    },
+    activeproxy::{
+        ActiveProxyClient as ActiveProxy,
+        client::ActiveProxyOptions
+    },
 };
 
 #[derive(Parser, Debug)]
@@ -100,7 +109,10 @@ impl ConnectionStatusListener for ReadyListener {
 async fn main() {
     let opts = Options::parse();
 
-    let node_cfg = match NodeConfiguration::load(&opts.config) {
+    let result = configuration::Builder::new()
+        .load(&opts.config)
+        .and_then(|b| b.build());
+    let node_cfg = match result {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error loading configuration: {e}");
@@ -153,7 +165,7 @@ async fn main() {
                 }
             }
         }
-        None => None,
+        _ => None,
     };
 
     // `ProxyClient::start` drives its own single-threaded runtime and blocks

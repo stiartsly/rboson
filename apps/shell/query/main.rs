@@ -15,7 +15,7 @@ use boson::{
         Node,
         NodeConfig,
         ConnectionStatus,
-        NodeConfiguration
+        configuration,
     },
     network::Network,
     connection_status_listener::ConnectionStatusListener,
@@ -68,9 +68,16 @@ async fn main() {
     let local = LocalSet::new();
     local.run_until(async {
         let opts = Options::parse();
-        let config = NodeConfiguration::load(
-            opts.config.as_deref().unwrap_or("node.yaml")
-        ).unwrap();
+        let config = match configuration::Builder::new()
+                .load(opts.config.as_deref().unwrap_or("node.yaml"))
+                .and_then(|b| b.build())
+        {
+            Ok(v) => v,
+            Err(e) => {
+                println!("Loading configuration failed: {e}");
+                return;
+            }
+        };
 
         #[cfg(feature = "inspect")] {
             config.dump();

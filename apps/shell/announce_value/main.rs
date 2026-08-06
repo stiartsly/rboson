@@ -13,7 +13,7 @@ use boson::{
     dht::{
         Node,
         NodeConfig,
-        NodeConfiguration,
+        configuration,
         ConnectionStatus,
         ConnectionStatusListener,
     },
@@ -111,9 +111,16 @@ async fn announce_value(node: &Node, value: &Value) -> bool{
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
-    let config = NodeConfiguration::load(
-        opts.config.as_deref().unwrap_or("config.yaml")
-    ).unwrap();
+    let config = match configuration::Builder::new()
+            .load(opts.config.as_deref().unwrap_or("config.yaml"))
+            .and_then(|b| b.build())
+    {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Loading configuration failed: {e}");
+            return;
+        }
+    };
 
     #[cfg(feature = "inspect")] {
         config.dump();

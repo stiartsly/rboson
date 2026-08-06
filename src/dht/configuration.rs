@@ -32,7 +32,10 @@ struct YamlNodeConfig {
     log_level       : Option<String>,
     #[serde(rename = "logFile")]
     log_file        : Option<String>,
-    #[serde(rename = "logConsole", default)]
+    #[serde(
+        rename = "logConsole",
+        default = "default_log_console"
+    )]
     log_console     : bool,
     #[serde(rename = "enableDeveloperMode", default)]
     devmode         : bool,
@@ -59,6 +62,10 @@ fn default_port() -> u16 {
     DEFAULT_DHT_PORT
 }
 
+fn default_log_console() -> bool {
+    true
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeConfiguration {
     host4           : Option<String>,
@@ -74,7 +81,7 @@ pub struct NodeConfiguration {
     devmode         : bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Builder {
     host4           : Option<String>,
     host6           : Option<String>,
@@ -91,7 +98,19 @@ pub struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            host4           : None,
+            host6           : None,
+            port            : Some(DEFAULT_DHT_PORT),
+            private_key     : None,
+            data_dir        : None,
+            database_uri    : None,
+            bootstrap_nodes : Vec::new(),
+            log_level       : None,
+            log_file        : None,
+            log_console     : true,
+            devmode         : false,
+        }
     }
 
     fn apply(&mut self, yaml: YamlNodeConfig) -> Result<()> {

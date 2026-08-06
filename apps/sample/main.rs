@@ -1,13 +1,15 @@
 use std::env;
 use std::fs;
-use std::thread;
 use std::net::IpAddr;
-use tokio::time::Duration;
+use std::path::Path;
+use tokio::time::{sleep, Duration};
 use get_if_addrs::get_if_addrs;
 
 use boson::{
     Node,
-    configuration as cfg
+    signature,
+    dht::NodeConfig,
+    node_configuration as cfg,
 };
 
 fn get_storage_path(input: &str) -> String {
@@ -41,7 +43,23 @@ fn get_current_ip_address() -> Option<IpAddr>{
     }
 }
 
-fn main() {
+// Reuses the node's identity key across restarts by caching it under the storage path.
+fn load_or_create_key(path: &str) -> signature::PrivateKey {
+    let key_path = Path::new(path).join("key");
+    if let Ok(hex) = fs::read_to_string(&key_path) {
+        if let Ok(key) = signature::PrivateKey::try_from(hex.trim()) {
+            return key;
+        }
+    }
+
+    let key = signature::KeyPair::random().private_key().clone();
+    fs::write(&key_path, key.to_hexstr())
+        .unwrap_or_else(|e| panic!("Failed to save node key: {}", e));
+    key
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let mut path = get_storage_path(".target_data");
     let mut port = 39001 as u16;
 
@@ -73,16 +91,24 @@ fn main() {
         }
     };
 
-    let cfg = cfg::Builder::new()
-        .with_listening_port(port)
-        .with_ipv4(&ip_str)
-        .with_storage_path(path.as_str())
+    let private_key = load_or_create_key(&path);
+
+    let node_cfg = cfg::Builder::new()
+        .with_port(port)
+        .with_host4(&ip_str)
+        .with_data_dir(path.as_str())
+        .with_private_key(private_key)
+        .with_database_uri("jdbc:sqlite:node.db")
         .build()
         .unwrap();
 
-    let node = Node::new(cfg).unwrap();
-    let _ = node.start();
+    node_cfg.dump();
 
-    thread::sleep(Duration::from_secs(60*100));
-    node.stop();
+    let node = Node::new(Box::new(node_cfg)).unwrap();
+    let _ = node.start().await;
+
+    println!("Target node running on {}:{} (storage: {})", ip_str, port, path);
+    sleep(Duration::from_secs(60*100)).await;
+    let _ = node.stop().await;
 }
+

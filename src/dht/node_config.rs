@@ -3,7 +3,7 @@ use log::LevelFilter;
 use crate::{NodeInfo, signature};
 pub const DEFAULT_DHT_PORT: u16 = 19001;
 
-pub trait NodeConfig: Send + Sync {
+pub trait NodeConfig {
     fn host4(&self) -> Option<&str>;
     fn host6(&self) -> Option<&str>;
     fn port(&self) -> u16 { DEFAULT_DHT_PORT}
@@ -20,5 +20,5 @@ pub trait NodeConfig: Send + Sync {
 
     fn enable_devp(&self) -> bool { false }
 
-    fn dump(&self);
+    fn dump(&self) {}
 }

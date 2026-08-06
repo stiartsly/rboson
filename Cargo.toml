@@ -17,31 +17,35 @@ path = "tests/apitests/lib.rs"
 
 [[bin]]
 name = "shell"
-path = "apps/shell/shell.rs"
+path = "apps/shell/main.rs"
 
-#[[bin]]
-#name = "announce_peer"
-#path = "apps/shell/announce_peer/main.rs"
+[[bin]]
+name = "announce_peer"
+path = "apps/shell/announce_peer/main.rs"
 
-#[[bin]]
-#name = "announce_value"
-#path = "apps/shell/announce_value/main.rs"
+[[bin]]
+name = "announce_value"
+path = "apps/shell/announce_value/main.rs"
 
-#[[bin]]
-#name = "query"
-#path = "apps/shell/query/main.rs"
+[[bin]]
+name = "query"
+path = "apps/shell/query/main.rs"
 
 [[bin]]
 name = "identity"
 path = "apps/identity/main.rs"
 
-#[[bin]]
-#name = "launcher"
-#path = "apps/launcher/main.rs"
+[[bin]]
+name = "launcher"
+path = "apps/launcher/main.rs"
 
 #[[bin]]
 #name = "im"
 #path = "apps/im/mod.rs"
+
+[[bin]]
+name = "node"
+path = "apps/sample/main.rs"
 
 [features]
 devp = ["inspect"]

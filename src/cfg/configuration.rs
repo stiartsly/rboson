@@ -106,8 +106,8 @@ struct ActiveProxyCfg {
     server_peerid   : Id,
     peer_private_key: Option<signature::PrivateKey>,
     domain_name     : Option<String>,
-    upstream_host   : Option<String>,
-    upstream_port   : Option<u16>,
+    upstream_host   : String,
+    upstream_port   : u16,
 }
 
 #[derive(Debug)]
@@ -124,10 +124,11 @@ pub struct Builder {
     log_console     : bool,
     devmode         : bool,
 
-    active_proxy_server_peerid    : Option<Id>,
-    active_proxy_peer_private_key : Option<signature::PrivateKey>,
-    active_proxy_upstream_host    : Option<String>,
-    active_proxy_upstream_port    : Option<u16>,
+    ap_service_peerid   : Option<Id>,
+    ap_upstream_peer_private_key : Option<signature::PrivateKey>,
+    ap_upstream_domain  : Option<String>,
+    ap_upstream_host    : Option<String>,
+    ap_upstream_port    : Option<u16>,
 }
 
 #[allow(unused)]
@@ -146,10 +147,11 @@ impl Builder {
             log_console     : true,
             devmode         : false,
 
-            active_proxy_server_peerid    : None,
-            active_proxy_peer_private_key : None,
-            active_proxy_upstream_host    : None,
-            active_proxy_upstream_port    : None,
+            ap_service_peerid   : None,
+            ap_upstream_peer_private_key : None,
+            ap_upstream_domain  : None,
+            ap_upstream_host    : None,
+            ap_upstream_port    : None,
         }
     }
 
@@ -183,13 +185,13 @@ impl Builder {
         self.devmode        = yaml.devmode;
 
         if let Some(ap) = yaml.activeproxy {
-            self.active_proxy_server_peerid = Some(ap.server_peerid);
-            self.active_proxy_peer_private_key = ap.peer_private_key
+            self.ap_service_peerid = Some(ap.server_peerid);
+            self.ap_upstream_peer_private_key = ap.peer_private_key
                 .as_deref()
                 .map(signature::PrivateKey::try_from)
                 .transpose()?;
-            self.active_proxy_upstream_host = ap.upstream_host;
-            self.active_proxy_upstream_port = ap.upstream_port;
+            self.ap_upstream_host = ap.upstream_host;
+            self.ap_upstream_port = ap.upstream_port;
         }
         Ok(())
     }
@@ -254,23 +256,28 @@ impl Builder {
         self
     }
 
-    pub fn with_active_proxy_server_peerid(&mut self, peerid: Id) -> &mut Self {
-        self.active_proxy_server_peerid = Some(peerid);
+    pub fn with_activeproxy_service_peerid(&mut self, peerid: Id) -> &mut Self {
+        self.ap_service_peerid = Some(peerid);
         self
     }
 
-    pub fn with_active_proxy_peer_private_key(&mut self, private_key: signature::PrivateKey) -> &mut Self {
-        self.active_proxy_peer_private_key = Some(private_key);
+    pub fn with_upstream_peer_private_key(&mut self, private_key: signature::PrivateKey) -> &mut Self {
+        self.ap_upstream_peer_private_key = Some(private_key);
         self
     }
 
-    pub fn with_active_proxy_upstream_host(&mut self, host: impl Into<String>) -> &mut Self {
-        self.active_proxy_upstream_host = Some(host.into());
+    pub fn with_upstream_domain(&mut self, domain: impl Into<String>) -> &mut Self {
+        self.ap_upstream_domain = Some(domain.into());
         self
     }
 
-    pub fn with_active_proxy_upstream_port(&mut self, port: u16) -> &mut Self {
-        self.active_proxy_upstream_port = Some(port);
+    pub fn with_upstream_host(&mut self, host: impl Into<String>) -> &mut Self {
+        self.ap_upstream_host = Some(host.into());
+        self
+    }
+
+    pub fn with_upstream_port(&mut self, port: u16) -> &mut Self {
+        self.ap_upstream_port = Some(port);
         self
     }
 
@@ -283,6 +290,15 @@ impl Builder {
         }
         if self.database_uri.is_none() {
             return Err(ArgumentError::new("Database URI is missing"));
+        }
+
+        if self.ap_service_peerid.is_some() {
+            if self.ap_upstream_host.is_none() {
+                return Err(ArgumentError::new("ActiveProxy upstream host is missing"));
+            }
+            if self.ap_upstream_port.is_none() {
+                return Err(ArgumentError::new("ActiveProxy upstream port is missing"));
+            }
         }
         Ok(())
     }
@@ -333,12 +349,12 @@ impl Builder {
             log_console     : self.log_console,
             devmode         : self.devmode,
 
-            active_proxy    : self.active_proxy_server_peerid.take().map(|server_peerid| ActiveProxyCfg {
-                server_peerid,
-                peer_private_key: self.active_proxy_peer_private_key.take(),
-                domain_name     : None,
-                upstream_host   : self.active_proxy_upstream_host.take(),
-                upstream_port   : self.active_proxy_upstream_port.take(),
+            active_proxy    : self.ap_service_peerid.take().map(|v| ActiveProxyCfg {
+                server_peerid   : v,
+                peer_private_key: self.ap_upstream_peer_private_key.take(),
+                domain_name     : self.ap_upstream_domain.take(),
+                upstream_host   : self.ap_upstream_host.take().unwrap(),
+                upstream_port   : self.ap_upstream_port.take().unwrap(),
             }),
         })
     }
@@ -414,13 +430,13 @@ impl ActiveProxyConfig for Configuration {
     }
 
     fn upstream_host(&self) -> Option<&str> {
-        self.active_proxy.as_ref().and_then(|cfg|
-            cfg.upstream_host.as_deref()
+        self.active_proxy.as_ref().map(|cfg|
+            cfg.upstream_host.as_str()
         )
     }
 
     fn upstream_port(&self) -> Option<u16> {
-        self.active_proxy.as_ref().and_then(|cfg|
+        self.active_proxy.as_ref().map(|cfg|
             cfg.upstream_port
         )
     }
@@ -532,6 +548,18 @@ impl fmt::Display for Configuration {
                 write!(f, "\n\t- {} {} {}", node.id(), node.host(), node.port())?;
             }
         }
+
+        if let Some(ap) = &self.active_proxy {
+            write!(f, "\n\tactiveProxy\t:")?;
+            write!(f, "\n\t- serverPeerId\t:{}", ap.server_peerid)?;
+            write!(f, "\n\t- peerPrivateKey\t:{}", ap.peer_private_key.as_ref().map(|k| k.to_string()).unwrap_or("<none>".to_string()))?;
+            write!(f, "\n\t- domainName\t:{}", ap.domain_name.as_deref().unwrap_or("<none>"))?;
+            write!(f, "\n\t- upstreamHost\t:{}", ap.upstream_host)?;
+            write!(f, "\n\t- upstreamPort\t:{}", ap.upstream_port)?;
+        } else {
+            write!(f, "\n\tactiveProxy\t:<none>")?;
+        }
+
         Ok(())
     }
 }

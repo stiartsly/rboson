@@ -67,10 +67,10 @@ mod tests {
             .with_host4("127.0.0.1")
             .with_private_key(keypair.private_key().clone())
             .with_database_uri("sqlite://node.db")
-            .with_active_proxy_server_peerid(server_peerid)
-            .with_active_proxy_peer_private_key(proxy_keypair.private_key().clone())
-            .with_active_proxy_upstream_host("upstream.example")
-            .with_active_proxy_upstream_port(18080)
+            .with_activeproxy_service_peerid(server_peerid)
+            .with_upstream_peer_private_key(proxy_keypair.private_key().clone())
+            .with_upstream_host("upstream.example")
+            .with_upstream_port(18080)
             .build()
             .unwrap();
 
@@ -130,10 +130,10 @@ mod tests {
             .with_port(40111)
             .with_data_dir("./override-data")
             .with_log_console(true)
-            .with_active_proxy_server_peerid(Id::random())
-            .with_active_proxy_peer_private_key(proxy_sk.clone())
-            .with_active_proxy_upstream_host("override.host")
-            .with_active_proxy_upstream_port(18081)
+            .with_activeproxy_service_peerid(Id::random())
+            .with_upstream_peer_private_key(proxy_sk.clone())
+            .with_upstream_host("override.host")
+            .with_upstream_port(18081)
             .build()
             .unwrap();
 

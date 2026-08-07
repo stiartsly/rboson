@@ -204,30 +204,4 @@ mod tests {
         failed.fail();
         assert_eq!(failed.state(), State::Err);
     }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_scheduler_timeout_canceled() {
-        /*
-        let target = make_target("127.0.0.1:40006");
-        let req = Arc::new(Mutex::new(msg::ping_request()));
-        let call = Arc::new(Mutex::new(RpcCall::with_node(target, req)));
-        call.lock().unwrap().set_cloned(call.clone());
-
-        let timed_out = Arc::new(Mutex::new(0usize));
-        let timed_out_cb = timed_out.clone();
-        call.lock().unwrap().set_timeout_cb(Box::new(move |_| {
-            *timed_out_cb.lock().unwrap() += 1;
-        }));
-
-        call.lock().unwrap().sent();
-        let rsp = make_matching_response(&call.lock().unwrap());
-        call.lock().unwrap().respond(rsp);
-
-        sleep(Duration::from_millis(60)).await;
-
-        assert_eq!(call.lock().unwrap().state(), State::Responded);
-        assert_eq!(*timed_out.lock().unwrap(), 0);
-        */
-    }
 }

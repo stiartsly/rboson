@@ -57,7 +57,6 @@ pub(super) fn make_dht(
 mod tests {
     use super::*;
 
-    #[ignore]
     #[tokio::test]
     async fn test_futures() {
         use std::sync::atomic::{AtomicU8, Ordering};
@@ -74,22 +73,6 @@ mod tests {
         })).await;
         let val = increment.lock().unwrap().load(Ordering::SeqCst);
         assert_eq!(val, 10);
-
-        /*
-        use futures::stream::{FuturesUnordered, FuturesOrdered, StreamExt};
-
-        let unordered = FuturesUnordered::new();
-        for i in 0..10 {
-            let increment = increment.clone();
-            unordered.push(async move {
-                increment.lock().unwrap().fetch_add(1, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            });
-        }
-        let result = futures::future::join_all(unordered).await;
-        let incre = increment.lock().unwrap().load(Ordering::SeqCst);
-        assert_eq!(incre, 20);
-        */
     }
 
     #[tokio::test]

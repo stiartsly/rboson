@@ -6,11 +6,11 @@ use std::borrow::Cow;
 use boson::{
     Id,
     Network,
+    NodeConfig,
+    cfg::configuration,
     signature::PrivateKey,
     dht::{
         Node,
-        NodeConfig,
-        configuration,
         ConnectionStatus,
         ConnectionStatusListener,
     },

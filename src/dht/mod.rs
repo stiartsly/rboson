@@ -138,8 +138,6 @@ mod timer_client;
 mod timer_manager;
 mod timer_verticle;
 
-pub mod node_config;
-pub mod configuration;
 pub mod errors;
 pub mod connection_status_listener;
 pub mod connection_status;
@@ -151,8 +149,6 @@ pub use crate::dht::{
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
-    node_config::NodeConfig,
-    configuration::NodeConfiguration,
 };
 
 pub(crate) mod utils {
@@ -239,8 +235,6 @@ pub(crate) mod utils {
 #[cfg(test)]
 mod unitests {
     mod test_addr;
-    mod test_configuration;
-
     mod test_rpccall;
     mod test_token_manager;
     mod test_dht;

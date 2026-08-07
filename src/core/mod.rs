@@ -1,7 +1,6 @@
 pub(crate) mod logger;
 pub(crate) mod version;
 
-pub mod config;
 pub mod id;
 pub mod network;
 pub mod identity;
@@ -24,16 +23,17 @@ pub use crate::core::{
     cryptobox::CryptoBox,
 
     network::Network,
-    config::{
-        Config,
-        UserConfig,
-        DeviceConfig,
-        ActiveProxyConfig,
-        MessagingConfig,
-    },
     node_info::NodeInfo,
-    peer_info::{PeerInfo, PeerBuilder},
-    value::{Value, ImmutableBuilder, SignedBuilder, EncryptedBuilder},
+    peer_info::{
+        PeerInfo,
+        PeerBuilder
+    },
+    value::{
+        Value,
+        ImmutableBuilder,
+        SignedBuilder,
+        EncryptedBuilder
+    },
 };
 
 #[cfg(test)]

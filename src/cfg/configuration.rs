@@ -11,7 +11,11 @@ use crate::{
     NodeInfo,
     signature,
     errors::{Result, IOError, ArgumentError},
-    dht::{NodeConfig, node_config::DEFAULT_DHT_PORT},
+    cfg::{
+        NodeConfig,
+        ActiveProxyConfig,
+        config::DEFAULT_DHT_PORT
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +43,20 @@ struct YamlNodeConfig {
     log_console     : bool,
     #[serde(rename = "enableDeveloperMode", default)]
     devmode         : bool,
+    #[serde(default)]
+    activeproxy     : Option<YamlActiveProxyConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlActiveProxyConfig {
+    #[serde(rename = "serverPeerId")]
+    server_peerid    : Id,
+    #[serde(rename = "peerPrivateKey")]
+    peer_private_key : Option<String>,
+    #[serde(rename = "upstreamHost")]
+    upstream_host    : Option<String>,
+    #[serde(rename = "upstreamPort")]
+    upstream_port    : Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,7 +85,7 @@ fn default_log_console() -> bool {
 }
 
 #[derive(Debug, Clone)]
-pub struct NodeConfiguration {
+pub struct Configuration {
     host4           : Option<String>,
     host6           : Option<String>,
     port            : u16,
@@ -79,6 +97,17 @@ pub struct NodeConfiguration {
     log_file        : Option<String>,
     log_console     : bool,
     devmode         : bool,
+
+    active_proxy    : Option<ActiveProxyCfg>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveProxyCfg {
+    server_peerid   : Id,
+    peer_private_key: Option<signature::PrivateKey>,
+    domain_name     : Option<String>,
+    upstream_host   : Option<String>,
+    upstream_port   : Option<u16>,
 }
 
 #[derive(Debug)]
@@ -94,8 +123,14 @@ pub struct Builder {
     log_file        : Option<String>,
     log_console     : bool,
     devmode         : bool,
+
+    active_proxy_server_peerid    : Option<Id>,
+    active_proxy_peer_private_key : Option<signature::PrivateKey>,
+    active_proxy_upstream_host    : Option<String>,
+    active_proxy_upstream_port    : Option<u16>,
 }
 
+#[allow(unused)]
 impl Builder {
     pub fn new() -> Self {
         Self {
@@ -110,6 +145,11 @@ impl Builder {
             log_file        : None,
             log_console     : true,
             devmode         : false,
+
+            active_proxy_server_peerid    : None,
+            active_proxy_peer_private_key : None,
+            active_proxy_upstream_host    : None,
+            active_proxy_upstream_port    : None,
         }
     }
 
@@ -141,6 +181,16 @@ impl Builder {
         self.log_file       = yaml.log_file;
         self.log_console    = yaml.log_console;
         self.devmode        = yaml.devmode;
+
+        if let Some(ap) = yaml.activeproxy {
+            self.active_proxy_server_peerid = Some(ap.server_peerid);
+            self.active_proxy_peer_private_key = ap.peer_private_key
+                .as_deref()
+                .map(signature::PrivateKey::try_from)
+                .transpose()?;
+            self.active_proxy_upstream_host = ap.upstream_host;
+            self.active_proxy_upstream_port = ap.upstream_port;
+        }
         Ok(())
     }
 
@@ -204,6 +254,26 @@ impl Builder {
         self
     }
 
+    pub fn with_active_proxy_server_peerid(&mut self, peerid: Id) -> &mut Self {
+        self.active_proxy_server_peerid = Some(peerid);
+        self
+    }
+
+    pub fn with_active_proxy_peer_private_key(&mut self, private_key: signature::PrivateKey) -> &mut Self {
+        self.active_proxy_peer_private_key = Some(private_key);
+        self
+    }
+
+    pub fn with_active_proxy_upstream_host(&mut self, host: impl Into<String>) -> &mut Self {
+        self.active_proxy_upstream_host = Some(host.into());
+        self
+    }
+
+    pub fn with_active_proxy_upstream_port(&mut self, port: u16) -> &mut Self {
+        self.active_proxy_upstream_port = Some(port);
+        self
+    }
+
     fn check_valid(&self) -> Result<()> {
         if self.host4.is_none() && self.host6.is_none() {
             return Err(ArgumentError::new("At least one of host4 or host6 must be set"));
@@ -247,10 +317,10 @@ impl Builder {
         self.load(path)
     }
 
-    pub fn build(&mut self) -> Result<NodeConfiguration> {
+    pub fn build(&mut self) -> Result<Configuration> {
         self.check_valid()?;
 
-        Ok(NodeConfiguration {
+        Ok(Configuration {
             host4           : self.host4.take(),
             host6           : self.host6.take(),
             port            : self.port.take().unwrap_or_else(default_port),
@@ -262,11 +332,19 @@ impl Builder {
             log_file        : self.log_file.take(),
             log_console     : self.log_console,
             devmode         : self.devmode,
+
+            active_proxy    : self.active_proxy_server_peerid.take().map(|server_peerid| ActiveProxyCfg {
+                server_peerid,
+                peer_private_key: self.active_proxy_peer_private_key.take(),
+                domain_name     : None,
+                upstream_host   : self.active_proxy_upstream_host.take(),
+                upstream_port   : self.active_proxy_upstream_port.take(),
+            }),
         })
     }
 }
 
-impl NodeConfig for NodeConfiguration {
+impl NodeConfig for Configuration {
     fn host4(&self) -> Option<&str> {
         self.host4.as_deref()
     }
@@ -313,6 +391,42 @@ impl NodeConfig for NodeConfiguration {
 
     fn dump(&self) {
         println!("{}", self);
+    }
+}
+
+impl ActiveProxyConfig for Configuration {
+    fn server_peerid(&self) -> Option<&Id> {
+        self.active_proxy.as_ref().map(|cfg|
+            &cfg.server_peerid
+        )
+    }
+
+    fn peer_private_key(&self) -> Option<&signature::PrivateKey> {
+        self.active_proxy.as_ref().and_then(|cfg|
+            cfg.peer_private_key.as_ref()
+        )
+    }
+
+    fn domain_name(&self) -> Option<&str> {
+        self.active_proxy.as_ref().and_then(|cfg|
+            cfg.domain_name.as_deref()
+        )
+    }
+
+    fn upstream_host(&self) -> Option<&str> {
+        self.active_proxy.as_ref().and_then(|cfg|
+            cfg.upstream_host.as_deref()
+        )
+    }
+
+    fn upstream_port(&self) -> Option<u16> {
+        self.active_proxy.as_ref().and_then(|cfg|
+            cfg.upstream_port
+        )
+    }
+
+    fn dump(&self) {
+        unimplemented!()
     }
 }
 
@@ -397,7 +511,7 @@ fn config_paths() -> Vec<PathBuf> {
     paths
 }
 
-impl fmt::Display for NodeConfiguration {
+impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "node config:")?;
         write!(f, "\n\thost4\t:{}", self.host4.as_deref().unwrap_or("<none>"))?;

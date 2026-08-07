@@ -11,11 +11,11 @@ use tokio::sync::Notify;
 
 use boson::{
     Id,
+    NodeConfig,
+    cfg::configuration,
     dht::{
         Node,
-        NodeConfig,
         ConnectionStatus,
-        configuration,
     },
     network::Network,
     connection_status_listener::ConnectionStatusListener,

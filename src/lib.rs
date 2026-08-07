@@ -1,9 +1,16 @@
+pub mod cfg;
 pub mod core;
 pub mod did;
 pub mod dht;
 pub mod activeproxy;
 pub mod messaging;
 pub(crate) mod utils;
+
+pub use crate::cfg::{
+    NodeConfig,
+    ActiveProxyConfig,
+    configuration::Configuration,
+};
 
 pub use crate::core::{
     id::{
@@ -27,9 +34,6 @@ pub use crate::core::{
     network::{self, Network},
     identity::{self, Identity, CryptoIdentity},
     crypto_context::{self, CryptoContext},
-
-    //node_config::{self, NodeConfig},
-    //default_configuration as configuration,
 };
 
 pub use crate::did::{
@@ -48,8 +52,7 @@ pub use crate::did::{
 pub use crate::dht::{
     node::{self, Node},
     connection_status::{self, ConnectionStatus},
-    connection_status_listener::{self, ConnectionStatusListener},
-    configuration as node_configuration,
+    connection_status_listener::{self, ConnectionStatusListener}
 };
 
 pub use crate::activeproxy::{

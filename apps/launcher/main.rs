@@ -11,10 +11,10 @@ use boson::{
     Id,
     Network,
     signature,
+    NodeConfig,
+    cfg::configuration,
     dht::{
         Node,
-        NodeConfig,
-        configuration,
         ConnectionStatus,
         ConnectionStatusListener
     },

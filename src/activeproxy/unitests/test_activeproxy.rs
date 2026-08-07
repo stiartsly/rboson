@@ -6,7 +6,7 @@ use crate::{
         ActiveProxyClient as ActiveProxy,
         client::ActiveProxyOptions
     },
-    dht::configuration,
+    cfg::configuration
 };
 
 fn remove_path(input: &str) {

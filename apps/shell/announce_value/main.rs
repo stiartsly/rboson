@@ -9,11 +9,11 @@ use boson::{
     Value,
     SignedBuilder,
     Network,
+    NodeConfig,
+    cfg::configuration,
     signature::{KeyPair, PrivateKey},
     dht::{
         Node,
-        NodeConfig,
-        configuration,
         ConnectionStatus,
         ConnectionStatusListener,
     },

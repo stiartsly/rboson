@@ -23,10 +23,10 @@ use crate::{
     Value,
     core::{logger,version},
     errors::{ArgumentError, IOError, Result, StateError},
-    signature
+    signature,
+    NodeConfig,
 };
 use crate::dht::{
-    NodeConfig,
     LookupOption,
     eligible_value::EligibleValue,
     eligible_peers::EligiblePeers,

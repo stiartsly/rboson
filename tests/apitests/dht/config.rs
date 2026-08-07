@@ -1,7 +1,8 @@
 use std::env;
 use log::LevelFilter;
 use boson::{
-    dht::{NodeConfig, configuration},
+    NodeConfig,
+    cfg::configuration,
     signature::{KeyPair, PrivateKey},
 };
 

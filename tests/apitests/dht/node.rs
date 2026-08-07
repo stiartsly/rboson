@@ -6,15 +6,13 @@ use std::{
 use serial_test::serial;
 use boson::{
     signature,
+    cfg::configuration,
     cryptobox::{Nonce, CryptoBox},
     core::{
         PeerBuilder, Result,
         ImmutableBuilder as ValueBuilder,
     },
-    dht::{
-        configuration,
-        Node,
-    },
+    dht::Node,
 };
 use crate::{
     create_random_bytes,

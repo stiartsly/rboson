@@ -8,11 +8,11 @@ use clap::Parser;
 use boson::{
     PeerInfo,
     Network,
+    NodeConfig,
+    cfg::configuration,
     signature::{PrivateKey, KeyPair},
     dht::{
         Node,
-        NodeConfig,
-        configuration,
         ConnectionStatus,
         ConnectionStatusListener,
     },

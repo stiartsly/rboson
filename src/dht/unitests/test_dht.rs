@@ -36,14 +36,13 @@ pub(super) fn make_dht(
     let listener: Arc<dyn ConnectionStatusListener> = Arc::new(NoopConnectionStatusListener);
     let (tx, rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
     let timer_client = Rc::new(LocalTimerClient::new(tx));
-    let data_dir = PathBuf::from(".");
 
     let options = VerticleOptions::default()
         .with_identity(identity)
         .with_storage(storage)
         .with_tokenman(tokenman)
         .with_listener(listener)
-        .with_datadir(data_dir);
+        .with_datadir(".");
 
     let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client)
         .expect("test DHT should build");

@@ -8,15 +8,12 @@
 .vscode
 
 
-# Added by cargo
-#
-# already existing elements were commented out
-
 .shell_data
 .target_data
+.sample_node
 .DS_Store
 
 
 .github
 .shell_*
-
+**/config.yaml

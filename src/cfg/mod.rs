@@ -8,8 +8,5 @@ mod unitests {
 
 pub use {
     configuration::Configuration,
-    config::{
-        NodeConfig,
-        ActiveProxyConfig,
-    }
+    config::DEFAULT_DHT_PORT,
 };

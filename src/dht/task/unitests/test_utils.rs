@@ -36,7 +36,7 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<RefCell<DHT>> {
         .with_storage(storage)
         .with_tokenman(token_man)
         .with_listener(listener)
-        .with_datadir(PathBuf::from("."));
+        .with_datadir(".");
 
     let (tx, _rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
     let timer_client = Rc::new(LocalTimerClient::new(tx));

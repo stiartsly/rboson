@@ -51,9 +51,9 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
 
     fs::write(&config_path, yaml)?;
     let cfg = configuration::Builder::new()
-        .load(&config_path).unwrap()
+        .load_from(&config_path).unwrap()
         .build().unwrap();
-    Ok(Node::new(Box::new(cfg))?)
+    Ok(Node::new(cfg.build_node_options().unwrap())?)
 }
 
 #[cfg(test)]

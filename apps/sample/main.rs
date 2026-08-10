@@ -1,13 +1,13 @@
-use std::env;
-use std::fs;
-use std::net::IpAddr;
-use std::path::Path;
+use std::{
+    env,
+    fs,
+    net::IpAddr,
+    path::Path
+};
 use tokio::time::{sleep, Duration};
 use get_if_addrs::get_if_addrs;
-
 use boson::{
     Node,
-    NodeConfig,
     signature,
     cfg::configuration as cfg,
 };
@@ -43,8 +43,7 @@ fn get_current_ip_address() -> Option<IpAddr>{
     }
 }
 
-// Reuses the node's identity key across restarts by caching it under the storage path.
-fn load_or_create_key(path: &str) -> signature::PrivateKey {
+fn load_or_generate_key(path: &str) -> signature::PrivateKey {
     let key_path = Path::new(path).join("key");
     if let Ok(hex) = fs::read_to_string(&key_path) {
         if let Ok(key) = signature::PrivateKey::try_from(hex.trim()) {
@@ -60,22 +59,20 @@ fn load_or_create_key(path: &str) -> signature::PrivateKey {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mut path = get_storage_path(".target_data");
+    let mut path = get_storage_path(".sample_node");
     let mut port = 39001 as u16;
 
-    let ip_str = {
-        match get_current_ip_address() {
-            Some(addr) => addr,
-            None => return
-        }.to_string()
-    };
+    let ip_str = match get_current_ip_address() {
+        Some(addr) => addr,
+        _ => return,
+    }.to_string();
 
     let args: Vec<String> = env::args().collect();
 
     let mut iter = args.iter();
     while let Some(argv) = iter.next() {
         match argv.as_ref() {
-            "--storepath" => {
+            "--store" => {
                 if let Some(arg) = iter.next() {
                     path = arg.clone();
                 }
@@ -91,9 +88,9 @@ async fn main() {
         }
     };
 
-    let private_key = load_or_create_key(&path);
+    let private_key = load_or_generate_key(&path);
 
-    let node_cfg = cfg::Builder::new()
+    let cfg = cfg::Configuration::new()
         .with_port(port)
         .with_host4(&ip_str)
         .with_data_dir(path.as_str())
@@ -102,13 +99,13 @@ async fn main() {
         .build()
         .unwrap();
 
-    node_cfg.dump();
+    cfg.dump();
 
-    let node = Node::new(Box::new(node_cfg)).unwrap();
+    let options = cfg.build_node_options().unwrap();
+    let node = Node::new(options).unwrap();
     let _ = node.start().await;
 
     println!("Target node running on {}:{} (storage: {})", ip_str, port, path);
-    sleep(Duration::from_secs(60*100)).await;
+    sleep(Duration::from_secs(60)).await;
     let _ = node.stop().await;
 }
-

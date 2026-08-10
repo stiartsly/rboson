@@ -6,7 +6,6 @@ use std::borrow::Cow;
 use boson::{
     Id,
     Network,
-    NodeConfig,
     cfg::configuration,
     signature::PrivateKey,
     dht::{
@@ -204,7 +203,7 @@ async fn main() {
     let opts = Options::parse();
 
     let mut builder = configuration::Builder::new();
-    if let Err(e) = builder.load(opts.config.as_deref().unwrap_or("config.yaml")) {
+    if let Err(e) = builder.load_from(opts.config.as_deref().unwrap_or("config.yaml")) {
         println!("Loading configuration failed: {e}");
         return;
     }
@@ -238,7 +237,7 @@ async fn main() {
     let private_key = config.private_key().clone();
     let ready = Arc::new(tokio::sync::Notify::new());
 
-    let node = Node::new(Box::new(config)).unwrap();
+    let node = Node::new(config.build_node_options().unwrap()).unwrap();
     node.add_listener(DefaultConnectionStatusListener { ready: Some(ready.clone()) });
     let _ = node.start().await;
 

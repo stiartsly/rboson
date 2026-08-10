@@ -3,6 +3,7 @@ mod state;
 mod connection;
 mod managed;
 mod worker;
+pub mod options;
 pub mod client;
 
 #[cfg(test)]
@@ -12,6 +13,7 @@ mod unitests {
 
 pub use {
     client::ProxyClient as ActiveProxyClient,
+    options::{ActiveProxyOptions, ActiveProxyOptionsBuilder},
 };
 
 pub(crate)

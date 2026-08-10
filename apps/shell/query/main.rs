@@ -11,7 +11,6 @@ use tokio::sync::Notify;
 
 use boson::{
     Id,
-    NodeConfig,
     cfg::configuration,
     dht::{
         Node,
@@ -69,7 +68,7 @@ async fn main() {
     local.run_until(async {
         let opts = Options::parse();
         let config = match configuration::Builder::new()
-                .load(opts.config.as_deref().unwrap_or("node.yaml"))
+                .load_from(opts.config.as_deref().unwrap_or("node.yaml"))
                 .and_then(|b| b.build())
         {
             Ok(v) => v,
@@ -92,7 +91,7 @@ async fn main() {
 
         let bootstrap_nodes = config.bootstrap_nodes().to_vec();
 
-        let node = Node::new(Box::new(config)).unwrap();
+        let node = Node::new(config.build_node_options().unwrap()).unwrap();
         node.add_listener(listener);
         let _ = node.start().await;
 

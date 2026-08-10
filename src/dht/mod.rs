@@ -142,10 +142,12 @@ pub mod errors;
 pub mod connection_status_listener;
 pub mod connection_status;
 pub mod lookup_option;
+pub mod node_options;
 pub mod node;
 
 pub use crate::dht::{
     node::Node,
+    node_options::{NodeOptions, NodeOptionsBuilder},
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,

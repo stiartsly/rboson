@@ -20,17 +20,8 @@ use crate::{
 use super::{
     managed::ManagedFields,
     worker::{self, ManagedWorker},
+    options::ActiveProxyOptions,
 };
-
-pub struct ActiveProxyOptions {
-    pub cached_dir: PathBuf,
-    pub server_peerid: Id,
-    pub user_keypair: signature::KeyPair,
-    pub peer_keypair: Option<signature::KeyPair>,
-    pub upstream_host: String,
-    pub upstream_port: u16,
-    pub upstream_domain: Option<String>,
-}
 
 pub struct ProxyClient {
     node:               Arc<Node>,
@@ -53,7 +44,7 @@ pub struct ProxyClient {
 
 impl ProxyClient {
     pub fn new(node: Arc<Node>, options: ActiveProxyOptions) -> Result<Self> {
-        let upstream_name = format!("{}:{}", options.upstream_host, options.upstream_port);
+        let upstream_name = format!("{}:{}", options.upstream_host(), options.upstream_port());
         let upstream_addr = upstream_name.to_socket_addrs()
             .map_err(|e| {
                 error!("Failed to resolve address '{upstream_name}', network error: {e}");
@@ -66,18 +57,20 @@ impl ProxyClient {
             })?;
 
         let managed = {
-            let mut fields = ManagedFields::new(&options.user_keypair);
-            fields.peer_keypair  = options.peer_keypair;
+            let mut fields = ManagedFields::new(&signature::KeyPair::random());
+            fields.peer_keypair = options
+                .upstream_peer_private_key()
+                .map(signature::KeyPair::from);
             fields.upstream_addr = Some(upstream_addr.clone());
             fields.upstream_name = Some(upstream_name.clone());
-            fields.peer_domain   = options.upstream_domain.clone();
+            fields.peer_domain = options.upstream_domain().map(str::to_string);
 
             Arc::new(Mutex::new(fields))
         };
 
-        let peerid = options.server_peerid.clone();
+        let peerid = options.server_peerid().clone();
         let worker = Arc::new(Mutex::new(ManagedWorker::new(
-            options.cached_dir.clone(),
+            PathBuf::from(options.data_dir()).join("activeproxy.cache"),
             node.clone(),
             managed.clone(),
             peerid.clone(),
@@ -85,17 +78,17 @@ impl ProxyClient {
 
         Ok(Self {
             node,
-            cached_dir: options.cached_dir,
+            cached_dir: PathBuf::from(options.data_dir()).join("activeproxy.cache"),
 
             remote_peerid:  peerid,
             remote_peer:    None,
             remote_node:    None,
 
-            upstream_host:  options.upstream_host,
-            upstream_port:  options.upstream_port,
+            upstream_host:  options.upstream_host().to_string(),
+            upstream_port:  options.upstream_port(),
             upstream_endpoint:  upstream_name,
             upstream_addr:  upstream_addr,
-            upstream_domain:    options.upstream_domain,
+            upstream_domain: options.upstream_domain().map(str::to_string),
 
             managed,
             worker,

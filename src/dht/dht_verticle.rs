@@ -250,8 +250,8 @@ impl VerticleOptions {
         self
     }
 
-    pub(crate) fn with_datadir(mut self, datadir: PathBuf) -> Self {
-        self.data_dir = Some(datadir);
+    pub(crate) fn with_datadir(mut self, data_dir: impl Into<String>) -> Self {
+        self.data_dir = Some(PathBuf::from(data_dir.into()));
         self
     }
 

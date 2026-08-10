@@ -8,7 +8,6 @@ use clap::Parser;
 use boson::{
     PeerInfo,
     Network,
-    NodeConfig,
     cfg::configuration,
     signature::{PrivateKey, KeyPair},
     dht::{
@@ -107,7 +106,7 @@ async fn announce_peer(node: &Node, peer: &PeerInfo) -> bool {
 async fn main() {
     let opts = Options::parse();
     let config = match configuration::Builder::new()
-            .load(opts.config.as_deref().unwrap_or("config.yaml"))
+            .load_from(opts.config.as_deref().unwrap_or("config.yaml"))
             .and_then(|b| b.build())
     {
         Ok(v) => v,
@@ -128,7 +127,7 @@ async fn main() {
         status: Some(status.clone()),
     };
 
-    let node = Node::new(Box::new(config)).unwrap();
+    let node = Node::new(config.build_node_options().unwrap()).unwrap();
     node.add_listener(listener);
     let _ = node.start().await;
 

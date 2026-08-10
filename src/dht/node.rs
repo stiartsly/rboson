@@ -23,11 +23,11 @@ use crate::{
     Value,
     core::{logger,version},
     errors::{ArgumentError, IOError, Result, StateError},
-    signature,
-    NodeConfig,
+    signature
 };
 use crate::dht::{
     LookupOption,
+    NodeOptions,
     eligible_value::EligibleValue,
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
@@ -56,7 +56,7 @@ const RE_ANNOUNCE_INTERVAL      : u64 = 5 * 60 * 1000;      // 5 minutes in mill
 const STORAGE_EXPIRE_INTERVAL   : u64 = 10 * 60 * 1000;     // 10 minutes in milliseconds
 
 pub struct Node {
-    cfg             : Box<dyn NodeConfig>,
+    options         : NodeOptions,
     identity        : CachedIdentity,
 
     lookup_option   : Mutex<LookupOption>,
@@ -64,7 +64,6 @@ pub struct Node {
     dht4            : Mutex<Option<Arc<VerticleClient>>>,
     dht6            : Mutex<Option<Arc<VerticleClient>>>,
 
-    data_dir        : PathBuf,
     database_uri    : PathBuf,
 
     running         : Mutex<bool>,
@@ -78,39 +77,40 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(cfg: Box<dyn NodeConfig>) -> Result<Arc<Self>> {
-        Self::check_config(cfg.as_ref())?;
+    pub fn new(options: NodeOptions) -> Result<Arc<Self>> {
+        Self::check_options(&options)?;
 
-        let path: Option<PathBuf> = cfg.as_ref().log_file().map(|v|{
-            let mut path = PathBuf::from(cfg.as_ref().data_dir());
+        let path: Option<PathBuf> = options.log_file().map(|v|{
+            let mut path = PathBuf::from(options.data_dir());
             path.push(v);
             Some(path)
         }).unwrap_or(None);
 
         logger::setup(
-            cfg.as_ref().log_level(),
+            options.log_level(),
             path.as_ref().map(|v| v.to_str().unwrap())
         );
-        if cfg.as_ref().log_console() {
+        if options.log_console() {
             logger::enable_console_output();
         } else {
             logger::disable_console_output();
         }
 
-        #[cfg(feature = "devp")]
-        info!("DHT node running in development mode!!!");
+        if options.developer_mode() {
+            info!("DHT node running in development mode!!!");
+        }
 
-        let data_dir = PathBuf::from(cfg.data_dir());
+        let data_dir = PathBuf::from(options.data_dir());
         let database_uri = data_dir.join(
-            data_storage::database_name(cfg.database_uri())
+            data_storage::database_name(options.database_uri())
         );
 
         let identity = CachedIdentity::new({
-            let kp = signature::KeyPair::from(cfg.private_key());
+            let kp = signature::KeyPair::from(options.private_key());
             CryptoIdentity::from(kp)
         });
 
-        // Cache the node id to a file for quick access in the future.
+        // Cache the node id to a file for convinient access.
         let bs58 = identity.id().to_base58();
         let path = data_dir.join("id");
         File::create(&path).map_err(|e| IOError::new(
@@ -121,9 +121,8 @@ impl Node {
         info!("The Kademlia node ID: {}", identity.id());
 
         Ok(Arc::new_cyclic(|weak| Self {
-            cfg,
+            options,
             identity,
-            data_dir,
             database_uri,
             lookup_option   : Mutex::new(LookupOption::Conservative),
             dht4            : Mutex::new(None),
@@ -140,22 +139,17 @@ impl Node {
         }))
     }
 
-    fn check_config(cfg: &dyn NodeConfig) -> Result<()> {
-        if cfg.host4().is_none() && cfg.host6().is_none() {
+    fn check_options(opts: &NodeOptions) -> Result<()> {
+        if opts.host4().is_none() && opts.host6().is_none() {
             return Err(ArgumentError::new(
                 "At least one host/address must be specified"));
         }
 
-        //if cfg.bootstrap_nodes().is_empty() {
-        //    return Err(ArgumentError::new(
-        //        "At least one bootstrap node must be specified"));
-        //}
-
-        if cfg.data_dir().is_empty() {
+        if opts.data_dir().is_empty() {
             return Err(ArgumentError::new("Data directory cannot be empty"));
         }
 
-        let data_dir = cfg.data_dir();
+        let data_dir = opts.data_dir();
         let path = Path::new(data_dir);
         if path.exists() {
             if !path.is_dir() {
@@ -169,7 +163,7 @@ impl Node {
             })?;
         };
 
-        let database_uri = cfg.database_uri();
+        let database_uri = opts.database_uri();
         if database_uri.is_empty() {
             return Err(ArgumentError::new("Database URI cannot be empty"));
         }
@@ -183,7 +177,7 @@ impl Node {
     }
 
     #[inline]
-    fn option(&self, option: Option<LookupOption>) -> LookupOption {
+    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
         option.unwrap_or_else(|| self.default_lookup_option())
     }
 
@@ -324,15 +318,16 @@ impl Node {
         };
 
         {
-            let db_path = self.database_uri.to_str()
-                .ok_or_else(|| IOError::new("Database path contains invalid UTF-8"))?;
+            let dbpath = self.database_uri.to_str().ok_or_else(||
+                IOError::new("Database path contains invalid UTF-8")
+            )?;
             let mut locked = self.storage.lock().unwrap();
-            locked.open(db_path)?;
+            locked.open(dbpath)?;
             locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?
         }
 
         let options = timer_verticle::VerticleOptions::default();
-        let client = timer_verticle::deploy(options)?;
+        let client  = timer_verticle::deploy(options)?;
         *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
 
         self.setup_periodic_tasks().await?;
@@ -341,20 +336,18 @@ impl Node {
             listeners: self.listeners.clone()
         });
 
-
-
         let options = VerticleOptions::default()
             .with_identity(self.identity.identity())
             .with_storage(self.storage.clone())
             .with_tokenman(self.token_man.clone())
-            .with_bootstrap(self.cfg.bootstrap_nodes().to_vec())
-            .with_datadir(self.data_dir.clone())
+            .with_bootstrap(self.options.bootstrap_nodes().to_vec())
+            .with_datadir(self.options.data_dir())
             .with_listener(listener);
 
 
-        let port  = self.cfg.port();
-        let host4 = self.cfg.host4();
-        let host6 = self.cfg.host6();
+        let port  = self.options.port();
+        let host4 = self.options.host4();
+        let host6 = self.options.host6();
 
         let cb = async move|host: Option<&str> | {
             if let Some(host) = host {
@@ -501,7 +494,7 @@ impl Node {
     {
         self.check_running()?;
 
-        let option  = self.option(lookup_option);
+        let option  = self.lookup_option(lookup_option);
         let cb = async move |dht: Option<Arc<VerticleClient>>| {
             let target  = target.clone();
             if let Some(dht) = dht {
@@ -558,7 +551,7 @@ impl Node {
         self.check_running()?;
 
         let target  = value_id.clone();
-        let option  = self.option(lookup_option);
+        let option  = self.lookup_option(lookup_option);
         let dht4    = self.dht4.lock().unwrap().clone();
         let dht6    = self.dht6.lock().unwrap().clone();
 
@@ -622,7 +615,7 @@ impl Node {
         self.check_running()?;
 
         let target  = peer_id.clone();
-        let option  = self.option(lookup_option);
+        let option  = self.lookup_option(lookup_option);
         let dht4    = self.dht4.lock().unwrap().clone();
         let dht6    = self.dht6.lock().unwrap().clone();
 

@@ -1,10 +1,7 @@
 use crate::{
-    Id,
     dht::Node,
-    signature,
     activeproxy::{
         ActiveProxyClient as ActiveProxy,
-        client::ActiveProxyOptions
     },
     cfg::configuration
 };
@@ -49,24 +46,37 @@ fn test_activeproxy() {
         data_dir,
     );
 
-    let cfg = Box::new(configuration::Builder::new().from(&yaml).unwrap().build().unwrap());
+    let mut b = configuration::Builder::new();
+    let _ = b.read_from(&yaml).unwrap();
 
-    let result = Node::new(cfg);
+    let server_peerid = json
+        .get("activeproxy")
+        .and_then(|v| v.get("serverPeerId"))
+        .and_then(|v| v.as_str())
+        .unwrap();
+    let upstream_host = json
+        .get("activeproxy")
+        .and_then(|v| v.get("upstreamHost"))
+        .and_then(|v| v.as_str())
+        .unwrap();
+    let upstream_port = json
+        .get("activeproxy")
+        .and_then(|v| v.get("upstreamPort"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(8080) as u16;
+
+    b.with_activeproxy_service_peerid(server_peerid.try_into().unwrap())
+        .with_upstream_host(upstream_host)
+        .with_upstream_port(upstream_port);
+
+    let cfg = b.build().unwrap();
+
+    let result = Node::new(cfg.build_node_options().unwrap());
     assert_eq!(result.is_ok(), true);
 
     let node = result.unwrap();
-    let user_sk = signature::PrivateKey::try_from(user_private_key).unwrap();
-    let options = ActiveProxyOptions {
-        cached_dir: std::path::PathBuf::from(data_dir).join("activeproxy.cache"),
-        server_peerid: Id::try_from(
-            json.get("activeproxy").and_then(|v| v.get("serverPeerId")).and_then(|v| v.as_str()).unwrap()
-        ).unwrap(),
-        user_keypair: signature::KeyPair::from(&user_sk),
-        peer_keypair: None,
-        upstream_host: json.get("activeproxy").and_then(|v| v.get("upstreamHost")).and_then(|v| v.as_str()).unwrap().to_string(),
-        upstream_port: json.get("activeproxy").and_then(|v| v.get("upstreamPort")).and_then(|v| v.as_u64()).unwrap_or(8080) as u16,
-        upstream_domain: None,
-    };
+
+    let options = cfg.build_activeproxy_options().unwrap().unwrap();
     let result = ActiveProxy::new(node.clone(), options);
     assert_eq!(result.is_ok(), true);
 
@@ -76,7 +86,7 @@ fn test_activeproxy() {
     assert_eq!(ap.upstream_port(), 8080);
     assert_eq!(ap.upstream_endpoint(), "127.0.0.1:8080");
     assert_eq!(ap.domain_name(), None);
-    assert_eq!(ap.remote_peerid().clone(), Id::try_from("FemkhMoaGnt8HUYANxX9zKgd5Ghy7tWxDkxqd1fe6kJT").unwrap());
+    assert_eq!(ap.remote_peerid().clone(), "FemkhMoaGnt8HUYANxX9zKgd5Ghy7tWxDkxqd1fe6kJT".try_into().unwrap());
 
     remove_path(data_dir);
     remove_file("unitests.log");

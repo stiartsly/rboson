@@ -1,7 +1,6 @@
 use std::{
-    cell::RefCell,
-    path::PathBuf,
     rc::Rc,
+    cell::RefCell,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;

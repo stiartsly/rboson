@@ -1,8 +1,7 @@
 use std::{
     rc::Rc,
     cell::RefCell,
-    sync::{Arc, Mutex},
-    path::PathBuf,
+    sync::{Arc, Mutex}
 };
 use tokio::sync::mpsc;
 use crate::CryptoIdentity;

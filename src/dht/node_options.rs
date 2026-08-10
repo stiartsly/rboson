@@ -45,6 +45,9 @@ impl NodeOptions {
             developer_mode  : false,
         }
     }
+    pub fn builder() -> NodeOptionsBuilder {
+        NodeOptionsBuilder::new()
+    }
 
     pub fn host4(&self) -> Option<&str> {
         self.host4.as_deref()
@@ -94,7 +97,6 @@ impl NodeOptions {
 pub struct NodeOptionsBuilder {
     options: NodeOptions,
 }
-
 
 impl NodeOptionsBuilder {
     pub fn new() -> Self {

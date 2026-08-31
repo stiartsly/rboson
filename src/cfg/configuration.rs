@@ -10,7 +10,10 @@ use serde::Deserialize;
 use crate::{
     Id,
     NodeInfo,
-    activeproxy::{ActiveProxyOptions, ActiveProxyOptionsBuilder},
+    activeproxy::{
+        Options as ActiveProxyOptions,
+        OptionsBuilder as ActiveProxyOptionsBuilder
+    },
     dht::{NodeOptions, NodeOptionsBuilder},
     errors::{ArgumentError, IOError, Result},
     signature,
@@ -20,12 +23,12 @@ const DEFAULT_DHT_PORT: u16 = 19001;
 
 #[derive(Debug, Deserialize)]
 struct SerdeConfiguration {
+    #[serde(rename = "privateKey")]
+    private_key     : String,
     ipv4: Option<bool>,
     ipv6: Option<bool>,
     #[serde(default = "default_port")]
     port            : u16,
-    #[serde(rename = "privateKey")]
-    private_key     : String,
     #[serde(rename = "dataDir")]
     data_dir        : Option<String>,
     #[serde(rename = "databaseUri")]
@@ -43,6 +46,12 @@ struct SerdeConfiguration {
     log_console     : bool,
     #[serde(rename = "enableDeveloperMode", default)]
     devmode         : bool,
+
+    #[serde(rename = "userKey")]
+    user_key        : Option<String>,
+    #[serde(rename = "deviceKey")]
+    device_key      : Option<String>,
+
     #[serde(default)]
     activeproxy     : Option<SerdeActiveProxy>,
 }
@@ -52,16 +61,16 @@ struct SerdeNodeEntry(Id, String, u16);
 
 #[derive(Debug, Deserialize)]
 struct SerdeActiveProxy {
+    #[serde(rename = "device_key")]
+    device_key      : Option<String>,
     #[serde(rename = "serverPeerId")]
-    server_peerid: Id,
-    #[serde(rename = "peerPrivateKey")]
-    peer_private_key: Option<String>,
-    #[serde(rename = "upstreamDomain")]
-    upstream_domain: Option<String>,
+    server_peerid   : Id,
     #[serde(rename = "upstreamHost")]
-    upstream_host: Option<String>,
+    upstream_host   : Option<String>,
     #[serde(rename = "upstreamPort")]
-    upstream_port: Option<u16>,
+    upstream_port   : Option<u16>,
+    name_access     : Option<bool>,
+    announce_peer   : Option<bool>,
 }
 
 impl TryFrom<SerdeNodeEntry> for NodeInfo {
@@ -88,10 +97,10 @@ fn default_log_console() -> bool {
 
 #[derive(Debug, Clone)]
 pub struct Configuration {
+    private_key     : signature::PrivateKey,
     host4           : Option<String>,
     host6           : Option<String>,
     port            : u16,
-    private_key     : signature::PrivateKey,
     data_dir        : String,
     database_uri    : String,
     bootstrap_nodes : Vec<NodeInfo>,
@@ -100,19 +109,22 @@ pub struct Configuration {
     log_console     : bool,
     developer_mode  : bool,
 
+    user_key        : Option<signature::PrivateKey>,
+    device_key      : Option<signature::PrivateKey>,
+
     server_peerid   : Option<Id>,
-    upstream_peer_private_key: Option<signature::PrivateKey>,
-    upstream_domain : Option<String>,
     upstream_host   : Option<String>,
-    upstream_port   : Option<u16>
+    upstream_port   : Option<u16>,
+    name_access     : bool,
+    announce_peer   : bool,
 }
 
 #[derive(Debug)]
 pub struct Builder {
+    private_key     : Option<signature::PrivateKey>,
     host4           : Option<String>,
     host6           : Option<String>,
     port            : Option<u16>,
-    private_key     : Option<signature::PrivateKey>,
     data_dir        : Option<String>,
     database_uri    : Option<String>,
     bootstrap_nodes : Vec<NodeInfo>,
@@ -122,10 +134,12 @@ pub struct Builder {
     devmode         : bool,
 
     server_peerid   : Option<Id>,
-    upstream_peer_private_key : Option<signature::PrivateKey>,
-    upstream_domain : Option<String>,
+    user_key        : Option<signature::PrivateKey>,
+    device_key      : Option<signature::PrivateKey>,
     upstream_host   : Option<String>,
-    upstream_port: Option<u16>,
+    upstream_port   : Option<u16>,
+    name_access     : bool,
+    announce_peer   : bool,
 }
 
 #[allow(unused)]
@@ -145,10 +159,12 @@ impl Builder {
             devmode         : false,
 
             server_peerid   : None,
-            upstream_peer_private_key: None,
-            upstream_domain : None,
+            user_key        : None,
+            device_key      : None,
             upstream_host   : None,
             upstream_port   : None,
+            name_access     : false,
+            announce_peer   : false,
         }
     }
 
@@ -180,16 +196,30 @@ impl Builder {
         self.log_console = yaml.log_console;
         self.devmode = yaml.devmode;
 
+        self.user_key = if let Some(key) = yaml.user_key {
+            Some(signature::PrivateKey::try_from(key.as_str())?)
+        } else {
+            None
+        };
+
         if let Some(ap) = yaml.activeproxy {
             self.server_peerid = Some(ap.server_peerid);
-            self.upstream_peer_private_key = ap
-                .peer_private_key
-                .as_deref()
-                .map(signature::PrivateKey::try_from)
-                .transpose()?;
-            self.upstream_domain = ap.upstream_domain;
             self.upstream_host = ap.upstream_host;
             self.upstream_port = ap.upstream_port;
+            self.name_access   = ap.name_access.unwrap_or(false);
+            self.announce_peer = ap.announce_peer.unwrap_or(false);
+
+            if yaml.device_key.is_none() {
+                self.device_key = ap
+                    .device_key
+                    .as_deref()
+                    .map(signature::PrivateKey::try_from)
+                    .transpose()?;
+            }
+        }
+
+        if let Some(key) = yaml.device_key {
+            self.device_key = Some(signature::PrivateKey::try_from(key.as_str())?);
         }
 
         Ok(())
@@ -255,21 +285,18 @@ impl Builder {
         self
     }
 
+    pub fn with_user_key(&mut self, user_key: signature::PrivateKey) -> &mut Self {
+        self.user_key = Some(user_key);
+        self
+    }
+
+    pub fn with_device_key(&mut self, device_key: signature::PrivateKey) -> &mut Self {
+        self.device_key = Some(device_key);
+        self
+    }
+
     pub fn with_activeproxy_service_peerid(&mut self, peerid: Id) -> &mut Self {
         self.server_peerid = Some(peerid);
-        self
-    }
-
-    pub fn with_upstream_peer_private_key(
-        &mut self,
-        private_key: signature::PrivateKey,
-    ) -> &mut Self {
-        self.upstream_peer_private_key = Some(private_key);
-        self
-    }
-
-    pub fn with_upstream_domain(&mut self, domain: impl Into<String>) -> &mut Self {
-        self.upstream_domain = Some(domain.into());
         self
     }
 
@@ -280,6 +307,16 @@ impl Builder {
 
     pub fn with_upstream_port(&mut self, port: u16) -> &mut Self {
         self.upstream_port = Some(port);
+        self
+    }
+
+    pub fn enable_name_access(&mut self) -> &mut Self {
+        self.name_access = true;
+        self
+    }
+
+    pub fn enable_announce_peer(&mut self) -> &mut Self {
+        self.announce_peer = true;
         self
     }
 
@@ -314,15 +351,15 @@ impl Builder {
         self.load_from(path)
     }
 
-    fn check_node_options(&self) -> Result<()> {
+    fn check_global_options(&self) -> Result<()> {
         if self.host4.is_none() && self.host6.is_none() {
             return Err(ArgumentError::new("At least one of host4 or host6 must be set"));
         }
-        if self.private_key.is_none() {
-            return Err(ArgumentError::new("Private key is missing"));
-        }
         if self.database_uri.is_none() {
             return Err(ArgumentError::new("Database URI is missing"));
+        }
+        if self.private_key.is_none() {
+            return Err(ArgumentError::new("Private key is missing"));
         }
         Ok(())
     }
@@ -331,7 +368,9 @@ impl Builder {
         if self.server_peerid.is_none() {
             return Ok(());
         }
-
+        if self.device_key.is_none() {
+            return Err(ArgumentError::new("Device key is missing"));
+        }
         if self.upstream_host.is_none() {
             return Err(ArgumentError::new("ActiveProxy upstream host is missing"));
         }
@@ -342,14 +381,14 @@ impl Builder {
     }
 
     pub fn build(&mut self) -> Result<Configuration> {
-        self.check_node_options()?;
+        self.check_global_options()?;
         self.check_activeproxy_options()?;
 
         Ok(Configuration {
+            private_key     : self.private_key.take().unwrap(),
             host4           : self.host4.take(),
             host6           : self.host6.take(),
             port            : self.port.take().unwrap_or(DEFAULT_DHT_PORT),
-            private_key     : self.private_key.take().unwrap(),
             data_dir        : self.data_dir.take().unwrap_or_else(|| ".".to_string()),
             database_uri    : self.database_uri.take().unwrap(),
             bootstrap_nodes : std::mem::take(&mut self.bootstrap_nodes),
@@ -358,11 +397,14 @@ impl Builder {
             log_console     : self.log_console,
             developer_mode  : self.devmode,
 
+            user_key        : self.user_key.take(),
+            device_key      : self.device_key.take(),
+
             server_peerid   : self.server_peerid.take(),
-            upstream_peer_private_key: self.upstream_peer_private_key.take(),
-            upstream_domain : self.upstream_domain.take(),
             upstream_host   : self.upstream_host.take(),
             upstream_port   : self.upstream_port.take(),
+            name_access     : self.name_access,
+            announce_peer   : self.announce_peer,
         })
     }
 }
@@ -370,6 +412,10 @@ impl Builder {
 impl Configuration {
     pub fn new() -> Builder {
         Builder::new()
+    }
+
+    pub fn private_key(&self) -> &signature::PrivateKey {
+        &self.private_key
     }
 
     pub fn host4(&self) -> Option<&str> {
@@ -382,10 +428,6 @@ impl Configuration {
 
     pub fn port(&self) -> u16 {
         self.port
-    }
-
-    pub fn private_key(&self) -> &signature::PrivateKey {
-        &self.private_key
     }
 
     pub fn data_dir(&self) -> &str {
@@ -416,16 +458,16 @@ impl Configuration {
         self.developer_mode
     }
 
+    pub fn user_key(&self) -> Option<&signature::PrivateKey> {
+        self.user_key.as_ref()
+    }
+
+    pub fn device_key(&self) -> Option<&signature::PrivateKey> {
+        self.device_key.as_ref()
+    }
+
     pub fn server_peerid(&self) -> Option<&Id> {
         self.server_peerid.as_ref()
-    }
-
-    pub fn peer_private_key(&self) -> Option<&signature::PrivateKey> {
-        self.upstream_peer_private_key.as_ref()
-    }
-
-    pub fn domain_name(&self) -> Option<&str> {
-        self.upstream_domain.as_deref()
     }
 
     pub fn upstream_host(&self) -> Option<&str> {
@@ -434,6 +476,14 @@ impl Configuration {
 
     pub fn upstream_port(&self) -> Option<u16> {
         self.upstream_port
+    }
+
+    pub fn is_name_access_enabled(&self) -> bool {
+        self.name_access
+    }
+
+    pub fn is_announce_peer_enabled(&self) -> bool {
+        self.announce_peer
     }
 
     pub fn dump(&self) {
@@ -482,13 +532,17 @@ impl Configuration {
             })?)
             .with_upstream_port(self.upstream_port.ok_or_else(|| {
                 ArgumentError::new("ActiveProxy upstream port is missing")
-            })?);
+            })?)
+            .with_device_key(
+                signature::KeyPair::from(self.device_key.as_ref().ok_or_else(|| {
+                    ArgumentError::new("ActiveProxy device key is missing")
+                })?)
+            );
 
-        if let Some(v) = self.upstream_peer_private_key.clone() {
-            builder = builder.with_upstream_peer_private_key(v);
-        }
-        if let Some(v) = self.upstream_domain.as_deref() {
-            builder = builder.with_upstream_domain(v);
+        if let Some(user_key) = &self.user_key {
+            builder = builder.with_user_key(
+                signature::KeyPair::from(user_key)
+            );
         }
 
         let options = builder
@@ -617,16 +671,11 @@ impl fmt::Display for Configuration {
             write!(f, "\n\t- serverPeerId\t:{}", server_peerid)?;
             write!(
                 f,
-                "\n\t- peerPrivateKey\t:{}",
-                self.upstream_peer_private_key
+                "\n\t- deviceKey\t:{}",
+                self.device_key
                     .as_ref()
-                    .map(|k| k.to_string())
+                    .map(ToString::to_string)
                     .unwrap_or_else(|| "<none>".to_string())
-            )?;
-            write!(
-                f,
-                "\n\t- domainName\t:{}",
-                self.upstream_domain.as_deref().unwrap_or("<none>")
             )?;
             write!(
                 f,

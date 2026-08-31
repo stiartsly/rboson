@@ -96,7 +96,7 @@ async fn main() {
 
     let ap = match cfg.build_activeproxy_options() {
         Ok(Some(options)) => {
-            match ActiveProxy::new(node.clone(), options) {
+            match ActiveProxy::new(Some(node.clone()), options) {
                 Ok(ap) => Some(Arc::new(ap)),
                 Err(e) => {
                     eprintln!("Creating ActiveProxy client error: {e}");
@@ -104,28 +104,28 @@ async fn main() {
                 }
             }
         }
-        Ok(None) => None,
+        Ok(_) => None,
         Err(e) => {
             eprintln!("Error building activeproxy options: {e}");
             exit(1);
         }
     };
 
-    // `ProxyClient::start` drives its own single-threaded runtime and blocks
-    // until stopped, so it needs its own OS thread.
-    let ap_thread = ap.map(|ap| std::thread::spawn(move || {
-        if let Err(e) = ap.start() {
+    if let Some(ap) = &ap {
+        if let Err(e) = ap.start().await {
             eprintln!("ActiveProxy client stopped with error: {e}");
         }
-    }));
+    }
 
     if tokio::signal::ctrl_c().await.is_err() {
         eprintln!("Failed to listen for shutdown signal.");
     }
 
     println!("Shutting down...");
-    let _ = node.stop().await;
-    if let Some(handle) = ap_thread {
-        let _ = handle.join();
+
+    if let Some(ap) = ap {
+        let _ = ap.stop().await;
     }
+
+    let _ = node.stop().await;
 }

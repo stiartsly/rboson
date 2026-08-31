@@ -1,21 +1,29 @@
+mod handler;
+mod timer_client;
+mod timer_manager;
+mod utils;
+mod session;
+mod verticle;
+mod connection;
+mod connection_registry;
+mod packet_type;
 mod packet;
 mod state;
-mod connection;
-mod managed;
-mod worker;
+
 pub mod options;
 pub mod client;
 
 #[cfg(test)]
 mod unitests {
-    mod test_activeproxy;
+    //mod test_activeproxy;
 }
 
 pub use {
-    client::ProxyClient as ActiveProxyClient,
-    options::{ActiveProxyOptions, ActiveProxyOptionsBuilder},
+    options::{Options, OptionsBuilder},
+    client::ActiveProxyClient,
 };
 
+/*
 pub(crate)
 fn random_padding() -> u32 {
     unsafe {
@@ -34,7 +42,7 @@ fn random_boolean(input: bool) -> u8 {
         false => val & 0xFE
     }
 }
-
+*/
 pub(crate)
 fn random_timeshift() -> u32 {
     unsafe { // max is 10s

@@ -1,284 +1,216 @@
-use std::sync::{Arc, Mutex};
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::{Path, PathBuf};
-use std::io::{Read, Write};
-use std::fs::File;
-
-use rand::seq::SliceRandom;
-use log::{error, warn, info, debug};
+use core::convert::Into;
+use std::{
+    cell::Cell,
+    sync::{Arc, Mutex},
+    net::{SocketAddr, ToSocketAddrs},
+    path::{Path, PathBuf},
+    io::Read,
+    fs::File,
+};
+use log::{error, warn, debug, info};
 
 use crate::{
     Id,
     PeerInfo,
-    NodeInfo,
-    signature,
     Result,
-    core::errors::{ArgumentError, StateError},
-    dht::Node,
+    errors::{NetworkError, ArgumentError},
+    dht::Node
 };
 
 use super::{
-    managed::ManagedFields,
-    worker::{self, ManagedWorker},
-    options::ActiveProxyOptions,
+    options::Options,
+    verticle::{self, VerticleClient}
 };
 
-pub struct ProxyClient {
-    node:               Arc<Node>,
-    cached_dir:         PathBuf,
+pub struct ActiveProxyClient {
+    options             : Options,
+    node                : Option<Arc<Node>>,
+    cache_file          : PathBuf,
 
-    remote_peerid:      Id,
-    remote_peer:        Option<Arc<Mutex<PeerInfo>>>,
-    remote_node:        Option<Arc<Mutex<NodeInfo>>>,
+    service_peerid      : Id,
+    service_peer        : Arc<Mutex<Option<PeerInfo>>>,
+    service_endpoint    : Option<String>,
 
-    upstream_host:      String,
-    upstream_port:      u16,
-    upstream_endpoint:  String,
-    upstream_addr:      SocketAddr,
-    upstream_domain:    Option<String>,
+    upstream_endpoint   : String,
+    upstream_addr       : SocketAddr,
+    // upstream_domain     : Option<String>,
 
-    managed:            Arc<Mutex<ManagedFields>>,
-    worker:             Arc<Mutex<ManagedWorker>>,
-    quit:               Arc<Mutex<bool>>,
+    verticle            : Cell<Option<VerticleClient>>,
+    running             : Cell<bool>,
 }
 
-impl ProxyClient {
-    pub fn new(node: Arc<Node>, options: ActiveProxyOptions) -> Result<Self> {
-        let upstream_name = format!("{}:{}", options.upstream_host(), options.upstream_port());
-        let upstream_addr = upstream_name.to_socket_addrs()
+impl ActiveProxyClient {
+    pub fn new(node: Option<Arc<Node>>, options: Options) -> Result<Arc<Self>> {
+        let path = PathBuf::from(options.data_dir()).join("activeproxy");
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            return Err(ArgumentError::new(format!(
+                "Failed to create ActiveProxy cache dir {}: {e}",
+                path.display()
+            )));
+        }
+
+        if node.is_none() &&
+            options.service_peer().is_none() &&
+            options.service_host().is_none() {
+            return Err(ArgumentError::new(
+                "ActiveProxy requires either a DHT node or a specified service peer or service host",
+            ));
+        }
+
+        let upstream_endpoint = format!(
+            "{}{}:{}", options.upstream_scheme(), options.upstream_host(), options.upstream_port()
+        );
+        let rest = upstream_endpoint.strip_prefix("tcp://").unwrap_or(&upstream_endpoint);
+        let upstream_sockaddr = rest.to_socket_addrs()
             .map_err(|e| {
-                error!("Failed to resolve address '{upstream_name}', network error: {e}");
-                ArgumentError::new(format!("Bad upstream {upstream_name}"))
+                error!("Failed to resolve address '{rest}', network error: {e}");
+                ArgumentError::new(format!("Bad upstream address: {rest}"))
             })?
             .next()
             .ok_or_else(|| {
-                error!("No valid address found for '{upstream_name}', network error!!!");
-                ArgumentError::new("Network error!")
+                error!("No valid address found for '{rest}', network error!!!");
+                NetworkError::new(format!("No valid address found for '{rest}'!"))
             })?;
 
-        let managed = {
-            let mut fields = ManagedFields::new(&signature::KeyPair::random());
-            fields.peer_keypair = options
-                .upstream_peer_private_key()
-                .map(signature::KeyPair::from);
-            fields.upstream_addr = Some(upstream_addr.clone());
-            fields.upstream_name = Some(upstream_name.clone());
-            fields.peer_domain = options.upstream_domain().map(str::to_string);
+        let mut endpoint = None;
+        if let Some(host) = options.service_host() {
+            endpoint = Some(format!("{}:{}", host, options.service_port()));
+        } else if let Some(peer) = options.service_peer() {
+            endpoint = Some(peer.endpoint().to_string());
+        } else if let Some(peer) = load_peer(&path, options.service_peerid()) {
+            debug!("ActiveProxy loaded peer {} from cached file.", peer.id());
+            endpoint = Some(peer.endpoint().to_string());
+        } else if node.is_none() {
+            return Err(ArgumentError::new(
+                "ActiveProxy requires a DHT node to lookup a service peer information.",
+            ));
+        }
 
-            Arc::new(Mutex::new(fields))
-        };
-
-        let peerid = options.server_peerid().clone();
-        let worker = Arc::new(Mutex::new(ManagedWorker::new(
-            PathBuf::from(options.data_dir()).join("activeproxy.cache"),
-            node.clone(),
-            managed.clone(),
-            peerid.clone(),
-        )));
-
-        Ok(Self {
+        Ok(Arc::new(Self {
             node,
-            cached_dir: PathBuf::from(options.data_dir()).join("activeproxy.cache"),
-
-            remote_peerid:  peerid,
-            remote_peer:    None,
-            remote_node:    None,
-
-            upstream_host:  options.upstream_host().to_string(),
-            upstream_port:  options.upstream_port(),
-            upstream_endpoint:  upstream_name,
-            upstream_addr:  upstream_addr,
-            upstream_domain: options.upstream_domain().map(str::to_string),
-
-            managed,
-            worker,
-            quit:           Arc::new(Mutex::new(false)),
-        })
+            cache_file          : path.to_path_buf(),
+            service_peerid      : options.service_peerid().clone(),
+            service_peer        : Arc::new(Mutex::new(options.service_peer().cloned())),
+            service_endpoint    : endpoint,
+            upstream_endpoint,
+            upstream_addr       : upstream_sockaddr,
+            verticle            : Cell::new(None),
+            running             : Cell::new(false),
+            options
+        }))
     }
 
-    pub fn nodeid(&self) -> Id {
-        self.node.id().clone()
-    }
-
-    pub fn node(&self) -> Arc<Node> {
+    pub fn node(&self) -> Option<Arc<Node>> {
         self.node.clone()
     }
 
-    pub fn cached_path(&self) -> &Path {
-        self.cached_dir.as_path()
+    pub fn node_id(&self) -> Option<Id> {
+        self.node.as_ref().map(|n| n.id().clone())
     }
 
     pub fn upstream_host(&self) -> &str {
-        &self.upstream_host
+        &self.options.upstream_host()
     }
 
     pub fn upstream_port(&self) -> u16 {
-        self.upstream_port
+        self.options.upstream_port()
     }
 
     pub fn upstream_endpoint(&self) -> &str {
         &self.upstream_endpoint
     }
 
-    pub fn upstream_addr(&self) -> &SocketAddr {
+    pub fn upstream_socketaddr(&self) -> &SocketAddr {
         &self.upstream_addr
     }
 
-    pub fn domain_name(&self) -> Option<&str> {
-        self.upstream_domain.as_deref()
+    pub fn service_peerid(&self) -> &Id {
+        &self.service_peerid
     }
 
-    pub fn remote_peerid(&self) -> &Id {
-        &self.remote_peerid
+    pub fn service_peer(&self) -> Option<PeerInfo> {
+        self.service_peer.lock().unwrap().clone()
     }
 
-    pub fn remote_peer(&self) -> Option<PeerInfo> {
-        self.remote_peer.as_ref().map(|v|v.lock().unwrap().clone())
+    pub fn service_endpoint(&self) -> Option<String> {
+        if let Some(endpoint) = self.service_endpoint.clone() {
+            Some(endpoint)
+        } else if let Some(peer) = self.service_peer() {
+            Some(peer.endpoint().to_string())
+        } else {
+            None
+        }
     }
 
-    pub fn remote_node(&self) -> Option<NodeInfo> {
-        self.remote_node.as_ref().map(|v|v.lock().unwrap().clone())
-    }
-
-    pub fn start(&self) -> Result<()> {
-        // The whole worker pipeline runs on a single-threaded runtime and relies
-        // on `task::spawn_local`, so it must be driven from within a `LocalSet`.
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let local = tokio::task::LocalSet::new();
-
-        rt.block_on(local.run_until(async {
-            let cached = load_peer(self.cached_path(), self.remote_peerid());
-            let found = match cached {
-                Some(v) => Some(v),
-                None => {
-                    if self.cached_path().exists() {
-                        _ = std::fs::remove_file(self.cached_path());
-                    }
-                    let looked_up = lookup_peer(self.node(), self.remote_peerid()).await;
-                    if let Some(v) = looked_up.as_ref() {
-                        save_peer(self.cached_path(), v.clone());
-                    }
-                    looked_up
+    pub async fn start(&self) -> Result<()> {
+        let _ = match self.service_peer() {
+            Some(_) => {},
+            _ => {
+                let node = self.node().unwrap();
+                let peer = super::utils::lookup_peer(node, self.service_peerid()).await?;
+                if let Some(peer) = peer {
+                    super::utils::save_peer(self.cache_file.as_path(), &peer);
+                    *self.service_peer.lock().unwrap() = Some(peer);
                 }
-            };
-
-            let Some((peer, node)) = found else {
-                error!("No available peers hosting peer ID {} were found.", self.remote_peerid);
-                return Err(StateError::new(format!("No available peers with peerid {} found", self.remote_peerid)));
-            };
-
-            let remote_addr = peer.endpoint().to_socket_addrs().ok().and_then(|mut addrs| addrs.next())
-                .unwrap_or_else(|| SocketAddr::new(node.ip(), 0));
-            info!("ActiveProxy found the peer serivce {} on server {}.", peer.id(), remote_addr);
-
-            if let Ok(mut managed) = self.managed.lock() {
-                managed.remote_peer = Some(Arc::new(Mutex::new(peer)));
-                managed.remote_node = Some(Arc::new(Mutex::new(node)));
-                managed.remote_addr = Some(remote_addr);
-                managed.remote_name = Some(remote_addr.to_string());
             }
+        };
 
-            let worker = self.worker.clone();
-            let quit = self.quit.clone();
-            _ = worker::run_loop(worker, quit).await;
+        let options = verticle::VerticleOptions::new(
+            self.node(),
+            self.service_peerid().clone(),
+            self.service_peer(),
+            self.service_endpoint().unwrap(),
+            self.upstream_endpoint().into(),
+            self.upstream_socketaddr().clone(),
+            self.options.user_id().clone(),
+            self.options.device_key().private_key().clone(),
+        );
 
-            Ok(())
-        }))
+        let client = verticle::deploy(options).map_err(|e| {
+            ArgumentError::new(format!("Failed to deploy ActiveProxy verticle: {e}"))
+        })?;
+        self.running.set(true);
+        self.verticle.set(Some(client));
+        Ok(())
     }
 
-    pub fn stop(&self) {
-        // TODO:
+    fn is_running(&self) -> bool {
+        self.running.get()
+    }
+
+    pub async fn stop(&self) {
+        debug!("ActiveProxy instance is stopping ....");
+        if !self.is_running() {
+            return;
+        }
+
+        if let Some(mut v) = self.verticle.replace(None) {
+            let _ = v.stop().await;
+        }
+
+        info!("ActiveProxy instance stopped.");
     }
 }
 
-fn load_peer(path: &Path, peerid: &Id) -> Option<(PeerInfo, NodeInfo)> {
-    info!("ActiveProxy is trying to load peer {peerid} and its host node from cached file...");
-
+fn load_peer(path: &Path, peerid: &Id) -> Option<PeerInfo> {
     let mut buf = vec![];
     let _ = File::open(path).map(|mut fp| {
         _ = fp.read_to_end(&mut buf);
     }).map_err(|e| {
-        warn!("Failed to open cached file {} with error: {e}.", path.display());
+        warn!("Failed to open cached file {} with error: {e}.",
+            path.display());
         None::<File>
     }).ok()?;
 
-    let cached: (PeerInfo, NodeInfo) = ciborium::de::from_reader(buf.as_slice()).map_err(|e| {
+    let peer: PeerInfo = serde_json::from_reader(buf.as_slice()).map_err(|e| {
         warn!("Failed to parse data from cached file {} with error: {e} - \
-               cached file might be broken", path.display());
-        None::<(PeerInfo, NodeInfo)>
+            cached file might be broken", path.display());
+        None::<PeerInfo>
     }).ok()?;
-    let (peer, node) = cached;
 
     if !peer.is_valid() || peer.id() != peerid {
-        warn!("The cached peer {} is invalid or outdated since it does not match the expected {peerid}", peer.id());
+        warn!("The cached peer {} is invalid or outdated since it does not match the expected {}", peer.id(), peerid);
         return None;
     }
-
-    info!("ActiveProxy loaded peer {} and its host node {} from cached file.",
-        peer.id(),
-        node.id()
-    );
-
-    Some((peer, node))
-}
-
-pub(crate) fn save_peer(path: &Path, input: (PeerInfo, NodeInfo)) {
-    debug!("ActiveProxy is trying to persist peer {} and its host node into cached file...",
-        input.0.id());
-
-    let mut buf = vec![];
-    if let Err(e) = ciborium::ser::into_writer(&input, &mut buf) {
-        warn!("Failed to persist peer {} and its host node error {e}", input.0.id());
-        return;
-    }
-
-    _ = File::create(path).map(|mut fp| {
-        _ = fp.write_all(&buf);
-        debug!("ActiveProxy persisted peer {} and its host node to cached file.",
-            input.0.id());
-    });
-}
-
-pub(crate) async fn lookup_peer(node: Arc<Node>, peerid: &Id) -> Option<(PeerInfo, NodeInfo)> {
-    info!("ActiveProxy is trying to find peer {} and its host node via DHT network...", peerid);
-
-    let result = node.find_peer(peerid, -1, 4, None).await;
-    if let Err(e) = result {
-        warn!("Trying to find peer but error: {}, please try it later!!!", e);
-        return None;
-    }
-
-    let mut peers = result.unwrap();
-    if peers.is_empty() {
-        warn!("No peers with peerid {} is found at this moment, please try it later!!!", peerid);
-        return None;
-    }
-
-    debug!("Discovered {} satisfied peers, extracting each node's infomation...", peers.len());
-
-    let mut rng = rand::rng();
-    peers.shuffle(&mut rng);
-    while let Some(peer) = peers.pop() {
-        let Some(nodeid) = peer.nodeid() else {
-            continue;
-        };
-        debug!("Trying to lookup node {} hosting the peer {} ...", nodeid, peerid);
-
-        let result = node.find_node(nodeid, None).await;
-        if let Err(e) = result {
-            warn!("AcriveProxy failed to find node {}, error: {}", nodeid, e);
-            return None;
-        }
-
-        let Some(node) = result.unwrap() else {
-            continue;
-        };
-
-        info!("ActiveProxy found peer {} and its host node {}.", peer.id(), node.id());
-        return Some((peer, node))
-    }
-    None
+    Some(peer)
 }

@@ -1,61 +1,39 @@
 use std::mem;
-use std::fmt;
-use std::str;
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-use std::net::{
-    SocketAddr,
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr
-};
-use tokio::io::{
-    split,
-    ReadHalf,
-    WriteHalf,
-    AsyncWriteExt
-};
-use tokio::net::{
-    TcpStream,
-    TcpSocket
-};
-use tokio::task;
-use log::{warn, error,info, debug, trace};
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+use std::time::{Duration, SystemTime};
+use std::net::SocketAddr;
+
+use tokio::io::{split, ReadHalf, WriteHalf, AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::time::{self, Instant};
+use log::{error, info, debug, trace, warn};
 
 use crate::{
-    elapsed_ms,
-    srv_endp,
-    srv_addr,
-    srv_peer,
-    ups_endp,
-    ups_addr,
-    enbox,
-    unwrap,
-    random_bytes,
     Id,
     Result,
-    cryptobox, CryptoBox,
-    signature,
-    Signature,
-    PeerBuilder,
-    Identity,
+    elapsed_ms,
+    cryptobox,
     CryptoContext,
-    core::errors::{PermissionError, ProtocolError, StateError},
+    core::errors::{MalformedError, ProtocolError, StateError},
 };
 
-use crate::activeproxy::{
-    random_padding,
+use super::{
     random_timeshift,
-    random_boolean,
-    managed::ManagedFields,
-    packet::{Packet, AttachType, AuthType, ConnType, DisconnType, DataType, PingType},
+    packet,
+    packet_type::PacketType,
     state::State,
+    session::ProxySession,
 };
 
-// packet size (2bytes) + packet type(1bytes)
+// packet size (2 bytes) + packet type (1 byte)
 const PACKET_HEADER_BYTES: usize = mem::size_of::<u16>() + mem::size_of::<u8>();
-const KEEPALIVE_INTERVAL:   u128 = 60000;      // 60 seconds
-const MAX_KEEP_ALIVE_RETRY: u128 = 3;
+const KEEPALIVE_INTERVAL:    u128 = 60000;   // 60 seconds
+const MAX_KEEP_ALIVE_RETRY:  u128 = 3;
+const HEALTH_CHECK_INTERVAL: u64  = 10 * 1000; // 10 seconds, drives the run() loop's keepalive ticks
+// A relayed connection is fully torn down only after three disconnect confirmations:
+// the local upstream end, the server DISCONNECT, and the matching DISCONNECT_ACK.
+const DISCONNECT_CONFIRMS:  i32 = 3;
 
 static mut NEXT_CONNID: i32 = 0;
 fn next_connection_id() -> i32 {
@@ -68,13 +46,29 @@ fn next_connection_id() -> i32 {
     }
 }
 
+fn get_packet_type(packet: &[u8]) -> Result<PacketType> {
+    if packet.len() < PACKET_HEADER_BYTES {
+        return Err(MalformedError::new("packet too short"));
+    }
+
+    let size = u16::from_be_bytes([packet[0], packet[1]]) as usize;
+    if size != packet.len() {
+        return Err(MalformedError::new("packet size mismatch"));
+    }
+
+    PacketType::from(packet[mem::size_of::<u16>()])
+}
+
 pub(crate) struct ProxyConnection {
     conn_id:            i32,
     state:              State,
     keepalive:          SystemTime,
     disconnect_confirms: i32,
 
-    inners:             Arc<Mutex<ManagedFields>>,
+    // Back-reference to the owning session (Java's `ProxyConnectionHandler handler`) and to this
+    // connection's own shared handle, so hook callbacks can pass `this` back to the session.
+    handler:            Weak<ProxySession>,
+    self_ref:           Weak<RefCell<ProxyConnection>>,
 
     relay_reader:       Option<ReadHalf<TcpStream>>,
     relay_writer:       Option<WriteHalf<TcpStream>>,
@@ -82,162 +76,53 @@ pub(crate) struct ProxyConnection {
     upstream_reader:    Option<ReadHalf<TcpStream>>,
     upstream_writer:    Option<WriteHalf<TcpStream>>,
 
-    stickybuf:          Option<Vec<u8>>,
+    stickybuf:          Vec<u8>,
 
-    deviceid:           Id,
-    signature_keypair:  signature::KeyPair,
-    crypto_context:     Mutex<CryptoContext>,
-
-    authorized_cb:      Box<dyn Fn(&ProxyConnection, &cryptobox::PublicKey, u16, bool) + Send + Sync>,
-    opened_cb:          Box<dyn Fn(&ProxyConnection) + Send + Sync>,
-    open_failed_cb:     Box<dyn Fn(&ProxyConnection) + Send + Sync>,
-    closed_cb:          Box<dyn Fn(&ProxyConnection) + Send + Sync>,
-    busy_cb:            Box<dyn Fn(&ProxyConnection) + Send + Sync>,
-    idle_cb:            Box<dyn Fn(&ProxyConnection) + Send + Sync>,
-}
-
-impl Identity for ProxyConnection {
-    fn id(&self) -> &Id {
-        &self.deviceid
-    }
-
-    fn sign(&self, data: &[u8], sig: &mut [u8]) -> Result<usize> {
-        signature::sign(data, sig, self.signature_keypair.private_key())
-    }
-
-    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let mut signature = vec![0u8; crate::Signature::BYTES];
-        self.sign(data, &mut signature).map(|_| signature)
-    }
-
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
-        signature::verify(data, signature, self.signature_keypair.public_key())
-    }
-
-    fn encrypt(&self, _recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        self.crypto_context.lock().unwrap().encrypt(plain, cipher)
-    }
-
-    fn encrypt_into(&self, _recipient: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        self.crypto_context.lock().unwrap().encrypt_into(plain)
-    }
-
-    fn decrypt(&self, _sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        self.crypto_context.lock().unwrap().decrypt(cipher, plain)
-    }
-
-    fn decrypt_into(&self, _sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        self.crypto_context.lock().unwrap().decrypt_into(cipher)
-    }
-
-    fn create_crypto_context(&self, _id: &Id) -> Result<CryptoContext> {
-        unimplemented!()
-    }
+    // Session-scoped crypto contexts, shared with the owning `ProxySession` and its sibling connections.
+    peer_context:       Rc<RefCell<CryptoContext>>,
+    session_context:    Rc<RefCell<Option<CryptoContext>>>,
 }
 
 impl ProxyConnection {
-    pub(crate) fn new(inners: Arc<Mutex<ManagedFields>>, keypair: &signature::KeyPair) -> Self {
-        let encryption_keypair = cryptobox::KeyPair::from(keypair);
+    // Constructs a connection around an already-established relay socket, mirroring the Java
+    // constructor which is likewise handed an open `NetSocket`. Dialing the relay socket and
+    // resolving the crypto contexts is the owning `ProxySession`'s responsibility.
+    pub(crate) fn new_shared(
+        session: &Rc<ProxySession>,
+        stream: TcpStream,
+        peer_context: Rc<RefCell<CryptoContext>>,
+        session_context: Rc<RefCell<Option<CryptoContext>>>,
+    ) -> Rc<RefCell<Self>> {
+        let (reader, writer) = split(stream);
 
-        let mut connection = Self {
-            inners:             inners.clone(),
+        let connection = Rc::new_cyclic(|weak_self| {
+            RefCell::new(Self {
+                conn_id:            next_connection_id(),
+                state:              State::Initializing,
+                keepalive:          SystemTime::now(),
+                disconnect_confirms: 0,
 
-            conn_id:            next_connection_id(),
-            state:              State::Initializing,
-            keepalive:          SystemTime::now(),
-            disconnect_confirms: 0,
+                handler:            Rc::downgrade(session),
+                self_ref:           weak_self.clone(),
 
-            relay_reader:       None,
-            relay_writer:       None,
-            upstream_reader:    None,
-            upstream_writer:    None,
+                relay_reader:       Some(reader),
+                relay_writer:       Some(writer),
+                upstream_reader:    None,
+                upstream_writer:    None,
 
-            stickybuf:          Some(Vec::with_capacity(4*1024)),
+                stickybuf:          Vec::with_capacity(4 * 1024),
 
-            deviceid:           Id::from(keypair.public_key()),
-            signature_keypair:  keypair.clone(),
-            crypto_context:     Mutex::new(CryptoContext::from_private_key(
-                srv_peer!(inners).lock().unwrap().id().clone(),
-                encryption_keypair.private_key()
-            )),
-
-            authorized_cb:      Box::new(|_,_,_,_|{}),
-            opened_cb:          Box::new(|_|{}),
-            open_failed_cb:     Box::new(|_|{}),
-            closed_cb:          Box::new(|_|{}),
-            busy_cb:            Box::new(|_|{}),
-            idle_cb:            Box::new(|_|{}),
-        };
-
-        connection.authorized_cb = Box::new(move |conn, pk, port, domain_enabled| {
-            let mut inners = conn.inners.lock().unwrap();
-
-            inners.relay_port = Some(port);
-            inners.cryptobox  = cryptobox::CryptoBox::try_from((pk, inners.session_keypair.private_key())).ok();
-            inners.domain_enabled = domain_enabled;
-
-            if inners.peer_keypair.is_none() {
-                return;
-            }
-
-            let endpoint = format!("{}:{}", unwrap!(inners.remote_addr).ip(), port);
-            let mut builder = PeerBuilder::new(&endpoint)
-                .with_fingerprint(0)
-                .with_sequence_number(0);
-            if let Some(keypair) = inners.peer_keypair.as_ref() {
-                builder = builder.with_key(keypair.clone());
-            }
-
-            if let Ok(peer) = builder.build() {
-                info!("-**- ActiveProxy: peer server endpoint: {} -**-", peer.endpoint());
-                inners.peer = Some(peer);
-            }
+                peer_context,
+                session_context,
+            })
         });
 
-        connection.opened_cb = Box::new(move |conn| {
-            let mut inners = conn.inners.lock().unwrap();
-            inners.server_failures = 0;
-            inners.reconnect_delay = 0;
-        });
-
-        connection.open_failed_cb = Box::new(move|conn| {
-            let mut inners = conn.inners.lock().unwrap();
-            let failures = inners.server_failures;
-
-            inners.server_failures = failures + 1;
-            if inners.reconnect_delay < 64 {
-                inners.reconnect_delay = (1 << failures) * 1000;
-            }
-        });
-
-        connection.closed_cb = Box::new(move |conn| {
-            conn.inners.lock().unwrap().connections -= 1;
-        });
-
-        connection.busy_cb = Box::new(move |conn| {
-            let mut inners = conn.inners.lock().unwrap();
-            inners.inflights += 1;
-            inners.last_idle_check = SystemTime::UNIX_EPOCH;
-        });
-
-        connection.idle_cb = Box::new(move |conn| {
-            let mut inners = conn.inners.lock().unwrap();
-            inners.inflights -= 1;
-            if inners.inflights == 0 {
-                inners.last_idle_check = SystemTime::now();
-            }
-        });
-
-        info!("Connection {} is created.", connection.id());
+        info!("Connection {} is created.", connection.borrow().cid());
         connection
     }
 
     pub(crate) fn cid(&self) -> i32 {
         self.conn_id
-    }
-
-    pub(crate) fn inners(&self) -> Arc<Mutex<ManagedFields>> {
-        self.inners.clone()
     }
 
     pub(crate) fn take_relay_reader(&mut self) -> Option<ReadHalf<TcpStream>> {
@@ -256,899 +141,604 @@ impl ProxyConnection {
         self.upstream_reader = reader;
     }
 
-    fn stickybuf_mut(&mut self) -> &mut Vec<u8> {
-        self.stickybuf.as_mut().unwrap()
-    }
+    // Drives this connection for its whole lifetime: de-frames the relay stream, relays upstream
+    // data, and runs the keepalive tick. Stands in for Java's reactive `NetSocket` handlers, which
+    // Vert.x invokes on their own without an explicit read loop.
+    pub(crate) async fn run(conn: Rc<RefCell<ProxyConnection>>) {
+        let mut relay_data = vec![0u8; 0x7FFF];
+        let mut upstream_data = vec![0u8; 0x7FFF];
+        let duration = Duration::from_millis(HEALTH_CHECK_INTERVAL);
+        let mut ticker = time::interval_at(Instant::now() + duration, duration);
 
-    fn stickybuf(&self) -> &[u8] {
-        self.stickybuf.as_ref().unwrap()
-    }
+        loop {
+            let mut relay = conn.borrow_mut().take_relay_reader();
+            let mut upstream = conn.borrow_mut().take_upstream_reader();
 
-    fn allow(&self, _: &SocketAddr) -> bool {
-        true
-    }
+            let close_all = tokio::select! {
+                res = read_stream(relay.as_mut(), &mut relay_data), if relay.is_some() => {
+                    match res {
+                        Err(e) => {
+                            error!("Connection {} read relay stream error: {e}", conn.borrow().cid());
+                            true
+                        },
+                        Ok(0) => {
+                            info!("Connection {} read EOF from relay stream", conn.borrow().cid());
+                            true
+                        },
+                        Ok(len) => {
+                            if let Err(e) = conn.borrow_mut().on_relay_data(&relay_data[..len]).await {
+                                error!("Connection {} relay handling error: {e}", conn.borrow().cid());
+                                true
+                            } else {
+                                conn.borrow_mut().put_relay_reader(relay.take());
+                                if upstream.is_some() {
+                                    conn.borrow_mut().put_upstream_reader(upstream.take());
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                },
+                res = read_stream(upstream.as_mut(), &mut upstream_data), if upstream.is_some() => {
+                    match res {
+                        Err(e) => {
+                            error!("Connection {} read upstream stream error: {e}", conn.borrow().cid());
+                            false
+                        },
+                        Ok(0) => {
+                            info!("Connection {} read EOF from upstream", conn.borrow().cid());
+                            false
+                        },
+                        Ok(len) => {
+                            if conn.borrow_mut().on_upstream_data(&upstream_data[..len]).await.is_ok() {
+                                conn.borrow_mut().put_relay_reader(relay.take());
+                                if upstream.is_some() {
+                                    conn.borrow_mut().put_upstream_reader(upstream.take());
+                                }
+                                continue;
+                            }
+                            true
+                        }
+                    }
+                },
+                _ = ticker.tick() => {
+                    if conn.borrow_mut().check_keepalive().await.is_ok() {
+                        conn.borrow_mut().put_relay_reader(relay.take());
+                        if upstream.is_some() {
+                            conn.borrow_mut().put_upstream_reader(upstream.take());
+                        }
+                        continue;
+                    }
+                    true
+                }
+            };
 
-    fn on_authorized(&mut self, pk: &cryptobox::PublicKey, port: u16, domain_enabled: bool) {
-        (self.authorized_cb)(self, pk, port, domain_enabled);
-    }
+            conn.borrow_mut().put_relay_reader(relay);
+            if upstream.is_some() {
+                conn.borrow_mut().put_upstream_reader(upstream);
+            }
 
-    fn on_opened(&mut self) {
-        (self.opened_cb)(self);
-    }
-
-    fn on_closed(&mut self) {
-        (self.closed_cb)(self);
-    }
-
-    fn on_open_failed(&mut self) {
-        (self.open_failed_cb)(self)
-    }
-
-    fn on_busy(&mut self) {
-        (self.busy_cb)(self);
-    }
-
-    fn on_idle(&mut self) {
-        (self.idle_cb)(self);
-    }
-
-    pub(crate) async fn close(&mut self) -> Result<()> {
-        if self.state == State::Closed {
-            return Ok(())
+            if close_all {
+                let _ = conn.borrow_mut().close().await;
+                break;
+            } else {
+                let _ = conn.borrow_mut().close_upstream().await;
+            }
         }
+    }
 
-        let old_state = self.state.clone();
-        self.state = State::Closed;
+    fn allow(&self, addr: SocketAddr) -> bool {
+        self.handler.upgrade().map(|h| h.allow(addr)).unwrap_or(false)
+    }
 
-        info!("Connection {} is closing...", self.cid());
-
-        if old_state <= State::Attaching {
-            self.on_open_failed();
+    // Invokes `f` with the owning session and this connection's own shared handle, mirroring the
+    // `handler.xxx(this)` calls on the Java side. No-op once either has been dropped.
+    fn with_handler(&self, f: impl FnOnce(&Rc<ProxySession>, &Rc<RefCell<ProxyConnection>>)) {
+        if let (Some(handler), Some(me)) = (self.handler.upgrade(), self.self_ref.upgrade()) {
+            f(&handler, &me);
         }
-        if old_state == State::Relaying {
-            self.on_idle();
-        }
+    }
 
-        let reader = self.relay_reader.take();
-        let writer = self.relay_writer.take();
+    fn on_opened(&self) {
+        self.with_handler(|h, me| h.connection_open_handler(me));
+    }
 
-        assert!(reader.is_some());
-        assert!(writer.is_some());
+    fn on_closed(&self) {
+        self.with_handler(|h, me| h.connection_closed_handler(me));
+    }
 
-        let mut stream = reader.unwrap().unsplit(writer.unwrap());
-        _ = task::spawn_local(async move {
-            _ = stream.flush().await;
-            _ = stream.shutdown().await;
-        }).await;
+    fn on_busy(&self) {
+        self.with_handler(|h, me| h.connection_busy_handler(me));
+    }
 
-        let reader = self.upstream_reader.take();
-        let writer = self.upstream_writer.take();
-
-        if let Some(reader) = reader {
-            assert!(writer.is_some());
-
-            let mut stream = reader.unsplit(writer.unwrap());
-            _ = task::spawn_local(async move {
-                _ = stream.flush().await;
-                _ = stream.shutdown().await;
-            }).await
-        }
-
-        self.on_closed();
-
-        info!("Connection {} is closed...", self.cid());
-        Ok(())
+    fn on_idle(&self) {
+        self.with_handler(|h, me| h.connection_idle_handler(me));
     }
 
     async fn open_upstream(&mut self) -> Result<()> {
-        debug!("Connection {} connecting to upstream {}...", self.cid(), ups_endp!(self.inners));
-
-        let raddr = ups_addr!(self.inners).clone();
-        let socket = TcpSocket::new_v4()?;  // TODO: ip v4 addr?;
-        let result = socket.connect(raddr).await;
-        match result {
-            Ok(stream) => {
-                info!("Connection {} has connected to upstream {}", self.cid(), ups_endp!(self.inners));
-                let (reader, writer) = split(stream);
-                self.upstream_reader = Some(reader);
-                self.upstream_writer = Some(writer);
-            },
-            Err(e) => {
-                error!("Connection {} connect to upstream {} failed: {}", self.cid(), ups_endp!(self.inners), e);
-                self.close_upstream2().await?;
-                self.state = State::Idling;
-                self.on_idle();
-            }
+        let Some(handler) = self.handler.upgrade() else {
+            return Err(StateError::new("proxy session is gone"));
         };
 
-        if self.upstream_reader.is_some() {
-            self.send_connect_response(true).await
+        let stream = handler.connect_upstream().await?;
+        let (reader, writer) = split(stream);
+        self.upstream_reader = Some(reader);
+        self.upstream_writer = Some(writer);
+        Ok(())
+    }
+
+    fn connect_upstream(&mut self) {
+        if self.state == State::Connecting {
+            self.state = State::Relaying;
         } else {
-            self.send_connect_response(false).await
+            // Disconnected from the client side before connecting to the upstream:
+            // drop the socket, keep the state.
+            debug!("Connection {} dropped the upstream socket in {} state", self.cid(), self.state);
+            self.upstream_reader = None;
+            self.upstream_writer = None;
         }
     }
 
-    async fn close_upstream2(&mut self) -> Result<()> {
-        if  self.state == State::Closed ||
-            self.state == State::Idling {
-            return Ok(())
-        }
+    async fn send_packet(&mut self, label: &str, payload: Vec<u8>) -> Result<()> {
+        let Some(writer) = self.relay_writer.as_mut() else {
+            return Err(StateError::new("relay writer is not available"));
+        };
 
-        let reader = self.upstream_reader.take();
-        let writer = self.upstream_writer.take();
-
-        if let Some(reader) = reader {
-            assert!(writer.is_some());
-            let mut stream = reader.unsplit(writer.unwrap());
-            _ = task::spawn_local(async move {
-                _ = stream.flush().await;
-                _ = stream.shutdown().await;
-            }).await
-        }
-
-        info!("Connection {} closed upstream {}", self.cid(), ups_endp!(self.inners));
-        Ok(())
-    }
-
-    pub(crate) async fn close_upstream(&mut self) -> Result<()> {
-        if  self.state == State::Closed ||
-            self.state == State::Idling  {
-            return Ok(())
-        }
-
-        info!("Connection {} closing upstream {}", self.cid(), ups_endp!(self.inners));
-
-        self.state = State::Disconnecting;
-
-        _ = self.send_disconnect_request().await;
-        _ = self.close_upstream2().await;
-
-        Ok(())
-    }
-
-    pub(crate) async fn check_keepalive(&mut self) -> Result<()> {
-        if self.state == State::Relaying {
-            return Ok(())
-        }
-
-        if elapsed_ms!(self.keepalive) > MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
-            warn!("Connection {} is dead and should be obsolete.", self.cid());
-            return Err(StateError::new(format!("Connection {} is dead", self.cid())));
-        }
-
-        // keepalive check.
-        let random_shift = random_timeshift() as u128; // max  10 seconds;
-        if self.state == State::Idling &&
-            elapsed_ms!(self.keepalive) >= KEEPALIVE_INTERVAL - random_shift {
-            return self.send_ping_request().await;
-        }
-        return Ok(())
-    }
-
-    pub(crate) async fn connect_server(&mut self) -> Result<()> {
-        info!("Connection {} is connecting to the server {}...", self.cid(), srv_endp!(self.inners));
-
-        let raddr = srv_addr!(self.inners).clone();
-        let socket = TcpSocket::new_v4()?;  // TODO: ip v4 addr?;
-        let result = socket.connect(raddr).await;
-        match result {
-            Ok(stream) => {
-                info!("Connection {} has connected to server {}", self.cid(), srv_endp!(self.inners));
-
-                let (reader, writer) = split(stream);
-                self.relay_reader = Some(reader);
-                self.relay_writer = Some(writer);
-                Ok(())
-            },
-            Err(e) => {
-                error!("Connection {} connect to server {} failed: {}", self.cid(), srv_endp!(self.inners), e);
-                Err(e.into())
+        let mut written = 0;
+        while written < payload.len() {
+            match writer.write(&payload[written..]).await {
+                Ok(len) => written += len,
+                Err(e) => {
+                    error!("Connection {} failed to send {label} packet to proxy socket: {e}", self.cid());
+                    self.close().await?;
+                    return Err(e.into());
+                }
             }
         }
+
+        trace!("Connection {} sent {label} packet to proxy socket", self.cid());
+        Ok(())
+    }
+
+    pub(crate) async fn send_auth(
+        &mut self,
+        user_id: Id,
+        device_id: Id,
+        client_session_pk: cryptobox::PublicKey,
+        name_access: bool,
+        device_sig: Vec<u8>,
+    ) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.state = State::Authenticating;
+
+        let auth = packet::Auth::new(packet::VERSION as u16, user_id, device_id, client_session_pk, name_access, device_sig);
+        let payload = auth.encode(&mut self.peer_context.borrow_mut())?;
+        self.send_packet("AUTH", payload).await
+    }
+
+    pub(crate) async fn send_attach(
+        &mut self,
+        device_id: Id,
+        client_session_pk: cryptobox::PublicKey,
+        device_sig: Vec<u8>,
+    ) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.state = State::Attaching;
+
+        let attach = packet::Attach::new(device_id, client_session_pk, device_sig);
+        let payload = attach.encode(&mut self.peer_context.borrow_mut())?;
+        self.send_packet("ATTACH", payload).await
+    }
+
+    async fn send_ping(&mut self) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.send_packet("PING", packet::Ping::encode()).await
+    }
+
+    async fn send_connect_ack(&mut self, succeeded: bool) -> Result<()> {
+        let payload = packet::ConnectAck::new(succeeded).encode();
+        self.send_packet("CONNECT_ACK", payload).await
+    }
+
+    async fn send_disconnect(&mut self) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.send_packet("DISCONNECT", packet::Disconnect::encode()).await
+    }
+
+    async fn send_disconnect_ack(&mut self) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.send_packet("DISCONNECT_ACK", packet::DisconnectAck::encode()).await
+    }
+
+    async fn send_data(&mut self, data: Vec<u8>) -> Result<()> {
+        let session_context = self.session_context.borrow().clone()
+            .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+        let mut ctx = session_context;
+        let payload = packet::Data::new(data).encode(&mut ctx)?;
+        *self.session_context.borrow_mut() = Some(ctx);
+        self.send_packet("DATA", payload).await
     }
 
     pub(crate) async fn on_relay_data(&mut self, input: &[u8]) -> Result<()> {
         self.keepalive = SystemTime::now();
 
         let mut pos = 0;
-        let mut remain = input.len();
-        if self.stickybuf_mut().len() > 0 {
-            if self.stickybuf().len() < PACKET_HEADER_BYTES {
-                let rs = PACKET_HEADER_BYTES - self.stickybuf().len();
-                //  Read header data, but insufficient to form a complete header
-                if remain < rs {
-                    self.stickybuf_mut().extend_from_slice(input);
+        let mut remaining = input.len();
+
+        if !self.stickybuf.is_empty() {
+            if self.stickybuf.len() < PACKET_HEADER_BYTES {
+                let need = PACKET_HEADER_BYTES - self.stickybuf.len();
+                if remaining < need {
+                    self.stickybuf.extend_from_slice(input);
                     return Ok(());
                 }
 
-                // A complete packet header has been read.
-                self.stickybuf_mut().extend_from_slice(&input[..rs]);
-                pos += rs;
-                remain -= rs;
+                self.stickybuf.extend_from_slice(&input[..need]);
+                pos += need;
+                remaining -= need;
             }
 
-            // Parse the header to determine packet size.
-            let packet_sz = u16::from_be_bytes(
-                    self.stickybuf()[..size_of::<u16>()].try_into().unwrap()
-                ) as usize;
-            let rs = packet_sz - self.stickybuf().len();
-            if remain < rs {
-                // Reader packet data but insufficient to form a complete packet
-                self.stickybuf_mut().extend_from_slice(&input[pos..pos+remain]);
+            let packet_size = u16::from_be_bytes([self.stickybuf[0], self.stickybuf[1]]) as usize;
+            if packet_size < PACKET_HEADER_BYTES {
+                error!("Connection {} got malformed packet (declared size {packet_size}) from proxy socket", self.cid());
+                return self.close().await;
+            }
+
+            let need = packet_size - self.stickybuf.len();
+            if remaining < need {
+                self.stickybuf.extend_from_slice(&input[pos..pos + remaining]);
                 return Ok(());
             }
 
-            // A complete packet has been successfully read.
-            self.stickybuf_mut().extend_from_slice(&input[pos..pos+rs]);
-            pos += rs;
-            remain -= rs;
+            self.stickybuf.extend_from_slice(&input[pos..pos + need]);
+            pos += need;
+            remaining -= need;
 
-            let stickybuf = self.stickybuf.take().unwrap();
-            self.stickybuf = Some(Vec::with_capacity(4*1024));
-            self.process_relay_packet(&stickybuf).await?;
-        }
+            let packet = mem::take(&mut self.stickybuf);
+            self.packet_handler(&packet).await?;
 
-        // Continue parsing the remaining data from input buffer.
-        while remain > 0 {
-            // clean sticky buffer to prepare for new packet.
-            if remain < PACKET_HEADER_BYTES {
-                self.stickybuf_mut().extend_from_slice(&input[pos..pos + remain]);
-                return Ok(())
-            }
-
-            let packet_sz = u16::from_be_bytes(input[pos..pos+size_of::<u16>()].try_into().unwrap()) as usize;
-            if remain < packet_sz {
-                // Reader packet data but insufficient to form a complete packet
-                self.stickybuf_mut().extend_from_slice(&input[pos..pos+remain]);
-                return Ok(())
-            }
-
-            self.process_relay_packet(&input[pos..pos+packet_sz]).await?;
-            pos += packet_sz;
-            remain -= packet_sz;
-        }
-        Ok(())
-    }
-
-    async fn process_relay_packet(&mut self, input: &[u8]) -> Result<()> {
-        let pos = mem::size_of::<u16>();
-        if self.state == State::Initializing {
-            return self.on_challenge(&input[pos..]).await;
-        }
-
-        // packet format
-        // - u16: packet size,
-        // - u8: packet flag.
-        let result = Packet::from(input[pos]);
-        if let Err(e) = result {
-            error!("Received an invalid packet type: {}", e);
-            return Err(e);
-        }
-
-        let packet = result.unwrap();
-        debug!("Connection {} got packet from server {}: type={}, ack={}, size={}",
-            self.cid(), srv_endp!(self.inners), packet, packet.ack(), input.len());
-
-        if matches!(packet, Packet::Error(_)) {
-            let len = input.len() - PACKET_HEADER_BYTES;
-            let mut plain = vec![0u8; len];
-            _ = enbox!(self.inners).decrypt(
-                &input[PACKET_HEADER_BYTES..],
-                &mut plain[..]
-            ).map_err(|e| {
-                error!("Connection {} decrypt packet from server {} error {e}",
-                    self.cid(),
-                    srv_endp!(self.inners)
-                ); e
-            })?;
-
-            let mut pos = 0;
-            let end = mem::size_of::<u16>();
-            let ecode = u16::from_be_bytes(plain[pos..end].try_into().unwrap());
-
-            pos = end;
-            let data = &plain[pos..];
-            let errstr = str::from_utf8(data).unwrap().to_string();
-
-            error!("Connection {} got ERR response from the server {}, error:{}:{}",
-                self.cid(), srv_endp!(self.inners), ecode, errstr);
-
-            return Err(ProtocolError::new("Packet error"));
-        }
-
-        if !self.state.accept(&packet) {
-            error!("Connection {} is not allowed for {} packet at {} state", self.cid(), packet, self.state);
-            return Err(PermissionError::new("Permission denied"));
-        }
-
-        match packet {
-            Packet::AuthAck(_)      => self.on_authenticate_response(input),
-            Packet::AttachAck(_)    => self.on_attach_reponse(input),
-            Packet::PingAck(_)      => self.on_ping_response(input),
-            Packet::Connect(_)      => self.on_connect_request(input).await,
-            Packet::Data(_)         => self.on_data_request(input).await,
-            Packet::Disconnect(_)   => self.on_disconnect_request(input).await,
-            Packet::DisconnectAck(_)=> self.on_disconnect_response(input),
-            _ => {
-                error!("INTERNAL ERROR: Connection {} got wrong {} packet in {} state", self.cid(), packet, self.state);
-                Err(ProtocolError::new(format!("Wrong expected packet {} received", packet)))
+            if self.state == State::Closed {
+                return Ok(());
             }
         }
-    }
 
-    /*
-    * Challenge packet
-    * - plain
-    *   - Random challenge bytes.
-    */
-    async fn on_challenge(&mut self, input: &[u8]) -> Result<()> {
-        if input.len() < 32 || input.len() > 256 {
-            error!("Connection {} got invalid challenge from server {}, expected range {}:{}, acutal length:{}!",
-                self.cid(),
-                srv_endp!(self.inners),
-                32,
-                256,
+        while remaining > 0 {
+            if remaining < PACKET_HEADER_BYTES {
+                self.stickybuf.extend_from_slice(&input[pos..pos + remaining]);
+                return Ok(());
+            }
 
-                input.len()
-            );
-            return Ok(())
+            let packet_size = u16::from_be_bytes([input[pos], input[pos + 1]]) as usize;
+            if packet_size < PACKET_HEADER_BYTES {
+                error!("Connection {} got malformed packet (declared size {packet_size}) from proxy socket", self.cid());
+                return self.close().await;
+            }
+
+            if remaining < packet_size {
+                self.stickybuf.extend_from_slice(&input[pos..pos + remaining]);
+                return Ok(());
+            }
+
+            self.packet_handler(&input[pos..pos + packet_size]).await?;
+            pos += packet_size;
+            remaining -= packet_size;
+
+            if self.state == State::Closed {
+                return Ok(());
+            }
         }
 
-        // Sign the challenge, send auth or attach with siguature
-        let sig = self.sign_into(input)?;
-        // TODO: device signature
-        if self.inners.lock().unwrap().is_authenticated() {
-            self.send_attach_request(&sig).await
-        } else {
-            let user_sig = signature::sign_into(input, self.inners().lock().unwrap().keypair.private_key()).unwrap();
-            self.send_authenticate_request(&user_sig, &sig).await
-        }
-    }
-
-    /*
-    * AUTHACK packet payload:
-    * - encrypted
-    *   - sessionPk[server]
-    *   - port[uint16]
-    *   - domainEnabled[uint8]
-    */
-    const AUTH_ACK_SIZE: usize = PACKET_HEADER_BYTES    // header.
-        + cryptobox::Nonce::BYTES                       // nonce.
-        + cryptobox::CryptoBox::MAC_BYTES               // MAC BYTES.
-        + cryptobox::PublicKey::BYTES                   // public key.
-        + mem::size_of::<u16>()                         // port.
-        + mem::size_of::<u16>()                         // max connections allowed.
-        + mem::size_of::<bool>();
-
-    fn on_authenticate_response(&mut self, input: &[u8]) -> Result<()> {
-        if input.len() < Self::AUTH_ACK_SIZE {
-            error!("Connection {} got invalid AUTH ACK from server {}, expected minimum length {}, actual found: {}",
-                self.cid(),
-                srv_endp!(self.inners),
-                Self::AUTH_ACK_SIZE,
-                input.len()
-            );
-            return Err(ProtocolError::new("Invalid AUTH ACK packet"));
-        }
-
-        let plain_len = Self::AUTH_ACK_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
-        let mut plain = vec![0u8; plain_len];
-
-        let peerid = srv_peer!(self.inners).lock().unwrap().id().clone();
-        self.decrypt(
-            &peerid,
-            &input[PACKET_HEADER_BYTES..Self::AUTH_ACK_SIZE],
-            &mut plain
-        ).map_err(|e| {
-            error!("Connection {} decrypt AUTH ACK from server {} error {e}.",
-                self.cid(),
-                srv_endp!(self.inners())
-            ); e
-        })?;
-
-        let mut pos = 0;
-        let mut end = pos + cryptobox::PublicKey::BYTES;
-        let server_pk = cryptobox::PublicKey::try_from(     // extract server public key.
-            &plain[pos..end]
-        )?;
-
-        pos = end;
-        end += mem::size_of::<u16>();
-        let port = u16::from_be_bytes(                  // extract port.
-            plain[pos..end].try_into().unwrap()
-        );
-
-        pos = end;
-        end += mem::size_of::<u16>();
-        let max_connections = u16::from_be_bytes(       // extract max connections allowed
-            plain[pos..end].try_into().unwrap()
-        ) as usize;
-
-        self.inners.lock().unwrap().capacity = max_connections;
-
-        pos = end;
-        let domain_enabled = input[pos] != 0;           // extract flag whether domain enabled or not.
-
-        self.on_authorized(&server_pk, port, domain_enabled);
-
-        self.state = State::Idling;
-        self.on_opened();
-        info!("Connection {} opened.", self.cid());
         Ok(())
     }
 
-    /*
-     * No Payload.
-     */
-    fn on_attach_reponse(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got ATTACH ACK from server {}", self.cid(), srv_endp!(self.inners));
-        self.state = State::Idling;
-        self.on_opened();
-        info!("Connection {} opened.", self.cid());
-        Ok(())
-    }
-
-    /*
-     * No Payload.
-     */
-    fn on_ping_response(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got PING ACK from server {}", self.cid(), srv_endp!(self.inners));
-        // ignore the random padding payload.
-        // keep-alive time stamp already update when we got the server data.
-        // so nothing to do here.
-        Ok(())
-    }
-
-    const CONNECT_REQ_SIZE: usize = PACKET_HEADER_BYTES
-        + cryptobox::Nonce::BYTES
-        + CryptoBox::MAC_BYTES
-        + mem::size_of::<u8>()      // address length
-        + 16                        // address (IPv4 or IPv6)
-        + mem::size_of::<u16>();    // port
-
-    /*
-     * CONNECT packet payload:
-     * - encrypted
-     *   - addrlen[uint8]
-     *   - addr[16 bytes both for IPv4 or IPv6]
-     *   - port[uint16]
-     */
-    async fn on_connect_request(&mut self, input: &[u8]) -> Result<()> {
-        if input.len() < Self::CONNECT_REQ_SIZE {
-            error!("Connection {} got invalid CONNECT request from server {}, expected length: {}, acutal length:{}",
-                self.cid(),
-                srv_endp!(self.inners),
-                Self::CONNECT_REQ_SIZE,
-                input.len()
-            );
-            return Err(ProtocolError::new("Invalid CONNECT packet"));
-        }
-
-        debug!("Connection {} got CONNECT from server {}", self.cid(), srv_endp!(self.inners));
-        self.state = State::Relaying;
-        self.on_busy();
-
-        let plain_len = Self::CONNECT_REQ_SIZE - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
-        let mut plain = vec![0u8; plain_len];
-
-        let _ = enbox!(self.inners).decrypt(
-            &input[PACKET_HEADER_BYTES..Self::CONNECT_REQ_SIZE],
-            &mut plain[..]
-        ).map_err(|e| {
-            error!("Connection {} decrypt CONNECT request packet from server {} error: {e}",
-                self.cid(),
-                srv_endp!(self.inners)
-            ); e
-        })?;
-
-        let mut pos = 0;
-        let addr_len = plain[pos] as usize;
-
-        pos += mem::size_of::<u8>();
-        let ip = match (addr_len * 8) as u32 {
-            Ipv4Addr::BITS => {
-                let bytes = input[pos..pos + addr_len].try_into().unwrap();
-                let bits = u32::from_be_bytes(bytes);
-                IpAddr::V4(Ipv4Addr::from(bits))
-            },
-            Ipv6Addr::BITS => {
-                let bytes = input[pos..pos + addr_len].try_into().unwrap();
-                let bits = u128::from_be_bytes(bytes);
-                IpAddr::V6(Ipv6Addr::from(bits))
-            },
-            _ => return Err(ProtocolError::new("Unsupported address family.")),
-        };
-
-        pos += 16;      // the length of the buffer for address.
-        let end = pos + mem::size_of::<u16>();
-        let port = u16::from_be_bytes(input[pos..end].try_into().unwrap());
-        let addr = SocketAddr::new(ip, port);
-
-        if self.allow(&addr) {
-            self.open_upstream().await
-        } else {
-            self.send_connect_response(false).await?;
-            self.state = State::Idling;
-            self.on_idle();
-            Ok(())
-        }
-    }
-
-    /*
-     * DATA packet payload:
-     * - encrypted
-     *   - data
-     */
-    async fn on_data_request(&mut self, input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DATA({}) from server {}", self.cid(), input.len(), srv_endp!(self.inners));
-
-        let plain_len = input.len() - PACKET_HEADER_BYTES - CryptoBox::MAC_BYTES - cryptobox::Nonce::BYTES;
-        let mut data = Box::new(vec![0u8; plain_len]);
-
-        _ = enbox!(self.inners).decrypt(
-            &input[PACKET_HEADER_BYTES..],
-            &mut data[..]
-        ).map_err(|e| {
-            error!("Connection {} decrypt CONNECT request packet from server {} error: {e}",
-                self.cid(),
-                srv_endp!(self.inners)
-            ); e
-        })?;
-
-        trace!("Connection {} sending {} bytes data to upstream {}",
-            self.cid(),
-            data.len(),
-            ups_endp!(self.inners)
-        );
-
-        let mut written = 0;
-        while written < data.len() {
-            let slen = match self.upstream_writer.as_mut().unwrap().write(&data[written..]).await {
-                Ok(len) => len,
+    async fn packet_handler(&mut self, packet: &[u8]) -> Result<()> {
+        if self.state != State::Initializing {
+            let packet_type = match get_packet_type(packet) {
+                Ok(t) => t,
                 Err(e) => {
-                    error!("Connection {} send DATA to upstream {} error: {e}",
-                        self.cid(),
-                        srv_endp!(self.inners)
-                    );
-                    return Err(e.into())
+                    error!("Connection {} got malformed packet from proxy socket: {e}", self.cid());
+                    return self.close().await;
                 }
             };
-            written += slen;
-        }
 
-        debug!("Connection {} sended DATA (len:{}) to upstream {}.",
-            self.cid(),
-            data.len(),
-            ups_endp!(self.inners)
-        );
+            trace!("Connection {} got {packet_type} packet ({} bytes) from proxy socket", self.cid(), packet.len());
 
-        Ok(())
-    }
+            if !self.state.accept(&packet_type) {
+                error!("Connection {} cannot accept {packet_type} packet in {} state", self.cid(), self.state);
+                return self.close().await;
+            }
 
-    /*
-     * No payload
-     */
-    async fn on_disconnect_request(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DISCONNECT from server {}", self.cid(), srv_endp!(self.inners));
+            if let Err(e) = self.dispatch_packet(&packet_type, packet).await {
+                error!("Connection {} got invalid {packet_type} packet from proxy socket: {e}", self.cid());
+                return self.close().await;
+            }
 
-        _ = self.close_upstream();
-        _ = self.send_disconnect_response().await?;
-
-        self.disconnect_confirms += 1;
-        if self.disconnect_confirms == 2 {
-            self.disconnect_confirms = 0;
-            self.state = State::Idling;
-            self.on_idle();
-        }
-        Ok(())
-    }
-
-    /*
-    * No payload
-    */
-    fn on_disconnect_response(&mut self, _input: &[u8]) -> Result<()> {
-        debug!("Connection {} got DISCONNECT_ACK from server {}", self.cid(), srv_endp!(self.inners));
-
-        self.disconnect_confirms += 1;
-        if self.disconnect_confirms == 2 {
-            self.disconnect_confirms = 0;
-            self.state = State::Idling;
-            self.on_idle();
-        }
-        Ok(())
-    }
-
-    /*
-    * ATTACH packet:
-    *   - plain
-    *     - clientNodeId
-    *   - encrypted
-    *     - sessionPk[client]
-    *     - connectionNonce
-    *     - signature[challenge]
-    *   - plain
-    *     - padding
-    */
-    async fn send_attach_request(&mut self, dev_sig: &[u8]) -> Result<()> {
-        assert!(dev_sig.len() == Signature::BYTES);
-        if self.state == State::Closed {
-            return Ok(())
-        }
-
-        self.state = State::Attaching;
-
-        let len = Signature::BYTES;                 // signature of challenge.
-        let mut plain:Vec<u8> = Vec::with_capacity(len);
-        plain.extend_from_slice(dev_sig);           // signature of challenge.
-
-        let len = PACKET_HEADER_BYTES
-            + Id::BYTES                          // plain device id
-            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
-            + plain.len();
-
-        let mut payload =vec![0u8;len];
-        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + Id::BYTES].copy_from_slice(self.deviceid.as_bytes());
-        self.encrypt(
-            srv_peer!(self.inners).lock().unwrap().id(),
-            &plain,
-            &mut payload[PACKET_HEADER_BYTES + Id::BYTES..]
-        ).map_err(|e| {
-            error!("Connection {} failed to encrypt attach request: {e}", self.cid());
-            e
-        })?;
-
-        self.send_relay_packet(
-            Packet::Attach(AttachType),
-            payload
-        ).await
-    }
-
-
-    /*  PACKET_HEADER_BYTES                 // header.
-        ID BYTES                            // device id.
-        cryptobox::Nonce::BYTES             // nonce.
-        cryptobox::CryptoBox::MAC_BYTES     // MAC BYTES.
-        ID BYTES                            // client user id.
-        cryptobox::PublicKey::BYTES         // session public key
-        mem::size_of::<8>()                 // domain size.
-        Signature::BYTES                    // signature of challenge from user client.
-        Signature::BYTES                    // signature of challenge from device node.
-    */
-    async fn send_authenticate_request(&mut self, user_sig: &[u8], dev_sig: &[u8]) -> Result<()> {
-        assert!(user_sig.len() == Signature::BYTES);
-        assert!(dev_sig.len() == Signature::BYTES);
-
-        if self.state == State::Closed {
-            return Ok(())
-        }
-
-        self.state = State::Authenticating;
-
-        //let domain_len = self.inners.lock().unwrap().peer_domain.as_ref().map_or(0, |v|v.len());
-        let len = Id::BYTES                      // client user id.
-            + cryptobox::PublicKey::BYTES       // client public key.
-            + mem::size_of::<u8>()              // the value to domain length.
-            + Signature::BYTES                  // signature of challenge from user client.
-            + Signature::BYTES;                 // signature of challenge from device node.
-
-        let mut plain = Vec::with_capacity(len);
-        plain.extend_from_slice(self.inners().lock().unwrap().userid.as_bytes()); // userid
-        plain.extend_from_slice(self.inners().lock().unwrap().session_keypair.public_key().as_bytes()); // client session public key
-        plain.extend_from_slice(&[false as u8]);        // boolean for domain DNS
-        plain.extend_from_slice(user_sig);              // signature of challenge.
-        plain.extend_from_slice(dev_sig);               // signature of challenge.
-
-        let mut len = PACKET_HEADER_BYTES               // packet header.
-            + Id::BYTES                                  // plain device id
-            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
-            + plain.len();                              // encyption payload
-
-        let mut padding_sz = random_padding() as usize;
-        if padding_sz == 0 {
-            padding_sz += 1;
-        }
-        len += padding_sz;                              // padding size for randomness.
-
-        let mut payload =vec![0u8;len];
-        payload[PACKET_HEADER_BYTES..PACKET_HEADER_BYTES + Id::BYTES].copy_from_slice(self.deviceid.as_bytes());
-        self.encrypt(
-            srv_peer!(self.inners).lock().unwrap().id(),
-            &plain,
-            &mut payload[PACKET_HEADER_BYTES + Id::BYTES..]
-        ).map_err(|e| {
-            error!("Connection {} failed to encrypt authentication request: {e}", self.cid());
-            e
-        })?;
-
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz);     // padding
-            payload[len - padding_sz..].copy_from_slice(&padding);
-        }
-
-        self.send_relay_packet(
-            Packet::Auth(AuthType),
-            payload
-        ).await
-    }
-
-    /*
-     * PING packet:
-     *   - plain
-     *     - padding
-     */
-    async fn send_ping_request(&mut self) -> Result<()> {
-        if self.state == State::Closed {
-            return Ok(())
-        }
-
-        let mut padding_sz = random_padding() as usize;
-        if padding_sz == 0 {
-            padding_sz += 1;
-        }
-
-        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
-        let mut payload = vec![0u8; len];
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz); // padding
-            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
-        }
-
-        self.send_relay_packet(
-            Packet::Ping(PingType),
-            payload
-        ).await
-    }
-
-    /*
-     * CONNECTACK packet payload:
-     * - plain
-     *   - success[uint8]
-     *   - padding
-     */
-    async fn send_connect_response(&mut self, success: bool) -> Result<()> {
-        let mut padding_sz = random_padding() as usize;
-        if padding_sz == 0 {
-            padding_sz += 1;
-        }
-
-        let len = PACKET_HEADER_BYTES + size_of::<u8>() + padding_sz;
-        let mut payload = vec![0u8; len];
-        payload[PACKET_HEADER_BYTES] = random_boolean(success);
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz); // padding
-            payload[PACKET_HEADER_BYTES + size_of::<u8>()..].copy_from_slice(&padding);
-        }
-
-        self.send_relay_packet(
-            Packet::ConnectAck(ConnType),
-            payload
-        ).await
-    }
-
-    /*
-     * DISCONNECT packet:
-     *   - plain
-     *     - padding
-     */
-    async fn send_disconnect_request(&mut self) -> Result<()> {
-        if self.state == State::Closed {
-            return Ok(())
-        }
-
-        let mut padding_sz = random_padding() as usize;
-        if padding_sz == 0 {
-            padding_sz += 1;
-        }
-
-        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
-        let mut payload = vec![0u8; len];
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz); // padding
-            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
-        }
-
-        self.send_relay_packet(
-            Packet::Disconnect(DisconnType),
-            payload
-        ).await
-    }
-
-    /*
-     * DISCONNECT packet:
-     *   - plain
-     *     - padding
-     */
-    async fn send_disconnect_response(&mut self) -> Result<()> {
-        if self.state == State::Closed {
-            return Ok(())
-        }
-
-        let mut padding_sz = random_padding() as usize;
-        if padding_sz == 0 {
-            padding_sz += 1;
-        }
-
-        let len = PACKET_HEADER_BYTES + padding_sz; // packet header + padding size
-        let mut payload = vec![0u8; len];
-        if padding_sz > 0 {
-            let padding = random_bytes(padding_sz); // padding
-            payload[PACKET_HEADER_BYTES..].copy_from_slice(&padding);
-        }
-
-        self.send_relay_packet(
-            Packet::DisconnectAck(DisconnType),
-            payload
-        ).await
-    }
-
-    async fn send_relay_packet(&mut self,
-        pkt: Packet,
-        mut input: Vec<u8>
-    ) -> Result<()> {
-        if self.state == State::Closed {
-            warn!("Connection {} is already closed, but still try to send {} to upstream.", self.cid(), pkt);
             return Ok(());
         }
 
-        let len = input.len() as u16;
-        let pos = size_of::<u16>();
-        input[..pos].copy_from_slice(&len.to_be_bytes()); // packet size.
-        input[pos..pos+size_of::<u8>()].copy_from_slice(&[pkt.value()]); // packet flag.
-
-        let mut written = 0;
-        while written < input.len() {
-            let slen = match self.relay_writer.as_mut().unwrap().write(&input[written..]).await {
-                Ok(len) => len,
-                Err(e) => {
-                    error!("Connection {} failed to send {} to server {} with error: {e}",
-                        self.cid(),
-                        pkt,
-                        srv_endp!(self.inners)
-                    );
-                    return Err(e.into())
+        match packet::Challenge::decode(packet) {
+            Ok(challenge) => {
+                if let Err(e) = self.handle_challenge(challenge).await {
+                    error!("Connection {} got invalid CHALLENGE packet from proxy socket: {e}", self.cid());
+                    return self.close().await;
                 }
-            };
-            written += slen;
-        };
+                Ok(())
+            },
+            Err(e) => {
+                error!("Connection {} got malformed CHALLENGE packet from proxy socket: {e}", self.cid());
+                self.close().await
+            }
+        }
+    }
 
-        debug!("Connection {} send {}(len:{}) to server {}. ",
-            self.cid(),
-            pkt,
-            input.len(),
-            srv_endp!(self.inners)
-        );
+    async fn dispatch_packet(&mut self, packet_type: &PacketType, packet: &[u8]) -> Result<()> {
+        match packet_type {
+            PacketType::AuthAck(_) => {
+                let ack = packet::AuthAck::decode(packet, &self.peer_context.borrow())?;
+                self.handle_auth_ack(ack)
+            },
+            PacketType::AttachAck(_) => {
+                let ack = packet::AttachAck::decode(packet)?;
+                self.handle_attach_ack(ack)
+            },
+            PacketType::PingAck(_) => {
+                let ack = packet::PingAck::decode(packet)?;
+                self.handle_ping_ack(ack)
+            },
+            PacketType::Connect(_) => {
+                let session_context = self.session_context.borrow().clone()
+                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+                let conn = packet::Connect::decode(packet, &session_context)?;
+                self.handle_connect(conn).await
+            },
+            PacketType::Data(_) => {
+                let session_context = self.session_context.borrow().clone()
+                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+                let data = packet::Data::decode(packet, &session_context)?;
+                self.handle_data(data).await
+            },
+            PacketType::Disconnect(_) => {
+                let d = packet::Disconnect::decode(packet)?;
+                self.handle_disconnect(d).await
+            },
+            PacketType::DisconnectAck(_) => {
+                let d = packet::DisconnectAck::decode(packet)?;
+                self.handle_disconnect_ack(d).await
+            },
+            PacketType::Error(_) => {
+                let session_context = self.session_context.borrow().clone()
+                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+                let err = packet::Error::decode(packet, &session_context)?;
+                error!("Connection {} got ERROR response from the server, error: {}: {}",
+                    self.cid(), err.code(), err.message().unwrap_or_default());
+                Err(ProtocolError::new("Packet error"))
+            },
+            _ => {
+                error!("INTERNAL ERROR: Connection {} got wrong {packet_type} packet in {} state", self.cid(), self.state);
+                Ok(())
+            }
+        }
+    }
+
+    async fn handle_challenge(&mut self, challenge: packet::Challenge) -> Result<()> {
+        let Some(handler) = self.handler.upgrade() else {
+            return Err(StateError::new("proxy session is gone"));
+        };
+        let Some(me) = self.self_ref.upgrade() else {
+            return Err(StateError::new("connection handle is gone"));
+        };
+        handler.connection_challenge_handler(&me, challenge.challenge());
         Ok(())
     }
 
-    pub(crate) async fn on_upstream_data(&mut self, input: &[u8]) -> Result<()> {
-        let len = PACKET_HEADER_BYTES
-            + cryptobox::Nonce::BYTES  + cryptobox::CryptoBox::MAC_BYTES // encryption padding of nonce + MAC
-            + input.len();
+    fn handle_auth_ack(&mut self, ack: packet::AuthAck) -> Result<()> {
+        let Some(handler) = self.handler.upgrade() else {
+            return Err(StateError::new("proxy session is gone"));
+        };
+        handler.authenticated_handler(
+            ack.server_session_pk(), ack.max_connections() as i32, ack.name_access(),
+            ack.endpoint(), ack.named_endpoint(),
+        )?;
+        self.state = State::Idling;
+        self.on_opened();
+        info!("Connection {} opened.", self.cid());
+        Ok(())
+    }
 
-        let mut payload = vec![0u8; len];
-        let nonce = cryptobox::Nonce::random();
+    fn handle_attach_ack(&mut self, _ack: packet::AttachAck) -> Result<()> {
+        self.state = State::Idling;
+        self.on_opened();
+        info!("Connection {} opened.", self.cid());
+        Ok(())
+    }
 
-        _ = enbox!(self.inners).encrypt(
-            &input[..],
-            &mut payload[PACKET_HEADER_BYTES..],
-            &nonce
-        ).map_err(|e| {
-            error!("Connection {} encrypt DATA packet to server {} error: {e}",
-                self.cid(),
-                srv_endp!(self.inners)
-            ); e
-        })?;
+    fn handle_ping_ack(&mut self, _ack: packet::PingAck) -> Result<()> {
+        // keep-alive timestamp is already updated on receipt of any relay data.
+        Ok(())
+    }
 
-        self.send_relay_packet(
-            Packet::Data(DataType),
-            payload
-        ).await
+    async fn handle_connect(&mut self, conn: packet::Connect) -> Result<()> {
+        let addr = SocketAddr::new(conn.address(), conn.port());
+        if !self.allow(addr) {
+            return self.send_connect_ack(false).await;
+        }
+
+        self.state = State::Connecting;
+        // Reset the disconnect handshake count at the start of a new relay cycle so that a DISCONNECT
+        // racing this CONNECT keeps its confirmation instead of being wiped by a late callback.
+        self.disconnect_confirms = 0;
+        self.on_busy();
+
+        debug!("Connection {} connecting to the upstream...", self.cid());
+        match self.open_upstream().await {
+            Ok(()) => {
+                debug!("Connection {} connected to the upstream", self.cid());
+                self.connect_upstream();
+                self.send_connect_ack(true).await
+            },
+            Err(e) => {
+                self.state = State::Idling;
+                self.on_idle();
+                error!("Connection {} failed to connect to upstream: {e}", self.cid());
+                self.send_connect_ack(false).await
+            }
+        }
+    }
+
+    async fn handle_data(&mut self, data: packet::Data) -> Result<()> {
+        if self.state != State::Relaying {
+            trace!("Connection {} dropping DATA packet because the connection is not in the relaying state",
+                self.cid());
+            return Ok(());
+        }
+
+        let Some(writer) = self.upstream_writer.as_mut() else {
+            return Err(StateError::new("upstream writer is not available"));
+        };
+
+        let payload = data.data();
+        let mut written = 0;
+        let mut close_upstream = false;
+        {
+            while written < payload.len() {
+                match writer.write(&payload[written..]).await {
+                    Ok(len) => written += len,
+                    Err(e) => {
+                        error!("Connection {} failed to write data to upstream: {e}", self.cid());
+                        close_upstream = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if close_upstream {
+            let _ = self.close_upstream().await;
+            return Ok(());
+        }
+
+        trace!("Connection {} sent {} bytes data to upstream", self.cid(), payload.len());
+        Ok(())
+    }
+
+    async fn handle_disconnect(&mut self, _pkt: packet::Disconnect) -> Result<()> {
+        debug!("Connection {} got DISCONNECT from server", self.cid());
+
+        // Disconnected from the client side before connecting to the upstream:
+        // assume the upstream is already gone and account
+        // for that leg of the handshake before sending our own DISCONNECT.
+        if self.state == State::Connecting && self.upstream_writer.is_none() {
+            self.confirm_disconnect();
+            let _ = self.send_disconnect().await;
+        }
+
+        self.state = State::Disconnecting;
+        self.disconnect_upstream().await;
+        self.send_disconnect_ack().await
+    }
+
+    async fn handle_disconnect_ack(&mut self, _pkt: packet::DisconnectAck) -> Result<()> {
+        debug!("Connection {} got DISCONNECT_ACK from server", self.cid());
+        self.disconnect_upstream().await;
+        Ok(())
+    }
+
+    async fn disconnect_upstream(&mut self) {
+        if let Some(mut writer) = self.upstream_writer.take() {
+            let _ = writer.shutdown().await;
+        }
+        self.upstream_reader = None;
+        self.confirm_disconnect();
+    }
+
+    // A relayed connection returns to Idling only after DISCONNECT_CONFIRMS confirmations are observed:
+    // the local upstream end, the server DISCONNECT, and the matching DISCONNECT_ACK.
+    fn confirm_disconnect(&mut self) {
+        self.disconnect_confirms += 1;
+        if self.disconnect_confirms == DISCONNECT_CONFIRMS {
+            trace!("Connection {} disconnect confirmed, changing state to idle", self.cid());
+            self.state = State::Idling;
+            self.disconnect_confirms = 0;
+            self.on_idle();
+        }
+    }
+
+    pub(crate) async fn on_upstream_data(&mut self, data: &[u8]) -> Result<()> {
+        if self.state != State::Relaying {
+            trace!("Connection {} dropping data from upstream because the connection is not in the relaying state", self.cid());
+            return Ok(());
+        }
+        self.send_data(data.to_vec()).await
+    }
+
+    pub(crate) async fn check_keepalive(&mut self) -> Result<()> {
+        if elapsed_ms!(self.keepalive) >= MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
+            warn!("Connection {} keep alive timeout, closing now", self.cid());
+            return Err(StateError::new(format!("Connection {} is dead", self.cid())));
+        }
+
+        let random_shift = random_timeshift() as u128 * 1000; // max 10 seconds
+        if elapsed_ms!(self.keepalive) >= KEEPALIVE_INTERVAL - random_shift {
+            return self.send_ping().await;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn close_upstream(&mut self) -> Result<()> {
+        if self.state == State::Closed || self.state == State::Idling {
+            return Ok(());
+        }
+
+        info!("Connection {} closing upstream", self.cid());
+
+        self.state = State::Disconnecting;
+        let _ = self.send_disconnect().await;
+        self.disconnect_upstream().await;
+        Ok(())
+    }
+
+    pub(crate) async fn close(&mut self) -> Result<()> {
+        if self.state == State::Closed {
+            return Ok(());
+        }
+        self.state = State::Closed;
+
+        info!("Connection {} is closing...", self.cid());
+
+        if let Some(mut writer) = self.upstream_writer.take() {
+            let _ = writer.shutdown().await;
+            info!("Connection {} upstream socket closed", self.cid());
+        }
+        self.upstream_reader = None;
+
+        if let Some(mut writer) = self.relay_writer.take() {
+            let _ = writer.shutdown().await;
+            info!("Connection {} proxy socket closed", self.cid());
+        }
+        self.relay_reader = None;
+
+        self.stickybuf.clear();
+        self.on_closed();
+
+        info!("Connection {} closed", self.cid());
+        Ok(())
     }
 }
 
-impl fmt::Display for ProxyConnection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Connection[{}]: state={}", self.cid(), self.state)?;
-        Ok(())
-    }
+async fn read_stream(stream: Option<&mut ReadHalf<TcpStream>>, data: &mut [u8]) -> Result<usize> {
+    let Some(stream) = stream else {
+        return Ok(0);
+    };
+
+    stream.read(data).await.map_err(|e| e.into())
 }

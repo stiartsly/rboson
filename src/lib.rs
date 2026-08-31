@@ -4,7 +4,8 @@ pub mod did;
 pub mod dht;
 pub mod activeproxy;
 pub mod messaging;
-pub(crate) mod utils;
+
+mod utils;
 
 pub use crate::cfg::{
     configuration::Configuration,
@@ -55,8 +56,8 @@ pub use crate::dht::{
 
 pub use crate::activeproxy::{
     ActiveProxyClient,
-    ActiveProxyOptions,
-    ActiveProxyOptionsBuilder,
+    Options,
+    OptionsBuilder,
 };
 
 #[macro_export]

@@ -2,27 +2,32 @@ use std::{
     collections::HashMap,
     time::Duration
 };
-use futures::StreamExt;
 use tokio_util::time::{
     delay_queue::Key,
     DelayQueue,
 };
-use crate::dht::handler::{AsyncHandler, LocalHandler, Callable};
+use futures::StreamExt;
+
+use super::handler::{
+    BoxHandler,
+    LocalBoxHandler,
+    Callable
+};
 
 pub(crate) type TimerId = u64;
 
-struct GenericTimerEntry<H> {
+struct TimerEntry<H> {
     interval    : Option<Duration>,
     handler     : H,
     key         : Key,
 }
 
-pub struct GenericTimerManager<H> {
+pub struct TimerManager<H> {
     delay_queue : DelayQueue<TimerId>,
-    timers      : HashMap<TimerId, GenericTimerEntry<H>>,
+    timers      : HashMap<TimerId, TimerEntry<H>>,
 }
 
-impl<H: Callable<()>> GenericTimerManager<H> {
+impl<H: Callable<()>> TimerManager<H> {
     pub fn new() -> Self {
         Self {
             delay_queue: DelayQueue::new(),
@@ -41,7 +46,7 @@ impl<H: Callable<()>> GenericTimerManager<H> {
         }
 
         let key = self.delay_queue.insert(id, delay);
-        let entry = GenericTimerEntry { handler, interval, key };
+        let entry = TimerEntry { handler, interval, key };
         self.timers.insert(id, entry);
     }
 
@@ -90,7 +95,7 @@ impl<H: Callable<()>> GenericTimerManager<H> {
 }
 
 // Alias for standard (thread-safe Send) timer manager
-pub(crate) type AsyncTimerManager = GenericTimerManager<AsyncHandler<()>>;
+pub(crate) type BoxTimerManager = TimerManager<BoxHandler<()>>;
 
 // Alias for local (not Send) timer manager
-pub(crate) type LocalTimerManager = GenericTimerManager<LocalHandler<()>>;
+pub(crate) type LocalBoxTimerManager = TimerManager<LocalBoxHandler<()>>;

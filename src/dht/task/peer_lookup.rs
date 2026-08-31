@@ -6,7 +6,7 @@ use std::{
 use crate::{Id, PeerInfo};
 use crate::dht::{
     dht::DHT,
-    handler::Handler,
+    handler::EasyHandler,
     eligible_peers::EligiblePeers,
     rpc::RpcCall,
     routing::{
@@ -129,7 +129,7 @@ impl Task for PeerLookupTask {
                 self.result.expected_count() as i32,
             );
 
-            let cb = Handler::new(move |_| {
+            let cb = EasyHandler::new(move |_| {
                 next.borrow_mut().set_sent();
             });
             self.send_call(target, msg, Some(cb));

@@ -10,7 +10,7 @@ use crate::core::Network;
 use crate::dht::{
     dht::DHT,
     msg::Message,
-    handler::Handler,
+    handler::EasyHandler,
     task::task_listener::TaskListener,
     rpc::{
         Target, RpcCall, rpccall,
@@ -73,7 +73,7 @@ pub(crate) struct TaskData {
 
     inflights   : HashSet<i32>,
     listener    : Option<TaskListener>,
-    end_handler : Option<Handler<()>>,
+    end_handler : Option<EasyHandler<()>>,
 
     nested      : RefCell<Option<Box<dyn Task>>>,
     cloned      : Option<Weak<RefCell<Box<dyn Task>>>>,
@@ -178,7 +178,7 @@ pub(crate) trait Task {
         self.data().inflights.len()
     }
 
-    fn with_ended_handler(&mut self, handler: Handler<()>) {
+    fn with_ended_handler(&mut self, handler: EasyHandler<()>) {
         self.data_mut().end_handler = Some(handler);
     }
 
@@ -335,7 +335,7 @@ pub(crate) trait Task {
     fn call_error(&mut self, _: &RpcCall) {}
     fn call_timeout(&mut self, _: &RpcCall) {}
 
-    fn send_call(&mut self, target: Target, msg: Message, handler: Option<Handler<()>>) {
+    fn send_call(&mut self, target: Target, msg: Message, handler: Option<EasyHandler<()>>) {
         if !self.can_dorequest() {
             return;
         }

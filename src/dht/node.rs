@@ -32,7 +32,7 @@ use crate::dht::{
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
-    handler::AsyncHandler,
+    handler::BoxHandler,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
     storage::{
@@ -272,7 +272,7 @@ impl Node {
         let _ = client.add_timer(
             30_000,
             Some(STORAGE_EXPIRE_INTERVAL),
-            AsyncHandler::new(move |_|{
+            BoxHandler::new(move |_|{
                     let storage = storage.clone();
                     Box::pin(async move {
                         let _ = storage.lock().unwrap().purge();
@@ -283,7 +283,7 @@ impl Node {
         let _ = client.add_timer(
             60_000,
             Some(RE_ANNOUNCE_INTERVAL),
-            AsyncHandler::new(move |_| {
+            BoxHandler::new(move |_| {
                 let weak = weak.clone();
                 let Some(node) = weak.upgrade() else {
                     return Box::pin(async move {});
@@ -298,7 +298,7 @@ impl Node {
         let _ = client.add_timer(
             TokenManager::TOKEN_TIMEOUT,
             Some(TokenManager::TOKEN_TIMEOUT),
-            AsyncHandler::new(move |_| {
+            BoxHandler::new(move |_| {
                 let token_man = token_man.clone();
                 Box::pin(async move {
                     token_man.update_token_timestamp();

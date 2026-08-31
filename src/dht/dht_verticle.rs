@@ -31,8 +31,11 @@ use crate::dht::{
     lookup_option::LookupOption,
     promise::Promise,
     storage::data_storage::DataStorage,
-    timer_client::{LocalTimerClient as TimerClient, LocalTimerCmd as TimerCmd},
-    timer_manager::LocalTimerManager as TimerManager,
+    timer_client::{
+        LocalBoxTimerClient as TimerClient,
+        LocalBoxTimerCmd as TimerCmd
+    },
+    timer_manager::LocalBoxTimerManager as TimerManager,
     token_manager::TokenManager,
     rpc::rpc_server::RpcServer,
 };

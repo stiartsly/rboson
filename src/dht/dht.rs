@@ -26,11 +26,11 @@ use crate::dht::{
     ConnectionStatus,
     ConnectionStatusListener,
     promise::Promise,
-    handler::{Handler, LocalHandler as AsyncHandler,},
+    handler::{EasyHandler, LocalBoxHandler},
     token_manager::TokenManager,
     lookup_option::LookupOption,
     dht_verticle::VerticleOptions,
-    timer_client::LocalTimerClient as TimerClient,
+    timer_client::LocalBoxTimerClient as TimerClient,
     storage::data_storage::DataStorage,
     suspicious_node_detector::SuspiciousNodeDetector,
     rpc::{
@@ -255,6 +255,7 @@ impl DHT {
         _probe_replacement: bool,
         name: String
     ) {
+        // TODO: might be "RefCell already mutably borrowed"
         if !dht.borrow().rs().borrow().is_reachable() {
             return;
         }
@@ -335,7 +336,7 @@ impl DHT {
         let ids = self.bootstrap_ids.clone();
         let _ = self.rt().borrow_mut().maintenance(
             ids.as_slice(),
-            Handler::new(move |bucket: &Rc<RefCell<KBucket>>| {
+            EasyHandler::new(move |bucket: &Rc<RefCell<KBucket>>| {
                 let prefix = bucket.borrow().prefix().clone();
                 Self::try_ping_maintenance(dht.clone(), bucket.clone(), false, false, false,
                         format!("Routing table maintenance: refreshing bucket {}", prefix)
@@ -430,7 +431,7 @@ impl DHT {
         );
 
         let dht = self.dht();
-        rs.message_handler(AsyncHandler::new(move |msg: Rc<Message>| {
+        rs.message_handler(LocalBoxHandler::new(move |msg: Rc<Message>| {
             let dht = dht.clone();
             Box::pin(async move {
                 dht.borrow_mut().on_message(&msg);
@@ -438,7 +439,7 @@ impl DHT {
         }));
 
         let rt = self.rt();
-        rs.callsent_handler(Handler::new({
+        rs.callsent_handler(EasyHandler::new({
             let rt = rt.clone();
             move |nodeid: &Id|{
                 rt.borrow_mut().on_request_sent(&nodeid);
@@ -446,7 +447,7 @@ impl DHT {
         }));
 
         let rt = self.rt();
-        rs.calltimeout_handler(Handler::new({
+        rs.calltimeout_handler(EasyHandler::new({
             let rt = rt.clone();
             move |nodeid: &Id| {
                 rt.borrow_mut().on_timeout(&nodeid);
@@ -471,7 +472,7 @@ impl DHT {
         self.set_status(ConnectionStatus::Connecting);
 
         let dht     = self.dht();
-        let handler = AsyncHandler::new(move |reachable: bool|{
+        let handler = LocalBoxHandler::new(move |reachable: bool|{
             let dht = dht.clone();
             Box::pin(async move {
                 let mut borrowed = dht.borrow_mut();
@@ -587,7 +588,7 @@ impl DHT {
     async fn setup_periodic_tasks(&self) -> Result<()> {
         let dht = self.dht();
         let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
-            AsyncHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
                     dht.borrow_mut().update().await;
@@ -599,7 +600,7 @@ impl DHT {
         let _ = self.timer_client.add_timer(
             Self::RANDOM_LOOKUP_INTERVAL,
             Some(Self::RANDOM_LOOKUP_INTERVAL),
-            AsyncHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
                     dht.borrow().random_lookup();
@@ -611,7 +612,7 @@ impl DHT {
         let _ = self.timer_client.add_timer(
             Self::RANDOM_PING_INTERVAL,
             Some(Self::RANDOM_PING_INTERVAL),
-            AsyncHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
                     dht.borrow_mut().random_ping();
@@ -622,7 +623,7 @@ impl DHT {
         if let Some(detector) = self.suspicious_detector.as_ref() {
             let detector = detector.clone();
             let _ = self.timer_client.add_timer(60, Some(30),
-                AsyncHandler::new(move |_| {
+                LocalBoxHandler::new(move |_| {
                     let detector = detector.clone();
                     Box::pin(async move {
                         info!("Periodic: purging suspicious nodes ...");
@@ -636,7 +637,7 @@ impl DHT {
             let _  = self.timer_client.add_timer(
                 120,
                 Some(Self::ROUTING_TABLE_PERSIST_INTERVAL),
-                AsyncHandler::new(move |_| {
+                LocalBoxHandler::new(move |_| {
                     let rt = rt.clone();
                     let path = path.clone();
                     Box::pin(async move {

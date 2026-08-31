@@ -7,9 +7,10 @@ use tokio::sync::mpsc;
 use crate::CryptoIdentity;
 use crate::Network;
 use crate::dht::{
+    LocalBoxTimerCmd,
+    LocalBoxTimerClient,
     dht::DHT,
     dht_verticle::VerticleOptions,
-    timer_client::{LocalTimerClient, LocalTimerCmd},
     token_manager::TokenManager,
     connection_status_listener::ConnectionStatusListener,
     storage::{
@@ -37,8 +38,8 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<RefCell<DHT>> {
         .with_listener(listener)
         .with_datadir(".");
 
-    let (tx, _rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
-    let timer_client = Rc::new(LocalTimerClient::new(tx));
+    let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
+    let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
     let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client)
         .expect("test DHT should build");

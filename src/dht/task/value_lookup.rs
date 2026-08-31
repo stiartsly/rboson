@@ -6,7 +6,7 @@ use std::{
 use crate::{Id, Value};
 use crate::dht::{
     dht::DHT,
-    handler::Handler,
+    handler::EasyHandler,
     eligible_value::EligibleValue,
     rpc::RpcCall,
     msg::{msg, LookupResponse, Body},
@@ -128,7 +128,7 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let handler = Handler::new(move |_|
+            let handler = EasyHandler::new(move |_|
                 next.borrow_mut().set_sent()
             );
             self.send_call(target, msg, Some(handler));

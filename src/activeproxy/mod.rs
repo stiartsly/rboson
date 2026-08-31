@@ -1,6 +1,3 @@
-mod handler;
-mod timer_client;
-mod timer_manager;
 mod utils;
 mod session;
 mod verticle;
@@ -9,6 +6,15 @@ mod connection_registry;
 mod packet_type;
 mod packet;
 mod state;
+
+pub(crate) use crate::utils::{
+    handler::LocalBoxHandler,
+    timer_client::{
+        LocalBoxTimerClient,
+        LocalBoxTimerCmd,
+    },
+    timer_manager::LocalBoxTimerManager,
+};
 
 pub mod options;
 pub mod client;

@@ -24,9 +24,9 @@ use crate::{
     }
 };
 use crate::dht::{
-    timer_client::LocalTimerClient as TimerClient,
+    timer_client::LocalBoxTimerClient as TimerClient,
     suspicious_node_detector::SuspiciousNodeDetector,
-    handler::{Handler, LocalHandler as AsyncHandler},
+    handler::{EasyHandler, LocalBoxHandler},
     rpc::RpcCall,
     msg::{Message, msg::Method},
 };
@@ -44,10 +44,10 @@ pub(crate) struct RpcServer {
     last_reachable_check: SystemTime,
     is_reachable        : bool,
 
-    reachable_handler   : Option<AsyncHandler<bool>>,
-    message_handler     : Option<AsyncHandler<Rc<Message>>>,
-    callsent_handler    : Option<Handler<Id>>,
-    calltimeout_handler : Option<Handler<Id>>,
+    reachable_handler   : Option<LocalBoxHandler<bool>>,
+    message_handler     : Option<LocalBoxHandler<Rc<Message>>>,
+    callsent_handler    : Option<EasyHandler<Id>>,
+    calltimeout_handler : Option<EasyHandler<Id>>,
 
     start_time          : Option<SystemTime>,
     is_running          : bool,
@@ -106,7 +106,6 @@ impl RpcServer {
         let now = SystemTime::now();
 
         if self.recv_packets != self.recv_packets_at_last_reachable_check {
-            println!("RpcServer check_reachability, line:{}", line!());
             self.set_reachable(true).await;
             self.last_reachable_check = now;
             self.recv_packets_at_last_reachable_check = self.recv_packets;
@@ -126,13 +125,12 @@ impl RpcServer {
         }
         self.is_reachable = reachable;
         if let Some(h) = self.reachable_handler.take() {
-            println!("RpcServer set_reachable, line:{}", line!());
             h.cb(reachable).await;
             self.reachable_handler = Some(h);
         }
     }
 
-    pub(crate) fn reachable_handler(&mut self, consumer: AsyncHandler<bool>) {
+    pub(crate) fn reachable_handler(&mut self, consumer: LocalBoxHandler<bool>) {
         self.reachable_handler = Some(consumer);
     }
 
@@ -144,15 +142,15 @@ impl RpcServer {
         !self.pending_calls.is_empty()
     }
 
-    pub(crate) fn message_handler(&mut self, consumer: AsyncHandler<Rc<Message>>) {
+    pub(crate) fn message_handler(&mut self, consumer: LocalBoxHandler<Rc<Message>>) {
         self.message_handler = Some(consumer);
     }
 
-    pub(crate) fn callsent_handler(&mut self, consumer: Handler<Id>) {
+    pub(crate) fn callsent_handler(&mut self, consumer: EasyHandler<Id>) {
         self.callsent_handler = Some(consumer);
     }
 
-    pub(crate) fn calltimeout_handler(&mut self, consumer: Handler<Id>) {
+    pub(crate) fn calltimeout_handler(&mut self, consumer: EasyHandler<Id>) {
         self.calltimeout_handler = Some(consumer);
     }
 
@@ -196,7 +194,7 @@ impl RpcServer {
         let result = self.timer_client.add_timer(
             Self::REACHABILITY_CHECK_INTERVAL,
             Some(Self::REACHABILITY_CHECK_INTERVAL),
-            AsyncHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let server = cloned.clone();
                 Box::pin(async move {
                     server.borrow_mut().check_reachability().await;
@@ -240,9 +238,9 @@ impl RpcServer {
         let target_id = call.target_id();
         let rs = self.cloned.upgrade().expect("RpcServer weak reference not set");
 
-        let handler = Handler::new(move |_| {
-            let exists = rs.borrow_mut().pending_calls.remove(&txid);
-            if exists.is_none() {
+        let handler = EasyHandler::new(move |_| {
+            let existing = rs.borrow_mut().pending_calls.remove(&txid);
+            if existing.is_none() {
                 return;
             }
 

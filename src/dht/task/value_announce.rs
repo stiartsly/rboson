@@ -8,7 +8,7 @@ use std::{
 use crate::Value;
 use crate::dht::{
     dht::DHT,
-    handler::Handler,
+    handler::EasyHandler,
     msg::msg,
     task::{
         Task, TaskData,
@@ -105,7 +105,7 @@ impl Task for ValueAnnounceTask {
             );
 
             let cloned_todo = self.todo.clone();
-            let handler = Handler::new(move |_| {
+            let handler = EasyHandler::new(move |_| {
                 cloned_todo.borrow_mut().pop_front();
             });
 

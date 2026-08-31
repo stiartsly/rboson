@@ -5,8 +5,33 @@ pub mod dht;
 pub mod activeproxy;
 pub mod messaging;
 
-#[path = "utils/utils.rs"]
-pub(crate) mod utils;
+pub(crate) mod utils {
+    pub(crate) mod utils;
+    pub(crate) mod handler;
+    pub(crate) mod timer_client;
+    pub(crate) mod timer_manager;
+
+    pub(crate) use utils::*;
+}
+
+#[allow(unused_imports)]
+pub(crate) use crate::utils::{
+    handler::{
+        EasyHandler,
+        BoxHandler,
+        LocalBoxHandler,
+    },
+    timer_client::{
+        BoxTimerCmd,
+        BoxTimerClient,
+        LocalBoxTimerCmd,
+        LocalBoxTimerClient
+    },
+    timer_manager::{
+        BoxTimerManager,
+        LocalBoxTimerManager
+    }
+};
 
 pub use crate::cfg::{
     configuration::Configuration,

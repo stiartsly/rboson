@@ -4,13 +4,11 @@ use tokio::{
     sync::mpsc::{self, UnboundedSender}
 };
 use crate::errors::Result;
-use crate::dht::{
-    handler::AsyncHandler,
-    timer_manager::AsyncTimerManager as TimerManager,
-    timer_client::{
-        AsyncTimerClient as TimerClient,
-        AsyncTimerCmd as TimerCmd,
-    }
+use crate::{
+    BoxHandler,
+    BoxTimerManager as TimerManager,
+    BoxTimerClient as TimerClient,
+    BoxTimerCmd as TimerCmd,
 };
 
 pub(crate) type TimerId = u64;
@@ -34,7 +32,7 @@ impl VerticleClient {
     pub(crate) fn add_timer(&self,
         delay: u64,
         interval: Option<u64>,
-        cb: AsyncHandler<()>
+        cb: BoxHandler<()>
     ) -> Result<TimerId> {
         self.timer_client.add_timer(delay, interval, cb)
     }

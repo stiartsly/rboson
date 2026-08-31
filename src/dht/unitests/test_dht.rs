@@ -18,7 +18,7 @@ use crate::dht::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
     },
-    timer_client::{LocalTimerClient, LocalTimerCmd},
+    timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
     token_manager::TokenManager,
 };
 
@@ -29,12 +29,12 @@ pub(super) fn make_dht(
     identity: Arc<CryptoIdentity>,
     network: Network,
     host: &str,
-) -> (Rc<RefCell<DHT>>, mpsc::UnboundedReceiver<LocalTimerCmd>) {
+) -> (Rc<RefCell<DHT>>, mpsc::UnboundedReceiver<LocalBoxTimerCmd>) {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<dyn DataStorage>> = Arc::new(Mutex::new(SqliteStorage::new()));
     let listener: Arc<dyn ConnectionStatusListener> = Arc::new(NoopConnectionStatusListener);
-    let (tx, rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
-    let timer_client = Rc::new(LocalTimerClient::new(tx));
+    let (tx, rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
+    let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
     let options = VerticleOptions::default()
         .with_identity(identity)

@@ -26,10 +26,10 @@ use crate::{
     core::errors::{ArgumentError, NetworkError},
 };
 use super::{
+    LocalBoxHandler,
+    LocalBoxTimerClient as TimerClient,
     connection::ProxyConnection,
     connection_registry::ConnectionRegistry,
-    handler::LocalHandler,
-    timer_client::TimerClient,
     verticle::VerticleOptions,
 };
 
@@ -194,7 +194,7 @@ impl ProxySession {
 
         let peerid = self.service_peerid.clone();
         let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
-            LocalHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let node = node.clone();
                 Box::pin(async move {
                     let _ = super::utils::lookup_peer(node, &peerid).await;
@@ -206,7 +206,7 @@ impl ProxySession {
         let _ = self.timer_client.add_timer(
             PERIODIC_CHECK_INTERVAL,
             Some(PERIODIC_CHECK_INTERVAL),
-            LocalHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let session = session.clone();
                 Box::pin(async move {
                     session.periodic_check();

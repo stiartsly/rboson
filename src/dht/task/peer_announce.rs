@@ -8,7 +8,7 @@ use crate::PeerInfo;
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    handler::Handler,
+    handler::EasyHandler,
     task::{ClosestSet, CandidateNode,Task, TaskData}
 };
 
@@ -105,7 +105,7 @@ impl Task for PeerAnnounceTask {
             );
 
             let cloned_todo = self.todo.clone();
-            let cb = Handler::new(move |_| {
+            let cb = EasyHandler::new(move |_| {
                 cloned_todo.borrow_mut().pop_front();
             });
             self.send_call(cn.into(), msg, Some(cb));

@@ -14,7 +14,7 @@ use log::debug;
 
 use crate::{Id, Result};
 use crate::dht::{
-    handler::Handler,
+    handler::EasyHandler,
     rpc::TargetInfo,
     routing:: {
         Prefix,
@@ -300,7 +300,7 @@ impl RoutingTable {
     pub(crate) fn maintenance(
         &mut self,
         bootstrap_ids: &[Id],
-        handler: Handler<Rc<RefCell<KBucket>>>
+        handler: EasyHandler<Rc<RefCell<KBucket>>>
     ){
         self._merge_buckets();
         self.updated = SystemTime::now();
@@ -309,7 +309,7 @@ impl RoutingTable {
         for bucket in buckets {
             let mut borrowed = bucket.borrow_mut();
             borrowed.cleanup(&self.nodeid, bootstrap_ids,
-                Handler::new(move |_entry| {
+                EasyHandler::new(move |_entry| {
                     unimplemented!()
                     // TODO: Self::put(&mut locked, _entry);
                 })

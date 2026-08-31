@@ -7,9 +7,8 @@ use log::error;
 use crate::Id;
 use crate::dht::{
     msg::{Message, msg::Kind},
-    timer_client::LocalTimerClient as TimerClient,
-    handler::LocalHandler as AsyncHandler,
-    handler::Handler,
+    timer_client::LocalBoxTimerClient as TimerClient,
+    handler::{EasyHandler, LocalBoxHandler},
     rpc::{
         Target,
         Listener as CallListener,
@@ -54,7 +53,7 @@ pub(crate) struct RpcCall {
 
     timer_id        : Option<u64>,
     timer_client    : Option<Rc<TimerClient>>,
-    timeout_handler : Option<Handler<()>>,
+    timeout_handler : Option<EasyHandler<()>>,
 
     cloned          : Weak<RefCell<Self>>,
 }
@@ -140,7 +139,7 @@ impl RpcCall {
         self.listener = Some(listener);
     }
 
-    pub(crate) fn set_timeout_handler(&mut self, handler: Handler<()>) {
+    pub(crate) fn set_timeout_handler(&mut self, handler: EasyHandler<()>) {
         self.timeout_handler = Some(handler);
     }
 
@@ -186,7 +185,7 @@ impl RpcCall {
 
         let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
         let result = timer_client.add_timer(timeout, None,
-            AsyncHandler::new(move |_| {
+            LocalBoxHandler::new(move |_| {
                 let cloned = cloned.clone();
                 Box::pin(async move {
                     cloned.borrow_mut().check_timeout();

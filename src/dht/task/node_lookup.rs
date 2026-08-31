@@ -5,8 +5,8 @@ use std::{
 };
 use crate::{Id, NodeInfo};
 use crate::dht::{
+    EasyHandler,
     dht::DHT,
-    handler::Handler,
     rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
     routing::{
@@ -175,7 +175,7 @@ impl Task for NodeLookupTask {
                 self.want_token
             );
 
-            let cb = Handler::new(move |_| {
+            let cb = EasyHandler::new(move |_| {
                 next.borrow_mut().set_sent();
             });
             self.send_call(target, msg, Some(cb));

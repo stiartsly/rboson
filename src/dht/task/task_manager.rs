@@ -7,8 +7,8 @@ use std::{
 use log::{debug, error};
 
 use crate::dht::{
-    handler::Handler,
-    task::{Task, task::{State, TaskId}}
+    task::{Task, task::{State, TaskId}},
+    handler::EasyHandler,
 };
 
 const MAX_ACTIVE_TASKS: usize = 8;
@@ -43,7 +43,7 @@ impl TaskManager {
         let taskid = task.task_id();
         let running = self.running.clone();
         task.with_ended_handler(
-            Handler::new(move |_| {
+            EasyHandler ::new(move |_| {
                 let _ = running.borrow_mut().remove(&taskid);
             })
         );

@@ -14,7 +14,7 @@ use crate::dht::{
         TargetInfo,
         Listener
     },
-    timer_client::{LocalTimerClient, LocalTimerCmd},
+    timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
 };
 
 fn make_nodeinfo(addr: &str) -> NodeInfo {
@@ -46,9 +46,9 @@ fn finalize_call(call: &mut RpcCall) {
     call.set_request(req);
 }
 
-fn make_timer_client() -> Rc<LocalTimerClient> {
-    let (tx, _rx) = mpsc::unbounded_channel::<LocalTimerCmd>();
-    Rc::new(LocalTimerClient::new(tx))
+fn make_timer_client() -> Rc<LocalBoxTimerClient> {
+    let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
+    Rc::new(LocalBoxTimerClient::new(tx))
 }
 
 #[cfg(test)]

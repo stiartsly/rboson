@@ -1,32 +1,38 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering}
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::errors::{Result, StateError};
-use super::handler::LocalHandler;
+use super::handler::{BoxHandler, LocalBoxHandler};
 
 pub(crate) type TimerId = u64;
 
-pub(crate) enum GenericTimerCmd<H> {
+pub(crate) enum TimerCmd<H> {
     Add {
         timer_id: TimerId,
         delay: u64,
         interval: Option<u64>,
         cb: H,
     },
+    Cancel {
+        timer_id: TimerId,
+    },
+    Stop {
+        complete: oneshot::Sender<()>,
+    },
 }
 
 #[derive(Clone)]
-pub(crate) struct GenericTimerClient<H> {
-    sender: mpsc::UnboundedSender<GenericTimerCmd<H>>,
+pub(crate) struct TimerClient<H> {
+    sender: mpsc::UnboundedSender<TimerCmd<H>>,
     next_id: Arc<AtomicU64>,
 }
 
-impl<H> GenericTimerClient<H> {
+impl<H> TimerClient<H> {
     pub(crate) fn new(
-        sender: mpsc::UnboundedSender<GenericTimerCmd<H>>,
+        sender: mpsc::UnboundedSender<TimerCmd<H>>,
     ) -> Self {
         Self {
             sender,
@@ -46,7 +52,7 @@ impl<H> GenericTimerClient<H> {
     ) -> Result<TimerId> {
         let timer_id = self.next_timer_id();
         self.sender.send(
-            GenericTimerCmd::Add {
+            TimerCmd::Add {
                 timer_id,
                 delay,
                 interval,
@@ -58,13 +64,13 @@ impl<H> GenericTimerClient<H> {
             timer_id
         )
     }
-/*
+
     pub(crate) fn cancel_timer(
         &self,
         timer_id: TimerId,
     ) -> Result<()> {
         self.sender.send(
-            GenericTimerCmd::Cancel { timer_id }
+            TimerCmd::Cancel { timer_id }
         ).map_err(|_| {
             StateError::new("timer channel closed")
         }).map(|_| ())
@@ -75,7 +81,7 @@ impl<H> GenericTimerClient<H> {
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(
-            GenericTimerCmd::Stop { complete: tx }
+            TimerCmd::Stop { complete: tx }
         ).map_err(|_| {
             StateError::new("timer channel closed")
         })?;
@@ -84,8 +90,12 @@ impl<H> GenericTimerClient<H> {
             StateError::new("timer shutdown acknowledgement dropped")
         }).map(|_| ())
     }
-    */
 }
 
-pub(crate) type TimerCmd = GenericTimerCmd<LocalHandler<()>>;
-pub(crate) type TimerClient = GenericTimerClient<LocalHandler<()>>;
+// Aliases for standard (thread-safe Send) timer client
+pub(crate) type BoxTimerCmd = TimerCmd<BoxHandler<()>>;
+pub(crate) type BoxTimerClient = TimerClient<BoxHandler<()>>;
+
+// Aliases for local (not Send) timer client
+pub(crate) type LocalBoxTimerCmd = TimerCmd<LocalBoxHandler<()>>;
+pub(crate) type LocalBoxTimerClient = TimerClient<LocalBoxHandler<()>>;

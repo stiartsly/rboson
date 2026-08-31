@@ -8,7 +8,7 @@ use crate::dht::{
     dht::DHT,
     msg::msg,
     rpc::RpcCall,
-    handler::Handler,
+    handler::EasyHandler,
     task::{Task, TaskData},
     routing::{KBucket, KBucketEntry}
 };
@@ -131,7 +131,7 @@ impl Task for PingRefreshTask {
 
             let msg  = msg::ping_request();
             let todo = self.todo.clone();
-            let cb = Handler::new(move |_| {
+            let cb = EasyHandler::new(move |_| {
                 todo.borrow_mut().pop_front();
             });
 

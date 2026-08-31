@@ -9,7 +9,7 @@ use log::info;
 use crate::Id;
 use crate::dht::{
     rpc::TargetInfo,
-    handler::Handler,
+    handler::EasyHandler,
     routing::{Prefix, KBucketEntry},
 };
 
@@ -216,7 +216,7 @@ impl KBucket {
     pub(crate) fn cleanup(&mut self,
         _local_id: &Id,
         _bootstrap_ids: &[Id],
-        _dropped_handler: Handler<KBucketEntry>) {
+        _dropped_handler: EasyHandler<KBucketEntry>) {
         //unimplemented!()
     }
 }

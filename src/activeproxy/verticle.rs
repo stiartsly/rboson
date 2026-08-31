@@ -19,9 +19,10 @@ use crate::{
     signature,
 };
 use super::{
-    session::ProxySession,
-    timer_client::{TimerClient, TimerCmd},
-    timer_manager::TimerManager
+    LocalBoxTimerCmd as TimerCmd,
+    LocalBoxTimerClient as TimerClient,
+    LocalBoxTimerManager as TimerManager,
+    session::ProxySession
 };
 
 pub(crate) struct VerticleClient {
@@ -146,7 +147,6 @@ impl Verticle {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
                 self.timer_manager.add_timer(timer_id, delay, interval, cb),
 
-            /*
             TimerCmd::Cancel { timer_id } =>
                 self.timer_manager.cancel_timer(timer_id),
 
@@ -154,7 +154,6 @@ impl Verticle {
                 self.timer_manager.stop_all();
                 let _ = complete.send(());
             }
-            */
         }
     }
 

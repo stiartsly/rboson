@@ -5,7 +5,8 @@ pub mod dht;
 pub mod activeproxy;
 pub mod messaging;
 
-mod utils;
+#[path = "utils/utils.rs"]
+pub(crate) mod utils;
 
 pub use crate::cfg::{
     configuration::Configuration,

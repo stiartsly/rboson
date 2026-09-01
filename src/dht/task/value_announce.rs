@@ -5,10 +5,12 @@ use std::{
     collections::VecDeque,
 };
 
-use crate::Value;
+use crate::{
+    Value,
+    EasyHandler,
+};
 use crate::dht::{
     dht::DHT,
-    handler::EasyHandler,
     msg::msg,
     task::{
         Task, TaskData,

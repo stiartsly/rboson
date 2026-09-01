@@ -3,9 +3,8 @@ use std::{
     rc::Rc,
     cell::RefCell
 };
-use crate::{Id, NodeInfo};
+use crate::{Id, NodeInfo, EasyHandler};
 use crate::dht::{
-    EasyHandler,
     dht::DHT,
     rpc::RpcCall,
     msg::{msg, Body, LookupResponse},

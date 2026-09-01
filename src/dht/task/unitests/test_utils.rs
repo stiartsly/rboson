@@ -4,11 +4,13 @@ use std::{
     sync::{Arc, Mutex}
 };
 use tokio::sync::mpsc;
-use crate::CryptoIdentity;
-use crate::Network;
-use crate::dht::{
+use crate::{
+    CryptoIdentity,
+    Network,
     LocalBoxTimerCmd,
-    LocalBoxTimerClient,
+    LocalBoxTimerClient
+};
+use crate::dht::{
     dht::DHT,
     dht_verticle::VerticleOptions,
     token_manager::TokenManager,

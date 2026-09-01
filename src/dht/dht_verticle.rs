@@ -23,19 +23,17 @@ use crate::{
     Id, Network, NodeInfo,
     PeerInfo, Value,
     Result,
-    errors::StateError
+    errors::StateError,
+    LocalBoxTimerClient as TimerClient,
+    LocalBoxTimerCmd as TimerCmd,
+    LocalBoxTimerManager as TimerManager,
+    Promise
 };
 use crate::dht::{
     ConnectionStatusListener,
     dht::DHT,
     lookup_option::LookupOption,
-    promise::Promise,
     storage::data_storage::DataStorage,
-    timer_client::{
-        LocalBoxTimerClient as TimerClient,
-        LocalBoxTimerCmd as TimerCmd
-    },
-    timer_manager::LocalBoxTimerManager as TimerManager,
     token_manager::TokenManager,
     rpc::rpc_server::RpcServer,
 };

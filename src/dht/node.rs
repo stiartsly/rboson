@@ -23,7 +23,8 @@ use crate::{
     Value,
     core::{logger,version},
     errors::{ArgumentError, IOError, Result, StateError},
-    signature
+    signature,
+    BoxHandler,
 };
 use crate::dht::{
     LookupOption,
@@ -32,7 +33,6 @@ use crate::dht::{
     eligible_peers::EligiblePeers,
     cached_identity::CachedIdentity,
     token_manager::TokenManager,
-    handler::BoxHandler,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
     storage::{
@@ -45,7 +45,7 @@ use crate::dht::{
         NotOwnerError,
         ImmutableSubstitutionError
     },
-    timer_verticle,
+    node_verticle,
     dht_verticle::{self, VerticleClient, VerticleOptions},
 };
 
@@ -69,7 +69,7 @@ pub struct Node {
     running         : Mutex<bool>,
     listeners       : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
 
-    timer_verticle  : Mutex<Option<Arc<timer_verticle::VerticleClient>>>,
+    timer_verticle  : Mutex<Option<Arc<node_verticle::VerticleClient>>>,
 
     storage         : Arc<Mutex<dyn DataStorage>>,
     token_man       : Arc<TokenManager>,
@@ -191,7 +191,7 @@ impl Node {
     }
 
     #[inline]
-    fn timer_verticle(&self) -> Arc<timer_verticle::VerticleClient> {
+    fn timer_verticle(&self) -> Arc<node_verticle::VerticleClient> {
         self.timer_verticle.lock().unwrap()
             .as_ref().expect("Timer verticle is not initialized")
             .clone()
@@ -326,8 +326,8 @@ impl Node {
             locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?
         }
 
-        let options = timer_verticle::VerticleOptions::default();
-        let client  = timer_verticle::deploy(options)?;
+        let options = node_verticle::VerticleOptions::default();
+        let client  = node_verticle::deploy(options)?;
         *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
 
         self.setup_periodic_tasks().await?;

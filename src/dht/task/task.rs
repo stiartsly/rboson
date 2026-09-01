@@ -6,11 +6,13 @@ use std::{
     collections::HashSet
 };
 use log::{warn, debug};
-use crate::core::Network;
+use crate::{
+    core::Network,
+    EasyHandler,
+};
 use crate::dht::{
     dht::DHT,
     msg::Message,
-    handler::EasyHandler,
     task::task_listener::TaskListener,
     rpc::{
         Target, RpcCall, rpccall,

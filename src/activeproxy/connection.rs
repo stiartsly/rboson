@@ -1,10 +1,17 @@
-use std::mem;
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
-use std::time::{Duration, SystemTime};
-use std::net::SocketAddr;
-
-use tokio::io::{split, ReadHalf, WriteHalf, AsyncReadExt, AsyncWriteExt};
+use std::{
+    mem,
+    cell::RefCell,
+    rc::{Rc, Weak},
+    net::SocketAddr,
+    time::{Duration, SystemTime},
+};
+use tokio::io::{
+    split,
+    ReadHalf,
+    WriteHalf,
+    AsyncReadExt,
+    AsyncWriteExt
+};
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
 use log::{error, info, debug, trace, warn};

@@ -6,10 +6,9 @@ use libsodium_sys::randombytes_uniform;
 use rbtree::RBTree;
 use log::info;
 
-use crate::Id;
+use crate::{Id,EasyHandler};
 use crate::dht::{
     rpc::TargetInfo,
-    handler::EasyHandler,
     routing::{Prefix, KBucketEntry},
 };
 

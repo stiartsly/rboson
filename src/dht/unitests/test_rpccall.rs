@@ -5,7 +5,12 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{Id, NodeInfo};
+use crate::{
+    Id,
+    NodeInfo,
+    LocalBoxTimerClient,
+    LocalBoxTimerCmd
+};
 use crate::dht::{
     msg::{msg, msg::Method},
     routing::KBucketEntry,
@@ -13,8 +18,7 @@ use crate::dht::{
         RpcCall, rpccall::State,
         TargetInfo,
         Listener
-    },
-    timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
+    }
 };
 
 fn make_nodeinfo(addr: &str) -> NodeInfo {

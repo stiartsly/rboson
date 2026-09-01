@@ -1,4 +1,3 @@
-use core::convert::Into;
 use std::{
     cell::Cell,
     sync::{Arc, Mutex},
@@ -33,7 +32,6 @@ pub struct ActiveProxyClient {
 
     upstream_endpoint   : String,
     upstream_addr       : SocketAddr,
-    // upstream_domain     : Option<String>,
 
     verticle            : Cell<Option<VerticleClient>>,
     running             : Cell<bool>,

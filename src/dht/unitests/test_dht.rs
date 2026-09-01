@@ -8,17 +8,18 @@ use crate::{
     Network,
     Identity,
     CryptoIdentity,
+    LocalBoxTimerClient,
+    LocalBoxTimerCmd,
+    Promise,
 };
 use crate::dht::{
     connection_status_listener::ConnectionStatusListener,
     dht::DHT,
     dht_verticle::VerticleOptions,
-    promise::Promise,
     storage::{
         data_storage::DataStorage,
         sqlite_storage::SqliteStorage,
     },
-    timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
     token_manager::TokenManager,
 };
 

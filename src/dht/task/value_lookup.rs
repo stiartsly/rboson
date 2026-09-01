@@ -3,10 +3,9 @@ use std::{
     rc::Rc,
     cell::RefCell,
 };
-use crate::{Id, Value};
+use crate::{Id, Value, EasyHandler};
 use crate::dht::{
     dht::DHT,
-    handler::EasyHandler,
     eligible_value::EligibleValue,
     rpc::RpcCall,
     msg::{msg, LookupResponse, Body},

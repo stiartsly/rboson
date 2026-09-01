@@ -4,11 +4,11 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
 };
+use crate::EasyHandler;
 use crate::dht::{
     dht::DHT,
     msg::msg,
     rpc::RpcCall,
-    handler::EasyHandler,
     task::{Task, TaskData},
     routing::{KBucket, KBucketEntry}
 };

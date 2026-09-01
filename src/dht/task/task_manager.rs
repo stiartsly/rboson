@@ -6,9 +6,9 @@ use std::{
 };
 use log::{debug, error};
 
+use crate::EasyHandler;
 use crate::dht::{
-    task::{Task, task::{State, TaskId}},
-    handler::EasyHandler,
+    task::{Task, task::{State, TaskId}}
 };
 
 const MAX_ACTIVE_TASKS: usize = 8;

@@ -4,11 +4,13 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
 };
-use crate::PeerInfo;
+use crate::{
+    PeerInfo,
+    EasyHandler,
+};
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    handler::EasyHandler,
     task::{ClosestSet, CandidateNode,Task, TaskData}
 };
 

@@ -19,18 +19,19 @@ use crate::{
     Id, Network,
     NodeInfo, PeerInfo, Value,
     identity::{Identity, CryptoIdentity},
-    errors::Result
+    errors::Result,
+    EasyHandler,
+    LocalBoxHandler,
+    LocalBoxTimerClient as TimerClient,
+    Promise
 };
 use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus,
     ConnectionStatusListener,
-    promise::Promise,
-    handler::{EasyHandler, LocalBoxHandler},
     token_manager::TokenManager,
     lookup_option::LookupOption,
     dht_verticle::VerticleOptions,
-    timer_client::LocalBoxTimerClient as TimerClient,
     storage::data_storage::DataStorage,
     suspicious_node_detector::SuspiciousNodeDetector,
     rpc::{

@@ -128,24 +128,11 @@ mod storage;
 mod cached_identity;
 mod dht_verticle;
 mod dht;
-mod promise;
 mod eligible_peers;
 mod eligible_value;
 mod suspicious_node_detector;
 mod token_manager;
-mod timer_verticle;
-
-pub(crate) use crate::utils::{
-    handler,
-    timer_client,
-    timer_manager,
-};
-pub(crate) use crate::EasyHandler;
-#[cfg(test)]
-pub(crate) use crate::{
-    LocalBoxTimerClient,
-    LocalBoxTimerCmd,
-};
+mod node_verticle;
 
 pub mod errors;
 pub mod connection_status_listener;

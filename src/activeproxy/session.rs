@@ -99,7 +99,6 @@ impl ProxySession {
             service_endpoint,
             upstream_endpoint,
             upstream_addr,
-            upstream_peer_private_key: _,
             user_id,
             device_key,
             name_access_enabled,

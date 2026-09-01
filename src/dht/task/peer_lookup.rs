@@ -3,10 +3,9 @@ use std::{
     rc::Rc,
     cell::RefCell
 };
-use crate::{Id, PeerInfo};
+use crate::{Id, PeerInfo, EasyHandler};
 use crate::dht::{
     dht::DHT,
-    handler::EasyHandler,
     eligible_peers::EligiblePeers,
     rpc::RpcCall,
     routing::{

@@ -4,11 +4,14 @@ use std::{
     time::SystemTime
 };
 use log::error;
-use crate::Id;
+use crate::{
+    Id,
+    EasyHandler,
+    LocalBoxHandler,
+    LocalBoxTimerClient as TimerClient
+};
 use crate::dht::{
     msg::{Message, msg::Kind},
-    timer_client::LocalBoxTimerClient as TimerClient,
-    handler::{EasyHandler, LocalBoxHandler},
     rpc::{
         Target,
         Listener as CallListener,

@@ -1,4 +1,3 @@
-// Ported from Packet.java; keep the wire layout and logic in sync with the original source.
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -34,7 +33,7 @@ pub(crate) struct Challenge {
 impl Challenge {
     pub(crate) const MIN_BYTES: usize = mem::size_of::<u16>() + 32;
 
-    pub(crate) fn new(challenge: Vec<u8>) -> Self {
+    pub(crate) fn _new(challenge: Vec<u8>) -> Self {
         Self { challenge }
     }
 
@@ -42,7 +41,7 @@ impl Challenge {
         &self.challenge
     }
 
-    pub(crate) fn encode(&self) -> Vec<u8> {
+    pub(crate) fn _encode(&self) -> Vec<u8> {
         let size = Self::MIN_BYTES + self.challenge.len() - 32;
 
         let mut packet = Vec::with_capacity(size);

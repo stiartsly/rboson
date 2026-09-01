@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 use rbtree::RBTree;
 use log::debug;
 
-use crate::{Id, Result};
+use crate::{Id, Result, EasyHandler};
 use crate::dht::{
-    handler::EasyHandler,
     rpc::TargetInfo,
     routing:: {
         Prefix,

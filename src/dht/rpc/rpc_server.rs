@@ -21,12 +21,13 @@ use crate::{
         CryptoError,
         NetworkError,
         ProtocolError,
-    }
+    },
+    LocalBoxTimerClient as TimerClient,
+    EasyHandler,
+    LocalBoxHandler
 };
 use crate::dht::{
-    timer_client::LocalBoxTimerClient as TimerClient,
     suspicious_node_detector::SuspiciousNodeDetector,
-    handler::{EasyHandler, LocalBoxHandler},
     rpc::RpcCall,
     msg::{Message, msg::Method},
 };

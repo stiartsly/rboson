@@ -9,6 +9,7 @@ use log::info;
 use tokio::{
     runtime,
     sync::{mpsc, oneshot},
+    task,
 };
 
 use crate::{
@@ -68,7 +69,6 @@ pub(crate) struct VerticleOptions {
     pub(super) service_endpoint            : String,
     pub(super) upstream_endpoint           : String,
     pub(super) upstream_addr               : SocketAddr,
-    pub(super) upstream_peer_private_key   : Option<signature::PrivateKey>,
     pub(super) user_id                     : Id,
     pub(super) device_key                  : signature::PrivateKey,
     pub(super) name_access_enabled         : bool,
@@ -93,7 +93,6 @@ impl VerticleOptions {
             service_endpoint,
             upstream_endpoint,
             upstream_addr,
-            upstream_peer_private_key: None,
             user_id,
             device_key,
             name_access_enabled: false,
@@ -193,9 +192,9 @@ pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
             .enable_time()
             .enable_io()
             .build()
-            .expect("ActiveProxy verticle runtime should build");
+            .expect("ActiveProxy runtime verticle should be built");
 
-        let local = tokio::task::LocalSet::new();
+        let local = task::LocalSet::new();
         rt.block_on(local.run_until(async move {
             let mut vert = match Verticle::new(options, cmd_rx) {
                 Ok(v) => v,

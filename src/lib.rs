@@ -7,6 +7,7 @@ pub mod messaging;
 
 pub(crate) mod utils {
     pub(crate) mod utils;
+    pub(crate) mod promise;
     pub(crate) mod handler;
     pub(crate) mod timer_client;
     pub(crate) mod timer_manager;
@@ -30,6 +31,10 @@ pub(crate) use crate::utils::{
     timer_manager::{
         BoxTimerManager,
         LocalBoxTimerManager
+    },
+    promise::{
+        Promise,
+        PromiseFuture
     }
 };
 

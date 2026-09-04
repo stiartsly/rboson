@@ -29,6 +29,14 @@ pub mod vouch;
 pub mod vouch_builder;
 pub mod card;
 pub mod card_builder;
+pub mod resolver;
+pub mod registry;
+pub mod dht_resolver;
+pub mod dht_registry;
+pub mod cached_resolver;
+pub mod resolution_cache;
+pub mod filesystem_resolution_cache;
+pub mod resolution_errors;
 
 pub(crate) use crate::did::{
     boson_identity_object_builder::BosonIdentityObjectBuilder,
@@ -44,6 +52,14 @@ pub use crate::did::{
 
     card::Card,
     card_builder::CardBuilder,
+    resolver::{Resolver, ResolutionStatus, ResolutionOptions, ResolutionMetadata, ResolutionResult},
+    registry::Registry,
+    dht_resolver::DHTResolver,
+    dht_registry::DHTRegistry,
+    cached_resolver::CachedResolver,
+    resolution_cache::ResolutionCache,
+    filesystem_resolution_cache::FileSystemResolutionCache,
+    resolution_errors::{RegistryError, ResolverError, ResolutionCacheError},
     credential::Credential,
     credential_builder::CredentialBuilder,
     vouch::Vouch,

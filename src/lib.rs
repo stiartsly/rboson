@@ -77,6 +77,14 @@ pub use crate::did::{
     vouch_builder,
     card,
     card_builder,
+    resolver,
+    registry,
+    dht_resolver,
+    dht_registry,
+    cached_resolver,
+    resolution_cache,
+    filesystem_resolution_cache,
+    resolution_errors,
 };
 
 pub use crate::dht::{

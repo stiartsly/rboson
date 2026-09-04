@@ -51,49 +51,52 @@ pub(crate) struct Verticle {
     timer_manager: TimerManager,
     receiver: mpsc::UnboundedReceiver<TimerCmd>,
 
-    quit        : bool,
 }
 
 impl Verticle {
     pub(crate) fn new(
-        _options: VerticleOptions,
         receiver: mpsc::UnboundedReceiver<TimerCmd>
     ) -> Self {
         Self {
             timer_manager: TimerManager::new(),
             receiver,
-            quit: false,
         }
     }
 
-    fn handle_timer_cmd(&mut self, cmd: TimerCmd) {
+    fn handle_timer_cmd(&mut self, cmd: TimerCmd) -> bool {
         match cmd {
-            TimerCmd::Add { timer_id, delay, interval, cb } =>
-                self.timer_manager.add_timer(timer_id, delay, interval, cb),
-            TimerCmd::Cancel { timer_id } =>
-                self.timer_manager.cancel_timer(timer_id),
+            TimerCmd::Add { timer_id, delay, interval, cb } => {
+                self.timer_manager.add_timer(timer_id, delay, interval, cb);
+            }
+            TimerCmd::Cancel { timer_id } => {
+                self.timer_manager.cancel_timer(timer_id);
+            }
             TimerCmd::Stop { complete } => {
-                self.quit = true;
                 self.timer_manager.stop_all();
                 let _ = complete.send(());
+                return true;
             }
         }
+        false
     }
 
     async fn run_loop(&mut self) {
         loop {
             tokio::select! {
-                Some(cmd) = self.receiver.recv() => {
-                    self.handle_timer_cmd(cmd);
+                cmd = self.receiver.recv() => {
+                    match cmd {
+                        Some(cmd) => {
+                            if self.handle_timer_cmd(cmd) {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
                 }
 
                 Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {
                     self.timer_manager.fire_expired(timer_id).await;
                 }
-            }
-
-            if self.quit {
-                break;
             }
         }
     }
@@ -102,7 +105,7 @@ impl Verticle {
 #[derive(Default)]
 pub(crate) struct VerticleOptions {}
 
-pub(crate) fn deploy(option: VerticleOptions) -> Result<VerticleClient> {
+pub(crate) fn deploy(_option: VerticleOptions) -> Result<VerticleClient> {
     let (sender, receiver) = mpsc::unbounded_channel::<TimerCmd>();
     let handle = std::thread::spawn(move || {
         let rt = runtime::Builder::new_current_thread()
@@ -113,7 +116,7 @@ pub(crate) fn deploy(option: VerticleOptions) -> Result<VerticleClient> {
 
         let local = tokio::task::LocalSet::new();
         rt.block_on(local.run_until(async move {
-            let mut vert = Verticle::new(option, receiver);
+            let mut vert = Verticle::new(receiver);
             vert.run_loop().await;
         }));
     });

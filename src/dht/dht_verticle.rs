@@ -495,7 +495,6 @@ impl Verticle {
     }
 }
 
-type StartupResult = StdResult<NodeInfo, String>;
 pub(crate) async fn deploy(
     options: VerticleOptions,
     network: Network,
@@ -503,7 +502,7 @@ pub(crate) async fn deploy(
     port: u16,
 ) -> Result<VerticleClient> {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<Cmd>();
-    let (startup_tx, startup_rx) = std_mpsc::sync_channel::<StartupResult>(1);
+    let (startup_tx, startup_rx) = std_mpsc::sync_channel::<StdResult<NodeInfo, String>>(1);
 
     let handle = std::thread::spawn(move || {
         let rt = runtime::Builder::new_current_thread()
@@ -514,27 +513,27 @@ pub(crate) async fn deploy(
 
         let local = tokio::task::LocalSet::new();
         rt.block_on(local.run_until(async move {
-                let result = Verticle::new(options, network, host, port, command_rx);
-                let mut vert = match result {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let _ = startup_tx.send(Err(format!("{e}")));
-                        return;
-                    }
-                };
-
-                let result = vert.start0().await;
-                match result {
-                    Ok(()) => {
-                        let _ = startup_tx.send(Ok(vert.ni()));
-                    }
-                    Err(e) => {
-                        let _ = startup_tx.send(Err(format!("{e}")));
-                        return;
-                    }
+            let result = Verticle::new(options, network, host, port, command_rx);
+            let mut vert = match result {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = startup_tx.send(Err(format!("{e}")));
+                    return;
                 }
-                vert.run_loop().await;
-            }));
+            };
+
+            let result = vert.start0().await;
+            match result {
+                Ok(()) => {
+                    let _ = startup_tx.send(Ok(vert.ni()));
+                }
+                Err(e) => {
+                    let _ = startup_tx.send(Err(format!("{e}")));
+                    return;
+                }
+            }
+            vert.run_loop().await;
+        }));
     });
 
     let mut vert = match startup_rx.recv() {

@@ -1,12 +1,11 @@
 #[cfg(test)]
 mod core {
-    mod id;
-    mod signature;
     mod cryptobox;
+    mod id;
     mod node_info;
     mod peer_info;
+    mod signature;
     mod value;
-
 }
 
 #[cfg(test)]
@@ -17,14 +16,17 @@ mod dht {
 
 #[cfg(test)]
 mod did {
-    mod didurl;
-    mod verification_method;
-    mod credential;
-    mod vouch;
     mod card;
-    mod vc;
-    mod vp;
+    mod credential;
     mod diddoc;
+    mod didurl;
+    mod registry;
+    mod resolution_cache;
+    mod resolver;
+    mod vc;
+    mod verification_method;
+    mod vouch;
+    mod vp;
 }
 
 /*
@@ -37,20 +39,14 @@ mod messaging {
 // helper function
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     unsafe {
-        libsodium_sys::randombytes_buf(
-            array.as_mut_ptr() as *mut libc::c_void,
-            N
-        );
+        libsodium_sys::randombytes_buf(array.as_mut_ptr() as *mut libc::c_void, N);
     }
 }
 
 fn create_random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(len);
     unsafe {
-        libsodium_sys::randombytes_buf(
-            bytes.as_mut_ptr()as *mut libc::c_void,
-            len
-        );
+        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, len);
         bytes.set_len(len);
     }
     bytes

@@ -1,36 +1,28 @@
-use boson::{
-    id,
-    Id,
-    signature,
-    cryptobox
-};
+use boson::{cryptobox, id, signature, Id};
 
-use crate::{
-    randomize_bytes,
-    create_random_bytes,
-};
+use crate::{create_random_bytes, randomize_bytes};
 
 /*  APIs for testcase
- - Id::random()             [X]
- - Id::default()
- - Id::from_bytes(..)       [V]
- - Id::try_from_hexstr(..)
- - Id::try_from_base58(..)
- - Id::min()
- - Id::max()
- - to_hexstr()
- - to_base58()
- - to_signature_key()
- - to_encryption_key()
- - distance(..)
- - size()
- - as_bytes()
- - Id::try_from(&[u8])
- - Id::try_from(&str)
- - Id::from(signature::PublicKey)
- - Eq
- - PartialEq
- */
+- Id::random()             [X]
+- Id::default()
+- Id::from_bytes(..)       [V]
+- Id::try_from_hexstr(..)
+- Id::try_from_base58(..)
+- Id::min()
+- Id::max()
+- to_hexstr()
+- to_base58()
+- to_signature_key()
+- to_encryption_key()
+- distance(..)
+- size()
+- as_bytes()
+- Id::try_from(&[u8])
+- Id::try_from(&str)
+- Id::from(signature::PublicKey)
+- Eq
+- PartialEq
+*/
 
 #[cfg(test)]
 mod tests {
@@ -112,13 +104,16 @@ mod tests {
     fn test_min() {
         let mut bytes = [0u8; Id::BYTES];
         bytes.fill(0);
-        let id1  = Id::from_bytes(bytes);
+        let id1 = Id::from_bytes(bytes);
         let id2 = Id::min();
         let id3 = Id::default();
         let id4 = Id::zero();
         assert_eq!(id1.size(), Id::BYTES);
         assert_eq!(id1.as_bytes(), bytes.as_slice());
-        assert_eq!(id1.to_hexstr(), "0x0000000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(
+            id1.to_hexstr(),
+            "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
         assert_eq!(id1, id2);
         assert_eq!(id1, id3);
         assert_eq!(id1, id4);
@@ -132,7 +127,10 @@ mod tests {
         let id2 = Id::max();
         assert_eq!(id1.size(), Id::BYTES);
         assert_eq!(id1.as_bytes(), bytes.as_slice());
-        assert_eq!(id1.to_hexstr(), "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        assert_eq!(
+            id1.to_hexstr(),
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
         assert_eq!(id1, id2);
     }
 
@@ -163,7 +161,7 @@ mod tests {
         let result = Id::try_from(base58);
         assert_eq!(result.is_ok(), false);
 
-        let result: Result<Id,_> = base58.try_into();
+        let result: Result<Id, _> = base58.try_into();
         assert_eq!(result.is_ok(), false);
 
         let base58 = "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ";
@@ -174,7 +172,7 @@ mod tests {
         assert_eq!(id_from.size(), Id::BYTES);
         assert_eq!(id_from.to_base58(), base58);
 
-        let result: Result<Id,_> = base58.try_into();
+        let result: Result<Id, _> = base58.try_into();
         assert_eq!(result.is_ok(), true);
 
         let id_into = result.unwrap();
@@ -271,15 +269,13 @@ mod tests {
         }
 
         let data = TestId {
-            id: Some(Id::random())
+            id: Some(Id::random()),
         };
         let ser = serde_json::to_string(&data).unwrap();
         let des: TestId = serde_json::from_str(&ser).unwrap();
         assert_eq!(data, des);
 
-        let data_none = TestId {
-            id: None,
-        };
+        let data_none = TestId { id: None };
         let ser = serde_json::to_string(&data_none).unwrap();
         let des: TestId = serde_json::from_str(&ser).unwrap();
         assert_eq!(data_none, des);
@@ -298,8 +294,14 @@ mod tests {
         let msb = Id::try_from_bit_at(0).expect("bit 0 should be valid");
         let lsb = Id::try_from_bit_at(Id::BITS - 1).expect("last bit should be valid");
 
-        assert_eq!(msb.to_hexstr(), "0x8000000000000000000000000000000000000000000000000000000000000000");
-        assert_eq!(lsb.to_hexstr(), "0x0000000000000000000000000000000000000000000000000000000000000001");
+        assert_eq!(
+            msb.to_hexstr(),
+            "0x8000000000000000000000000000000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            lsb.to_hexstr(),
+            "0x0000000000000000000000000000000000000000000000000000000000000001"
+        );
         assert!(Id::try_from_bit_at(Id::BITS).is_err());
     }
 
@@ -323,7 +325,10 @@ mod tests {
         assert_eq!(id.to_abbr_hexstr(), "0xf61019...1ed8");
         assert_eq!(id.to_abbr_base58(), "HZXX...zuhZ");
         assert_eq!(id.to_abbr_str(), id.to_abbr_base58());
-        assert_eq!(id.to_did_string(), format!("{}{}", id::DID_PREFIX, id.to_base58()));
+        assert_eq!(
+            id.to_did_string(),
+            format!("{}{}", id::DID_PREFIX, id.to_base58())
+        );
     }
 
     #[test]

@@ -1,30 +1,23 @@
-use boson::{
-    signature,
-    cryptobox,
-    Id,
-    value,
-    Value,
-    ImmutableBuilder,
-    SignedBuilder,
-    EncryptedBuilder
-};
 use crate::create_random_bytes;
+use boson::{
+    cryptobox, signature, value, EncryptedBuilder, Id, ImmutableBuilder, SignedBuilder, Value,
+};
 
 /* Value methods:
- - id(),
- - public_key()
- - private_key()
- - recipient()
- - sequence_number()
- - nonce()
- - signature()
- - data()
- - size()
- - is_encrypted()
- - is_signed()
- - is_mutable()
- - is_valid()
- */
+- id(),
+- public_key()
+- private_key()
+- recipient()
+- sequence_number()
+- nonce()
+- signature()
+- data()
+- size()
+- is_encrypted()
+- is_signed()
+- is_mutable()
+- is_valid()
+*/
 
 #[cfg(test)]
 mod tests {
@@ -84,9 +77,7 @@ mod tests {
     fn test_signed_with_keypair() {
         let data = create_random_bytes(32);
         let kp = signature::KeyPair::random();
-        let rc = SignedBuilder::new(&data)
-            .with_keypair(&kp)
-            .build();
+        let rc = SignedBuilder::new(&data).with_keypair(&kp).build();
         assert_eq!(rc.is_ok(), true);
 
         let val: Value = rc.unwrap();
@@ -137,9 +128,7 @@ mod tests {
     #[test]
     fn test_signed_with_seq() {
         let data = create_random_bytes(32);
-        let rc = SignedBuilder::new(&data)
-            .with_sequence_number(55)
-            .build();
+        let rc = SignedBuilder::new(&data).with_sequence_number(55).build();
         assert_eq!(rc.is_ok(), true);
 
         let val: Value = rc.unwrap();
@@ -217,12 +206,8 @@ mod tests {
     fn test_encrypted_with_keypair() {
         let data = create_random_bytes(32);
         let kp = signature::KeyPair::random();
-        let rec: Id = signature::KeyPair::random()
-            .public_key()
-            .into();
-        let rc = EncryptedBuilder::new(&data, &rec)
-            .with_keypair(&kp)
-            .build();
+        let rec: Id = signature::KeyPair::random().public_key().into();
+        let rc = EncryptedBuilder::new(&data, &rec).with_keypair(&kp).build();
         assert_eq!(rc.is_ok(), true);
 
         let val: Value = rc.unwrap();
@@ -247,9 +232,7 @@ mod tests {
     fn test_encrypted_with_nonce() {
         let data = create_random_bytes(32);
         let nonce = cryptobox::Nonce::random();
-        let rec: Id = signature::KeyPair::random()
-            .public_key()
-            .into();
+        let rec: Id = signature::KeyPair::random().public_key().into();
         let rc = EncryptedBuilder::new(&data, &rec)
             .with_nonce(&nonce)
             .build();
@@ -277,9 +260,7 @@ mod tests {
         let data = create_random_bytes(32);
         let kp = signature::KeyPair::random();
         let nonce = cryptobox::Nonce::random();
-        let rec: Id = signature::KeyPair::random()
-            .public_key()
-            .into();
+        let rec: Id = signature::KeyPair::random().public_key().into();
         let rc = EncryptedBuilder::new(&data, &rec)
             .with_keypair(&kp)
             .with_nonce(&nonce)

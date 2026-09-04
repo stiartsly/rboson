@@ -77,4 +77,5 @@ mod unitests {
     mod test_didurl;
     mod test_verification_method;
     mod test_proof;
+    mod test_resolution_cache;
 }

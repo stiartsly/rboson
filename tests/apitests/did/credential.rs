@@ -1,14 +1,9 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
-use boson::{
-    Id,
-    CryptoIdentity,
-    Identity,
-    did::Credential,
-};
+use boson::{did::Credential, CryptoIdentity, Id, Identity};
 
-const DAY: u64= 24 * 60 * 60;
+const DAY: u64 = 24 * 60 * 60;
 
 #[cfg(test)]
 mod tests {
@@ -25,7 +20,8 @@ mod tests {
                 claims.insert("name", "John Doe".into());
                 claims.insert("email", "example@gmail.com".into());
                 claims
-            }).build();
+            })
+            .build();
 
         assert!(rc.is_ok());
         let cred = rc.unwrap();
@@ -88,7 +84,8 @@ mod tests {
                 claims.insert("zip", "12345".to_string());
                 claims.insert("country", "USA".to_string());
                 claims
-            }).build();
+            })
+            .build();
 
         assert!(rc.is_ok());
         let cred = rc.unwrap();
@@ -108,7 +105,10 @@ mod tests {
         assert_eq!(claims.get("name"), Some(&"Jane Doe".to_string()));
         assert_eq!(claims.get("email"), Some(&"cV9dX@example.com".to_string()));
         assert_eq!(claims.get("phone"), Some(&"+1-123-456-7890".to_string()));
-        assert_eq!(claims.get("address"), Some(&"123 Main St, Anytown, USA".to_string()));
+        assert_eq!(
+            claims.get("address"),
+            Some(&"123 Main St, Anytown, USA".to_string())
+        );
         assert_eq!(claims.get("city"), Some(&"Anytown".to_string()));
         assert_eq!(claims.get("state"), Some(&"CA".to_string()));
         assert_eq!(claims.get("zip"), Some(&"12345".to_string()));
@@ -186,8 +186,8 @@ mod tests {
         let rc = Credential::builder(issuer.clone())
             .with_id("emailCredential")
             .with_types(vec!["Email"])
-            .with_valid_from(now - Duration::from_secs(15 * DAY))   // 15 days ago
-            .with_valid_until(now - Duration::from_secs(DAY))       // 1 day ago
+            .with_valid_from(now - Duration::from_secs(15 * DAY)) // 15 days ago
+            .with_valid_until(now - Duration::from_secs(DAY)) // 1 day ago
             .with_claim::<&str>("email", "John Doe")
             .with_claim::<&str>("email", "cV9dX@example.com")
             .build();

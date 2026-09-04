@@ -1,9 +1,6 @@
 use boson::{
+    did::{VerificationMethod, VerificationMethodType},
     Id,
-    did::{
-        VerificationMethod,
-        VerificationMethodType
-    }
 };
 
 #[cfg(test)]
@@ -30,9 +27,15 @@ mod tests {
         let controller = Id::try_from("D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv").unwrap();
         let id = format!("{}#key-1", controller.to_did_string());
         assert_eq!(vm.id(), &id);
-        assert_eq!(vm.method_type(), Some(VerificationMethodType::Ed25519VerificationKey2020));
+        assert_eq!(
+            vm.method_type(),
+            Some(VerificationMethodType::Ed25519VerificationKey2020)
+        );
         assert_eq!(vm.controller(), Some(&controller));
-        assert_eq!(vm.public_key_multibase(), Some(controller.to_base58().as_str()));
+        assert_eq!(
+            vm.public_key_multibase(),
+            Some(controller.to_base58().as_str())
+        );
     }
 
     #[test]
@@ -77,8 +80,14 @@ mod tests {
         let vmr = rc.unwrap();
         assert_eq!(vmr.is_reference(), true);
         assert_eq!(vmr.id(), id);
-        assert_eq!(vmr.method_type(), Some(VerificationMethodType::Ed25519VerificationKey2020));
+        assert_eq!(
+            vmr.method_type(),
+            Some(VerificationMethodType::Ed25519VerificationKey2020)
+        );
         assert_eq!(vmr.controller(), Some(&controller));
-        assert_eq!(vmr.public_key_multibase(), Some(controller.to_base58().as_str()));
+        assert_eq!(
+            vmr.public_key_multibase(),
+            Some(controller.to_base58().as_str())
+        );
     }
 }

@@ -25,7 +25,7 @@ impl FileSystemResolutionCache {
             }),
         })
     }
-    fn file(&self, id: &Id) -> PathBuf {
+    pub(crate) fn file(&self, id: &Id) -> PathBuf {
         self.dir.join(id.to_string())
     }
 }

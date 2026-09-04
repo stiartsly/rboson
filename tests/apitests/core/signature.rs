@@ -1,27 +1,21 @@
 use boson::{
-    Id,
     signature,
-    signature::{
-        PrivateKey,
-        PublicKey,
-        KeyPair,
-        Signature
-    },
-    Error
+    signature::{KeyPair, PrivateKey, PublicKey, Signature},
+    Error, Id,
 };
 
 use crate::create_random_bytes;
 
 /*
- # PrivateKey APIs.
-    - try_from(&str)
-    - try_from(&[u8])
-    - size()
-    - as_bytes()
-    - clear()
-    - sign(data, signature) -> Result(usize)
-    - sign_into(data) -> Result<Vec<u8>>
- */
+# PrivateKey APIs.
+   - try_from(&str)
+   - try_from(&[u8])
+   - size()
+   - as_bytes()
+   - clear()
+   - sign(data, signature) -> Result(usize)
+   - sign_into(data) -> Result<Vec<u8>>
+*/
 
 #[cfg(test)]
 mod tests {
@@ -176,7 +170,7 @@ mod tests {
     #[test]
     fn test_pk_into_id() {
         let kp = KeyPair::new();
-        let id: Id= kp.public_key().into();
+        let id: Id = kp.public_key().into();
         let pk = id.to_signature_key();
         assert_eq!(kp.to_public_key(), pk);
     }
@@ -263,7 +257,10 @@ mod tests {
 
         kp.clear();
         assert_eq!(*kp.public_key().as_bytes(), zero_bytes[..PublicKey::BYTES]);
-        assert_eq!(*kp.private_key().as_bytes(), zero_bytes[..PrivateKey::BYTES]);
+        assert_eq!(
+            *kp.private_key().as_bytes(),
+            zero_bytes[..PrivateKey::BYTES]
+        );
     }
 
     /*
@@ -291,8 +288,8 @@ mod tests {
         assert_eq!(rc.is_ok(), true);
         assert_eq!(rc.unwrap(), Signature::BYTES);
 
-    // let rc = sig.verify(&sig_data, kp.public_key());
-    // TODO: assert_eq!(rc.is_ok(), true);
+        // let rc = sig.verify(&sig_data, kp.public_key());
+        // TODO: assert_eq!(rc.is_ok(), true);
     }
 
     /**

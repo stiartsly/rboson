@@ -1,18 +1,12 @@
+use boson::{
+    did::{
+        constants, w3c::DIDDocument as DIDDoc, w3c::VerifiableCredential as VC, Card, DIDUrl,
+        VerificationMethodType,
+    },
+    CryptoIdentity, Id, Identity,
+};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
-use boson::{
-    Id,
-    CryptoIdentity,
-    Identity,
-    did::{
-        constants,
-        w3c::DIDDocument as DIDDoc,
-        w3c::VerifiableCredential as VC,
-        VerificationMethodType,
-        Card,
-        DIDUrl,
-    },
-};
 
 #[cfg(test)]
 mod tests {
@@ -64,7 +58,8 @@ mod tests {
         let rc = did_url.parse::<DIDUrl>();
         assert!(rc.is_ok());
         assert!(doc.verification_method_by_didurl(&rc.unwrap()).is_some());
-        let methods = doc.verification_methods_by_type(VerificationMethodType::Ed25519VerificationKey2020);
+        let methods =
+            doc.verification_methods_by_type(VerificationMethodType::Ed25519VerificationKey2020);
         assert_eq!(methods.len(), 1);
 
         let auths = doc.authentications();
@@ -151,7 +146,10 @@ mod tests {
         let doc_new = DIDDoc::from_card_with_contexts(
             &card,
             vec![],
-            HashMap::from([("BosonProfile", vec!["https://example.com/credentials/profile/v1"])]),
+            HashMap::from([(
+                "BosonProfile",
+                vec!["https://example.com/credentials/profile/v1"],
+            )]),
         );
         assert_eq!(doc, doc_new);
 
@@ -165,7 +163,10 @@ mod tests {
         let doc_new = DIDDoc::from_card_with_contexts(
             &card_new,
             vec![],
-            HashMap::from([("BosonProfile", vec!["https://example.com/credentials/profile/v1"])]),
+            HashMap::from([(
+                "BosonProfile",
+                vec!["https://example.com/credentials/profile/v1"],
+            )]),
         );
         assert_eq!(doc, doc_new);
         assert_eq!(doc.to_string(), doc_new.to_string());
@@ -290,7 +291,8 @@ mod tests {
         let rc = did_url.parse::<DIDUrl>();
         assert!(rc.is_ok());
         assert!(doc.verification_method_by_didurl(&rc.unwrap()).is_some());
-        let methods = doc.verification_methods_by_type(VerificationMethodType::Ed25519VerificationKey2020);
+        let methods =
+            doc.verification_methods_by_type(VerificationMethodType::Ed25519VerificationKey2020);
         assert_eq!(methods.len(), 1);
 
         let auths = doc.authentications();
@@ -394,10 +396,19 @@ mod tests {
             &card,
             vec![],
             HashMap::from([
-                ("BosonProfile", vec!["https://example.com/credentials/profile/v1"]),
+                (
+                    "BosonProfile",
+                    vec!["https://example.com/credentials/profile/v1"],
+                ),
                 ("Email", vec!["https://example.com/credentials/email/v1"]),
-                ("Passport", vec!["https://example.com/credentials/passport/v1"]),
-                ("DriverLicense", vec!["https://example.com/credentials/driverLicense/v1"]),
+                (
+                    "Passport",
+                    vec!["https://example.com/credentials/passport/v1"],
+                ),
+                (
+                    "DriverLicense",
+                    vec!["https://example.com/credentials/driverLicense/v1"],
+                ),
             ]),
         );
         assert_eq!(doc, doc_new);
@@ -461,11 +472,7 @@ mod tests {
         assert_eq!(doc, doc_new);
         assert_eq!(doc.to_string(), doc_new.to_string());
 
-        let doc_new = DIDDoc::from_card_with_contexts(
-            &card,
-            vec![],
-            HashMap::new(),
-        );
+        let doc_new = DIDDoc::from_card_with_contexts(&card, vec![], HashMap::new());
         assert_eq!(doc, doc_new);
         assert_eq!(doc.to_string(), doc_new.to_string());
     }

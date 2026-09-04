@@ -1,20 +1,16 @@
 use boson::{
+    did::{DIDUrl, DID_METHOD, DID_SCHEME},
     Id,
-    did::{
-        DID_SCHEME,
-        DID_METHOD,
-        DIDUrl
-    }
 };
 
 /*  APIs for testcase
- - DIDUrl::parse(..)        [X]
- - DIDUrl::from_id(..)      [X]
- - DIDUrl::from(bytes)      [X]
- - DIDUrl::try_from(str)    [X]
- - Eq
- - PartialEq
- */
+- DIDUrl::parse(..)        [X]
+- DIDUrl::from_id(..)      [X]
+- DIDUrl::from(bytes)      [X]
+- DIDUrl::try_from(str)    [X]
+- Eq
+- PartialEq
+*/
 
 #[cfg(test)]
 mod tests {

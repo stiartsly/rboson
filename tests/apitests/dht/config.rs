@@ -1,9 +1,9 @@
-use std::env;
-use log::LevelFilter;
 use boson::{
     cfg::configuration,
     signature::{KeyPair, PrivateKey},
 };
+use log::LevelFilter;
+use std::env;
 
 #[cfg(test)]
 mod tests {
@@ -16,12 +16,19 @@ mod tests {
             "ipv4: true\nport: 39001\nprivateKey: \"{private_key}\"\ndataDir: tests-data\ndatabaseUri: sqlite://node.db\nbootstraps:\n  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k\n    - 203.0.113.5\n    - 39011\nlogLevel: debug\nlogFile: node.log\nenableDeveloperMode: true\n"
         );
 
-        let cfg = configuration::Builder::new().read_from(&yaml).unwrap().build().unwrap();
+        let cfg = configuration::Builder::new()
+            .read_from(&yaml)
+            .unwrap()
+            .build()
+            .unwrap();
 
         assert!(cfg.host4().is_some());
         assert_eq!(cfg.host6(), None);
         assert_eq!(cfg.port(), 39001);
-        assert_eq!(cfg.private_key(), &PrivateKey::try_from(private_key.as_str()).unwrap());
+        assert_eq!(
+            cfg.private_key(),
+            &PrivateKey::try_from(private_key.as_str()).unwrap()
+        );
         assert_eq!(cfg.data_dir(), "tests-data");
         assert_eq!(cfg.database_uri(), "sqlite://node.db");
         assert_eq!(cfg.bootstrap_nodes().len(), 1);
@@ -44,7 +51,11 @@ mod tests {
                 "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ",
             );
         }
-        let cfg = configuration::Builder::new().load_from(&path).unwrap().build().unwrap();
+        let cfg = configuration::Builder::new()
+            .load_from(&path)
+            .unwrap()
+            .build()
+            .unwrap();
 
         assert!(cfg.host4().is_some());
         assert_eq!(cfg.host6(), None);

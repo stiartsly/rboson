@@ -76,7 +76,7 @@ impl<H> TimerClient<H> {
         }).map(|_| ())
     }
 
-    pub(crate) async fn stop(
+    pub(crate) async fn stop_timers(
         &self,
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();

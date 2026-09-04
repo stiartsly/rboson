@@ -156,9 +156,8 @@ impl ActiveProxyClient {
         let options = verticle::VerticleOptions::new(
             self.node(),
             self.service_peerid().clone(),
-            self.service_peer(),
+            //self.service_peer(),
             self.service_endpoint().unwrap(),
-            self.upstream_endpoint().into(),
             self.upstream_socketaddr().clone(),
             self.options.user_id().clone(),
             self.options.device_key().private_key().clone(),
@@ -167,6 +166,9 @@ impl ActiveProxyClient {
         let client = verticle::deploy(options).map_err(|e| {
             ArgumentError::new(format!("Failed to deploy ActiveProxy verticle: {e}"))
         })?;
+
+        client.start().await?;
+
         self.running.set(true);
         self.verticle.set(Some(client));
         Ok(())

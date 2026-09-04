@@ -2,6 +2,7 @@ mod utils;
 mod session;
 mod verticle;
 mod connection;
+mod connection_handler;
 mod connection_registry;
 mod packet_type;
 mod packet;

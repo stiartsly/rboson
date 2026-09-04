@@ -38,7 +38,7 @@ impl VerticleClient {
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {
-        self.timer_client.stop().await?;
+        self.timer_client.stop_timers().await?;
 
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();

@@ -230,4 +230,42 @@ mod tests {
         assert_eq!(card, card3);
         assert_eq!(card.to_string(), card3.to_string());
     }
+
+    #[test]
+    fn test_card_preserves_entry_order() {
+        let identity = CryptoIdentity::new();
+        let card = Card::builder(identity)
+            .with_credential_by_claims("first", "First", HashMap::from([("value", "one")])).unwrap()
+            .with_credential_by_claims("second", "Second", HashMap::from([("value", "two")])).unwrap()
+            .with_service("firstService", "FirstType", "https://first.example",
+                HashMap::from([("token", "one")])).unwrap()
+            .with_service::<&str>("secondService", "SecondType", "https://second.example",
+                HashMap::<&str, &str>::new()).unwrap()
+            .build().unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(&card.to_string()).unwrap();
+        let object = json.as_object().unwrap();
+        assert!(object.get("properties").is_none());
+        assert_eq!(object["c"][0]["id"], "first");
+        assert_eq!(object["c"][1]["id"], "second");
+        assert_eq!(object["s"][0]["id"], "firstService");
+        assert_eq!(object["s"][0]["token"], "one");
+        assert_eq!(object["s"][1]["id"], "secondService");
+    }
+
+    #[test]
+    fn test_card_rejects_reserved_service_properties() {
+        let mut builder = Card::builder(CryptoIdentity::new());
+        assert!(builder.with_service("service", "type", "endpoint",
+            HashMap::from([("id", "invalid")])).is_err());
+    }
+
+    #[test]
+    fn test_card_signature_covers_signed_timestamp() {
+        let card = Card::builder(CryptoIdentity::new()).build().unwrap();
+        let mut json: serde_json::Value = serde_json::from_str(&card.to_string()).unwrap();
+        json["sat"] = serde_json::Value::from(0);
+        let tampered = Card::try_from(serde_json::to_string(&json).unwrap().as_str()).unwrap();
+        assert!(!tampered.is_genuine());
+    }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 use serde_json::Map;
+use indexmap::IndexMap;
 
 use crate::{
     Result,
@@ -18,16 +19,16 @@ use crate::did::{
 
 pub struct CardBuilder {
     identity    : CryptoIdentity,
-    credentials : HashMap<String, Credential>,
-    services    : HashMap<String, Service>,
+    credentials : IndexMap<String, Credential>,
+    services    : IndexMap<String, Service>,
 }
 
 impl CardBuilder {
     pub(crate) fn new(identity: CryptoIdentity) -> Self {
         Self {
             identity,
-            credentials : HashMap::new(),
-            services    : HashMap::new(),
+            credentials : IndexMap::new(),
+            services    : IndexMap::new(),
         }
     }
 
@@ -86,6 +87,9 @@ impl CardBuilder {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
             Err(ArgumentError::new("Service id, type and endpoint cannot be empty"))?;
         }
+        if properties.keys().any(|key| matches!(*key, "id" | "t" | "e")) {
+            Err(ArgumentError::new("Service properties must not contain reserved keys: id, t, e"))?;
+        }
 
         let mut map = Map::new();
         for (k, v) in properties {
@@ -98,9 +102,9 @@ impl CardBuilder {
         self.services.insert(
             id.to_string(),
             Service::new(
-                id.to_string(),
-                service_type.to_string(),
-                endpoint.to_string(),
+                id.nfc().collect(),
+                service_type.nfc().collect(),
+                endpoint.nfc().collect(),
                 map
             )
         );
@@ -136,10 +140,12 @@ impl BosonIdentityObjectBuilder for CardBuilder {
             None,
         );
 
+        let signed_at = Some(Self::now());
+        let unsigned = Card::signed(unsigned, signed_at, None);
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
         Ok(Card::signed(
             unsigned,
-            Some(Self::now()),
+            signed_at,
             Some(signature)
         ))
     }

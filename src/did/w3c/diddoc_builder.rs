@@ -12,6 +12,7 @@ use crate::{
 
 use crate::did::{
     did_constants as constants,
+    Card,
     BosonIdentityObjectBuilder,
     VerificationMethod as VM,
     proof::{Proof, ProofType, ProofPurpose},
@@ -240,10 +241,17 @@ impl BosonIdentityObjectBuilder for DIDDocumentBuilder {
             self.services.values().cloned().collect(),
         );
 
-        let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
+        let signed_at = Self::now();
+        let signature = self.identity.sign_into(
+            &Card::signed(
+                unsigned.to_unsigned_boson_card(),
+                Some(signed_at),
+                None,
+            ).to_sign_data()
+        )?;
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
-            Self::now(),
+            signed_at,
             unwrap!(self.def_method_ref).clone(),
             ProofPurpose::AssertionMethod,
             signature

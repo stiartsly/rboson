@@ -347,10 +347,14 @@ impl DIDDocument {
 	}
 
 	pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-		self.to_unsigned_boson_card().to_sign_data()
+		Card::signed(
+			self.to_unsigned_boson_card(),
+			self.proof.as_ref().map(|p| p.created()),
+			None
+		).to_sign_data()
 	}
 
-	fn to_unsigned_boson_card(&self) -> Card {
+	pub(crate) fn to_unsigned_boson_card(&self) -> Card {
 		let creds = self.credentials.as_ref().map_or(
 			Vec::new(),
 			|v| v.iter().map(|c| c.to_boson_credential()).collect()

@@ -28,6 +28,22 @@ const DEFAULT_PROFILE_CREDENTIAL_TYPE   : &str = "BosonProfile";
 const DEFAULT_HOME_NODE_SERVICE_ID      : &str = "homeNode";
 const DEFAULT_HOME_NODE_SERVICE_TYPE    : &str = "BosonHomeNode";
 
+fn is_none<T>(value: &&Option<T>) -> bool {
+    value.is_none()
+}
+
+#[derive(Serialize)]
+struct CardSignData<'a> {
+    #[serde(rename = "id")]
+    id: &'a Id,
+    #[serde(rename = "c", skip_serializing_if = "is_none")]
+    credentials: &'a Option<Vec<Credential>>,
+    #[serde(rename = "s", skip_serializing_if = "is_none")]
+    services: &'a Option<Vec<Service>>,
+    #[serde(rename = "sat")]
+    signed_at: &'a Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct Card {
     #[serde(rename = "id")]
@@ -157,7 +173,7 @@ impl Card {
             &self.to_sign_data(),
             &self.signature,
             &self.id.to_signature_key()
-        ).is_ok()
+        ).unwrap_or(false)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -172,10 +188,12 @@ impl Card {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        match self.signature.is_empty() {
-            true    => self.into(),
-            false   => Vec::from(&Self::signed(self.clone(), None, None))
-        }
+        serde_cbor::to_vec(&CardSignData {
+            id: &self.id,
+            credentials: &self.credentials,
+            services: &self.services,
+            signed_at: &self.signed_at,
+        }).unwrap()
     }
 
     pub fn did_doc(&self) -> Option<&DIDDocument> {
@@ -242,6 +260,7 @@ pub struct Service {
     #[serde(rename = "e")]
     endpoint: String,
 
+    #[serde(flatten)]
     properties: Map<String, Value>,
 }
 
@@ -297,7 +316,8 @@ impl PartialEq<Self> for Service {
     fn eq(&self, other: &Service) -> bool {
         self.id == other.id &&
         self.service_type == other.service_type &&
-        self.endpoint == other.endpoint
+        self.endpoint == other.endpoint &&
+        self.properties == other.properties
     }
 }
 
@@ -306,5 +326,10 @@ impl Hash for Service {
         self.id.hash(state);
         self.service_type.hash(state);
         self.endpoint.hash(state);
+        let mut properties = self.properties.iter()
+            .map(|(key, value)| (key, serde_json::to_string(value).unwrap()))
+            .collect::<Vec<_>>();
+        properties.sort_by(|(left, _), (right, _)| left.cmp(right));
+        properties.hash(state);
     }
 }

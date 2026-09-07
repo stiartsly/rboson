@@ -21,6 +21,7 @@ use crate::{
         CryptoError,
         NetworkError,
         ProtocolError,
+        StateError,
     },
     LocalBoxTimerClient as TimerClient,
     EasyHandler,
@@ -217,6 +218,12 @@ impl RpcServer {
             return;
         }
 
+        if let Some(timer_id) = self.reachable_check_task.take() {
+            if let Err(e) = self.timer_client.cancel_timer(timer_id) {
+                warn!("Failed to cancel reachability check timer: {e}");
+            }
+        }
+
         self.pending_calls.clear();
 
         self.tx_socket  = None;
@@ -225,14 +232,17 @@ impl RpcServer {
         self.is_running = false;
 
         self.is_reachable = false;
-        self.reachable_check_task = None;
 
         info!("RPC server stopped at {}", self.ni.address());
     }
 
-    pub(crate) fn send_call(&mut self, call: RpcCall) -> Result<()> {
+    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()> {
         if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
-            return Ok(());
+            call.fail();
+            return Err(StateError::new(format!(
+                "Maximum number of active RPC calls ({}) reached",
+                Self::MAX_ACTIVE_CALLS
+            )));
         }
 
         let txid = call.txid();
@@ -354,7 +364,7 @@ impl RpcServer {
     }
 
     pub(crate) async fn handle_packet(server: Rc<RefCell<Self>>, data: &[u8], from: SocketAddr) {
-        let minimal_len = Id::BYTES + CryptoBox::MAC_BYTES + Message::MIN_BYTES;
+        let minimal_len = Id::BYTES + Nonce::BYTES + CryptoBox::MAC_BYTES + Message::MIN_BYTES;
         if data.len() < minimal_len {
             warn!("Ignored invalid packet from {}: too short", from);
             server.borrow().malformed_message(from);
@@ -370,8 +380,6 @@ impl RpcServer {
                 return;
             }
         };
-
-        // TODO: blacklist checking.
 
         // Decrypting message data.
         let identity = server.borrow().identity.clone();
@@ -395,6 +403,11 @@ impl RpcServer {
         };
         msg.set_nodeid(from_id);
         msg.set_remote(from_id, from);
+
+        {
+            let mut server = server.borrow_mut();
+            server.recv_packets = server.recv_packets.wrapping_add(1);
+        }
 
         debug!("Received message {}_{} from {}@{}: {}",
             msg.method(), msg.kind(), from_id, from, msg);
@@ -428,11 +441,11 @@ impl RpcServer {
         {
             let mut locked = call.borrow_mut();
             let req = locked.req();
-            if req.remote_addr() != &from {
+            if req.remote_addr() != &from || locked.target_id() != from_id {
                 // Handle inconsistent socket (e.g., NAT issues or attack)
                 // - the message is not a request
                 // - the transaction ID matched
-                // - response source did not match request destination
+                // - response source or identity did not match request destination
                 // this happening by chance is exceedingly unlikely indicates either port-mangling NAT,
                 // a multihomed host listening on any-local address or some kind of attack
                 let target_id = locked.target().id();
@@ -453,6 +466,7 @@ impl RpcServer {
 
                 locked.respond_wrong_method();
                 server.borrow().malformed_message(from);
+                drop(locked);
                 return;
             }
 

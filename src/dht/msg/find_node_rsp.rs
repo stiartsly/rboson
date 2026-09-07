@@ -37,11 +37,23 @@ impl LookupResponse for FindNodeResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindNodeResponse {
-    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "n4",
+        skip_serializing_if = "utils::is_default"
+    )]
     nodes4: Option<Vec<NodeInfo>>,
-    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
+
+    #[serde(
+        rename = "n6",
+        skip_serializing_if = "utils::is_default"
+    )]
     nodes6: Option<Vec<NodeInfo>>,
-    #[serde(rename = "tok")]
+
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     token: i32,
 }
 

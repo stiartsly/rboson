@@ -36,4 +36,41 @@ mod tests {
         let decoded = serde_cbor::from_slice::<NodeInfo>(&encoded);
         assert!(decoded.is_err());
     }
+
+    #[test]
+    fn test_serde_with_byte_string_address() {
+        let id = Id::random();
+        let encoded = serde_cbor::to_vec(&Value::Array(vec![
+            Value::Bytes(id.as_bytes().to_vec()),
+            Value::Bytes(vec![45, 32, 138, 246]),
+            Value::Integer(39001.into()),
+        ])).expect("Failed to serialize byte string node info");
+
+        let decoded = serde_cbor::from_slice::<NodeInfo>(&encoded)
+            .expect("Failed to deserialize byte string node info");
+
+        assert_eq!(decoded.id(), &id);
+        assert_eq!(decoded.address().to_string(), "45.32.138.246:39001");
+    }
+
+    #[test]
+    fn test_serde_with_sequence_address() {
+        let id = Id::random();
+        let encoded = serde_cbor::to_vec(&Value::Array(vec![
+            Value::Bytes(id.as_bytes().to_vec()),
+            Value::Array(vec![
+                Value::Integer(45.into()),
+                Value::Integer(32.into()),
+                Value::Integer(138.into()),
+                Value::Integer(246.into()),
+            ]),
+            Value::Integer(39001.into()),
+        ])).expect("Failed to serialize sequence node info");
+
+        let decoded = serde_cbor::from_slice::<NodeInfo>(&encoded)
+            .expect("Failed to deserialize sequence node info");
+
+        assert_eq!(decoded.id(), &id);
+        assert_eq!(decoded.address().to_string(), "45.32.138.246:39001");
+    }
 }

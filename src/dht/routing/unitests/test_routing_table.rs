@@ -1,5 +1,7 @@
 use std::{
+    fs,
     net::SocketAddr,
+    path::PathBuf,
     time::SystemTime,
 };
 
@@ -46,6 +48,14 @@ fn fill_and_split_table() -> (RoutingTable, Id, Id) {
     rt.put(high_entry);
 
     (rt, make_id(0x00, 1), high_id)
+}
+
+fn cache_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "boson-routing-table-{name}-{}-{}",
+        std::process::id(),
+        crate::as_ms!(SystemTime::now()),
+    ))
 }
 
 #[cfg(test)]
@@ -128,5 +138,32 @@ mod tests {
         assert_eq!(responsed.is_reachable(), true);
         assert_eq!(responsed.failed_reqs(), 0);
         //assert_eq!(responsed.rtt(), 31);
+    }
+
+    #[test]
+    fn test_load_empty_cache() {
+        let path = cache_path("empty");
+        fs::write(&path, []).expect("Failed to create empty cache");
+
+        let mut rt = RoutingTable::new(Id::random());
+        rt.load(&path).expect("Empty cache should load successfully");
+
+        assert_eq!(rt.number_of_entries(), 0);
+        fs::remove_file(path).expect("Failed to remove empty cache");
+    }
+
+    #[test]
+    fn test_save_empty_table_removes_cache() {
+        let path = cache_path("remove-empty");
+        let id = make_id(0x00, 1);
+        let mut rt = RoutingTable::new(Id::random());
+        rt.put(make_reachable_entry(id, "127.0.0.1:32000"));
+        rt.save(&path).expect("Failed to save populated routing table");
+        assert!(path.exists());
+
+        rt.remove(&id);
+        rt.save(&path).expect("Failed to save empty routing table");
+
+        assert!(!path.exists());
     }
 }

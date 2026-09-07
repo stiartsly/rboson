@@ -270,20 +270,101 @@ impl fmt::Display for NodeInfo {
 struct SerdeNodeInfo {
     id: Id,
 
-    addr4: Option<IpAddr>,
+    addr4: Option<EncodedIpAddr>,
     port4: Option<u16>,
 
-    addr6: Option<IpAddr>,
+    addr6: Option<EncodedIpAddr>,
     port6: Option<u16>
+}
+
+struct EncodedIpAddr(IpAddr);
+
+impl Serialize for EncodedIpAddr {
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    where S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            return serializer.serialize_str(&self.0.to_string());
+        }
+
+        match self.0 {
+            IpAddr::V4(addr) => serializer.serialize_bytes(&addr.octets()),
+            IpAddr::V6(addr) => serializer.serialize_bytes(&addr.octets()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EncodedIpAddr {
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+    where D: Deserializer<'de>,
+    {
+        struct IpAddrVisitor;
+
+        impl IpAddrVisitor {
+            fn from_bytes<E>(bytes: &[u8]) -> StdResult<EncodedIpAddr, E>
+            where E: de::Error,
+            {
+                match bytes.len() {
+                    4 => Ok(EncodedIpAddr(IpAddr::V4(Ipv4Addr::from(
+                        <[u8; 4]>::try_from(bytes).unwrap()
+                    )))),
+                    16 => Ok(EncodedIpAddr(IpAddr::V6(Ipv6Addr::from(
+                        <[u8; 16]>::try_from(bytes).unwrap()
+                    )))),
+                    _ => Err(de::Error::invalid_length(bytes.len(), &IpAddrVisitor)),
+                }
+            }
+        }
+
+        impl<'de> Visitor<'de> for IpAddrVisitor {
+            type Value = EncodedIpAddr;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an IPv4 or IPv6 address")
+            }
+
+            fn visit_str<E>(self, value: &str) -> StdResult<Self::Value, E>
+            where E: de::Error,
+            {
+                value.parse::<IpAddr>()
+                    .map(EncodedIpAddr)
+                    .map_err(de::Error::custom)
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Self::Value, E>
+            where E: de::Error,
+            {
+                Self::from_bytes(value)
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> StdResult<Self::Value, E>
+            where E: de::Error,
+            {
+                Self::from_bytes(&value)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
+            where A: SeqAccess<'de>,
+            {
+                let mut bytes = Vec::with_capacity(16);
+                while let Some(byte) = sequence.next_element::<u8>()? {
+                    bytes.push(byte);
+                }
+                Self::from_bytes(&bytes)
+            }
+        }
+
+        deserializer.deserialize_any(IpAddrVisitor)
+    }
 }
 
 impl From<NodeInfo> for SerdeNodeInfo {
     fn from(node: NodeInfo) -> Self {
         Self {
             id: node.id,
-            addr4: node.addr4.map(|addr| addr.ip()),
+            addr4: node.addr4.map(|addr| EncodedIpAddr(addr.ip())),
             port4: node.addr4.map(|addr| addr.port()),
-            addr6: node.addr6.map(|addr| addr.ip()),
+            addr6: node.addr6.map(|addr| EncodedIpAddr(addr.ip())),
             port6: node.addr6.map(|addr| addr.port()),
         }
     }
@@ -295,8 +376,8 @@ impl TryFrom<SerdeNodeInfo> for NodeInfo {
     fn try_from(s: SerdeNodeInfo) -> StdResult<Self, Self::Error> {
         NodeInfo::with_addresses(
             s.id,
-            s.addr4.zip(s.port4).map(|(ip, port)| SocketAddr::new(ip, port)),
-            s.addr6.zip(s.port6).map(|(ip, port)| SocketAddr::new(ip, port)),
+            s.addr4.zip(s.port4).map(|(ip, port)| SocketAddr::new(ip.0, port)),
+            s.addr6.zip(s.port6).map(|(ip, port)| SocketAddr::new(ip.0, port)),
         )
     }
 }
@@ -310,41 +391,17 @@ impl Serialize for SerdeNodeInfo {
         }
 
         let len = if self.addr4.is_some() && self.addr6.is_some() {5} else {3};
-        let is_human_readable = se.is_human_readable();
-
         let mut s = se.serialize_tuple(len)?;
-        if is_human_readable {
-            s.serialize_element(&self.id.to_base58())?;
-            if let Some(addr) = &self.addr4 {
-                let port = self.port4.as_ref().unwrap();
-                s.serialize_element(&addr.to_string())?;
-                s.serialize_element(&port)?;
-            }
-            if let Some(addr) = &self.addr6 {
-                let port = self.port6.as_ref().unwrap();
-                s.serialize_element(&addr.to_string())?;
-                s.serialize_element(&port)?;
-            }
-        } else {
-            s.serialize_element(&self.id)?;
-            if let Some(addr) = &self.addr4 {
-                let port = self.port4.as_ref().unwrap();
-                let octets = match addr {
-                    IpAddr::V4(addr4) => addr4.octets().to_vec(),
-                    IpAddr::V6(addr6) => addr6.octets().to_vec(),
-                };
-                s.serialize_element(&octets)?;
-                s.serialize_element(&port)?;
-            }
-            if let Some(addr) = &self.addr6 {
-                let port = self.port6.as_ref().unwrap();
-                let octets = match addr {
-                    IpAddr::V4(addr4) => addr4.octets().to_vec(),
-                    IpAddr::V6(addr6) => addr6.octets().to_vec(),
-                };
-                s.serialize_element(&octets)?;
-                s.serialize_element(&port)?;
-            }
+        s.serialize_element(&self.id)?;
+        if let Some(addr) = &self.addr4 {
+            let port = self.port4.as_ref().unwrap();
+            s.serialize_element(addr)?;
+            s.serialize_element(&port)?;
+        }
+        if let Some(addr) = &self.addr6 {
+            let port = self.port6.as_ref().unwrap();
+            s.serialize_element(addr)?;
+            s.serialize_element(&port)?;
         }
         s.end()
     }
@@ -354,9 +411,7 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
     fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
     where D: Deserializer<'de>,
     {
-        struct ImplVisitor {
-            is_human_readable: bool,
-        }
+        struct ImplVisitor;
         impl<'de> Visitor<'de> for ImplVisitor {
             type Value = SerdeNodeInfo;
 
@@ -379,29 +434,9 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
 
                 // Each address is encoded as an (ip, port) pair; there may be
                 // one pair (addr4 or addr6) or two pairs (addr4 and addr6).
-                while let Some(ip) = if self.is_human_readable {
-                    seq.next_element::<String>()?
-                        .map(|s| s.parse::<IpAddr>().map_err(de::Error::custom))
-                        .transpose()?
-                } else {
-                    seq.next_element::<Vec<u8>>()?
-                        .map(|bytes| match bytes.len() {
-                            4 => {
-                                let mut octets = [0u8; 4];
-                                octets.copy_from_slice(&bytes);
-                                Ok(IpAddr::V4(Ipv4Addr::from(octets)))
-                            },
-                            16 => {
-                                let mut octets = [0u8; 16];
-                                octets.copy_from_slice(&bytes);
-                                Ok(IpAddr::V6(Ipv6Addr::from(octets)))
-                            },
-                            _ => Err(de::Error::invalid_value(de::Unexpected::Bytes(&bytes), &self)),
-                        })
-                        .transpose()?
-                } {
+                while let Some(ip) = seq.next_element::<EncodedIpAddr>()? {
                     let port: u16 = seq.next_element()?.ok_or_else(bad_length)?;
-                    match ip {
+                    match ip.0 {
                         IpAddr::V4(_) => {
                             addr4 = Some(ip);
                             port4 = Some(port);
@@ -427,7 +462,6 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
             }
         }
 
-        let is_human_readable = de.is_human_readable();
-        de.deserialize_tuple(5, ImplVisitor { is_human_readable })
+        de.deserialize_tuple(5, ImplVisitor)
     }
 }

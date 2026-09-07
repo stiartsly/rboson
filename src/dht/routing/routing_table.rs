@@ -3,7 +3,7 @@ use std::{
     path::Path,
     cmp::Ordering,
     time::SystemTime,
-    fs::{self, File},
+    fs,
     io::{ErrorKind, Error as StdError},
     rc::Rc,
     cell::RefCell,
@@ -331,13 +331,7 @@ impl RoutingTable {
             return Ok(());
         }
 
-        if !path.exists() {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            File::create(path)?;
-        }
-        if !path.is_file() {
+        if path.exists() && !path.is_file() {
             return Err(StdError::new(
                 ErrorKind::InvalidInput,
                 format!("Path {} is not a file", path.display())
@@ -345,7 +339,15 @@ impl RoutingTable {
         }
 
         if self.number_of_entries() == 0 {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+            self.saved = SystemTime::now();
             return Ok(());
+        }
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
         }
 
         let mut entries = Vec::with_capacity(self.number_of_entries());
@@ -381,6 +383,9 @@ impl RoutingTable {
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
             Err(err) => return Err(err.into()),
         };
+        if bytes.is_empty() {
+            return Ok(());
+        }
 
         let rt: SerdeRoutingTable = serde_cbor::from_slice(&bytes)?;
         if  rt.nodeid != self.nodeid {

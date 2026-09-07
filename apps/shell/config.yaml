@@ -86,13 +86,13 @@ databaseUri: jdbc:sqlite:node.db
 # Initial entry points to the DHT network.
 # These nodes are contacted during startup to discover other peers.
 # Format: [ NodeID (Base58), IPAddress, Port ]
-#bootstraps:
-#  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k
-#    - 203.0.113.5
-#    - 39001
-#  - - 7jFV8w7eivjGEpaDu4V38EZ16CDhn4JutEdtGBWC67rF
-#    - 198.51.100.8
-#    - 39001
+bootstraps:
+  - - FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo
+    - 155.138.245.211
+    - 39001
+  - - 66yzSu9imYLtG4TWMZKdk79BXGcX17s2b259taYFeyKw
+    - 45.32.138.246
+    - 39001
 
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true

@@ -122,4 +122,24 @@ mod tests {
         assert_eq!(nodes4[0], node1);
         assert_eq!(nodes4[1], node2);
     }
+
+    #[test]
+    fn test_serde_without_token() {
+        let node = make_node_info4();
+        let encoded = serde_cbor::to_vec(&serde_cbor::Value::Map(
+            vec![
+                (
+                    serde_cbor::Value::Text("n4".to_string()),
+                    serde_cbor::value::to_value(vec![node.clone()])
+                        .expect("Failed to encode nodes"),
+                ),
+            ].into_iter().collect()
+        )).expect("Failed to serialize response without token");
+
+        let decoded = serde_cbor::from_slice::<FindNodeResponse>(&encoded)
+            .expect("Failed to deserialize response without token");
+
+        assert_eq!(decoded.nodes4().unwrap(), [node]);
+        assert_eq!(decoded.token(), 0);
+    }
 }

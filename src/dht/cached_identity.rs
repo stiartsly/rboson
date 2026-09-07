@@ -80,7 +80,7 @@ impl Identity for CachedIdentity {
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        Ok(self.context(id).lock().unwrap().clone())
+        self.identity.create_crypto_context(id)
     }
 }
 

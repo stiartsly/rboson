@@ -1,13 +1,15 @@
 use std::{
     env,
     fs,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     path::Path
 };
 use tokio::time::{sleep, Duration};
 use get_if_addrs::get_if_addrs;
 use boson::{
+    Id,
     Node,
+    NodeInfo,
     signature,
     cfg::configuration as cfg,
 };
@@ -57,10 +59,26 @@ fn load_or_generate_key(path: &str) -> signature::PrivateKey {
     key
 }
 
+fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
+    let (id, address) = value.split_once('@').ok_or_else(|| format!(
+        "Invalid bootstrap '{value}': expected NODEID@IP:PORT"
+    ))?;
+
+    let id = Id::try_from(id).map_err(|e| format!(
+        "Invalid bootstrap node ID '{id}': {e}"
+    ))?;
+    let address = address.parse::<SocketAddr>().map_err(|e| format!(
+        "Invalid bootstrap address '{address}': {e}"
+    ))?;
+
+    Ok(NodeInfo::new(id, address))
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut path = get_storage_path(".sample_node");
     let mut port = 39001 as u16;
+    let mut bootstrap_nodes = Vec::new();
 
     let ip_str = match get_current_ip_address() {
         Some(addr) => addr,
@@ -69,9 +87,9 @@ async fn main() {
 
     let args: Vec<String> = env::args().collect();
 
-    let mut iter = args.iter();
+    let mut iter = args.iter().skip(1);
     while let Some(argv) = iter.next() {
-        match argv.as_ref() {
+        match argv.as_str() {
             "--store" => {
                 if let Some(arg) = iter.next() {
                     path = arg.clone();
@@ -84,20 +102,48 @@ async fn main() {
                     }
                 }
             }
+            "--bootstrap" => {
+                let Some(arg) = iter.next() else {
+                    eprintln!("Missing value for --bootstrap; expected NODEID@IP:PORT");
+                    return;
+                };
+                match parse_bootstrap(arg) {
+                    Ok(node) => bootstrap_nodes.push(node),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return;
+                    }
+                }
+            }
+            arg if arg.starts_with("--bootstrap=") => {
+                match parse_bootstrap(&arg["--bootstrap=".len()..]) {
+                    Ok(node) => bootstrap_nodes.push(node),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return;
+                    }
+                }
+            }
             _ => {},
         }
     };
 
+    println!("path: {}, port: {}, bootstrap nodes: {}", path, port, bootstrap_nodes.len());
+
     let private_key = load_or_generate_key(&path);
 
-    let cfg = cfg::Configuration::new()
+    let mut builder = cfg::Configuration::new();
+    builder
         .with_port(port)
         .with_host4(&ip_str)
         .with_data_dir(path.as_str())
         .with_private_key(private_key)
-        .with_database_uri("jdbc:sqlite:node.db")
-        .build()
-        .unwrap();
+        .with_database_uri("jdbc:sqlite:node.db");
+
+    for bootstrap_node in bootstrap_nodes {
+        builder.add_bootstrap_node(bootstrap_node);
+    }
+    let cfg = builder.build().unwrap();
 
     cfg.dump();
 
@@ -109,3 +155,21 @@ async fn main() {
     sleep(Duration::from_secs(60)).await;
     let _ = node.stop().await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bootstrap;
+
+    const NODE_ID: &str = "FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo";
+
+    #[test]
+    fn parses_bootstrap_node() {
+        let node = parse_bootstrap(&format!("{NODE_ID}@155.138.245.211:39001")).unwrap();
+
+        assert_eq!(node.id().to_string(), NODE_ID);
+        assert_eq!(node.address().to_string(), "155.138.245.211:39001");
+    }
+}
+
+// Here is the command to run the sample node with a bootstrap node:
+// cargo r --bin node -- --bootstrap FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo@155.138.245.211:39001

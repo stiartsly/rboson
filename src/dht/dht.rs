@@ -527,7 +527,6 @@ impl DHT {
 
         let dht = self.dht();
         task::spawn_local(async move {
-            println!(" unordered.len() = {}", unordered.len());
             futures::future::join_all(unordered).await;
             info!("DHT/{}:{} startup bootstrap finished", network, id);
 

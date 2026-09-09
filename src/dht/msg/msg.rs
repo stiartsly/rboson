@@ -4,7 +4,7 @@ use std::{
     cell::RefCell,
     net::SocketAddr,
     result::Result as StdResult,
-    sync::atomic::{AtomicI32, Ordering}
+    sync::atomic::{AtomicU32, Ordering}
 };
 use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{Deserialize, Serialize};
@@ -202,22 +202,21 @@ impl fmt::Display for Body {
     }
 }
 
-static NEXT_TXID: AtomicI32 = AtomicI32::new(0);
-fn next_txid() -> i32 {
+pub(crate) type TxId = u32;
+static NEXT_TXID: AtomicU32 = AtomicU32::new(0);
+
+fn next_txid_after(current: u32, step: u32) -> u32 {
+    let next = current.wrapping_add(step);
+    if next == 0 { step } else { next }
+}
+
+fn next_txid() -> TxId {
     let step = rand::rng().random_range(1..512);
     let current = NEXT_TXID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(if current > i32::MAX - step {
-            step
-        } else {
-            current + step
-        })
+        Some(next_txid_after(current, step))
     }).expect("transaction ID update must succeed");
 
-    if current > i32::MAX - step {
-        step
-    } else {
-        current + step
-    }
+    next_txid_after(current, step)
 }
 
 #[derive(Clone)]
@@ -228,7 +227,7 @@ pub(crate) struct Message {
 
     kind    : Kind,
     method  : Method,
-    txid    : i32,
+    txid    : TxId,
     ver     : i32,
 
     body    : Option<Body>,
@@ -241,7 +240,7 @@ pub(crate) struct Message {
 impl Message {
     pub(crate) const MIN_BYTES: usize = 10;
 
-    fn new(kind: Kind, method: Method,  txid: i32, body: Option<Body>) -> Self {
+    fn new(kind: Kind, method: Method, txid: u32, body: Option<Body>) -> Self {
         Self {
             nodeid: None,
             kind,
@@ -289,7 +288,7 @@ impl Message {
         self.nodeid = Some(id)
     }
 
-    pub(crate) fn txid(&self) -> i32 {
+    pub(crate) fn txid(&self) -> TxId {
         self.txid
     }
 
@@ -335,7 +334,7 @@ struct SerdeCborMessage {
     #[serde(rename = "y")]
     type_: i32,
     #[serde(rename = "t")]
-    txid: i32,
+    txid: u32,
     #[serde(rename = "v")]
     ver: i32,
 
@@ -357,7 +356,7 @@ struct SerdeJsonMessage<'a> {
     #[serde(rename = "y")]
     type_: i32,
     #[serde(rename = "t")]
-    txid: i32,
+    txid: u32,
     #[serde(rename = "v", serialize_with = "utils::serialize_ver")]
     ver: i32,
 
@@ -422,6 +421,7 @@ impl TryFrom<&Message> for SerdeCborMessage {
 
 impl TryFrom<SerdeCborMessage> for Message {
     type Error = Error;
+
     fn try_from(s: SerdeCborMessage) -> Result<Self> {
         let kind: Kind = s.type_.try_into()?;
         let method: Method = s.type_.try_into()?;
@@ -460,93 +460,103 @@ impl AsRef<Message> for Message {
     }
 }
 
-pub(crate) fn ping_request() -> Message {
-    Message::new( Kind::Request, Method::Ping, next_txid(), None)
+#[inline]
+fn request(method: Method, body: Option<Body>) -> Message {
+    Message::new(Kind::Request, method, next_txid(), body)
 }
 
-pub(crate) fn ping_response(txid: i32) -> Message {
-    Message::new( Kind::Response, Method::Ping, txid, None)
+#[inline]
+fn response(method: Method, txid: TxId, body: Option<Body>) -> Message {
+    Message::new(Kind::Response, method, txid, body)
+}
+
+pub(crate) fn ping_request() -> Message {
+    request(Method::Ping, None)
+}
+
+pub(crate) fn ping_response(txid: TxId) -> Message {
+    response(Method::Ping, txid, None)
 }
 
 pub(crate) fn find_node_request(target: Id, want4: bool, want6: bool, want_token: bool) -> Message {
     let body = Body::FindNodeRequest(
         FindNodeRequest::new(target, want4, want6, want_token)
     );
-    Message::new(Kind::Request, Method::FindNode, next_txid(), Some(body))
+    request(Method::FindNode, Some(body))
 }
 
-pub(crate) fn find_node_response(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>, token: i32)-> Message {
+pub(crate) fn find_node_response(txid: TxId, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>, token: i32)-> Message {
     let body = Body::FindNodeResponse(
         FindNodeResponse::new(nodes4, nodes6, token)
     );
-    Message::new(Kind::Response, Method::FindNode, txid, Some(body))
+    response(Method::FindNode, txid, Some(body))
 }
 
 pub(crate) fn find_peer_request(target: Id, want4: bool, want6: bool, expected_seq: i32, expected_count: i32) -> Message {
     let body = Body::FindPeerRequest(
         FindPeerRequest::new(target, want4, want6, expected_seq, expected_count)
     );
-    Message::new(Kind::Request, Method::FindPeer, next_txid(), Some(body))
+    request(Method::FindPeer, Some(body))
 }
 
-pub(crate) fn find_peer_response_with_nodes(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>) -> Message {
+pub(crate) fn find_peer_response_with_nodes(txid: TxId, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>) -> Message {
     let body = Body::FindPeerResponse(
         FindPeerResponse::with_nodes(nodes4, nodes6)
     );
-    Message::new(Kind::Response, Method::FindPeer, txid, Some(body))
+    response(Method::FindPeer, txid, Some(body))
 }
 
-pub(crate) fn find_peer_response(txid: i32, peers: Vec<PeerInfo>) -> Message {
+pub(crate) fn find_peer_response(txid: TxId, peers: Vec<PeerInfo>) -> Message {
     let body = Body::FindPeerResponse(
         FindPeerResponse::with_peers(peers)
     );
-    Message::new(Kind::Response, Method::FindPeer, txid, Some(body))
+    response(Method::FindPeer, txid, Some(body))
 }
 
 pub(crate) fn find_value_request(target: Id, want4: bool, want6: bool, expected_seq: i32) -> Message {
     let body = Body::FindValueRequest(
         FindValueRequest::new(target, want4, want6, expected_seq)
     );
-    Message::new(Kind::Request, Method::FindValue, next_txid(),Some(body))
+    request(Method::FindValue, Some(body))
 }
 
-pub(crate) fn find_value_response_with_nodes(txid: i32, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>)-> Message {
+pub(crate) fn find_value_response_with_nodes(txid: TxId, nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>)-> Message {
     let body = Body::FindValueResponse(
         FindValueResponse::with_nodes(nodes4, nodes6)
     );
-    Message::new(Kind::Response, Method::FindValue, txid, Some(body))
+    response(Method::FindValue, txid, Some(body))
 }
 
-pub(crate) fn find_value_response(txid: i32, value: Value) -> Message {
+pub(crate) fn find_value_response(txid: TxId, value: Value) -> Message {
     let body = Body::FindValueResponse(
         FindValueResponse::with_value(value)
     );
-    Message::new(Kind::Response, Method::FindValue, txid, Some(body))
+    response(Method::FindValue, txid, Some(body))
 }
 
 pub(crate) fn store_value_request(value: Value, token: i32, expected_seq: i32) -> Message {
     let body = Body::StoreValueRequest(
         StoreValueRequest::new(value, token, expected_seq)
     );
-    Message::new(Kind::Request, Method::StoreValue, next_txid(), Some(body))
+    request(Method::StoreValue, Some(body))
 }
 
-pub(crate) fn store_value_response(txid: i32) -> Message {
-    Message::new(Kind::Response, Method::StoreValue, txid, None)
+pub(crate) fn store_value_response(txid: TxId) -> Message {
+    response(Method::StoreValue, txid, None)
 }
 
 pub(crate) fn announce_peer_request(peer: PeerInfo, token: i32, expected_seq: i32) -> Message {
     let body = Body::AnnouncePeerRequest(
         AnnouncePeerRequest::new(peer, token, Some(expected_seq))
     );
-    Message::new(Kind::Request, Method::AnnouncePeer, next_txid(), Some(body))
+    request(Method::AnnouncePeer, Some(body))
 }
 
-pub(crate) fn announce_peer_response(txid: i32) -> Message {
-    Message::new(Kind::Response, Method::AnnouncePeer, txid, None)
+pub(crate) fn announce_peer_response(txid: TxId) -> Message {
+    response(Method::AnnouncePeer, txid, None)
 }
 
-pub(crate) fn error_msg(method: Method, txid: i32, code: i32, description: String) -> Message {
+pub(crate) fn error_msg(method: Method, txid: TxId, code: i32, description: String) -> Message {
     let body = Body::Error(
         ErrorBody::new(code, description)
     );

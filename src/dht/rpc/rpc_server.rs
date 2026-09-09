@@ -30,7 +30,7 @@ use crate::{
 use crate::dht::{
     suspicious_node_detector::SuspiciousNodeDetector,
     rpc::RpcCall,
-    msg::{Message, msg::Method},
+    msg::{Message, msg::Method, msg::TxId},
 };
 
 #[allow(dead_code)]
@@ -39,7 +39,7 @@ pub(crate) struct RpcServer {
     ni                  : NodeInfo,
 
     suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
-    pending_calls       : HashMap<i32, Rc<RefCell<RpcCall>>>,
+    pending_calls       : HashMap<TxId, Rc<RefCell<RpcCall>>>,
 
     recv_packets        : u32,
     recv_packets_at_last_reachable_check: u32,

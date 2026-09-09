@@ -12,7 +12,7 @@ use crate::{
 };
 use crate::dht::{
     dht::DHT,
-    msg::Message,
+    msg::{Message, msg::TxId},
     task::task_listener::TaskListener,
     rpc::{
         Target, RpcCall, rpccall,
@@ -73,7 +73,7 @@ pub(crate) struct TaskData {
     //started     : SystemTime,
     //ended       : SystemTime,
 
-    inflights   : HashSet<i32>,
+    inflights   : HashSet<TxId>,
     listener    : Option<TaskListener>,
     end_handler : Option<EasyHandler<()>>,
 

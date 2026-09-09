@@ -11,7 +11,7 @@ use crate::{
     LocalBoxTimerClient as TimerClient
 };
 use crate::dht::{
-    msg::{Message, msg::Kind},
+    msg::{Message, msg::Kind, msg::TxId},
     rpc::{
         Target,
         Listener as CallListener,
@@ -37,7 +37,7 @@ impl State {
 }
 
 pub(crate) struct RpcCall {
-    txid            : i32,
+    txid            : TxId,
     target          : Target,
 
     // a transient field to store request message before
@@ -108,7 +108,7 @@ impl RpcCall {
     //    self.target_reachable
     //}
 
-    pub(crate) fn txid(&self) -> i32 {
+    pub(crate) fn txid(&self) -> TxId {
         self.txid
     }
 

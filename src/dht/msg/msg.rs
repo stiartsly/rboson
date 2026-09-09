@@ -42,20 +42,17 @@ pub(crate) enum Kind {
 
 impl Kind {
     const MASK: i32 = 0xE0;
-    pub(crate) fn is_valid(_type: i32) -> bool {
-        let kind = _type & Self::MASK;
-        kind == 0x00 || kind == 0x20 || kind == 0x40
-    }
 }
 
-impl From<i32> for Kind {
-    fn from(_type: i32) -> Kind {
+impl TryFrom<i32> for Kind {
+    type Error = Error;
+    fn try_from(_type: i32) -> Result<Self> {
         let kind = _type & Self::MASK;
         match kind {
-            0x00 => Kind::Error,
-            0x20 => Kind::Request,
-            0x40 => Kind::Response,
-            _ => panic!("invalid msg kind: {}", kind)
+            0x00 => Ok(Kind::Error),
+            0x20 => Ok(Kind::Request),
+            0x40 => Ok(Kind::Response),
+            _ => Err(ProtocolError::new(format!("invalid msg kind: {}", kind)))
         }
     }
 }
@@ -84,23 +81,21 @@ pub(crate) enum Method {
 
 impl Method {
     const MASK: i32 = 0x1F;
-    pub(crate) fn is_valid(_type: i32) -> bool {
-        (_type & Self::MASK) <= 0x06
-    }
 }
 
-impl From<i32> for Method {
-    fn from(_type: i32) -> Self {
+impl TryFrom<i32> for Method {
+    type Error = Error;
+    fn try_from(_type: i32) -> Result<Self> {
         let method = _type & Self::MASK;
-        match _type & Self::MASK {
-            0x00 => Method::Unknown,
-            0x01 => Method::Ping,
-            0x02 => Method::FindNode,
-            0x03 => Method::AnnouncePeer,
-            0x04 => Method::FindPeer,
-            0x05 => Method::StoreValue,
-            0x06 => Method::FindValue,
-            _ => panic!("invalid msg method: {}", method)
+        match method {
+            0x00 => Ok(Method::Unknown),
+            0x01 => Ok(Method::Ping),
+            0x02 => Ok(Method::FindNode),
+            0x03 => Ok(Method::AnnouncePeer),
+            0x04 => Ok(Method::FindPeer),
+            0x05 => Ok(Method::StoreValue),
+            0x06 => Ok(Method::FindValue),
+            _ => Err(ProtocolError::new(format!("invalid msg method: {}", method)))
         }
     }
 }
@@ -428,18 +423,8 @@ impl TryFrom<&Message> for SerdeCborMessage {
 impl TryFrom<SerdeCborMessage> for Message {
     type Error = Error;
     fn try_from(s: SerdeCborMessage) -> Result<Self> {
-        let type_ = s.type_;
-        if !Kind::is_valid(type_) {
-            return Err(ProtocolError::new(
-                format!("Invalid message kind: {}", type_ & Kind::MASK)));
-        }
-        if !Method::is_valid(type_) {
-            return Err(ProtocolError::new(
-                format!("Invalid message method: {}", type_ & Method::MASK)));
-        }
-
-        let kind  = Kind::from(type_);
-        let method = Method::from(type_);
+        let kind: Kind = s.type_.try_into()?;
+        let method: Method = s.type_.try_into()?;
 
         let err =  if kind == Kind::Error {
             s.err.map(Body::from_err).transpose()?.flatten()
@@ -456,7 +441,7 @@ impl TryFrom<SerdeCborMessage> for Message {
         } else {
             None
         };
-        let body = match type_ & Kind::MASK {
+        let body = match s.type_ & Kind::MASK {
             0x00 => err,
             0x20 => req,
             0x40 => rsp,

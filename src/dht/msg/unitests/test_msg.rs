@@ -9,6 +9,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_transaction_ids_positive() {
+        for _ in 0..512 {
+            assert!(msg::ping_request().txid() > 0);
+        }
+    }
+
+    #[test]
     fn test_serde_find_value_request() {
         let target = Id::random();
         let mut msg = msg::find_value_request(target.clone(), true, false, 7);

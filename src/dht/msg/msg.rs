@@ -8,6 +8,7 @@ use std::{
 };
 use serde_cbor::value::{Value as CborValue, from_value};
 use serde::{Deserialize, Serialize};
+use rand::RngExt;
 
 use crate::{
     utils,
@@ -208,11 +209,19 @@ impl fmt::Display for Body {
 
 static NEXT_TXID: AtomicI32 = AtomicI32::new(0);
 fn next_txid() -> i32 {
-    let id = NEXT_TXID.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-    if id == 0 {
-        NEXT_TXID.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    let step = rand::rng().random_range(1..512);
+    let current = NEXT_TXID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        Some(if current > i32::MAX - step {
+            step
+        } else {
+            current + step
+        })
+    }).expect("transaction ID update must succeed");
+
+    if current > i32::MAX - step {
+        step
     } else {
-        id
+        current + step
     }
 }
 

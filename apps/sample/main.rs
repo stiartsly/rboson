@@ -77,7 +77,7 @@ fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut path = get_storage_path(".sample_node");
-    let mut port = 39001 as u16;
+    let mut port = 39010 as u16;
     let mut bootstrap_nodes = Vec::new();
 
     let ip_str = match get_current_ip_address() {
@@ -153,7 +153,7 @@ async fn main() {
     let _ = node.start().await;
 
     println!("Target node running on {}:{} (storage: {})", ip_str, port, path);
-    sleep(Duration::from_secs(60)).await;
+    sleep(Duration::from_secs(60*10)).await;
     let _ = node.stop().await;
 }
 

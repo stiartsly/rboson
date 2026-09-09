@@ -65,6 +65,7 @@ mod task {
         mod test_closest_candidates;
         mod test_closest_set;
         mod test_candidate_node;
+        mod test_task_manager;
         mod test_node_lookup;
         mod test_peer_lookup;
         mod test_peer_announce;

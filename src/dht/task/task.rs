@@ -3,7 +3,8 @@ use std::{
     any::Any,
     rc::{Rc, Weak},
     cell::RefCell,
-    collections::HashSet
+    collections::HashSet,
+    sync::atomic::{AtomicI32, Ordering},
 };
 use log::{warn, debug};
 use crate::{
@@ -53,15 +54,20 @@ impl fmt::Display for State {
 }
 
 pub(crate) type TaskId = i32;
-static mut NEXT_TASKID: i32 = 0;
+
+static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
+
+fn next_taskid_after(current: TaskId) -> TaskId {
+    let next = current.wrapping_add(1);
+    if next == 0 { 1 } else { next }
+}
+
 fn next_taskid() -> TaskId {
-    unsafe {
-        NEXT_TASKID += 1;
-        if NEXT_TASKID == 0 {
-            NEXT_TASKID += 1;
-        }
-        NEXT_TASKID
-    }
+    let current = NEXT_TASKID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        Some(next_taskid_after(current))
+    }).expect("task ID update must succeed");
+
+    next_taskid_after(current)
 }
 
 pub(crate) struct TaskData {
@@ -293,8 +299,8 @@ pub(crate) trait Task {
 
         let listener = self.data_mut().listener.take();
         if let Some(l) = listener {
+            l.completed(self.as_task());
             l.ended(self.as_task());
-            l.canceled(self.as_task());
             self.data_mut().listener = Some(l);
         }
     }

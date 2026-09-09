@@ -60,6 +60,24 @@ mod tests {
     }
 
     #[test]
+    fn test_add_rejects_candidates_when_all_entries_are_inflight() {
+        let target = Id::MIN_ID;
+        let mut candidates = ClosestCandidates::new(target, 2);
+        let first = make_node(1, "1.1.1.1", 39001);
+        let second = make_node(2, "1.1.1.2", 39002);
+        let third = make_node(3, "1.1.1.3", 39003);
+
+        candidates.add(vec![first.clone().into(), second.clone().into()]);
+        candidates.candidate_node(first.id()).unwrap().borrow_mut().set_sent();
+        candidates.candidate_node(second.id()).unwrap().borrow_mut().set_sent();
+
+        candidates.add(vec![third.clone().into()]);
+
+        assert_eq!(candidates.size(), 2);
+        assert!(candidates.candidate_node(third.id()).is_none());
+    }
+
+    #[test]
     fn test_add_when_developer_mode_enabled() {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::with_developer_mode(target, 4, true);

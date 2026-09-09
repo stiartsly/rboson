@@ -2,7 +2,7 @@ use std::{
     rc::Rc,
     cell::RefCell,
     sync::atomic::{AtomicBool, Ordering},
-    collections::{VecDeque, HashSet},
+    collections::{HashMap, VecDeque},
 };
 use log::{debug, error};
 
@@ -15,7 +15,7 @@ const MAX_ACTIVE_TASKS: usize = 8;
 
 pub(crate) struct TaskManager {
     queued      : RefCell<VecDeque<Rc<RefCell<Box<dyn Task>>>>>,
-    running     : Rc<RefCell<HashSet<TaskId>>>,
+    running     : Rc<RefCell<HashMap<TaskId, Rc<RefCell<Box<dyn Task>>>>>>,
     canceling   : AtomicBool,
 }
 
@@ -23,16 +23,16 @@ impl TaskManager {
     pub(crate) fn new() -> Self {
         Self {
             queued      : RefCell::new(VecDeque::new()),
-            running     : Rc::new(RefCell::new(HashSet::new())),
+            running     : Rc::new(RefCell::new(HashMap::new())),
             canceling   : AtomicBool::new(false),
         }
     }
 
-    pub(crate) fn add(&self, task: Box<dyn Task>) {
+    pub(crate) fn add(self: &Rc<Self>, task: Box<dyn Task>) {
         self.add_prior(task, false);
     }
 
-    pub(crate) fn add_prior(&self, mut task: Box<dyn Task>, priori: bool) {
+    pub(crate) fn add_prior(self: &Rc<Self>, mut task: Box<dyn Task>, priori: bool) {
         if self.canceling.load(Ordering::SeqCst) {
             return;
         }
@@ -41,10 +41,15 @@ impl TaskManager {
         }
 
         let taskid = task.task_id();
-        let running = self.running.clone();
+        let manager = Rc::downgrade(self);
         task.with_ended_handler(
             EasyHandler ::new(move |_| {
-                let _ = running.borrow_mut().remove(&taskid);
+                let Some(manager) = manager.upgrade() else {
+                    return;
+                };
+
+                let _ = manager.running.borrow_mut().remove(&taskid);
+                manager.dequeue();
             })
         );
 
@@ -87,7 +92,7 @@ impl TaskManager {
             }
 
             let taskid = task.borrow().task_id();
-            let _ = self.running.borrow_mut().insert(taskid);
+            self.running.borrow_mut().insert(taskid, task.clone());
             task.borrow_mut().start();
         }
     }
@@ -95,8 +100,12 @@ impl TaskManager {
     pub(crate) fn stop(&self) {
         self.canceling.store(true, Ordering::SeqCst);
 
-        let _ = self.running.borrow_mut().drain();
-        for t in self.queued.borrow_mut().drain(..) {
+        let running = self.running.borrow_mut().drain()
+            .map(|(_, task)| task)
+            .collect::<Vec<_>>();
+        let queued = self.queued.borrow_mut().drain(..).collect::<Vec<_>>();
+
+        for t in running.into_iter().chain(queued) {
             t.borrow_mut().cancel();
         }
 

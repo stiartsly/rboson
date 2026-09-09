@@ -69,6 +69,11 @@ impl ClosestCandidates {
     pub(crate) fn add(&mut self, entries: Vec<CandidateNode>)
     {
         for item in entries {
+            if self.reached_capacity() &&
+                !self.closest.values().any(|candidate| !candidate.borrow().is_inflight()) {
+                break;
+            }
+
             let id = item.id().clone();
             if !self.dedups_ids.insert(id) {
                 continue;

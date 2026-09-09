@@ -8,11 +8,6 @@ use crate::dht::{
     dht::DHT,
     rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
-    routing::{
-        KBucket,
-        KBucketEntry,
-        KClosestNodes,
-    },
     task::{
         Task, TaskData,
         LookupTask, LookupTaskData
@@ -91,15 +86,11 @@ impl LookupTask for NodeLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
-        self.dht.clone()
-    }
-
-    fn data(&self) -> &LookupTaskData {
+    fn lookup_data(&self) -> &LookupTaskData {
         &self.lookup_data
     }
 
-    fn data_mut(&mut self) -> &mut LookupTaskData {
+    fn lookup_data_mut(&mut self) -> &mut LookupTaskData {
         &mut self.lookup_data
     }
 }
@@ -126,30 +117,12 @@ impl Task for NodeLookupTask {
     }
 
     fn prepare(&mut self) {
-        let target = match self.bootstrap {
-            true => self.target().distance(&Id::MAX_ID),
-            false => self.target().clone()
+        let target = if self.bootstrap {
+            self.target().distance(&Id::MAX_ID)
+        } else {
+            self.target().clone()
         };
-
-        let rt = self.dht.borrow().rt();
-        let kes:Vec<KBucketEntry> = {
-            let mut kns = KClosestNodes::new(
-                &rt.borrow(),
-                target,
-                KBucket::MAX_ENTRIES *3
-            );
-            kns.set_filter(|v| v.eligible_for_local_lookup());
-            kns.fill();
-            kns.into()
-        };
-
-        log::debug!("{}#{} initialized {} candidates for target {}",
-            self.task_name(),
-            self.task_id(),
-            kes.len(),
-            target,
-        );
-        self.add(kes);
+        self.seed_candidates(target);
     }
 
     fn iterate(&mut self) {
@@ -227,8 +200,8 @@ impl Task for NodeLookupTask {
         }
 
         // If the target node is found, consider the lookup done immediately.
-        if LookupTask::data(self).done_on_eligible_result() {
-            LookupTask::data_mut(self).done_lookup();
+        if LookupTask::lookup_data(self).done_on_eligible_result() {
+            LookupTask::lookup_data_mut(self).done_lookup();
         }
     }
 

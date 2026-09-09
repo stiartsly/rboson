@@ -8,10 +8,6 @@ use crate::dht::{
     dht::DHT,
     eligible_peers::EligiblePeers,
     rpc::RpcCall,
-    routing::{
-        KBucket, KBucketEntry,
-        KClosestNodes
-    },
     msg::{msg, Body, LookupResponse},
     task::{
         Task, TaskData,
@@ -53,15 +49,11 @@ impl LookupTask for PeerLookupTask {
         &self.base_data
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
-        self.dht.clone()
-    }
-
-    fn data(&self) -> &LookupTaskData {
+    fn lookup_data(&self) -> &LookupTaskData {
         &self.lookup_data
     }
 
-    fn data_mut(&mut self) -> &mut LookupTaskData {
+    fn lookup_data_mut(&mut self) -> &mut LookupTaskData {
         &mut self.lookup_data
     }
 }
@@ -88,25 +80,7 @@ impl Task for PeerLookupTask {
     }
 
     fn prepare(&mut self) {
-        let entries: Vec<KBucketEntry> = {
-            let rt = self.dht.borrow().rt();
-            let mut kns = KClosestNodes::new(
-                &rt.borrow(),
-                self.target().clone(),
-                KBucket::MAX_ENTRIES *3
-            );
-            kns.set_filter(|v| v.eligible_for_local_lookup());
-            kns.fill();
-            kns.into()
-        };
-
-        log::debug!("{}#{} initialized {} candidates for target {}",
-            self.task_name(),
-            self.task_id(),
-            entries.len(),
-            self.target()
-        );
-        self.add(entries);
+        self.seed_candidates(self.target().clone());
     }
 
     fn iterate(&mut self) {
@@ -176,8 +150,8 @@ impl Task for PeerLookupTask {
             );
 
             if self.result.reached_capacity() {
-                if LookupTask::data(self).done_on_eligible_result() {
-                    LookupTask::data_mut(self).done_lookup();
+                if LookupTask::lookup_data(self).done_on_eligible_result() {
+                    LookupTask::lookup_data_mut(self).done_lookup();
                 }
                 self.result.prune();
             }

@@ -5,18 +5,18 @@ use std::{
 
 use crate::Id;
 use crate::dht::{
-    dht::DHT,
     utils::{is_any_unicast, is_bogon},
     rpc::{
         Target, rpc_target::TargetInfo,
         RpcCall
     },
-    msg::{Body,LookupResponse},
-    routing::KBucket,
+    msg::{Body, LookupResponse},
+    routing::{KBucket, KBucketEntry, KClosestNodes},
     task::{
         ClosestSet,
         ClosestCandidates,
         CandidateNode,
+        Task,
         TaskData,
     }
 };
@@ -55,19 +55,18 @@ impl LookupTaskData {
     }
 }
 
-pub(crate) trait LookupTask {
+pub(crate) trait LookupTask: Task {
     fn base_data(&self) -> &TaskData;
-    fn dht(&self) -> Rc<RefCell<DHT>>;
-    fn data(&self) -> &LookupTaskData;
-    fn data_mut(&mut self) -> &mut LookupTaskData;
+    fn lookup_data(&self) -> &LookupTaskData;
+    fn lookup_data_mut(&mut self) -> &mut LookupTaskData;
 
     fn target(&self) -> &Id {
-        &self.data().target
+        &self.lookup_data().target
     }
 
     #[allow(unused)]
     fn candidate_size(&self) -> usize {
-        self.data().candidates.size()
+        self.lookup_data().candidates.size()
     }
 
     fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
@@ -81,7 +80,7 @@ pub(crate) trait LookupTask {
                 is_bogon(candidate.addr())
             };
 
-            if bogon ||self.data().closest.contains(candidate.id()) ||
+            if bogon ||self.lookup_data().closest.contains(candidate.id()) ||
                 ni.id() == candidate.id() ||
                 ni.address() == candidate.addr() {
                 continue;
@@ -90,32 +89,56 @@ pub(crate) trait LookupTask {
         }
 
         if !todo.is_empty() {
-            self.data_mut().candidates.add(todo)
+            self.lookup_data_mut().candidates.add(todo)
         }
     }
 
+    fn seed_candidates(&mut self, target: Id) {
+        let entries: Vec<KBucketEntry> = {
+            let rt = self.dht().borrow().rt();
+            let mut closest = KClosestNodes::new(
+                &rt.borrow(),
+                target,
+                KBucket::MAX_ENTRIES * 3
+            );
+            closest.set_filter(|entry| entry.eligible_for_local_lookup());
+            closest.fill();
+            closest.into()
+        };
+
+        log::debug!(
+            "{}#{} initialized {} candidates for target {}",
+            self.task_name(),
+            self.task_id(),
+            entries.len(),
+            target,
+        );
+        self.add(entries);
+    }
+
+
     fn remove_candidate(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
-        self.data_mut().candidates.remove(id)
+        self.lookup_data_mut().candidates.remove(id)
     }
 
     fn next_candidate(&mut self) -> Option<Rc<RefCell<CandidateNode>>> {
-       self.data_mut().candidates.next()
+       self.lookup_data_mut().candidates.next()
     }
 
     fn add_closest(&mut self, cn: Rc<RefCell<CandidateNode>>) {
-        self.data_mut().closest.add(cn)
+        self.lookup_data_mut().closest.add(cn)
     }
 
     fn closest(&self) -> &ClosestSet {
-        &self.data().closest
+        &self.lookup_data().closest
     }
 
     fn iterate(&mut self) {
-        self.data_mut().iteration_count += 1;
+        self.lookup_data_mut().iteration_count += 1;
     }
 
     fn is_done(&self) -> bool {
-        let data = self.data();
+        let data = self.lookup_data();
         if data.done_on_lookup {
             return true;
         }

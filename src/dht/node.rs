@@ -342,7 +342,7 @@ impl Node {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let _ = self.lifecycle.lock().await;
+        let _lifecycle = self.lifecycle.lock().await;
         if self.is_running() {
             return Err(StateError::new("KadNode is already running."));
         };
@@ -426,7 +426,7 @@ impl Node {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        let _ = self.lifecycle.lock().await;
+        let _lifecycle = self.lifecycle.lock().await;
 
         debug!("Kademlia node is stopping ....");
         if !self.is_running() {

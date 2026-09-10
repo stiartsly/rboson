@@ -233,6 +233,7 @@ pub(crate) mod utils {
 
 #[cfg(test)]
 mod unitests {
+    mod test_node;
     mod test_addr;
     mod test_rpccall;
     mod test_token_manager;

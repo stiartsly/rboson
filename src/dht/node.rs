@@ -45,8 +45,8 @@ use crate::dht::{
         NotOwnerError,
         ImmutableSubstitutionError
     },
+    dht_verticle::{self, VerticleClient as DHTVerticleClient},
     node_verticle,
-    dht_verticle::{self, VerticleClient},
 };
 
 const MAX_PEER_AGE  : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
@@ -61,13 +61,14 @@ pub struct Node {
 
     lookup_option   : Mutex<LookupOption>,
 
-    dht4            : Mutex<Option<Arc<VerticleClient>>>,
-    dht6            : Mutex<Option<Arc<VerticleClient>>>,
+    dht4            : Mutex<Option<Arc<DHTVerticleClient>>>,
+    dht6            : Mutex<Option<Arc<DHTVerticleClient>>>,
 
     database_uri    : PathBuf,
 
     running         : Mutex<bool>,
-    listeners       : Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>,
+    lifecycle       : tokio::sync::Mutex<()>,
+    listeners       : Arc<Mutex<Vec<Arc<dyn ConnectionStatusListener>>>>,
 
     timer_verticle  : Mutex<Option<Arc<node_verticle::VerticleClient>>>,
 
@@ -88,8 +89,9 @@ impl Node {
 
         logger::setup(
             options.log_level(),
-            path.as_ref().map(|v| v.to_str().unwrap())
+            path.as_ref().and_then(|path| path.to_str())
         );
+
         if options.log_console() {
             logger::enable_console_output();
         } else {
@@ -129,6 +131,7 @@ impl Node {
             dht6            : Mutex::new(None),
 
             running         : Mutex::new(false),
+            lifecycle       : tokio::sync::Mutex::new(()),
             listeners       : Arc::new(Mutex::new(Vec::new())),
 
             timer_verticle  : Mutex::new(None),
@@ -275,7 +278,7 @@ impl Node {
             BoxHandler::new(move |_|{
                     let storage = storage.clone();
                     Box::pin(async move {
-                        let _ = storage.lock().unwrap().purge();
+                        storage.lock().unwrap().purge();
                 })
         }))?;
 
@@ -308,11 +311,38 @@ impl Node {
         Ok(())
     }
 
+    async fn shutdown_components(&self) {
+        let dht4 = self.dht4.lock().unwrap().take();
+        let dht6 = self.dht6.lock().unwrap().take();
+        tokio::join!(
+            async {
+                if let Some(dht) = dht4 {
+                    dht.stop().await;
+                }
+            },
+            async {
+                if let Some(dht) = dht6 {
+                    dht.stop().await;
+                }
+            }
+        );
+
+        let timer = self.timer_verticle.lock().unwrap().take();
+        if let Some(timer) = timer {
+            if let Err(e) = timer.stop().await {
+                warn!("Failed to stop node timer verticle: {e}");
+            }
+        }
+
+        self.storage.lock().unwrap().close();
+    }
+
     pub fn add_listener(&self, listener: impl ConnectionStatusListener + 'static) {
-        self.listeners.lock().unwrap().push(Box::new(listener));
+        self.listeners.lock().unwrap().push(Arc::new(listener));
     }
 
     pub async fn start(&self) -> Result<()> {
+        let _ = self.lifecycle.lock().await;
         if self.is_running() {
             return Err(StateError::new("KadNode is already running."));
         };
@@ -330,19 +360,23 @@ impl Node {
         let client  = node_verticle::deploy(options)?;
         *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
 
-        self.setup_periodic_tasks().await?;
+        if let Err(e) = self.setup_periodic_tasks().await {
+            self.shutdown_components().await;
+            return Err(e);
+        }
 
         let listener = Arc::new(DefaultConnectionStatusListener {
             listeners: self.listeners.clone()
         });
 
         let options = dht_verticle::VerticleOptions {
-            identity:  self.identity.identity(),
-            storage:   self.storage.clone(),
+            identity: self.identity.identity(),
+            storage: self.storage.clone(),
             token_man: self.token_man.clone(),
-            listener:  listener,
             bootstrap_nodes: self.options.bootstrap_nodes().to_vec(),
+            listener,
         };
+        let data_dir = self.options.data_dir();
         let port  = self.options.port();
         let host4 = self.options.host4();
         let host6 = self.options.host6();
@@ -351,7 +385,7 @@ impl Node {
             if let Some(host) = host {
                 dht_verticle::deploy(
                     options.clone(),
-                    self.options.data_dir(),
+                    data_dir,
                     Network::IPv4,
                     host.into(),
                     port
@@ -366,19 +400,24 @@ impl Node {
             cb(host6)
         );
 
+        let mut deployment_error = None;
         match result.0 {
             Ok(Some(v)) => {
                 *self.dht4.lock().unwrap() = Some(Arc::new(v));
             },
-            Err(e) => return Err(e),
+            Err(e) => deployment_error = Some(e),
             _ => {}
         }
         match result.1 {
             Ok(Some(v)) => {
                 *self.dht6.lock().unwrap() = Some(Arc::new(v));
             },
-            Err(e) => return Err(e),
+            Err(e) if deployment_error.is_none() => deployment_error = Some(e),
             _ => {}
+        }
+        if let Some(e) = deployment_error {
+            self.shutdown_components().await;
+            return Err(e);
         }
 
         *self.running.lock().unwrap() = true;
@@ -387,36 +426,15 @@ impl Node {
     }
 
     pub async fn stop(&self) -> Result<()> {
+        let _ = self.lifecycle.lock().await;
+
         debug!("Kademlia node is stopping ....");
         if !self.is_running() {
             return Ok(());
         }
         *self.running.lock().unwrap() = false;
 
-        // Stop DHT verticles concurrently
-        let dht4 = self.dht4.lock().unwrap().take();
-        let dht6 = self.dht6.lock().unwrap().take();
-        tokio::join!(
-            async {
-                if let Some(dht) = dht4 {
-                    let c = Arc::try_unwrap(dht).ok().unwrap();
-                    let _ = c.stop().await;
-                }
-            },
-            async {
-                if let Some(dht) = dht6 {
-                    let c = Arc::try_unwrap(dht).ok().unwrap();
-                    let _ = c.stop().await;
-                }
-            }
-        );
-
-        let verticle = self.timer_verticle.lock().unwrap().take();
-        if let Some(verticle) = verticle {
-            let vert = Arc::try_unwrap(verticle).ok().unwrap();
-            let _ = vert.stop().await;
-        }
-        self.storage.lock().unwrap().close();
+        self.shutdown_components().await;
 
         info!("Kademlia node stopped.");
         logger::teardown();
@@ -428,18 +446,18 @@ impl Node {
         self.identity.id()
     }
 
-    pub fn node_info(&self) -> NodeInfo {
+    pub fn node_info(&self) -> Result<NodeInfo> {
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
 
-        let mut ni = None;
-        if let Some(dht) = dht6 {
-            ni = Some(dht.ni());
-        };
         if let Some(dht) = dht4 {
-            ni = Some(dht.ni());
-        };
-        ni.unwrap()
+            return Ok(dht.ni());
+        }
+        if let Some(dht) = dht6 {
+            return Ok(dht.ni());
+        }
+
+        Err(StateError::new("KadNode is not running"))
     }
 
     pub fn version(&self) -> String {
@@ -465,7 +483,7 @@ impl Node {
     pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
         self.check_running()?;
 
-        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
             let nodes = nodes.to_vec();
 
             if let Some(dht) = dht {
@@ -497,7 +515,7 @@ impl Node {
         self.check_running()?;
 
         let option  = self.lookup_option(lookup_option);
-        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
             let target  = target.clone();
             if let Some(dht) = dht {
                 dht.find_node(target, option).await
@@ -572,7 +590,7 @@ impl Node {
             }
         }
 
-        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
             if let Some(dht) = dht {
                 dht.find_value(target, expected_seq, option).await
             } else {
@@ -590,9 +608,11 @@ impl Node {
         }
 
         if !ev.is_empty() && ev.is_latest() {
-            let _ = self.storage.lock().unwrap().put_value(
+            if let Err(e) = self.storage.lock().unwrap().put_value(
                 ev.value().unwrap(), false
-            );
+            ) {
+                warn!("Failed to cache value {} from lookup: {e}", target);
+            }
         }
 
         Ok(ev.value())
@@ -613,6 +633,12 @@ impl Node {
         if expected_count == 0 {
             return Err(ArgumentError::new(format!(
                 "Invalid expected count: {expected_count}, must be larger than 0")));
+        }
+        if expected_count > i32::MAX as usize {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected count: {expected_count}, must be less than or equal to {}",
+                i32::MAX
+            )));
         }
         self.check_running()?;
 
@@ -640,7 +666,7 @@ impl Node {
             }
         }
 
-        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
             if let Some(dht) = dht {
                 dht.find_peer(target, expected_seq, expected_count, option).await
             } else {
@@ -657,7 +683,9 @@ impl Node {
         ep.prune();
 
         if !ep.is_empty() && ep.is_latest() {
-            let _ = self.storage.lock().unwrap().put_peers(ep.peers());
+            if let Err(e) = self.storage.lock().unwrap().put_peers(ep.peers()) {
+                warn!("Failed to cache peers for {} from lookup: {e}", target);
+            }
         }
         Ok(ep.peers())
     }
@@ -696,7 +724,7 @@ impl Node {
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
 
-        let cb = async move|dht: Option<Arc<VerticleClient>>| {
+        let cb = async move|dht: Option<Arc<DHTVerticleClient>>| {
             let value   = value.clone();
 
             if let Some(dht) = dht {
@@ -714,7 +742,9 @@ impl Node {
             item?;
         }
 
-        let _ = self.storage.lock().unwrap().update_value_announced_time(&value_id);
+        if let Err(e) = self.storage.lock().unwrap().update_value_announced_time(&value_id) {
+            warn!("Stored value {} but failed to update its announcement time: {e}", value_id);
+        }
         Ok(())
     }
 
@@ -749,7 +779,7 @@ impl Node {
         let dht4 = self.dht4.lock().unwrap().clone();
         let dht6 = self.dht6.lock().unwrap().clone();
 
-        let cb = async move |dht: Option<Arc<VerticleClient>>| {
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
             let peer = peer.clone();
 
             if let Some(dht) = dht {
@@ -767,8 +797,13 @@ impl Node {
             item?;
         }
 
-        let _ = self.storage.lock().unwrap()
-                .update_peer_announced_time(peer.id(), peer.fingerprint());
+        if let Err(e) = self.storage.lock().unwrap()
+            .update_peer_announced_time(peer.id(), peer.fingerprint()) {
+            warn!(
+                "Stored peer {} but failed to update its announcement time: {e}",
+                peer.id()
+            );
+        }
         Ok(())
     }
 
@@ -912,7 +947,7 @@ fn check_peer_validity(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Res
 }
 
 struct DefaultConnectionStatusListener {
-    listeners: Arc<Mutex<Vec<Box<dyn ConnectionStatusListener>>>>
+    listeners: Arc<Mutex<Vec<Arc<dyn ConnectionStatusListener>>>>
 }
 
 impl ConnectionStatusListener for DefaultConnectionStatusListener {
@@ -922,33 +957,30 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
         old_status: ConnectionStatus,
     ) {
         info!("Connection status changed for DHT{{{}}}: {}->{}", network, old_status, new_status);
-        let locked = self.listeners.lock().unwrap();
-        for l in locked.iter() {
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
             l.status_changed(network, new_status, old_status);
         }
     }
     fn connecting(&self, network: Network) {
         info!("Connecting to DHT{{{}}}...", network);
-        let locked = self.listeners.lock().unwrap();
-        for l in locked.iter() {
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
             l.connecting(network);
         }
     }
     fn connected(&self, network: Network) {
         info!("Connected to DHT{{{}}}.", network);
-        let locked = self.listeners.lock().unwrap();
-        for l in locked.iter() {
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
             l.connected(network);
         }
     }
     fn disconnected(&self, network: Network) {
         info!("Disconnected from DHT{{{}}}.", network);
-        let locked = self.listeners.lock().unwrap();
-        for l in locked.iter() {
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
             l.disconnected(network);
         }
     }
 }
-
-unsafe impl Send for Node {}
-unsafe impl Sync for Node {}

@@ -263,7 +263,8 @@ mod tests {
         _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
         _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -344,7 +345,8 @@ mod tests {
         _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
         _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -398,7 +400,8 @@ mod tests {
         _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
         _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -452,7 +455,8 @@ mod tests {
         _ = rc2.map_err(|e| panic!("Failed to start node2: {e}"));
         _ = rc3.map_err(|e| panic!("Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -536,7 +540,8 @@ mod tests {
         _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
         _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -615,7 +620,8 @@ mod tests {
         _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
         _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -677,7 +683,8 @@ mod tests {
         _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
         _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -738,7 +745,8 @@ mod tests {
         _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
         _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),
@@ -802,7 +810,8 @@ mod tests {
         _ = rc2.map_err(|e| assert!(false, "Failed to start node2: {e}"));
         _ = rc3.map_err(|e| assert!(false, "Failed to start node3: {e}"));
 
-        let ni = node1.node_info();
+        let ni = node1.node_info()
+            .expect("Failed to get node info for node1");
 
         let (rc1, rc2) = tokio::join!(
             node2.bootstrap_one(&ni),

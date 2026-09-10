@@ -124,14 +124,14 @@ async fn main() {
                     }
                 }
             }
-            _ => {},
+            _ => {
+                eprintln!("Unknown argument: {}", argv);
+                return;
+            },
         }
     };
 
-    println!("path: {}, port: {}, bootstrap nodes: {}", path, port, bootstrap_nodes.len());
-
     let private_key = load_or_generate_key(&path);
-
     let mut builder = cfg::Configuration::new();
     builder
         .with_port(port)

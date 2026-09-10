@@ -1,26 +1,17 @@
+use super::{
+    errors::{ArgumentError, Error},
+    Id, Network, Result,
+};
+use serde::{
+    de::{self, SeqAccess, Visitor},
+    ser::SerializeTuple,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::{
     fmt,
     hash::{Hash, Hasher},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     result::Result as StdResult,
-    net::{
-        SocketAddr,
-        IpAddr,
-        Ipv4Addr,
-        Ipv6Addr
-    },
-};
-use serde::{
-    Serialize,
-    Deserialize,
-    Serializer,
-    Deserializer,
-    de::{self, Visitor, SeqAccess},
-    ser::{SerializeTuple},
-};
-use super::{
-    Id,
-    Network,
-    Result, errors::{Error, ArgumentError},
 };
 
 /// Node network information in the Boson network.
@@ -31,7 +22,7 @@ pub struct NodeInfo {
     id: Id,
     addr4: Option<SocketAddr>,
     addr6: Option<SocketAddr>,
-    default_family: Network
+    default_family: Network,
 }
 
 impl NodeInfo {
@@ -46,7 +37,7 @@ impl NodeInfo {
             id,
             addr4: addrs.0,
             addr6: addrs.1,
-            default_family
+            default_family,
         }
     }
 
@@ -61,7 +52,10 @@ impl NodeInfo {
         }
         if let Some(addr) = addr4 {
             if !addr.is_ipv4() {
-                return Err(ArgumentError::new(format!("Invalid IPv4 address: {}", addr)));
+                return Err(ArgumentError::new(format!(
+                    "Invalid IPv4 address: {}",
+                    addr
+                )));
             }
             if addr.port() == 0 {
                 return Err(ArgumentError::new("Invalid port of IPv4 address: 0"));
@@ -69,7 +63,10 @@ impl NodeInfo {
         }
         if let Some(addr) = addr6 {
             if !addr.is_ipv6() {
-                return Err(ArgumentError::new(format!("Invalid IPv6 address: {}", addr)));
+                return Err(ArgumentError::new(format!(
+                    "Invalid IPv6 address: {}",
+                    addr
+                )));
             }
             if addr.port() == 0 {
                 return Err(ArgumentError::new("Invalid port of IPv6 address: 0"));
@@ -84,7 +81,7 @@ impl NodeInfo {
             id,
             addr4,
             addr6,
-            default_family: preferred_family
+            default_family: preferred_family,
         })
     }
 
@@ -148,7 +145,8 @@ impl NodeInfo {
 
     /// Gets the socket address of the node for the default family.
     pub fn address(&self) -> &SocketAddr {
-        self.addr4.as_ref()
+        self.addr4
+            .as_ref()
             .or(self.addr6.as_ref())
             .expect("NodeInfo must have at least one address")
     }
@@ -227,9 +225,9 @@ impl NodeInfo {
     /// *or* the same socket address (IPv4 or IPv6). This is a partial match used to
     /// detect identity/address collisions, not full equality (see [`PartialEq`]).
     pub fn matches(&self, other: &NodeInfo) -> bool {
-        self.id == other.id ||
-            ((self.addr4.is_some() || other.addr4.is_some()) && self.addr4 == other.addr4) ||
-            ((self.addr6.is_some() || other.addr6.is_some()) && self.addr6 == other.addr6)
+        self.id == other.id
+            || ((self.addr4.is_some() || other.addr4.is_some()) && self.addr4 == other.addr4)
+            || ((self.addr6.is_some() || other.addr6.is_some()) && self.addr6 == other.addr6)
     }
 }
 
@@ -245,9 +243,7 @@ impl Hash for NodeInfo {
 impl Eq for NodeInfo {}
 impl PartialEq for NodeInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id &&
-        self.addr4 == other.addr4 &&
-        self.addr6 == other.addr6
+        self.id == other.id && self.addr4 == other.addr4 && self.addr6 == other.addr6
     }
 }
 
@@ -274,14 +270,15 @@ struct SerdeNodeInfo {
     port4: Option<u16>,
 
     addr6: Option<EncodedIpAddr>,
-    port6: Option<u16>
+    port6: Option<u16>,
 }
 
 struct EncodedIpAddr(IpAddr);
 
 impl Serialize for EncodedIpAddr {
     fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
-    where S: Serializer,
+    where
+        S: Serializer,
     {
         if serializer.is_human_readable() {
             return serializer.serialize_str(&self.0.to_string());
@@ -296,20 +293,22 @@ impl Serialize for EncodedIpAddr {
 
 impl<'de> Deserialize<'de> for EncodedIpAddr {
     fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
-    where D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct IpAddrVisitor;
 
         impl IpAddrVisitor {
             fn from_bytes<E>(bytes: &[u8]) -> StdResult<EncodedIpAddr, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
                 match bytes.len() {
                     4 => Ok(EncodedIpAddr(IpAddr::V4(Ipv4Addr::from(
-                        <[u8; 4]>::try_from(bytes).unwrap()
+                        <[u8; 4]>::try_from(bytes).unwrap(),
                     )))),
                     16 => Ok(EncodedIpAddr(IpAddr::V6(Ipv6Addr::from(
-                        <[u8; 16]>::try_from(bytes).unwrap()
+                        <[u8; 16]>::try_from(bytes).unwrap(),
                     )))),
                     _ => Err(de::Error::invalid_length(bytes.len(), &IpAddrVisitor)),
                 }
@@ -324,27 +323,32 @@ impl<'de> Deserialize<'de> for EncodedIpAddr {
             }
 
             fn visit_str<E>(self, value: &str) -> StdResult<Self::Value, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
-                value.parse::<IpAddr>()
+                value
+                    .parse::<IpAddr>()
                     .map(EncodedIpAddr)
                     .map_err(de::Error::custom)
             }
 
             fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Self::Value, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
                 Self::from_bytes(value)
             }
 
             fn visit_byte_buf<E>(self, value: Vec<u8>) -> StdResult<Self::Value, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
                 Self::from_bytes(&value)
             }
 
             fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
-            where A: SeqAccess<'de>,
+            where
+                A: SeqAccess<'de>,
             {
                 let mut bytes = Vec::with_capacity(16);
                 while let Some(byte) = sequence.next_element::<u8>()? {
@@ -376,21 +380,32 @@ impl TryFrom<SerdeNodeInfo> for NodeInfo {
     fn try_from(s: SerdeNodeInfo) -> StdResult<Self, Self::Error> {
         NodeInfo::with_addresses(
             s.id,
-            s.addr4.zip(s.port4).map(|(ip, port)| SocketAddr::new(ip.0, port)),
-            s.addr6.zip(s.port6).map(|(ip, port)| SocketAddr::new(ip.0, port)),
+            s.addr4
+                .zip(s.port4)
+                .map(|(ip, port)| SocketAddr::new(ip.0, port)),
+            s.addr6
+                .zip(s.port6)
+                .map(|(ip, port)| SocketAddr::new(ip.0, port)),
         )
     }
 }
 
 impl Serialize for SerdeNodeInfo {
     fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
-    where S: Serializer,
+    where
+        S: Serializer,
     {
         if self.addr4.is_none() && self.addr6.is_none() {
-            return Err(serde::ser::Error::custom("NodeInfo must have at least one address"));
+            return Err(serde::ser::Error::custom(
+                "NodeInfo must have at least one address",
+            ));
         }
 
-        let len = if self.addr4.is_some() && self.addr6.is_some() {5} else {3};
+        let len = if self.addr4.is_some() && self.addr6.is_some() {
+            5
+        } else {
+            3
+        };
         let mut s = se.serialize_tuple(len)?;
         s.serialize_element(&self.id)?;
         if let Some(addr) = &self.addr4 {
@@ -409,7 +424,8 @@ impl Serialize for SerdeNodeInfo {
 
 impl<'de> Deserialize<'de> for SerdeNodeInfo {
     fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
-    where D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct ImplVisitor;
         impl<'de> Visitor<'de> for ImplVisitor {
@@ -440,11 +456,11 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
                         IpAddr::V4(_) => {
                             addr4 = Some(ip);
                             port4 = Some(port);
-                        },
+                        }
                         IpAddr::V6(_) => {
                             addr6 = Some(ip);
                             port6 = Some(port);
-                        },
+                        }
                     }
                 }
 

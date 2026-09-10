@@ -1,34 +1,19 @@
-use std::fmt;
-use static_assertions::const_assert;
 use libsodium_sys::{
-    crypto_box_BEFORENMBYTES,
-    crypto_box_MACBYTES,
-    crypto_box_NONCEBYTES,
-    crypto_box_PUBLICKEYBYTES,
-    crypto_box_SECRETKEYBYTES,
-    crypto_box_SEEDBYTES,
-    crypto_box_beforenm,
-    crypto_box_easy,
-    crypto_box_easy_afternm,
-    crypto_box_keypair,
-    crypto_box_open_easy,
-    crypto_box_open_easy_afternm,
-    crypto_box_seed_keypair,
-    crypto_scalarmult_base,
-    crypto_sign_ed25519_pk_to_curve25519,
-    crypto_sign_ed25519_sk_to_curve25519,
-    sodium_increment,
+    crypto_box_BEFORENMBYTES, crypto_box_MACBYTES, crypto_box_NONCEBYTES,
+    crypto_box_PUBLICKEYBYTES, crypto_box_SECRETKEYBYTES, crypto_box_SEEDBYTES,
+    crypto_box_beforenm, crypto_box_easy, crypto_box_easy_afternm, crypto_box_keypair,
+    crypto_box_open_easy, crypto_box_open_easy_afternm, crypto_box_seed_keypair,
+    crypto_scalarmult_base, crypto_sign_ed25519_pk_to_curve25519,
+    crypto_sign_ed25519_sk_to_curve25519, sodium_increment,
 };
+use static_assertions::const_assert;
+use std::fmt;
 
-use crate::{
-    as_uchar_ptr,
-    as_uchar_ptr_mut,
-};
+use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
 use super::{
-    signature,
-    Error, Result,
     errors::{ArgumentError, CryptoError},
+    signature, Error, Result,
 };
 
 const_assert!(PrivateKey::BYTES == crypto_box_SECRETKEYBYTES as usize);
@@ -85,7 +70,7 @@ impl TryFrom<&signature::PrivateKey> for PrivateKey {
         if rc != 0 {
             return Err(CryptoError::new(format!(
                 "converts Ed25519 key to x25519 key failed."
-            )))
+            )));
         }
         Ok(Self(bytes))
     }
@@ -110,9 +95,7 @@ impl fmt::Display for PrivateKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKey(
-    pub(crate) [u8; Self::BYTES]
-);
+pub struct PublicKey(pub(crate) [u8; Self::BYTES]);
 
 impl PublicKey {
     pub const BYTES: usize = 32;
@@ -158,7 +141,7 @@ impl TryFrom<&signature::PublicKey> for PublicKey {
         if rc != 0 {
             return Err(CryptoError::new(format!(
                 "converts Ed25519 key to x25519 key failed."
-            )))
+            )));
         }
         Ok(Self(bytes))
     }
@@ -194,12 +177,7 @@ impl Nonce {
     }
 
     pub fn increment(&mut self) -> &Self {
-        unsafe {
-            sodium_increment(
-                as_uchar_ptr_mut!(self.0),
-                Self::BYTES
-            )
-        }
+        unsafe { sodium_increment(as_uchar_ptr_mut!(self.0), Self::BYTES) }
         self
     }
 
@@ -260,10 +238,7 @@ impl KeyPair {
         let mut sk = [0u8; PrivateKey::BYTES];
 
         unsafe {
-            crypto_box_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk)
-            );
+            crypto_box_keypair(as_uchar_ptr_mut!(pk), as_uchar_ptr_mut!(sk));
         }
 
         Self(PrivateKey(sk), PublicKey(pk))
@@ -275,7 +250,8 @@ impl KeyPair {
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
 
-        unsafe { // Always success
+        unsafe {
+            // Always success
             crypto_box_seed_keypair(
                 as_uchar_ptr_mut!(pk),
                 as_uchar_ptr_mut!(sk),
@@ -343,16 +319,10 @@ impl TryFrom<&[u8]> for KeyPair {
 
         let mut pk = [0u8; PublicKey::BYTES];
         unsafe {
-            crypto_scalarmult_base(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk)
-            );
+            crypto_scalarmult_base(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk));
         }
 
-        Ok(Self(
-            PrivateKey::try_from(sk).unwrap(),
-            PublicKey(pk)
-        ))
+        Ok(Self(PrivateKey::try_from(sk).unwrap(), PublicKey(pk)))
     }
 }
 
@@ -361,16 +331,10 @@ impl From<&PrivateKey> for KeyPair {
         let mut pk = [0u8; PublicKey::BYTES];
 
         unsafe {
-            crypto_scalarmult_base(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk.as_bytes())
-            );
+            crypto_scalarmult_base(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk.as_bytes()));
         }
 
-        KeyPair(
-            sk.clone(),
-            PublicKey(pk)
-        )
+        KeyPair(sk.clone(), PublicKey(pk))
     }
 }
 
@@ -425,14 +389,12 @@ impl CryptoBox {
         self.0.fill(0)
     }
 
-    pub fn encrypt(&self,
-        plain: &[u8],
-        cipher: &mut [u8],
-        nonce: &Nonce
-    ) -> Result<usize> {
+    pub fn encrypt(&self, plain: &[u8], cipher: &mut [u8], nonce: &Nonce) -> Result<usize> {
         let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
         if cipher.len() < expected_len {
-            return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
+            return Err(ArgumentError::new(format!(
+                "The input buffer is insufficient."
+            )));
         }
 
         cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
@@ -448,32 +410,28 @@ impl CryptoBox {
 
         match rc == 0 {
             true => Ok(expected_len),
-            false => return Err(CryptoError::new(format!("Data encryption failed")))
+            false => return Err(CryptoError::new(format!("Data encryption failed"))),
         }
     }
 
-    pub fn encrypt_into(&self,
-        plain: &[u8],
-        nonce: &Nonce
-    ) -> Result<Vec<u8>> {
+    pub fn encrypt_into(&self, plain: &[u8], nonce: &Nonce) -> Result<Vec<u8>> {
         let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
         self.encrypt(plain, cipher.as_mut(), nonce).map(|_| cipher)
     }
 
-    pub fn decrypt(&self,
-        cipher: &[u8],
-        plain: &mut [u8]
-    ) -> Result<usize> {
+    pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
         if plain.len() < expected_len {
-            return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
+            return Err(ArgumentError::new(format!(
+                "The input buffer is insufficient."
+            )));
         }
 
         let cipher_len = cipher.len() - Nonce::BYTES;
         //  Extract the nonce from the cipher text
         let rc = unsafe {
             crypto_box_open_easy_afternm(
-                as_uchar_ptr_mut!(plain[.. expected_len]),
+                as_uchar_ptr_mut!(plain[..expected_len]),
                 as_uchar_ptr!(cipher[Nonce::BYTES..]),
                 cipher_len as libc::c_ulonglong,
                 as_uchar_ptr!(cipher[..Nonce::BYTES]),
@@ -483,13 +441,11 @@ impl CryptoBox {
 
         match rc == 0 {
             true => Ok(expected_len),
-            false => return Err(CryptoError::new(format!("Data decryption failed")))
+            false => return Err(CryptoError::new(format!("Data decryption failed"))),
         }
     }
 
-    pub fn decrypt_into(&self,
-        cipher: &[u8]
-    ) -> Result<Vec<u8>> {
+    pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
         let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
         self.decrypt(cipher, plain.as_mut()).map(|_| plain)
     }
@@ -522,7 +478,8 @@ impl Drop for CryptoBox {
     }
 }
 
-pub fn encrypt(plain: &[u8],
+pub fn encrypt(
+    plain: &[u8],
     cipher: &mut [u8],
     nonce: &Nonce,
     pk: &PublicKey,
@@ -530,13 +487,15 @@ pub fn encrypt(plain: &[u8],
 ) -> Result<usize> {
     let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
     if cipher.len() < expected_len {
-        return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
+        return Err(ArgumentError::new(format!(
+            "The input buffer is insufficient."
+        )));
     }
 
     cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
     let rc = unsafe {
         crypto_box_easy(
-            as_uchar_ptr_mut!(cipher[Nonce::BYTES.. expected_len]),
+            as_uchar_ptr_mut!(cipher[Nonce::BYTES..expected_len]),
             as_uchar_ptr!(plain),
             plain.len() as libc::c_ulonglong,
             as_uchar_ptr!(cipher[..Nonce::BYTES]),
@@ -546,27 +505,26 @@ pub fn encrypt(plain: &[u8],
     };
     match rc == 0 {
         true => Ok(expected_len),
-        false => return Err(CryptoError::new(format!("Data encryption failed")))
+        false => return Err(CryptoError::new(format!("Data encryption failed"))),
     }
 }
 
-pub fn encrypt_into(plain: &[u8],
+pub fn encrypt_into(
+    plain: &[u8],
     nonce: &Nonce,
     pk: &PublicKey,
-    sk: &PrivateKey
+    sk: &PrivateKey,
 ) -> Result<Vec<u8>> {
     let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
     encrypt(plain, cipher.as_mut(), nonce, pk, sk).map(|_| cipher)
 }
 
-pub fn decrypt(cipher: &[u8],
-    plain: &mut [u8],
-    pk: &PublicKey,
-    sk: &PrivateKey,
-) -> Result<usize> {
+pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey) -> Result<usize> {
     let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
     if plain.len() < expected_len {
-        return Err(ArgumentError::new(format!("The input buffer is insufficient.")));
+        return Err(ArgumentError::new(format!(
+            "The input buffer is insufficient."
+        )));
     }
 
     let cipher_len = cipher.len() - Nonce::BYTES;
@@ -584,14 +542,11 @@ pub fn decrypt(cipher: &[u8],
 
     match rc == 0 {
         true => Ok(expected_len),
-        false => return Err(CryptoError::new(format!("Data decryption failed")))
+        false => return Err(CryptoError::new(format!("Data decryption failed"))),
     }
 }
 
-pub fn decrypt_into(cipher: &[u8],
-    pk: &PublicKey,
-    sk: &PrivateKey
-) -> Result<Vec<u8>> {
+pub fn decrypt_into(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
     let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
     decrypt(cipher, plain.as_mut(), pk, sk).map(|_| plain)
 }

@@ -1,38 +1,22 @@
-use std::{fmt, mem};
-use std::str::FromStr;
-use static_assertions::const_assert;
 use bs58::decode;
 use hex::FromHexError;
+use static_assertions::const_assert;
+use std::str::FromStr;
+use std::{fmt, mem};
 
 use libsodium_sys::{
-    crypto_sign_BYTES,
-    crypto_sign_PUBLICKEYBYTES,
-    crypto_sign_SECRETKEYBYTES,
-    crypto_sign_SEEDBYTES,
-    crypto_sign_detached,
-    crypto_sign_ed25519_sk_to_pk,
-    crypto_sign_final_create,
-    crypto_sign_final_verify,
-    crypto_sign_init,
-    crypto_sign_keypair,
-    crypto_sign_seed_keypair,
-    crypto_sign_state,
-    crypto_sign_update,
-    crypto_sign_verify_detached,
+    crypto_sign_BYTES, crypto_sign_PUBLICKEYBYTES, crypto_sign_SECRETKEYBYTES,
+    crypto_sign_SEEDBYTES, crypto_sign_detached, crypto_sign_ed25519_sk_to_pk,
+    crypto_sign_final_create, crypto_sign_final_verify, crypto_sign_init, crypto_sign_keypair,
+    crypto_sign_seed_keypair, crypto_sign_state, crypto_sign_update, crypto_sign_verify_detached,
     randombytes_buf,
 };
 
-use crate::{
-    as_uchar_ptr,
-    as_uchar_ptr_mut
-};
 use super::{
+    errors::{ArgumentError, CryptoError},
     Error, Result,
-    errors::{
-        ArgumentError,
-        CryptoError,
-    }
 };
+use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
 const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);
@@ -66,7 +50,8 @@ impl PrivateKey {
             )));
         }
 
-        unsafe { // Always success
+        unsafe {
+            // Always success
             crypto_sign_detached(
                 as_uchar_ptr_mut!(signature),
                 std::ptr::null_mut(),
@@ -114,34 +99,32 @@ impl TryFrom<&str> for PrivateKey {
         let mut bytes = vec![0u8; Self::BYTES];
         match input.starts_with("0x") {
             true => {
-                hex::decode_to_slice(&input[2..], &mut bytes[..])
-                .map_err(|e| match e {
-                    FromHexError::InvalidHexCharacter { c, index } => {
-                        ArgumentError::new(format!("Invalid hex character {} at position {}", c, index))
-                    },
+                hex::decode_to_slice(&input[2..], &mut bytes[..]).map_err(|e| match e {
+                    FromHexError::InvalidHexCharacter { c, index } => ArgumentError::new(format!(
+                        "Invalid hex character {} at position {}",
+                        c, index
+                    )),
                     FromHexError::OddLength => {
                         ArgumentError::new(format!("Odd hex string length {}", input.len()))
-                    },
+                    }
                     FromHexError::InvalidStringLength => {
                         ArgumentError::new(format!("Invalid hex string length"))
                     }
                 })?;
-            },
+            }
             false => {
                 bs58::decode(input)
-                .with_alphabet(bs58::Alphabet::DEFAULT)
-                .onto(&mut bytes[..])
-                .map_err(|e| match e {
-                    decode::Error::BufferTooSmall => {
-                        ArgumentError::new(format!("Invalid base58 string length"))
-                    },
-                    decode::Error::InvalidCharacter { character, index } => {
-                        ArgumentError::new(format!("Invalid base58 character {} at {}", character, index))
-                    },
-                    _ => {
-                        ArgumentError::new(format!("Invalid base58 with unknown error"))
-                    }
-                })?;
+                    .with_alphabet(bs58::Alphabet::DEFAULT)
+                    .onto(&mut bytes[..])
+                    .map_err(|e| match e {
+                        decode::Error::BufferTooSmall => {
+                            ArgumentError::new(format!("Invalid base58 string length"))
+                        }
+                        decode::Error::InvalidCharacter { character, index } => ArgumentError::new(
+                            format!("Invalid base58 character {} at {}", character, index),
+                        ),
+                        _ => ArgumentError::new(format!("Invalid base58 with unknown error")),
+                    })?;
             }
         };
         Ok(PrivateKey(bytes.try_into().unwrap()))
@@ -175,9 +158,7 @@ impl fmt::Display for PrivateKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKey(
-    pub(crate) [u8; Self::BYTES]
-);
+pub struct PublicKey(pub(crate) [u8; Self::BYTES]);
 
 impl TryFrom<&[u8]> for PublicKey {
     type Error = Error;
@@ -258,11 +239,9 @@ impl KeyPair {
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
 
-        unsafe { // Always success
-            crypto_sign_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk)
-            );
+        unsafe {
+            // Always success
+            crypto_sign_keypair(as_uchar_ptr_mut!(pk), as_uchar_ptr_mut!(sk));
         }
 
         KeyPair(PrivateKey(sk), PublicKey(pk))
@@ -271,16 +250,14 @@ impl KeyPair {
     pub fn random() -> Self {
         let mut seed = [0u8; KeyPair::SEED_BYTES];
         unsafe {
-            randombytes_buf(
-                seed.as_mut_ptr() as *mut libc::c_void,
-                KeyPair::SEED_BYTES
-            );
+            randombytes_buf(seed.as_mut_ptr() as *mut libc::c_void, KeyPair::SEED_BYTES);
         }
 
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
 
-        unsafe { // Always success
+        unsafe {
+            // Always success
             crypto_sign_seed_keypair(
                 as_uchar_ptr_mut!(pk),
                 as_uchar_ptr_mut!(sk),
@@ -303,7 +280,8 @@ impl KeyPair {
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
 
-        unsafe {// Always success
+        unsafe {
+            // Always success
             crypto_sign_seed_keypair(
                 as_uchar_ptr_mut!(pk),
                 as_uchar_ptr_mut!(sk),
@@ -349,17 +327,12 @@ impl TryFrom<&[u8]> for KeyPair {
         }
 
         let mut pk = [0u8; PublicKey::BYTES];
-        unsafe { // Always success
-            crypto_sign_ed25519_sk_to_pk(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk)
-            );
+        unsafe {
+            // Always success
+            crypto_sign_ed25519_sk_to_pk(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk));
         }
 
-        Ok(KeyPair(
-            PrivateKey::try_from(sk).unwrap(),
-            PublicKey(pk)
-        ))
+        Ok(KeyPair(PrivateKey::try_from(sk).unwrap(), PublicKey(pk)))
     }
 }
 
@@ -367,11 +340,9 @@ impl From<&PrivateKey> for KeyPair {
     fn from(sk: &PrivateKey) -> Self {
         let mut pk = [0u8; PublicKey::BYTES];
 
-        unsafe { // Always success
-            crypto_sign_ed25519_sk_to_pk(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr!(sk.as_bytes())
-            );
+        unsafe {
+            // Always success
+            crypto_sign_ed25519_sk_to_pk(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk.as_bytes()));
         }
         KeyPair(sk.clone(), PublicKey(pk))
     }
@@ -424,7 +395,7 @@ impl Signature {
 
     pub fn new() -> Self {
         Self {
-            state: SignState([0u8; std::mem::size_of::<crypto_sign_state>()])
+            state: SignState([0u8; std::mem::size_of::<crypto_sign_state>()]),
         }
     }
 
@@ -435,7 +406,8 @@ impl Signature {
         );
 
         let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe { // Always success
+        unsafe {
+            // Always success
             crypto_sign_init(s);
         }
         self
@@ -443,12 +415,9 @@ impl Signature {
 
     pub fn update(&mut self, part: &[u8]) -> &mut Self {
         let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe { // Always success
-            crypto_sign_update(
-                s,
-                as_uchar_ptr!(part),
-                part.len() as libc::c_ulonglong
-            );
+        unsafe {
+            // Always success
+            crypto_sign_update(s, as_uchar_ptr!(part), part.len() as libc::c_ulonglong);
         }
         self
     }
@@ -463,7 +432,8 @@ impl Signature {
         }
 
         let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe { // Always success
+        unsafe {
+            // Always success
             crypto_sign_final_create(
                 s,
                 as_uchar_ptr_mut!(signature),
@@ -476,8 +446,7 @@ impl Signature {
 
     pub fn sign_into(&mut self, sk: &PrivateKey) -> Result<Vec<u8>> {
         let mut sig = vec![0u8; Self::BYTES];
-        self.sign(sig.as_mut(), sk)
-            .map(|_| sig)
+        self.sign(sig.as_mut(), sk).map(|_| sig)
     }
 
     pub fn verify(&mut self, signature: &[u8], pk: &PublicKey) -> Result<bool> {
@@ -491,11 +460,7 @@ impl Signature {
 
         let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
         let rc = unsafe {
-            crypto_sign_final_verify(
-                s,
-                as_uchar_ptr!(signature),
-                as_uchar_ptr!(pk.as_bytes())
-            )
+            crypto_sign_final_verify(s, as_uchar_ptr!(signature), as_uchar_ptr!(pk.as_bytes()))
         };
 
         Ok(rc == 0)

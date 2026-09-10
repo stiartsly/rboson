@@ -1,21 +1,23 @@
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub struct PermissionError {
-    message: String
+    message: String,
 }
 
 impl PermissionError {
-    pub fn new(message: impl Into<String>) -> Box<Self>  {
-        Box::new(Self { message: message.into() })
+    pub fn new(message: impl Into<String>) -> Box<Self> {
+        Box::new(Self {
+            message: message.into(),
+        })
     }
 }
 
 impl Error for PermissionError {
     fn description(&self) -> &str {
         &self.message
-     }
+    }
 }
 
 impl fmt::Display for PermissionError {
@@ -23,4 +25,3 @@ impl fmt::Display for PermissionError {
         write!(f, "PermissionError: {}", self.message)
     }
 }
-

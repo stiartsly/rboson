@@ -28,7 +28,7 @@ impl Network {
 impl From<&SocketAddr> for Network {
     fn from(input: &SocketAddr) -> Self {
         match input.is_ipv4() {
-            true  => Network::IPv4,
+            true => Network::IPv4,
             false => Network::IPv6,
         }
     }

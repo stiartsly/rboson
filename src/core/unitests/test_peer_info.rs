@@ -1,12 +1,5 @@
+use crate::core::{signature, signature::KeyPair, CryptoIdentity, Id, PeerBuilder, PeerInfo};
 use std::sync::{Arc, Mutex};
-use crate::core::{
-    Id,
-    signature,
-    CryptoIdentity,
-    PeerInfo,
-    PeerBuilder,
-    signature::KeyPair,
-};
 
 #[cfg(test)]
 mod tests {
@@ -48,7 +41,7 @@ mod tests {
             sig.clone(),
             fingerprint,
             endpoint.clone(),
-            extra.clone()
+            extra.clone(),
         );
 
         assert_eq!(peer.id(), &pk);
@@ -129,13 +122,11 @@ mod tests {
             .build()
             .expect("Failed to build peer info");
 
-        let encoded = serde_cbor::to_vec(&peer)
-            .expect("Failed to serialize PeerInfo");
-        let decoded: PeerInfo = serde_cbor::from_slice(&encoded)
-            .expect("Failed to deserialize PeerInfo");
+        let encoded = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
+        let decoded: PeerInfo =
+            serde_cbor::from_slice(&encoded).expect("Failed to deserialize PeerInfo");
 
-        let json = serde_json::to_string(&peer)
-            .expect("Failed to serialize PeerInfo");
+        let json = serde_json::to_string(&peer).expect("Failed to serialize PeerInfo");
         println!("json: {}", json);
 
         assert!(peer.has_private_key());
@@ -160,11 +151,10 @@ mod tests {
             .build()
             .expect("Failed to build peer info");
 
-        let json = serde_json::to_string(&peer)
-            .expect("Failed to serialize PeerInfo to JSON");
+        let json = serde_json::to_string(&peer).expect("Failed to serialize PeerInfo to JSON");
         println!("JSON: {}", json);
-        let decoded: PeerInfo = serde_json::from_str(&json)
-            .expect("Failed to deserialize PeerInfo from JSON");
+        let decoded: PeerInfo =
+            serde_json::from_str(&json).expect("Failed to deserialize PeerInfo from JSON");
 
         assert_eq!(peer.id(), decoded.id());
         assert_eq!(peer.endpoint(), decoded.endpoint());
@@ -200,7 +190,10 @@ mod tests {
         let encoded = serde_cbor::to_vec(&invalid)
             .expect("Serialization of an invalid PeerInfo should succeed");
         let result: Result<PeerInfo, _> = serde_cbor::from_slice(&encoded);
-        assert!(result.is_err(), "Deserializing an invalid PeerInfo should fail");
+        assert!(
+            result.is_err(),
+            "Deserializing an invalid PeerInfo should fail"
+        );
     }
 
     #[test]
@@ -208,13 +201,13 @@ mod tests {
         let pk = Id::random();
         let sig = crate::random_bytes(64);
 
-        let invalid = PeerInfo::packed(
-            pk, 0, None, None, sig, 0, String::new(), None
-        );
+        let invalid = PeerInfo::packed(pk, 0, None, None, sig, 0, String::new(), None);
 
-        let encoded = serde_cbor::to_vec(&invalid)
-            .expect("Failed to serialize invalid PeerInfo");
+        let encoded = serde_cbor::to_vec(&invalid).expect("Failed to serialize invalid PeerInfo");
         let result: Result<PeerInfo, _> = serde_cbor::from_slice(&encoded);
-        assert!(result.is_err(), "Deserializing a PeerInfo with empty endpoint should fail");
+        assert!(
+            result.is_err(),
+            "Deserializing a PeerInfo with empty endpoint should fail"
+        );
     }
 }

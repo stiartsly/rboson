@@ -643,26 +643,28 @@ fn config_paths() -> Vec<PathBuf> {
 impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "node config:")?;
-        write!(f, "\n\thost4\t:{}", self.host4.as_deref().unwrap_or("<none>"))?;
-        write!(f, "\n\thost6\t:{}", self.host6.as_deref().unwrap_or("<none>"))?;
-        write!(f, "\n\tport\t:{}", self.port)?;
-        write!(f, "\n\tsk\t:{}", self.private_key)?;
-        write!(f, "\n\tdataDir\t:{}", self.data_dir)?;
+        if let Some(ref host4) = self.host4.as_ref() {
+            write!(f, "\n\thost4\t\t:{}", host4)?;
+        }
+        if let Some(ref host6) = self.host6.as_ref() {
+            write!(f, "\n\thost6\t\t:{}", host6)?;
+        }
+        write!(f, "\n\tport\t\t:{}", self.port)?;
+        // write!(f, "\n\tsk\t\t:{}", self.private_key)?;
+        write!(f, "\n\tdataDir\t\t:{}", self.data_dir)?;
         write!(f, "\n\tlogLevel\t:{:?}", self.log_level)?;
-        write!(
-            f,
-            "\n\tlogFile\t:{}",
-            self.log_file.as_deref().unwrap_or("<none>")
-        )?;
+        if let Some(ref logfile) = self.log_file.as_ref() {
+            write!(f, "\n\tlogFile\t\t:{}", logfile)?;
+        }
         write!(f, "\n\tlogConsole\t:{}", self.log_console)?;
-        write!(f, "\n\tenableDeveloperMode\t:{}", self.developer_mode)?;
+        write!(f, "\n\tdev mode\t:{}", self.developer_mode)?;
 
         if self.bootstrap_nodes.is_empty() {
             write!(f, "\n\tbootstraps\t:[]")?;
         } else {
             write!(f, "\n\tbootstraps\t:")?;
             for node in &self.bootstrap_nodes {
-                write!(f, "\n\t- {} {} {}", node.id(), node.host(), node.port())?;
+                write!(f, "\n\t\t- {}@{}:{}", node.id(), node.host(), node.port())?;
             }
         }
 
@@ -689,10 +691,8 @@ impl fmt::Display for Configuration {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "<none>".to_string())
             )?;
-        } else {
-            write!(f, "\n\tactiveProxy\t:<none>")?;
         }
-
+        write!(f, "\n")?;
         Ok(())
     }
 }

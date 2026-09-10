@@ -1,51 +1,40 @@
-pub(crate) mod logger;
+pub mod logger;
 pub(crate) mod version;
 
-pub mod id;
-pub mod network;
-pub mod identity;
 pub mod crypto_context;
-pub mod signature;
 pub mod cryptobox;
+pub mod errors;
+pub mod id;
+pub mod identity;
+pub mod network;
 pub mod node_info;
 pub mod peer_info;
+pub mod signature;
 pub mod value;
-pub mod errors;
 
 pub use crate::core::{
-    id::{Id, DID_PREFIX},
-    errors::{Error, Result},
-
-    identity::{Identity, CryptoIdentity},
     crypto_context::CryptoContext,
-
-    signature::Signature,
     cryptobox::CryptoBox,
-
+    errors::{Error, Result},
+    id::{Id, DID_PREFIX},
+    identity::{CryptoIdentity, Identity},
     network::Network,
     node_info::NodeInfo,
-    peer_info::{
-        PeerInfo,
-        PeerBuilder
-    },
-    value::{
-        Value,
-        ImmutableBuilder,
-        SignedBuilder,
-        EncryptedBuilder
-    },
+    peer_info::{PeerBuilder, PeerInfo},
+    signature::Signature,
+    value::{EncryptedBuilder, ImmutableBuilder, SignedBuilder, Value},
 };
 
 #[cfg(test)]
 mod unitests {
+    mod test_crypto_context;
+    mod test_crypto_identity;
     mod test_id;
     mod test_logger;
-    mod test_version;
-    mod test_value;
     mod test_node_info;
     mod test_peer_info;
-    mod test_crypto_identity;
-    mod test_crypto_context;
+    mod test_value;
+    mod test_version;
 }
 
 #[macro_export]

@@ -1,7 +1,7 @@
 use boson::{
-    PeerInfo,
     dht::Node,
     signature::{KeyPair, PrivateKey},
+    PeerInfo,
 };
 
 /// Default endpoint announced when the `announce_peer` command is run
@@ -40,10 +40,13 @@ pub(crate) async fn announce(
         }
     };
 
-    println!("Announcing peer {} with endpoint '{}' ...", peer.id(), peer.endpoint());
+    println!(
+        "Announcing peer {} with endpoint '{}' ...",
+        peer.id(),
+        peer.endpoint()
+    );
     match node.announce_peer(&peer, -1, true).await {
         Ok(_) => println!("\x1b[32mPeer announced successfully.\x1b[0m"),
         Err(e) => println!("\x1b[31mFailed to announce peer: {}\x1b[0m", e),
     }
 }
-

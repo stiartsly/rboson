@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 pub(crate) const NODE_TAG_NAME: &str = "MK";
 pub(crate) const NODE_VERSION: i32 = 1;
@@ -19,8 +19,10 @@ pub(crate) fn ver() -> i32 {
 // Build a version from the software name and version number.
 pub(crate) fn build(short_name: &str, ver: i32) -> i32 {
     let bytes = short_name.as_bytes();
-    ((bytes[0] as u32) << 24 | (ver as u32) & 0x0000FF00 |
-    (bytes[1] as u32) << 16 | (ver as u32) & 0x000000FF) as i32
+    ((bytes[0] as u32) << 24
+        | (ver as u32) & 0x0000FF00
+        | (bytes[1] as u32) << 16
+        | (ver as u32) & 0x000000FF) as i32
 }
 
 pub(crate) fn format_version(ver: i32) -> String {

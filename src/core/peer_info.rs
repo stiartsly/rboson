@@ -1,22 +1,20 @@
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fmt,
-    result::Result as StdResult,
     hash::{Hash, Hasher},
-    sync::{Arc, Mutex}
+    result::Result as StdResult,
+    sync::{Arc, Mutex},
 };
-use serde::{Serialize, Deserialize};
-use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::utils;
 use super::{
-    Id,
-    Identity,
-    signature,
-    Result,
     errors::{Error, StateError},
+    signature,
     signature::{KeyPair, PrivateKey},
+    Id, Identity, Result,
 };
+use crate::utils;
 
 pub struct PeerBuilder {
     keypair: Option<KeyPair>,
@@ -83,7 +81,7 @@ impl PeerBuilder {
             self.seq,
             self.fingerprint,
             self.endpoint,
-            self.extra
+            self.extra,
         )
     }
 }
@@ -92,17 +90,17 @@ impl PeerBuilder {
 #[serde(into = "SerdePeerInfo", try_from = "SerdePeerInfo")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
-    pk          : Id,
-    sk          : Option<PrivateKey>,
-    seq         : i32,
+    pk: Id,
+    sk: Option<PrivateKey>,
+    seq: i32,
 
-    nodeid      : Option<Id>,
-    node_sig    : Option<Vec<u8>>,
+    nodeid: Option<Id>,
+    node_sig: Option<Vec<u8>>,
 
-    sig         : Vec<u8>,
-    fingerprint : u64,
-    endpoint    : String,
-    extra       : Option<Vec<u8>>,
+    sig: Vec<u8>,
+    fingerprint: u64,
+    endpoint: String,
+    extra: Option<Vec<u8>>,
 }
 
 impl PeerInfo {
@@ -239,10 +237,11 @@ impl PeerInfo {
         s
     }
 
-    pub fn update(&self,
+    pub fn update(
+        &self,
         endpoint: &str,
         node: Option<Arc<Mutex<dyn Identity>>>,
-        extra: Option<Vec<u8>>
+        extra: Option<Vec<u8>>,
     ) -> Result<Self> {
         let Some(sk) = self.sk.clone() else {
             return Err(StateError::new("Not the owner of the peer info"));
@@ -254,20 +253,25 @@ impl PeerInfo {
         let endpoint_nfc = endpoint.nfc().collect::<String>();
         let extra_bytes = extra.filter(|v| !v.is_empty());
 
-        if endpoint_nfc == self.endpoint &&
-            self.nodeid.is_none() == node.is_none() &&
-            self.extra == extra_bytes {
+        if endpoint_nfc == self.endpoint
+            && self.nodeid.is_none() == node.is_none()
+            && self.extra == extra_bytes
+        {
             return Ok(self.clone());
         }
 
         // If current has an authenticating node, validate replacement
         if let Some(nodeid) = self.nodeid.as_ref() {
             let Some(node) = node.as_ref() else {
-                return Err(StateError::new("Cannot authenticate peer info without owner node"));
+                return Err(StateError::new(
+                    "Cannot authenticate peer info without owner node",
+                ));
             };
             let borrowed = node.lock().unwrap();
             if nodeid != borrowed.id() {
-                return Err(StateError::new("Cannot authenticate peer info with a different node"));
+                return Err(StateError::new(
+                    "Cannot authenticate peer info with a different node",
+                ));
             }
         }
 
@@ -278,7 +282,7 @@ impl PeerInfo {
             self.seq + 1,
             self.fingerprint,
             endpoint_nfc,
-            extra_bytes
+            extra_bytes,
         )
     }
 
@@ -303,8 +307,9 @@ impl PeerInfo {
             return signature::verify(
                 digest.as_slice(),
                 node_sig.as_slice(),
-                &nodeid.to_signature_key()
-            ).unwrap_or(false)
+                &nodeid.to_signature_key(),
+            )
+            .unwrap_or(false);
         } else if self.node_sig.is_some() {
             return false;
         }
@@ -312,8 +317,9 @@ impl PeerInfo {
         signature::verify(
             self.digest().as_slice(),
             self.sig.as_slice(),
-            &self.pk.to_signature_key()
-        ).unwrap_or(false)
+            &self.pk.to_signature_key(),
+        )
+        .unwrap_or(false)
     }
 
     fn digest(&self) -> Vec<u8> {
@@ -384,10 +390,7 @@ struct SerdePeerInfo {
     )]
     pk: Id,
 
-    #[serde(
-        rename = "seq",
-        deserialize_with = "utils::deserialize_seq",
-    )]
+    #[serde(rename = "seq", deserialize_with = "utils::deserialize_seq")]
     seq: i32,
 
     #[serde(
@@ -415,20 +418,13 @@ struct SerdePeerInfo {
     )]
     sig: Vec<u8>,
 
-     #[serde(
-        rename = "f",
-        default,
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "f", default, skip_serializing_if = "utils::is_default")]
     fingerprint: u64,
 
-     #[serde(
-        rename = "e",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "e", skip_serializing_if = "utils::is_default")]
     endpoint: String,
 
-     #[serde(
+    #[serde(
         rename = "ex",
         default,
         serialize_with = "utils::serialize_bytes_opt",
@@ -441,14 +437,14 @@ struct SerdePeerInfo {
 impl From<PeerInfo> for SerdePeerInfo {
     fn from(peer: PeerInfo) -> Self {
         Self {
-            pk      : peer.pk,
-            seq     : peer.seq,
-            nodeid  : peer.nodeid,
+            pk: peer.pk,
+            seq: peer.seq,
+            nodeid: peer.nodeid,
             node_sig: peer.node_sig,
-            sig     : peer.sig,
+            sig: peer.sig,
             fingerprint: peer.fingerprint,
             endpoint: peer.endpoint,
-            extra   : peer.extra,
+            extra: peer.extra,
         }
     }
 }
@@ -469,7 +465,7 @@ impl TryFrom<SerdePeerInfo> for PeerInfo {
         }
         if sp.nodeid.is_some() != sp.node_sig.is_some() {
             return Err(StateError::new(
-                "invalid peer: nodeid and node signature must both be present or absent"
+                "invalid peer: nodeid and node signature must both be present or absent",
             ));
         }
 
@@ -485,7 +481,7 @@ impl TryFrom<SerdePeerInfo> for PeerInfo {
         );
         if !peer.is_valid() {
             return Err(StateError::new(
-                "invalid peer: signature verification failed"
+                "invalid peer: signature verification failed",
             ));
         }
         Ok(peer)

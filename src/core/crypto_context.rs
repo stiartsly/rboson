@@ -1,15 +1,14 @@
 use crate::{
-    Id,
-    Result,
+    cryptobox::{CryptoBox, Nonce, PrivateKey},
     errors::CryptoError,
-    cryptobox::{CryptoBox, Nonce, PrivateKey}
+    Id, Result,
 };
 
 #[derive(Debug, Clone)]
 pub struct CryptoContext {
-    id          : Id,
-    crypto_box  : CryptoBox,
-    next_nonce  : Nonce,
+    id: Id,
+    crypto_box: CryptoBox,
+    next_nonce: Nonce,
     last_peer_nonce: Option<Nonce>,
 }
 
@@ -18,15 +17,15 @@ impl CryptoContext {
         Self {
             id,
             crypto_box,
-            next_nonce  : Nonce::random(),
-            last_peer_nonce: None
+            next_nonce: Nonce::random(),
+            last_peer_nonce: None,
         }
     }
 
     pub(crate) fn from_private_key(id: Id, sk: &PrivateKey) -> CryptoContext {
         Self::new(
             id,
-            CryptoBox::try_from((&id.to_encryption_key(), sk)).unwrap()
+            CryptoBox::try_from((&id.to_encryption_key(), sk)).unwrap(),
         )
     }
 
@@ -54,7 +53,9 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks"));
+                return Err(CryptoError::new(
+                    "Using inconsistent nonce with risking of replay attacks",
+                ));
             }
         }
         self.crypto_box.decrypt(cipher, plain)
@@ -64,7 +65,9 @@ impl CryptoContext {
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new("Using inconsistent nonce with risking of replay attacks"));
+                return Err(CryptoError::new(
+                    "Using inconsistent nonce with risking of replay attacks",
+                ));
             }
         }
         self.crypto_box.decrypt_into(&cipher)

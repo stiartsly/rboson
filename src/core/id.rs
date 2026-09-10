@@ -1,35 +1,21 @@
-use std::{
-    fmt,
-    cmp::Ordering,
-    str::FromStr,
-    ops::Deref,
-    result::Result as StdResult
-};
 use bs58;
 use serde::{
-    Serialize,Deserialize,
+    de::{self, Deserializer, Visitor},
     ser::Serializer,
-    de::{self, Deserializer, Visitor}
+    Deserialize, Serialize,
 };
+use std::{cmp::Ordering, fmt, ops::Deref, result::Result as StdResult, str::FromStr};
 
-use crate::{
-    cryptobox,
-    signature,
-    Error,
-    Result,
-    errors::ArgumentError,
-};
+use crate::{cryptobox, errors::ArgumentError, signature, Error, Result};
 
 pub const DID_PREFIX: &str = "did:boson:";
 
 #[derive(Debug, Copy, Clone, Default, PartialOrd, PartialEq, Ord, Eq, Hash)]
-pub struct Id(
-    [u8; Id::BYTES]
-);
+pub struct Id([u8; Id::BYTES]);
 
 impl Id {
     pub const BYTES: usize = 32;
-    pub const BITS:  usize = 256;
+    pub const BITS: usize = 256;
 
     pub const MAX_ID: Id = Id::max();
     pub const MIN_ID: Id = Id::min();
@@ -57,19 +43,22 @@ impl Id {
 
     pub fn try_from_hexstr(input: &str) -> Result<Self> {
         let Some(input) = input.strip_prefix("0x") else {
-            return Err(ArgumentError::new("Hex format strings must have a '0x' prefix."));
+            return Err(ArgumentError::new(
+                "Hex format strings must have a '0x' prefix.",
+            ));
         };
 
         let mut bytes = [0u8; Id::BYTES];
-        hex::decode_to_slice(input, &mut bytes[..]).map_err(|e|
-            ArgumentError::new(format!("Invalid hex format string: {e}"))
-        )?;
+        hex::decode_to_slice(input, &mut bytes[..])
+            .map_err(|e| ArgumentError::new(format!("Invalid hex format string: {e}")))?;
         Ok(Id(bytes))
     }
 
     pub fn try_from_base58(input: &str) -> Result<Self> {
         if input.starts_with("0x") {
-            return Err(ArgumentError::new("Base58 format strings must not have a '0x' prefix."));
+            return Err(ArgumentError::new(
+                "Base58 format strings must not have a '0x' prefix.",
+            ));
         }
 
         let mut bytes = [0u8; Id::BYTES];
@@ -79,7 +68,7 @@ impl Id {
             .map_err(|e| {
                 println!(">>> e: {}, input:{}", e, input);
                 ArgumentError::new(format!("Invalid base58 format string: {e}"))
-        })?;
+            })?;
         Ok(Id(bytes))
     }
 
@@ -88,7 +77,8 @@ impl Id {
         if index >= Id::BITS {
             return Err(ArgumentError::new(format!(
                 "Index {} is out of bounds for ID with {} bits",
-                index, Id::BITS
+                index,
+                Id::BITS
             )));
         }
 
@@ -260,7 +250,7 @@ impl TryFrom<&str> for Id {
     fn try_from(str: &str) -> Result<Self> {
         match str.starts_with("0x") {
             true => Self::try_from_hexstr(str),
-            false => Self::try_from_base58(str)
+            false => Self::try_from_base58(str),
         }
     }
 }
@@ -304,12 +294,13 @@ impl fmt::Binary for Id {
     }
 }
 
- impl Serialize for Id {
+impl Serialize for Id {
     fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
-    where S: Serializer,
+    where
+        S: Serializer,
     {
         match se.is_human_readable() {
-            true  => se.serialize_str(&self.to_base58()),
+            true => se.serialize_str(&self.to_base58()),
             false => se.serialize_bytes(&self.0),
         }
     }
@@ -317,7 +308,8 @@ impl fmt::Binary for Id {
 
 impl<'de> Deserialize<'de> for Id {
     fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
-    where D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct IdVisitor;
         impl<'de> Visitor<'de> for IdVisitor {
@@ -328,20 +320,22 @@ impl<'de> Deserialize<'de> for Id {
             }
 
             fn visit_str<E>(self, value: &str) -> StdResult<Self::Value, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
                 Id::try_from(value).map_err(|e| de::Error::custom(e))
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
-            where E: de::Error,
+            where
+                E: de::Error,
             {
                 Id::try_from_bytes(v).map_err(|e| de::Error::custom(e))
             }
         }
 
         match de.is_human_readable() {
-            true  => de.deserialize_str(IdVisitor),
+            true => de.deserialize_str(IdVisitor),
             false => de.deserialize_bytes(IdVisitor),
         }
     }

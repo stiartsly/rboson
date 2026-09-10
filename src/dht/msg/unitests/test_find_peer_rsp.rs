@@ -1,19 +1,13 @@
-use std::net::SocketAddr;
 use crate::{
-    Id,
-    Network,
-    NodeInfo,
-    PeerInfo,
-    PeerBuilder,
-    signature,
-    dht::msg::{
-        find_peer_rsp::FindPeerResponse,
-        lookup_rsp::LookupResponse
-    }
+    dht::msg::{find_peer_rsp::FindPeerResponse, lookup_rsp::LookupResponse},
+    signature, Id, Network, NodeInfo, PeerBuilder, PeerInfo,
 };
+use std::net::SocketAddr;
 
 fn make_node_info4() -> NodeInfo {
-    let addr = format!("127.0.0.1:{}", 39001).parse::<SocketAddr>().unwrap();
+    let addr = format!("127.0.0.1:{}", 39001)
+        .parse::<SocketAddr>()
+        .unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 
@@ -41,10 +35,8 @@ mod tests {
         let node4 = make_node_info4();
         let node6 = make_node_info6();
 
-        let rsp = FindPeerResponse::with_nodes(
-            Some(vec![node4.clone()]),
-            Some(vec![node6.clone()])
-        );
+        let rsp =
+            FindPeerResponse::with_nodes(Some(vec![node4.clone()]), Some(vec![node6.clone()]));
 
         assert!(rsp.nodes4().is_some());
         assert!(rsp.nodes6().is_some());
@@ -82,10 +74,7 @@ mod tests {
         let ni4 = make_node_info4();
         let ni6 = make_node_info6();
 
-        let rsp = FindPeerResponse::with_nodes(
-            Some(vec![ni4.clone()]),
-            Some(vec![ni6.clone()])
-        );
+        let rsp = FindPeerResponse::with_nodes(Some(vec![ni4.clone()]), Some(vec![ni6.clone()]));
 
         assert!(rsp.nodes4().is_some());
         assert!(rsp.nodes6().is_some());
@@ -94,11 +83,10 @@ mod tests {
         assert_eq!(rsp.nodes4().unwrap().len(), 1);
         assert_eq!(rsp.nodes6().unwrap().len(), 1);
 
-        let encoded = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
-            .expect("Deserialization failed");
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 0);
         assert!(decoded.nodes4().is_some());
@@ -127,11 +115,23 @@ mod tests {
         assert_eq!(rsp.peers().unwrap().len(), 1);
         assert_eq!(rsp.peers().unwrap()[0], peer.clone());
 
-        let encoded = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
+        let encoded_value: serde_cbor::Value =
+            serde_cbor::from_slice(&encoded).expect("Response should decode as CBOR");
+        let serde_cbor::Value::Map(fields) = encoded_value else {
+            panic!("Find peer response should encode as a CBOR map");
+        };
+        let peers = fields.iter().find_map(|(key, value)| match key {
+            serde_cbor::Value::Text(name) if name == "p" => Some(value),
+            _ => None,
+        });
+        assert!(
+            matches!(peers, Some(serde_cbor::Value::Bytes(_))),
+            "peers should be encoded as a packed CBOR byte string"
+        );
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
-            .expect("Deserialization failed");
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
 
         assert!(decoded.nodes4().is_none());
         assert!(decoded.nodes6().is_none());
@@ -147,12 +147,35 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_inline_peers() {
+        #[derive(serde::Serialize)]
+        struct InlinePeerResponse {
+            #[serde(rename = "tok")]
+            token: i32,
+            #[serde(rename = "p")]
+            peers: Vec<PeerInfo>,
+        }
+
+        let peer = make_peer(8080);
+        let encoded = serde_cbor::to_vec(&InlinePeerResponse {
+            token: 0,
+            peers: vec![peer.clone()],
+        })
+        .expect("Inline peer response serialization failed");
+
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(&encoded).expect("Inline peer response deserialization failed");
+
+        assert_eq!(decoded.token(), 0);
+        let expected_peer = peer.without_private_key();
+        assert_eq!(decoded.peers(), Some([expected_peer].as_slice()));
+    }
+
+    #[test]
     fn test_serde_with_peers() {
         let peer1 = make_peer(8080);
         let peer2 = make_peer(8081);
-        let rsp = FindPeerResponse::with_peers(
-            vec![peer1.clone(), peer2.clone()]
-        );
+        let rsp = FindPeerResponse::with_peers(vec![peer1.clone(), peer2.clone()]);
 
         assert!(rsp.nodes4().is_none());
         assert!(rsp.nodes6().is_none());
@@ -161,11 +184,10 @@ mod tests {
         assert_eq!(rsp.token(), 0);
         assert_eq!(rsp.peers().unwrap().len(), 2);
 
-        let encoded = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: FindPeerResponse = serde_cbor::from_slice(encoded.as_slice())
-            .expect("Deserialization failed");
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
 
         assert!(decoded.nodes4().is_none());
         assert!(decoded.nodes6().is_none());

@@ -1,15 +1,12 @@
 use crate::core::{
-    Id,
     cryptobox::{self, CryptoBox, Nonce},
-    signature,
-    CryptoContext,
+    signature, CryptoContext, Id,
 };
 /*
- Testcases for critical methods:
- - new(..)
- - from_private_key(..)
- */
-
+Testcases for critical methods:
+- new(..)
+- from_private_key(..)
+*/
 
 #[cfg(test)]
 mod tests {
@@ -39,8 +36,10 @@ mod tests {
         let id1 = Id::from(sig_kp1.public_key());
         let id2 = Id::from(sig_kp2.public_key());
 
-        let box1 = cryptobox::CryptoBox::try_from((box_kp2.public_key(), box_kp1.private_key())).unwrap();
-        let box2 = cryptobox::CryptoBox::try_from((box_kp1.public_key(), box_kp2.private_key())).unwrap();
+        let box1 =
+            cryptobox::CryptoBox::try_from((box_kp2.public_key(), box_kp1.private_key())).unwrap();
+        let box2 =
+            cryptobox::CryptoBox::try_from((box_kp1.public_key(), box_kp2.private_key())).unwrap();
         let ctx1 = CryptoContext::new(id2.clone(), box1);
         let ctx2 = CryptoContext::new(id1, box2);
 

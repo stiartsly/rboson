@@ -1,5 +1,5 @@
-use log::{info, debug, error};
 use crate::core::logger;
+use log::{debug, error, info};
 
 #[cfg(test)]
 mod tests {

@@ -1,16 +1,18 @@
-use std::sync::{Arc, Mutex};
-use std::io::{self, Write, IoSlice};
+use log::{LevelFilter, Metadata, Record};
 use std::fs::{File, OpenOptions};
-use log::{
-    LevelFilter,
-    Metadata,
-    Record
+use std::io::{self, IoSlice, Write};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 
 static mut MY_LOGGER: Option<Logger> = None;
 
+type ConsoleOutputHandler = Arc<dyn Fn(String) + Send + Sync>;
+
 struct Logger {
-    console_output_enabled: bool,
+    console_output_enabled: AtomicBool,
+    console_output_handler: Mutex<Option<ConsoleOutputHandler>>,
     max_level: LevelFilter,
     fp: Option<Arc<Mutex<File>>>,
 }
@@ -34,25 +36,33 @@ impl log::Log for Logger {
             } else {
                 &record_level
             };
-            let log = format!("[{:<8}] [{:^4}] {}",
+            let log = format!(
+                "[{:<8}] [{:^4}] {}",
                 record_target,
                 record_level,
                 record.args()
             );
 
             if let Some(fp) = self.fp.as_ref() {
-                _ = fp.lock().unwrap().write_vectored(
-                    &[IoSlice::new(log.as_bytes())]
-                );
+                _ = fp
+                    .lock()
+                    .unwrap()
+                    .write_vectored(&[IoSlice::new(log.as_bytes())]);
                 _ = fp.lock().unwrap().write(b"\n");
             }
 
-            if self.console_output_enabled {
-                match record.level() {
-                    log::Level::Error => eprintln!("\x1b[31m{log}\x1b[0m"),
-                    log::Level::Warn => eprintln!("\x1b[33m{log}\x1b[0m"),
-                    log::Level::Info => println!("\x1b[32m{log}\x1b[0m"),
-                    _ => println!("{log}"),
+            if self.console_output_enabled.load(Ordering::Acquire) {
+                let console_log = match record.level() {
+                    log::Level::Error => format!("\x1b[31m{log}\x1b[0m"),
+                    log::Level::Warn => format!("\x1b[33m{log}\x1b[0m"),
+                    log::Level::Info => format!("\x1b[32m{log}\x1b[0m"),
+                    _ => log,
+                };
+                let handler = self.console_output_handler.lock().unwrap().clone();
+                if let Some(handler) = handler {
+                    handler(console_log);
+                } else {
+                    println!("{console_log}");
                 }
             }
         }
@@ -65,7 +75,8 @@ impl log::Log for Logger {
 impl Logger {
     pub(crate) fn new(max_level: LevelFilter, logfile: Option<&str>) -> Self {
         let mut logger = Self {
-            console_output_enabled: true,
+            console_output_enabled: AtomicBool::new(true),
+            console_output_handler: Mutex::new(None),
             max_level,
             fp: None,
         };
@@ -81,16 +92,14 @@ impl Logger {
         }
         logger
     }
-
-    pub(crate) fn revert_console_output(&mut self) {
-        self.console_output_enabled = !self.console_output_enabled;
-    }
 }
 
 static NULL_LOGGER: NullLogger = NullLogger;
 struct NullLogger;
 impl log::Log for NullLogger {
-    fn enabled(&self, _: &Metadata) -> bool { false }
+    fn enabled(&self, _: &Metadata) -> bool {
+        false
+    }
     fn log(&self, _: &Record) {}
     fn flush(&self) {}
 }
@@ -106,19 +115,28 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
 }
 
 #[allow(unused)]
-pub(crate) fn enable_console_output() {
+pub fn enable_console_output() {
     unsafe {
-        if let Some(ref mut v) = MY_LOGGER {
-            v.console_output_enabled = true;
+        if let Some(ref v) = MY_LOGGER {
+            v.console_output_enabled.store(true, Ordering::Release);
         }
     }
 }
 
 #[allow(unused)]
-pub(crate) fn disable_console_output() {
+pub fn disable_console_output() {
     unsafe {
-        if let Some(ref mut v) = MY_LOGGER {
-            v.console_output_enabled = false;
+        if let Some(ref v) = MY_LOGGER {
+            v.console_output_enabled.store(false, Ordering::Release);
+        }
+    }
+}
+
+/// Sends console logs to `handler` rather than writing directly to stdout.
+pub fn set_console_output_handler(handler: impl Fn(String) + Send + Sync + 'static) {
+    unsafe {
+        if let Some(ref v) = MY_LOGGER {
+            *v.console_output_handler.lock().unwrap() = Some(Arc::new(handler));
         }
     }
 }
@@ -130,8 +148,8 @@ pub(crate) fn teardown() {
 #[allow(unused)]
 pub(crate) fn revert_console_output() {
     unsafe {
-        if let Some(ref mut v) = MY_LOGGER {
-            v.revert_console_output();
+        if let Some(ref v) = MY_LOGGER {
+            v.console_output_enabled.fetch_xor(true, Ordering::AcqRel);
         }
     }
 }

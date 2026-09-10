@@ -1,20 +1,16 @@
-use std::{
-    fmt,
-    result::Result as StdResult
-};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use serde::{Serialize, Deserialize};
+use std::{fmt, result::Result as StdResult};
 
-use crate::utils;
 use super::{
-    Id,
     cryptobox,
+    cryptobox::Nonce,
+    errors::{ArgumentError, Error},
     signature,
     signature::{KeyPair, PrivateKey},
-    cryptobox::Nonce,
-    Result,
-    errors::{Error, ArgumentError},
+    Id, Result,
 };
+use crate::utils;
 
 #[derive(Clone)]
 pub struct ImmutableBuilder<'a> {
@@ -153,27 +149,27 @@ impl Value {
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
-            _ => &KeyPair::random()
+            _ => &KeyPair::random(),
         };
         let mut value = Value {
             pk: Some(Id::from(kp.public_key())),
             sk: Some(kp.to_private_key()),
             recipient: None,
-            nonce: Some(b.nonce.map_or(Nonce::random(), |v|v.clone())),
+            nonce: Some(b.nonce.map_or(Nonce::random(), |v| v.clone())),
             sig: None,
             data: b.data.to_vec(),
-            seq: b.seq
+            seq: b.seq,
         };
 
         // sign data.
         let sig = signature::sign_into(
             value.serialize_signature_data().as_slice(),
-            value.sk.as_ref().unwrap()
+            value.sk.as_ref().unwrap(),
         );
 
         match sig {
             Ok(s) => value.sig = Some(s),
-            Err(e) => return Err(e.into())
+            Err(e) => return Err(e.into()),
         }
         Ok(value)
     }
@@ -183,22 +179,20 @@ impl Value {
 
         let kp = match b.keypair.as_ref() {
             Some(v) => v,
-            _ => &KeyPair::random()
+            _ => &KeyPair::random(),
         };
 
         let mut value = Value {
             pk: Some(Id::from(kp.public_key())),
             sk: Some(kp.to_private_key()),
             recipient: Some(b.rec.clone()),
-            nonce: Some(b.nonce.map_or(Nonce::random(), |v|v.clone())),
+            nonce: Some(b.nonce.map_or(Nonce::random(), |v| v.clone())),
             data: b.data.to_vec(),
             sig: None,
             seq: b.seq,
         };
 
-        let encryption_sk = cryptobox::PrivateKey::try_from(
-            value.sk.as_ref().unwrap()
-        )?;
+        let encryption_sk = cryptobox::PrivateKey::try_from(value.sk.as_ref().unwrap())?;
 
         // encrypt data.
         value.data = cryptobox::encrypt_into(
@@ -211,7 +205,7 @@ impl Value {
         // sign data
         let sig = signature::sign_into(
             value.serialize_signature_data().as_slice(),
-            value.sk.as_ref().unwrap()
+            value.sk.as_ref().unwrap(),
         )?;
         value.sig = Some(sig);
         Ok(value)
@@ -239,14 +233,15 @@ impl Value {
     pub fn id(&self) -> Id {
         let input = match self.pk.as_ref() {
             Some(pk) => pk.as_bytes(),
-            _ => self.data.as_slice()
+            _ => self.data.as_slice(),
         };
 
         Id::try_from({
             let mut sha256 = Sha256::new();
             sha256.update(input);
             sha256.finalize().as_slice()
-        }).unwrap()
+        })
+        .unwrap()
     }
 
     pub const fn public_key(&self) -> Option<&Id> {
@@ -282,8 +277,7 @@ impl Value {
     }
 
     pub fn size(&self) -> usize {
-        self.data.len() +
-            self.sig.as_ref().map_or(0, |s|s.len())
+        self.data.len() + self.sig.as_ref().map_or(0, |s| s.len())
     }
 
     pub const fn is_encrypted(&self) -> bool {
@@ -306,8 +300,7 @@ impl Value {
             return true;
         }
 
-        if self.pk.is_none() || self.sig.is_none() ||
-            self.nonce.is_none() {
+        if self.pk.is_none() || self.sig.is_none() || self.nonce.is_none() {
             return false;
         }
 
@@ -315,7 +308,8 @@ impl Value {
             self.serialize_signature_data().as_slice(),
             self.sig.as_ref().unwrap().as_slice(),
             &self.pk.as_ref().unwrap().to_signature_key(),
-        ).is_ok()
+        )
+        .is_ok()
     }
 
     pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
@@ -338,25 +332,21 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "id:{}", self.id())?;
         if self.is_mutable() {
-            write!(f,
+            write!(
+                f,
                 ",publicKey:{}, nonce:{}",
                 self.pk.as_ref().unwrap(),
                 self.nonce.as_ref().unwrap()
             )?;
         }
         if self.is_encrypted() {
-            write!(f,
-                ",recipient:{}",
-                self.recipient.as_ref().unwrap()
-            )?;
+            write!(f, ",recipient:{}", self.recipient.as_ref().unwrap())?;
         }
         if self.is_signed() {
-            write!(f,
-                ",sig:{}",
-                hex::encode(self.sig.as_ref().unwrap())
-            )?;
+            write!(f, ",sig:{}", hex::encode(self.sig.as_ref().unwrap()))?;
         }
-        write!(f,
+        write!(
+            f,
             ", seq:{}, data:{}",
             self.seq,
             hex::encode(self.data.as_slice())
@@ -415,10 +405,7 @@ struct SerdeValue {
     )]
     data: Vec<u8>,
 
-    #[serde(
-        rename = "seq",
-        deserialize_with = "utils::deserialize_seq"
-    )]
+    #[serde(rename = "seq", deserialize_with = "utils::deserialize_seq")]
     seq: i32,
 }
 
@@ -446,26 +433,17 @@ impl TryFrom<SerdeValue> for Value {
         let mutable = v.pk.is_some();
         if mutable && (v.sig.is_none() || v.nonce.is_none()) {
             return Err(ArgumentError::new(
-                "mutable value requires both signature and nonce"
+                "mutable value requires both signature and nonce",
             ));
         }
         if v.recipient.is_some() && !mutable {
-            return Err(ArgumentError::new(
-                "encrypted value requires a public key"
-            ));
+            return Err(ArgumentError::new("encrypted value requires a public key"));
         }
 
-        let value = Value::packed(
-            v.pk,
-            v.recipient,
-            v.nonce,
-            v.sig,
-            v.data,
-            v.seq,
-        );
+        let value = Value::packed(v.pk, v.recipient, v.nonce, v.sig, v.data, v.seq);
         if !value.is_valid() {
             return Err(ArgumentError::new(
-                "invalid value: signature verification failed"
+                "invalid value: signature verification failed",
             ));
         }
         Ok(value)

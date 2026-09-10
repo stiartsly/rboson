@@ -1,4 +1,4 @@
-use std::{fmt, error::Error as StdError};
+use std::{error::Error as StdError, fmt};
 
 #[derive(Debug)]
 pub struct ArgumentError(String);
@@ -14,7 +14,7 @@ impl StdError for ArgumentError {}
 impl fmt::Display for ArgumentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Argument error: {}", self.0)
-     }
+    }
 }
 
 #[cfg(test)]

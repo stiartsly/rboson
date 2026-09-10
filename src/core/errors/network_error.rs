@@ -1,24 +1,22 @@
-use std::{
-    fmt,
-    net,
-    error::Error
-};
+use std::{error::Error, fmt, net};
 
 #[derive(Debug)]
 pub struct NetworkError {
-    message: String
+    message: String,
 }
 
 impl NetworkError {
     pub fn new(message: impl Into<String>) -> Box<Self> {
-        Box::new(Self { message: message.into() })
+        Box::new(Self {
+            message: message.into(),
+        })
     }
 }
 
 impl Error for NetworkError {
     fn description(&self) -> &str {
         &self.message
-     }
+    }
 }
 
 impl From<net::AddrParseError> for Box<NetworkError> {

@@ -1,11 +1,6 @@
 use crate::core::{
-    Id,
+    cryptobox, signature, EncryptedBuilder, Id, ImmutableBuilder as ValueBuilder, SignedBuilder,
     Value,
-    ImmutableBuilder as ValueBuilder,
-    SignedBuilder,
-    EncryptedBuilder,
-    signature,
-    cryptobox
 };
 
 #[cfg(test)]
@@ -99,9 +94,7 @@ mod tests {
         let data = crate::random_bytes(32);
         let kp = signature::KeyPair::random();
         let nonce = cryptobox::Nonce::random();
-        let rec: Id = signature::KeyPair::random()
-            .public_key()
-            .into();
+        let rec: Id = signature::KeyPair::random().public_key().into();
         let rc = EncryptedBuilder::new(&data, &rec)
             .with_keypair(&kp)
             .with_nonce(&nonce)

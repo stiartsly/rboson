@@ -1,14 +1,9 @@
-use crate::core::{
-    Id,
-    signature,
-    CryptoIdentity,
-    Identity,
-};
+use crate::core::{signature, CryptoIdentity, Id, Identity};
 /*
- Testcases for critical methods:
- - test_sign(..)
- - test_encryption(..)
- */
+Testcases for critical methods:
+- test_sign(..)
+- test_encryption(..)
+*/
 
 #[cfg(test)]
 mod tests {
@@ -121,7 +116,9 @@ mod tests {
         assert_eq!(identity.signature_keypair().public_key(), kp.public_key());
         assert_eq!(
             identity.encryption_keypair().public_key().as_bytes(),
-            crate::core::cryptobox::KeyPair::from(&kp).public_key().as_bytes()
+            crate::core::cryptobox::KeyPair::from(&kp)
+                .public_key()
+                .as_bytes()
         );
     }
 

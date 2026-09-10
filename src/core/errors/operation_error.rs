@@ -1,21 +1,23 @@
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub struct OperationError {
-    message: String
+    message: String,
 }
 
 impl OperationError {
-    pub fn new(message: impl Into<String>) -> Box<Self>  {
-        Box::new(Self { message: message.into() })
+    pub fn new(message: impl Into<String>) -> Box<Self> {
+        Box::new(Self {
+            message: message.into(),
+        })
     }
 }
 
 impl Error for OperationError {
     fn description(&self) -> &str {
         &self.message
-     }
+    }
 }
 
 impl fmt::Display for OperationError {
@@ -23,4 +25,3 @@ impl fmt::Display for OperationError {
         write!(f, "Unsupported OperationError: {}", self.message)
     }
 }
-

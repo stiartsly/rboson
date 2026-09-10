@@ -1,10 +1,9 @@
 use super::{
-    Id,
-    CryptoContext,
     cryptobox::Nonce,
     cryptobox::{self, CryptoBox},
-    signature::{self, Signature},
     errors::{ArgumentError, Result},
+    signature::{self, Signature},
+    CryptoContext, Id,
 };
 
 /// An entity capable of signing, verifying, encrypting, and decrypting.
@@ -53,15 +52,15 @@ pub trait Identity {
 
 #[derive(Clone)]
 pub struct CryptoIdentity {
-    id      : Id,
-    keypair : signature::KeyPair,
+    id: Id,
+    keypair: signature::KeyPair,
     encryption_keypair: cryptobox::KeyPair,
 }
 
 impl CryptoIdentity {
     const CIPHER_OVERHEAD: usize = CryptoBox::MAC_BYTES + Nonce::BYTES;
 
-     pub fn new() -> Self {
+    pub fn new() -> Self {
         Self::from(signature::KeyPair::random())
     }
 
@@ -70,7 +69,7 @@ impl CryptoIdentity {
         Self {
             id: Id::from(keypair.public_key()),
             keypair: keypair,
-            encryption_keypair: encryption_kp
+            encryption_keypair: encryption_kp,
         }
     }
 
@@ -107,7 +106,7 @@ impl Identity for CryptoIdentity {
             cipher,
             &Nonce::random(),
             &recipient.to_encryption_key(),
-            self.encryption_keypair.private_key()
+            self.encryption_keypair.private_key(),
         )
     }
 
@@ -120,7 +119,8 @@ impl Identity for CryptoIdentity {
         if cipher.len() < Self::CIPHER_OVERHEAD {
             return Err(ArgumentError::new(format!(
                 "Ciphertext length {} is smaller than the required overhead {}",
-                cipher.len(), Self::CIPHER_OVERHEAD
+                cipher.len(),
+                Self::CIPHER_OVERHEAD
             )));
         }
 
@@ -128,7 +128,7 @@ impl Identity for CryptoIdentity {
             cipher,
             plain,
             &sender.to_encryption_key(),
-            self.encryption_keypair.private_key()
+            self.encryption_keypair.private_key(),
         )
     }
 
@@ -138,11 +138,11 @@ impl Identity for CryptoIdentity {
     }
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        CryptoBox::try_from(
-            (&id.to_encryption_key(), self.encryption_keypair.private_key())
-        ).map(|v|
-            CryptoContext::new(id.clone(), v)
-        )
+        CryptoBox::try_from((
+            &id.to_encryption_key(),
+            self.encryption_keypair.private_key(),
+        ))
+        .map(|v| CryptoContext::new(id.clone(), v))
     }
 }
 

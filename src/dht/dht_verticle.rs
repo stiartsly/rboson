@@ -14,6 +14,7 @@ use futures::{
 };
 use log::{error, info};
 use tokio::{
+    task,
     runtime,
     sync::{mpsc,oneshot},
 };
@@ -41,7 +42,7 @@ use crate::dht::{
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
 const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
 
-enum Cmd {
+enum CallEvent {
     Bootstrap {
         nodes: Vec<NodeInfo>,
         complete: oneshot::Sender<CmdResult<()>>,
@@ -84,8 +85,8 @@ enum Cmd {
 
 pub(crate) struct VerticleClient {
     ni          : NodeInfo,
-    command_tx  : mpsc::UnboundedSender<Cmd>,
-    handle      : Option<JoinHandle<()>>,
+    event_tx    : mpsc::UnboundedSender<CallEvent>,
+    handle      : Mutex<Option<JoinHandle<()>>>,
 }
 type CmdResult<T> = StdResult<T, String>;
 
@@ -110,8 +111,8 @@ impl VerticleClient {
         nodes: Vec<NodeInfo>
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(
-            Cmd::Bootstrap { nodes, complete: tx }
+        if self.event_tx.send(
+            CallEvent::Bootstrap { nodes, complete: tx }
         ).is_err() {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
@@ -124,9 +125,11 @@ impl VerticleClient {
         option: LookupOption
     ) -> Result<Option<NodeInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(
-            Cmd::FindNode { target, option, complete: tx }
-        ).is_err() {
+        if self.event_tx.send(CallEvent::FindNode {
+            target,
+            option,
+            complete: tx
+        }).is_err() {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -139,7 +142,7 @@ impl VerticleClient {
         option: LookupOption
     ) -> Result<Option<Value>> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(Cmd::FindValue {
+        if self.event_tx.send(CallEvent::FindValue {
             target,
             expected_seq,
             option,
@@ -156,9 +159,11 @@ impl VerticleClient {
         expected_seq: i32
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(
-            Cmd::StoreValue { value, expected_seq, complete: tx }
-        ).is_err() {
+        if self.event_tx.send(CallEvent::StoreValue {
+            value,
+            expected_seq,
+            complete: tx
+        }).is_err() {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -172,7 +177,7 @@ impl VerticleClient {
         option: LookupOption
     ) -> Result<Vec<PeerInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(Cmd::FindPeer {
+        if self.event_tx.send(CallEvent::FindPeer {
             target,
             expected_seq,
             expected_count,
@@ -190,9 +195,11 @@ impl VerticleClient {
         expected_seq: i32,
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(
-            Cmd::AnnouncePeer { peer, expected_seq, complete: tx }
-        ).is_err() {
+        if self.event_tx.send(CallEvent::AnnouncePeer {
+            peer,
+            expected_seq,
+            complete: tx
+        }).is_err() {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -200,107 +207,79 @@ impl VerticleClient {
 
     async fn start(&mut self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(Cmd::Start { complete: tx }).is_err() {
+        if self.event_tx.send(CallEvent::Start {
+            complete: tx
+        }).is_err() {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
     }
 
-    pub(crate) async fn stop(&mut self) {
+    pub(crate) async fn stop(&self) {
         info!("Stopping DHT verticle");
         let (tx, rx) = oneshot::channel();
-        if self.command_tx.send(Cmd::StopAll { complete: tx }).is_ok() {
+        if self.event_tx.send(CallEvent::StopAll {
+            complete: tx
+        }).is_ok() {
             let _ = rx.await;
         }
 
-        if let Some(handle) = self.handle.take() {
+        if let Some(handle) = self.handle.lock().unwrap().take() {
             let _ = handle.join();
         }
         info!("DHT verticle stopped");
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub(crate) struct VerticleOptions {
-    pub(crate) identity     : Option<Arc<CryptoIdentity>>,
-    pub(crate) storage      : Option<Arc<Mutex<dyn DataStorage>>>,
-    pub(crate) token_man    : Option<Arc<TokenManager>>,
-    pub(crate) listener     : Option<Arc<dyn ConnectionStatusListener>>,
-    pub(crate) data_dir     : Option<PathBuf>,
-    pub(crate) bootstrap_nodes  : Option<Vec<NodeInfo>>,
-}
-
-impl VerticleOptions {
-    pub(crate) fn with_identity(mut self, identity: Arc<CryptoIdentity>) -> Self {
-        self.identity = Some(identity);
-        self
-    }
-
-    pub(crate) fn with_bootstrap(mut self, bootstrap_nodes: Vec<NodeInfo>) -> Self {
-        self.bootstrap_nodes = Some(bootstrap_nodes);
-        self
-    }
-
-    pub(crate) fn with_storage(mut self, storage: Arc<Mutex<dyn DataStorage>>) -> Self {
-        self.storage = Some(storage);
-        self
-    }
-
-    pub(crate) fn with_tokenman(mut self, token_man: Arc<TokenManager>) -> Self {
-        self.token_man = Some(token_man);
-        self
-    }
-
-    pub(crate) fn with_datadir(mut self, data_dir: impl Into<String>) -> Self {
-        self.data_dir = Some(PathBuf::from(data_dir.into()));
-        self
-    }
-
-    pub(crate) fn with_listener(mut self, listener: Arc<dyn ConnectionStatusListener>) -> Self {
-        self.listener = Some(listener);
-        self
-    }
+    pub(crate) identity     : Arc<CryptoIdentity>,
+    pub(crate) storage      : Arc<Mutex<dyn DataStorage>>,
+    pub(crate) token_man    : Arc<TokenManager>,
+    pub(crate) listener     : Arc<dyn ConnectionStatusListener>,
+    pub(crate) bootstrap_nodes  : Vec<NodeInfo>,
 }
 
 pub(crate) struct Verticle {
-    dht             : Rc<RefCell<DHT>>,
-    timer_manager   : TimerManager,
+    dht         : Rc<RefCell<DHT>>,
+    timerman    : TimerManager,
 
-    cmd_rx          : mpsc::UnboundedReceiver<Cmd>,
-    tmr_rx          : mpsc::UnboundedReceiver<TimerCmd>,
-
-    quit            : bool,
+    event_rx    : mpsc::UnboundedReceiver<CallEvent>,
+    cmd_rx      : mpsc::UnboundedReceiver<TimerCmd>,
+    quit        : bool,
 }
 
 impl Verticle {
     fn new(
         options: VerticleOptions,
+        data_dir: String,
         network: Network,
         host: String,
         port: u16,
-        cmd_rx: mpsc::UnboundedReceiver<Cmd>
+        event_rx: mpsc::UnboundedReceiver<CallEvent>
     ) -> Result<Verticle> {
-        let persist_file = options.data_dir.as_ref().map(|dir| {
-            let filename = match network {
-                Network::IPv4 => "dht4.cache",
-                Network::IPv6 => "dht6.cache",
-            };
-            dir.join(filename)
-        });
+        let data_dir = PathBuf::from(data_dir);
+        let persist_file = Some(data_dir.join(match network {
+            Network::IPv4 => "dht4.cache",
+            Network::IPv6 => "dht6.cache",
+        }));
 
-        let (tmr_tx, tmr_rx) = mpsc::unbounded_channel::<TimerCmd>();
-        let timer_client = Rc::new(TimerClient::new(tmr_tx));
-        let timer_manager = TimerManager::new();
-
-        let dht = DHT::new(options, network, host, port, persist_file, timer_client)?;
-        let dht = Rc::new(RefCell::new(dht));
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<TimerCmd>();
+        let timer_client = Rc::new(TimerClient::new(cmd_tx));
+        let dht = Rc::new(RefCell::new(DHT::new(
+            options,
+            network, host, port,
+            persist_file,
+            timer_client
+        )));
         dht.borrow_mut().weak = Rc::downgrade(&dht);
 
+        let timerman = TimerManager::new();
         Ok(Self {
             dht,
-            timer_manager,
+            timerman,
+            event_rx,
             cmd_rx,
-            tmr_rx,
             quit: false,
         })
     }
@@ -313,13 +292,13 @@ impl Verticle {
         self.dht.borrow().ni()
     }
 
-    fn handle_dht_cmd(
+    fn handle_events(
         &mut self,
-        cmd: Cmd,
+        event: CallEvent,
         pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output=()>>>>
     ) {
-        match cmd {
-            Cmd::Bootstrap {
+        match event {
+            CallEvent::Bootstrap {
                 nodes,
                 complete
             } => {
@@ -332,7 +311,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::FindNode {
+            CallEvent::FindNode {
                 target,
                 option,
                 complete,
@@ -346,7 +325,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::FindValue {
+            CallEvent::FindValue {
                 target,
                 expected_seq,
                 option,
@@ -361,7 +340,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::StoreValue {
+            CallEvent::StoreValue {
                 value,
                 expected_seq,
                 complete,
@@ -375,7 +354,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::FindPeer {
+            CallEvent::FindPeer {
                 target,
                 expected_seq,
                 expected_count,
@@ -391,7 +370,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::AnnouncePeer {
+            CallEvent::AnnouncePeer {
                 peer,
                 expected_seq,
                 complete,
@@ -405,7 +384,7 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::Start { complete } => {
+            CallEvent::Start { complete } => {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
@@ -415,24 +394,24 @@ impl Verticle {
                     );
                 }.boxed_local());
             }
-            Cmd::StopAll { complete } => {
+            CallEvent::StopAll { complete } => {
                 self.quit = true;
-                self.timer_manager.stop_all();
+                self.timerman.stop_all();
                 let _ = complete.send(Ok(()));
             }
         }
     }
 
-    fn handle_timer_cmd(&mut self, cmd: TimerCmd) {
+    fn handle_commands(&mut self, cmd: TimerCmd) {
         match cmd {
             TimerCmd::Add { timer_id, delay, interval, cb } =>
-                self.timer_manager.add_timer(timer_id, delay, interval, cb),
+                self.timerman.add_timer(timer_id, delay, interval, cb),
 
             TimerCmd::Cancel { timer_id } =>
-                self.timer_manager.cancel_timer(timer_id),
+                self.timerman.cancel_timer(timer_id),
 
             TimerCmd::Stop { complete } => {
-                self.timer_manager.stop_all();
+                self.timerman.stop_all();
                 let _ = complete.send(());
             }
         }
@@ -459,11 +438,11 @@ impl Verticle {
 
         loop {
             tokio::select! {
-                Some(cmd) = self.cmd_rx.recv() => {
-                    self.handle_dht_cmd(cmd, &mut pendings);
+                Some(event) = self.event_rx.recv() => {
+                    self.handle_events(event, &mut pendings);
                 }
-                Some(cmd) = self.tmr_rx.recv() => {
-                    self.handle_timer_cmd(cmd);
+                Some(cmd) = self.cmd_rx.recv() => {
+                    self.handle_commands(cmd);
                 }
                 packet = socket.recv_from(&mut buf) => {
                     match packet {
@@ -478,8 +457,8 @@ impl Verticle {
                     }
 
                 },
-                Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {
-                    self.timer_manager.fire_expired(timer_id).await;
+                Some(timer_id) = self.timerman.next_expired(), if !self.timerman.is_idle() => {
+                    self.timerman.fire_expired(timer_id).await;
                 }
                 Some(_) = pendings.next() => {},
             }
@@ -489,7 +468,7 @@ impl Verticle {
             }
         }
 
-        self.timer_manager.stop_all();
+        self.timerman.stop_all();
         self.dht.borrow_mut().stop().await;
         info!("DHT verticle exited run_loop");
     }
@@ -497,13 +476,14 @@ impl Verticle {
 
 pub(crate) async fn deploy(
     options: VerticleOptions,
+    data_dir: &str,
     network: Network,
     host: String,
     port: u16,
 ) -> Result<VerticleClient> {
-    let (command_tx, command_rx) = mpsc::unbounded_channel::<Cmd>();
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<CallEvent>();
     let (startup_tx, startup_rx) = std_mpsc::sync_channel::<StdResult<NodeInfo, String>>(1);
-
+    let data_dir = data_dir.into();
     let handle = std::thread::spawn(move || {
         let rt = runtime::Builder::new_current_thread()
             .enable_time()
@@ -511,9 +491,9 @@ pub(crate) async fn deploy(
             .build()
             .expect("dht verticle runtime should build");
 
-        let local = tokio::task::LocalSet::new();
+        let local = task::LocalSet::new();
         rt.block_on(local.run_until(async move {
-            let result = Verticle::new(options, network, host, port, command_rx);
+            let result = Verticle::new(options, data_dir, network, host, port, event_rx);
             let mut vert = match result {
                 Ok(v) => v,
                 Err(e) => {
@@ -537,7 +517,11 @@ pub(crate) async fn deploy(
     });
 
     let mut vert = match startup_rx.recv() {
-        Ok(Ok(ni)) => VerticleClient {ni, command_tx, handle: Some(handle)},
+        Ok(Ok(ni)) => VerticleClient {
+            ni,
+            event_tx,
+            handle: Mutex::new(Some(handle)),
+        },
         Ok(Err(msg)) => return Err(StateError::new(msg)),
         Err(_) => return Err(StateError::new("dht verticle startup channel closed")),
     };

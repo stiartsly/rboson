@@ -46,7 +46,7 @@ use crate::dht::{
         ImmutableSubstitutionError
     },
     node_verticle,
-    dht_verticle::{self, VerticleClient, VerticleOptions},
+    dht_verticle::{self, VerticleClient},
 };
 
 const MAX_PEER_AGE  : Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
@@ -336,15 +336,13 @@ impl Node {
             listeners: self.listeners.clone()
         });
 
-        let options = VerticleOptions::default()
-            .with_identity(self.identity.identity())
-            .with_storage(self.storage.clone())
-            .with_tokenman(self.token_man.clone())
-            .with_bootstrap(self.options.bootstrap_nodes().to_vec())
-            .with_datadir(self.options.data_dir())
-            .with_listener(listener);
-
-
+        let options = dht_verticle::VerticleOptions {
+            identity:  self.identity.identity(),
+            storage:   self.storage.clone(),
+            token_man: self.token_man.clone(),
+            listener:  listener,
+            bootstrap_nodes: self.options.bootstrap_nodes().to_vec(),
+        };
         let port  = self.options.port();
         let host4 = self.options.host4();
         let host6 = self.options.host6();
@@ -352,7 +350,11 @@ impl Node {
         let cb = async move|host: Option<&str> | {
             if let Some(host) = host {
                 dht_verticle::deploy(
-                    options.clone(), Network::IPv4, host.into(), port
+                    options.clone(),
+                    self.options.data_dir(),
+                    Network::IPv4,
+                    host.into(),
+                    port
                 ).await.map(|v| Some(v))
             } else {
                 Ok(None)
@@ -397,13 +399,13 @@ impl Node {
         tokio::join!(
             async {
                 if let Some(dht) = dht4 {
-                    let mut c = Arc::try_unwrap(dht).ok().unwrap();
+                    let c = Arc::try_unwrap(dht).ok().unwrap();
                     let _ = c.stop().await;
                 }
             },
             async {
                 if let Some(dht) = dht6 {
-                    let mut c = Arc::try_unwrap(dht).ok().unwrap();
+                    let c = Arc::try_unwrap(dht).ok().unwrap();
                     let _ = c.stop().await;
                 }
             }
@@ -411,7 +413,7 @@ impl Node {
 
         let verticle = self.timer_verticle.lock().unwrap().take();
         if let Some(verticle) = verticle {
-            let mut vert = Arc::try_unwrap(verticle).ok().unwrap();
+            let vert = Arc::try_unwrap(verticle).ok().unwrap();
             let _ = vert.stop().await;
         }
         self.storage.lock().unwrap().close();

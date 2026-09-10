@@ -33,19 +33,17 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<RefCell<DHT>> {
     let token_man = Arc::new(TokenManager::new());
     let listener: Arc<dyn ConnectionStatusListener> = Arc::new(NoopConnectionStatusListener);
 
-    let options = VerticleOptions::default()
-        .with_identity(identity)
-        .with_storage(storage)
-        .with_tokenman(token_man)
-        .with_listener(listener)
-        .with_datadir(".");
-
+    let options = VerticleOptions {
+        identity,
+        storage,
+        token_man,
+        listener,
+        bootstrap_nodes: Vec::new(),
+    };
     let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
     let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
-    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client)
-        .expect("test DHT should build");
-
+    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);
     let dht = Rc::new(RefCell::new(dht));
     dht.borrow_mut().weak = Rc::downgrade(&dht);
     dht

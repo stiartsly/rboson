@@ -1,21 +1,25 @@
-use std::thread::JoinHandle;
+use std::{
+    sync::Mutex,
+    thread::JoinHandle
+};
 use tokio::{
+    task,
     runtime,
     sync::mpsc::{self, UnboundedSender}
 };
-use crate::errors::Result;
 use crate::{
+    errors::Result,
     BoxHandler,
-    BoxTimerManager as TimerManager,
-    BoxTimerClient as TimerClient,
     BoxTimerCmd as TimerCmd,
+    BoxTimerClient as TimerClient,
+    BoxTimerManager as TimerManager
 };
 
 pub(crate) type TimerId = u64;
 
 pub(crate) struct VerticleClient {
-    timer_client: TimerClient,
-    handle      : Option<JoinHandle<()>>,
+    timerc: TimerClient,
+    handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl VerticleClient {
@@ -24,8 +28,8 @@ impl VerticleClient {
         handle: JoinHandle<()>
     ) -> Self {
         Self {
-            timer_client: TimerClient::new(sender),
-            handle: Some(handle),
+            timerc: TimerClient::new(sender),
+            handle: Mutex::new(Some(handle)),
         }
     }
 
@@ -34,21 +38,22 @@ impl VerticleClient {
         interval: Option<u64>,
         cb: BoxHandler<()>
     ) -> Result<TimerId> {
-        self.timer_client.add_timer(delay, interval, cb)
+        self.timerc.add_timer(delay, interval, cb)
     }
 
-    pub(crate) async fn stop(&mut self) -> Result<()> {
-        self.timer_client.stop_timers().await?;
+    pub(crate) async fn stop(&self) -> Result<()> {
+        self.timerc.stop_timers().await?;
 
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+        let handle = self.handle.lock().unwrap().take();
+        if let Some(h) = handle {
+            let _ = h.join();
         }
         Ok(())
     }
 }
 
 pub(crate) struct Verticle {
-    timer_manager: TimerManager,
+    timerman: TimerManager,
     receiver: mpsc::UnboundedReceiver<TimerCmd>,
 
 }
@@ -58,21 +63,21 @@ impl Verticle {
         receiver: mpsc::UnboundedReceiver<TimerCmd>
     ) -> Self {
         Self {
-            timer_manager: TimerManager::new(),
+            timerman: TimerManager::new(),
             receiver,
         }
     }
 
-    fn handle_timer_cmd(&mut self, cmd: TimerCmd) -> bool {
+    fn handle_commands(&mut self, cmd: TimerCmd) -> bool {
         match cmd {
             TimerCmd::Add { timer_id, delay, interval, cb } => {
-                self.timer_manager.add_timer(timer_id, delay, interval, cb);
+                self.timerman.add_timer(timer_id, delay, interval, cb);
             }
             TimerCmd::Cancel { timer_id } => {
-                self.timer_manager.cancel_timer(timer_id);
+                self.timerman.cancel_timer(timer_id);
             }
             TimerCmd::Stop { complete } => {
-                self.timer_manager.stop_all();
+                self.timerman.stop_all();
                 let _ = complete.send(());
                 return true;
             }
@@ -86,7 +91,7 @@ impl Verticle {
                 cmd = self.receiver.recv() => {
                     match cmd {
                         Some(cmd) => {
-                            if self.handle_timer_cmd(cmd) {
+                            if self.handle_commands(cmd) {
                                 break;
                             }
                         }
@@ -94,8 +99,8 @@ impl Verticle {
                     }
                 }
 
-                Some(timer_id) = self.timer_manager.next_expired(), if !self.timer_manager.is_idle() => {
-                    self.timer_manager.fire_expired(timer_id).await;
+                Some(timer_id) = self.timerman.next_expired(), if !self.timerman.is_idle() => {
+                    self.timerman.fire_expired(timer_id).await;
                 }
             }
         }
@@ -114,7 +119,7 @@ pub(crate) fn deploy(_option: VerticleOptions) -> Result<VerticleClient> {
             .build()
             .expect("dht verticle runtime should build");
 
-        let local = tokio::task::LocalSet::new();
+        let local = task::LocalSet::new();
         rt.block_on(local.run_until(async move {
             let mut vert = Verticle::new(receiver);
             vert.run_loop().await;

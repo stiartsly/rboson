@@ -37,16 +37,15 @@ pub(super) fn make_dht(
     let (tx, rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
     let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
-    let options = VerticleOptions::default()
-        .with_identity(identity)
-        .with_storage(storage)
-        .with_tokenman(tokenman)
-        .with_listener(listener)
-        .with_datadir(".");
+    let options = VerticleOptions {
+        identity: identity.clone(),
+        storage: storage.clone(),
+        token_man: tokenman.clone(),
+        listener: listener.clone(),
+        bootstrap_nodes: Vec::new(),
+    };
 
-    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client)
-        .expect("test DHT should build");
-
+    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);
     let dht = Rc::new(RefCell::new(dht));
     dht.borrow_mut().weak = Rc::downgrade(&dht);
     (dht, rx)

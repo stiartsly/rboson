@@ -113,40 +113,29 @@ impl DHT {
 
     pub(crate) fn new(
         options: VerticleOptions,
-        network: Network, host: String, port: u16,
+        network: Network,
+        host: String,
+        port: u16,
         persist_file: Option<PathBuf>,
         timer_client: Rc<TimerClient>
-    ) -> Result<Self>
+    ) -> Self
     {
-        assert!(options.identity.is_some());
-        assert!(options.storage.is_some());
-        assert!(options.token_man.is_some());
-        assert!(options.data_dir.is_some());
-        assert!(options.listener.is_some());
-
-        let identity = options.identity.as_ref().unwrap().clone();
-        let storage  = options.storage.as_ref().unwrap().clone();
-        let tokenman = options.token_man.as_ref().unwrap().clone();
-        let listener = options.listener.as_ref().unwrap().clone();
-        let bootstrap_nodes = options.bootstrap_nodes.as_ref().map(|nodes| nodes.to_vec())
-            .unwrap_or_else(Vec::new);
-
-        Ok( Self {
-            identity,
+        Self {
+            identity            : options.identity,
             network,
             host,
             port,
             is_running          : false,
             status              : ConnectionStatus::Disconnected,
-            listener,
-            storage,
-            tokenman,
+            listener            : options.listener,
+            storage             : options.storage,
+            tokenman            : options.token_man,
             task_man            : Rc::new(TaskManager::new()),
 
             rt                  : None,
             persist_file,
 
-            bootstrap_nodes,
+            bootstrap_nodes     : options.bootstrap_nodes,
             bootstrap_ids       : Vec::new(),
             last_bootstrap      : SystemTime::UNIX_EPOCH,
             last_maintenance    : SystemTime::UNIX_EPOCH,
@@ -157,7 +146,7 @@ impl DHT {
             rpc_server          : None,
 
             weak                : Weak::new(), // will be set later
-        })
+        }
     }
 
     pub(crate) fn network(&self) -> Network {

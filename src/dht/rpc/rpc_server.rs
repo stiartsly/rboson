@@ -375,7 +375,7 @@ impl RpcServer {
         let from_id = match Id::try_from(&data[0..Id::BYTES]) {
             Ok(id) => id,
             Err(e) => {
-                warn!("Ignored invalid packet from {}: invalid nodeid {e}", from);
+                warn!("Ignored invalid packet from {}: {e}", from);
                 server.borrow().malformed_message(from);
                 return;
             }
@@ -386,7 +386,7 @@ impl RpcServer {
         let decrypted = match identity.decrypt_into(&from_id, &data[Id::BYTES..]) {
             Ok(d) => d,
             Err(e) => {
-                warn!("Ignored invalid packet from {}: decrypting error {e}", from);
+                warn!("Ignored invalid packet from {}: {e}", from);
                 server.borrow().malformed_message(from);
                 return;
             }
@@ -396,7 +396,7 @@ impl RpcServer {
         let mut msg = match serde_cbor::from_slice::<Message>(&decrypted) {
             Ok(m) => m,
             Err(e) => {
-                warn!("Ignored invalid packet from {}: deserializing error {e}", from);
+                warn!("Ignored invalid packet from {}: {e}", from);
                 server.borrow().malformed_message(from);
                 return;
             }

@@ -65,7 +65,7 @@ struct SerdeFindValueResponse {
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "tok")]
+    #[serde(rename = "tok", default)]
     token: i32,
 
     #[serde(

@@ -10,14 +10,15 @@ pub(crate) async fn announce(node: &Node, data: &str) {
             return;
         }
     };
+    let valueid = value.id();
 
     println!(
         "Announcing value {} ({} bytes) ...",
-        value.id(),
+        valueid,
         value.data().len()
     );
-    match node.store_value(&value, -1, true).await {
-        Ok(_) => println!("\x1b[32mValue announced successfully.\x1b[0m"),
-        Err(e) => println!("\x1b[31mFailed to announce value: {}\x1b[0m", e),
+    match node.store_value(&value, -1, false).await {
+        Ok(_) => println!("\x1b[32mValue {} announced successfully.\x1b[0m", valueid),
+        Err(e) => println!("\x1b[31mFailed to announce value {}: {}\x1b[0m", valueid, e),
     }
 }

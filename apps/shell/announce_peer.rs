@@ -29,7 +29,7 @@ pub(crate) async fn announce(
                 return;
             }
         },
-        None => KeyPair::from(default_key),
+        _ => KeyPair::from(default_key),
     };
 
     let peer = match PeerInfo::builder(endpoint).with_key(keypair).build() {
@@ -45,8 +45,8 @@ pub(crate) async fn announce(
         peer.id(),
         peer.endpoint()
     );
-    match node.announce_peer(&peer, -1, true).await {
-        Ok(_) => println!("\x1b[32mPeer announced successfully.\x1b[0m"),
-        Err(e) => println!("\x1b[31mFailed to announce peer: {}\x1b[0m", e),
+    match node.announce_peer(&peer, -1, false).await {
+        Ok(_) => println!("\x1b[32mPeer {} announced successfully.\x1b[0m", peer.id()),
+        Err(e) => println!("\x1b[31mFailed to announce peer {}: {}\x1b[0m", peer.id(), e),
     }
 }

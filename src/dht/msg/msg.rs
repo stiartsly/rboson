@@ -130,7 +130,7 @@ pub(crate) enum Body {
 
 impl Body {
     fn from_err(value: CborValue) -> Result<Option<Self>> {
-        let err_cb = |e| ProtocolError::new(format!("Decoding error body failed: {}", e));
+        let err_cb = |e| ProtocolError::new(format!("Deserializing error body failed <{e}>"));
         Ok(from_value::<ErrorBody>(value)
             .map(Body::Error)
             .map(Some)
@@ -138,7 +138,7 @@ impl Body {
     }
 
     fn from_req(method: Method, value: CborValue) -> Result<Option<Self>> {
-        let err_cb = |e| ProtocolError::new(format!("Decoding {} request error: {}", method, e));
+        let err_cb = |e| ProtocolError::new(format!("Deserializing {method} request error <{e}>"));
         Ok(match method {
             Method::Ping => None,
             Method::FindNode => from_value::<FindNodeRequest>(value)
@@ -166,7 +166,7 @@ impl Body {
     }
 
     fn from_rsp(method: Method, value: CborValue) -> Result<Option<Self>> {
-        let err_cb = |e| ProtocolError::new(format!("Decoding {} response error: {}", method, e));
+        let err_cb = |e| ProtocolError::new(format!("Deserializing {method} response error <{e}>"));
         Ok(match method {
             Method::Ping | Method::AnnouncePeer | Method::StoreValue => None,
             Method::FindNode => from_value::<FindNodeResponse>(value)

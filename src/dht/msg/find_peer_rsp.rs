@@ -50,7 +50,7 @@ struct SerdeFindPeerResponse {
     nodes4: Option<Vec<NodeInfo>>,
     #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
     nodes6: Option<Vec<NodeInfo>>,
-    #[serde(rename = "tok")]
+    #[serde(rename = "tok", default)]
     token: i32,
     #[serde(
         rename = "p",

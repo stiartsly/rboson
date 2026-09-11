@@ -390,7 +390,11 @@ struct SerdePeerInfo {
     )]
     pk: Id,
 
-    #[serde(rename = "seq", deserialize_with = "utils::deserialize_seq")]
+    #[serde(
+        rename = "seq",
+        default,
+        deserialize_with = "utils::deserialize_seq"
+    )]
     seq: i32,
 
     #[serde(

@@ -9,9 +9,8 @@ use std::{
 };
 
 use boson::{
-    cfg::configuration,
     core::logger,
-    dht::{ConnectionStatus, ConnectionStatusListener, Node},
+    dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptionsBuilder},
     signature::{KeyPair, PrivateKey},
     Id, Network,
 };
@@ -347,18 +346,22 @@ async fn execute_command(
 async fn main() {
     let opts = Options::parse();
 
-    let mut builder = configuration::Builder::new();
-    if let Err(e) = builder.load_from(opts.config.as_deref().unwrap_or("config.yaml")) {
-        println!("Loading configuration failed: {e}");
-        return;
-    }
+    let mut builder = match NodeOptionsBuilder::new()
+        .load_from(opts.config.as_deref().unwrap_or("config.yaml"))
+    {
+        Ok(builder) => builder,
+        Err(e) => {
+            println!("Loading node configuration failed: {e}");
+            return;
+        }
+    };
     if let Some(datadir) = opts.datadir.as_deref() {
-        builder.with_data_dir(datadir);
+        builder = builder.with_data_dir(datadir);
     }
     if let Some(key) = opts.privatekey.as_deref() {
         match PrivateKey::try_from(key) {
             Ok(private_key) => {
-                builder.with_private_key(private_key);
+                builder = builder.with_private_key(private_key);
             }
             Err(e) => {
                 println!("Invalid private key: {e}");
@@ -367,33 +370,21 @@ async fn main() {
         }
     }
     if let Some(port) = opts.port {
-        builder.with_port(port);
+        builder = builder.with_port(port);
     }
-
-    builder.with_log_console(opts.log);
-    let config = match builder.build() {
+    if opts.log {
+        builder = builder.with_log_console(true);
+    }
+    let node_options = match builder.build() {
         Ok(v) => v,
         Err(e) => {
-            println!("Loading configuration failed: {e}");
+            println!("Building node configuration failed: {e}");
             return;
         }
     };
 
-    #[cfg(feature = "inspect")]
-    {
-        config.dump();
-    }
-
-    let private_key = config.private_key().clone();
+    let private_key = node_options.private_key().clone();
     let readiness = Arc::new(ConnectionReadiness::new());
-
-    let node_options = match config.build_node_options() {
-        Ok(options) => options,
-        Err(e) => {
-            println!("Building node options failed: {e}");
-            return;
-        }
-    };
 
     let node = match Node::new(node_options) {
         Ok(node) => node,

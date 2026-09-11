@@ -1,13 +1,67 @@
+use std::{
+    fs,
+    net::SocketAddr,
+    path::Path,
+};
+
 use log::LevelFilter;
+use serde::Deserialize;
 use crate::{
     NodeInfo,
     signature,
-    errors::{Result, ArgumentError}
+    errors::{Result, ArgumentError, IOError},
 };
 
-const DEFAULT_DHT_PORT: u16 = 19001;
+const DEFAULT_DHT_PORT: u16 = 39001;
 const DATA_DIR: &str = ".";
 const DATABASE_URI: &str = "storage.db";
+
+#[derive(Debug, Deserialize)]
+struct SerdeNodeOptions {
+    #[serde(rename = "privateKey")]
+    private_key: String,
+    ipv4: Option<bool>,
+    ipv6: Option<bool>,
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(rename = "dataDir")]
+    data_dir: Option<String>,
+    #[serde(rename = "databaseUri")]
+    database_uri: String,
+    #[serde(default)]
+    bootstraps: Vec<SerdeNodeEntry>,
+    #[serde(rename = "logLevel")]
+    log_level: Option<String>,
+    #[serde(rename = "logFile")]
+    log_file: Option<String>,
+    #[serde(rename = "logConsole", default = "default_log_console")]
+    log_console: bool,
+    #[serde(rename = "enableDeveloperMode", default)]
+    developer_mode: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeNodeEntry(crate::Id, String, u16);
+
+impl TryFrom<SerdeNodeEntry> for NodeInfo {
+    type Error = crate::Error;
+
+    fn try_from(value: SerdeNodeEntry) -> Result<Self> {
+        let SerdeNodeEntry(id, host, port) = value;
+        let address = format!("{host}:{port}").parse::<SocketAddr>().map_err(|e| {
+            ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
+        })?;
+        Ok(NodeInfo::new(id, address))
+    }
+}
+
+fn default_port() -> u16 {
+    DEFAULT_DHT_PORT
+}
+
+fn default_log_console() -> bool {
+    true
+}
 
 #[derive(Debug, Clone)]
 pub struct NodeOptions {
@@ -103,6 +157,46 @@ impl NodeOptionsBuilder {
         Self {
             options: NodeOptions::new(),
         }
+    }
+
+    pub fn read_from(mut self, yaml: &str) -> Result<Self> {
+        let parsed = serde_yaml::from_str::<SerdeNodeOptions>(yaml)
+            .map_err(|e| ArgumentError::new(format!("invalid node YAML format: {e}")))?;
+        self.options.private_key = signature::PrivateKey::try_from(parsed.private_key.as_str())?;
+        self.options.host4 = parsed
+            .ipv4
+            .unwrap_or(false)
+            .then(|| crate::local_addr(true).map(|address| address.to_string()))
+            .transpose()?;
+        self.options.host6 = parsed
+            .ipv6
+            .unwrap_or(false)
+            .then(|| crate::local_addr(false).map(|address| address.to_string()))
+            .transpose()?;
+        self.options.port = parsed.port;
+        self.options.data_dir = parsed.data_dir.unwrap_or_else(|| DATA_DIR.to_string());
+        self.options.database_uri = parsed.database_uri;
+        self.options.bootstrap_nodes = parsed
+            .bootstraps
+            .into_iter()
+            .map(NodeInfo::try_from)
+            .collect::<Result<Vec<_>>>()?;
+        self.options.log_level = parsed
+            .log_level
+            .as_deref()
+            .and_then(|level| level.parse().ok())
+            .unwrap_or(LevelFilter::Info);
+        self.options.log_file = parsed.log_file;
+        self.options.log_console = parsed.log_console;
+        self.options.developer_mode = parsed.developer_mode;
+        Ok(self)
+    }
+
+    pub fn load_from(self, path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let yaml = fs::read_to_string(path)
+            .map_err(|e| IOError::new(format!("Reading config {} failed: {e}", path.display())))?;
+        self.read_from(&yaml)
     }
 
     pub fn with_host4(mut self, host: &str) -> Self {

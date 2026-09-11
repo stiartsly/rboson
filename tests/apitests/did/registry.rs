@@ -5,8 +5,7 @@ use std::{
 };
 
 use boson::{
-    cfg::configuration,
-    dht::Node,
+    dht::{Node, NodeOptionsBuilder},
     did::{DHTRegistry, Registry},
     CryptoIdentity,
 };
@@ -32,12 +31,12 @@ fn create_node() -> (Arc<Node>, std::path::PathBuf) {
         path.display()
     );
     fs::write(&config_path, yaml).unwrap();
-    let config = configuration::Builder::new()
+    let options = NodeOptionsBuilder::new()
         .load_from(&config_path)
         .unwrap()
         .build()
         .unwrap();
-    let node = Node::new(config.build_node_options().unwrap()).unwrap();
+    let node = Node::new(options).unwrap();
     (node, path)
 }
 

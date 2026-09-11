@@ -1,5 +1,5 @@
 use boson::{
-    cfg::configuration,
+    dht::NodeOptionsBuilder,
     signature::{KeyPair, PrivateKey},
 };
 use log::LevelFilter;
@@ -16,7 +16,7 @@ mod tests {
             "ipv4: true\nport: 39011\nprivateKey: \"{private_key}\"\ndataDir: tests-data\ndatabaseUri: sqlite://node.db\nbootstraps:\n  - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k\n    - 203.0.113.5\n    - 39011\nlogLevel: debug\nlogFile: node.log\nenableDeveloperMode: true\n"
         );
 
-        let cfg = configuration::Builder::new()
+        let cfg = NodeOptionsBuilder::new()
             .read_from(&yaml)
             .unwrap()
             .build()
@@ -36,7 +36,7 @@ mod tests {
         assert_eq!(cfg.bootstrap_nodes()[0].port(), 39011);
         assert_eq!(cfg.log_level(), LevelFilter::Debug);
         assert_eq!(cfg.log_file(), Some("node.log"));
-        assert!(cfg.enable_devp());
+        assert!(cfg.developer_mode());
     }
 
     #[test]
@@ -51,7 +51,7 @@ mod tests {
                 "HZXXs9LTfNQjrDKvvexRhuMk8TTJhYCfrHwaj3jUzuhZ",
             );
         }
-        let cfg = configuration::Builder::new()
+        let cfg = NodeOptionsBuilder::new()
             .load_from(&path)
             .unwrap()
             .build()
@@ -73,6 +73,6 @@ mod tests {
         assert_eq!(cfg.bootstrap_nodes()[1].port(), 39011);
         assert_eq!(cfg.log_level(), LevelFilter::Info);
         assert_eq!(cfg.log_file(), None);
-        assert!(!cfg.enable_devp());
+        assert!(!cfg.developer_mode());
     }
 }

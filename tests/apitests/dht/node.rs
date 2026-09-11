@@ -6,13 +6,12 @@ use std::{
 use serial_test::serial;
 use boson::{
     signature,
-    cfg::configuration,
     cryptobox::{Nonce, CryptoBox},
     core::{
         PeerBuilder, Result,
         ImmutableBuilder as ValueBuilder,
     },
-    dht::Node,
+    dht::{Node, NodeOptionsBuilder},
 };
 use crate::{
     create_random_bytes,
@@ -50,10 +49,10 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
     );
 
     fs::write(&config_path, yaml)?;
-    let cfg = configuration::Builder::new()
+    let options = NodeOptionsBuilder::new()
         .load_from(&config_path).unwrap()
         .build().unwrap();
-    Ok(Node::new(cfg.build_node_options().unwrap())?)
+    Ok(Node::new(options)?)
 }
 
 #[cfg(test)]

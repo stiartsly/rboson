@@ -11,7 +11,7 @@ use boson::{
     Node,
     NodeInfo,
     signature,
-    cfg::configuration as cfg,
+    dht::NodeOptionsBuilder,
 };
 
 fn get_storage_path(input: &str) -> String {
@@ -132,8 +132,7 @@ async fn main() {
     };
 
     let private_key = load_or_generate_key(&path);
-    let mut builder = cfg::Configuration::new();
-    builder
+    let mut builder = NodeOptionsBuilder::new()
         .with_port(port)
         .with_host4(&ip_str)
         .with_data_dir(path.as_str())
@@ -142,14 +141,8 @@ async fn main() {
         .with_log_console(true)
         .with_database_uri("jdbc:sqlite:node.db");
 
-    for bootstrap_node in bootstrap_nodes {
-        builder.add_bootstrap_node(bootstrap_node);
-    }
-    let cfg = builder.build().unwrap();
-
-    cfg.dump();
-
-    let options = cfg.build_node_options().unwrap();
+    builder = builder.with_bootstrap_nodes(bootstrap_nodes);
+    let options = builder.build().unwrap();
     let node = Node::new(options).unwrap();
     let _ = node.start().await;
 

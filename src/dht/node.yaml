@@ -1,0 +1,22 @@
+ipv4: true
+ipv6: false
+port: 39001
+
+privateKey: ${NODE_PRIVATE_KEY}
+
+dataDir: ${DATADIR}
+databaseUri: jdbc:sqlite:node.db
+
+logLevel: ${LOG_LEVEL}
+logFile: ${LOG_FILE}
+logConsole: true
+
+# Initial entry points to the DHT network.
+# Format: [ NodeID (Base58), IPAddress, Port ]
+bootstraps:
+  - - FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo
+    - 155.138.245.211
+    - 39001
+  - - 66yzSu9imYLtG4TWMZKdk79BXGcX17s2b259taYFeyKw
+    - 45.32.138.246
+    - 39001

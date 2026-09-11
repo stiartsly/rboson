@@ -1,0 +1,20 @@
+ipv4: true
+ipv6: false
+port: 39011
+
+privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
+
+dataDir: .boson_launcher
+databaseUri: jdbc:sqlite:node.db
+
+logLevel: debug
+logFile: launcher.log
+logConsole: true
+
+bootstraps:
+  - - FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo
+    - 155.138.245.211
+    - 39001
+  - - 66yzSu9imYLtG4TWMZKdk79BXGcX17s2b259taYFeyKw
+    - 45.32.138.246
+    - 39001

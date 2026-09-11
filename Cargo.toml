@@ -16,12 +16,12 @@ name = "apitests"
 path = "tests/apitests/lib.rs"
 
 [[bin]]
-name = "shell"
-path = "apps/shell/main.rs"
+name = "anode"
+path = "apps/sample/main.rs"
 
 [[bin]]
-name = "identity"
-path = "apps/identity/main.rs"
+name = "shell"
+path = "apps/shell/main.rs"
 
 [[bin]]
 name = "launcher"
@@ -30,10 +30,6 @@ path = "apps/launcher/main.rs"
 #[[bin]]
 #name = "im"
 #path = "apps/im/mod.rs"
-
-[[bin]]
-name = "node"
-path = "apps/sample/main.rs"
 
 [features]
 devp = ["inspect"]

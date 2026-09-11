@@ -5,6 +5,45 @@ use crate::{
     Result,
     errors::ArgumentError,
 };
+use std::{fs, path::Path};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct SerdeOptions {
+    service: SerdeService,
+    client: SerdeClient,
+    upstream: SerdeUpstream,
+    #[serde(rename = "nameAccess", default)]
+    name_access: bool,
+    #[serde(rename = "announcePeer", default)]
+    announce_peer: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeService {
+    #[serde(rename = "peerId")]
+    peer_id: Id,
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeClient {
+    #[serde(rename = "userId")]
+    user_id: Option<Id>,
+    #[serde(rename = "userPrivateKey")]
+    user_private_key: Option<String>,
+    #[serde(rename = "devicePrivateKey")]
+    device_private_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeUpstream {
+    host: String,
+    port: u16,
+    #[serde(default)]
+    scheme: Option<String>,
+}
 
 pub struct Options {
     server_peerid   : Id,
@@ -132,6 +171,53 @@ impl OptionsBuilder {
         }
     }
 
+    pub fn read_from(yaml: &str) -> Result<Self> {
+        let parsed = serde_yaml::from_str::<SerdeOptions>(yaml)
+            .map_err(|e| ArgumentError::new(format!("invalid ActiveProxy YAML format: {e}")))?;
+        let user_key = parsed
+            .client
+            .user_private_key
+            .as_deref()
+            .map(signature::PrivateKey::try_from)
+            .transpose()?;
+        let mut builder = Self::new(parsed.service.peer_id.clone())
+            .with_upstream_host(parsed.upstream.host)
+            .with_upstream_port(parsed.upstream.port)
+            .with_device_key(signature::KeyPair::from(&signature::PrivateKey::try_from(
+                parsed.client.device_private_key.as_str(),
+            )?))
+            .with_name_access(parsed.name_access)
+            .with_announce_peer(parsed.announce_peer);
+
+        if let Some(scheme) = parsed.upstream.scheme {
+            builder = builder.with_upstream_scheme(scheme);
+        }
+        if let (Some(host), Some(port)) = (parsed.service.host, parsed.service.port) {
+            builder = builder.with_service(parsed.service.peer_id, host, port);
+        }
+        match (parsed.client.user_id, user_key) {
+            (Some(user_id), Some(user_key)) => {
+                let keypair = signature::KeyPair::from(user_key);
+                if user_id != Id::from(keypair.public_key()) {
+                    return Err(ArgumentError::new("userId does not match userPrivateKey"));
+                }
+                Ok(builder.with_user_key(keypair))
+            }
+            (Some(user_id), _) => Ok(builder.with_user_id(user_id)),
+            (None, Some(user_key)) => Ok(builder.with_user_key(signature::KeyPair::from(user_key))),
+            (None, None) => Err(ArgumentError::new(
+                "ActiveProxy client requires userId or userPrivateKey",
+            )),
+        }
+    }
+
+    pub fn load_from(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let yaml = fs::read_to_string(path)
+            .map_err(|e| ArgumentError::new(format!("Reading config {} failed: {e}", path.display())))?;
+        Self::read_from(&yaml)
+    }
+
     pub fn with_data_dir(mut self, data_dir: impl Into<String>) -> Self {
         self.data_dir = Some(data_dir.into());
         self
@@ -201,6 +287,11 @@ impl OptionsBuilder {
         self
     }
 
+    pub fn with_upstream_scheme(mut self, scheme: impl Into<String>) -> Self {
+        self.upstream_scheme = scheme.into();
+        self
+    }
+
     pub fn with_name_access(mut self, enabled: bool) -> Self {
         self.name_access = enabled;
         self
@@ -242,4 +333,3 @@ impl OptionsBuilder {
         })
     }
 }
-

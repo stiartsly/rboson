@@ -7,15 +7,11 @@
 # Visual Code
 .vscode
 
-
-.shell_data
-.target_data
-.sample_node
+.boson_sample
+.boson_shell
+.boson_launcher
 .DS_Store
 
-
 .github
-.shell_*
 
-**/config.yaml
 

@@ -7,14 +7,15 @@ use tokio::sync::Notify;
 
 use boson::{
     Network,
-    cfg::configuration,
     dht::{
         Node,
         ConnectionStatus,
-        ConnectionStatusListener
+        ConnectionStatusListener,
+        NodeOptionsBuilder,
     },
     activeproxy::{
-        ActiveProxyClient as ActiveProxy
+        ActiveProxyClient as ActiveProxy,
+        OptionsBuilder as ActiveProxyOptionsBuilder,
     },
 };
 
@@ -23,9 +24,13 @@ use boson::{
 #[command(version = "1.0")]
 #[command(about = "Boson launcher service", long_about = None)]
 struct Options {
-    /// The configuration file (YAML)
-    #[arg(short, long, value_name = "FILE", default_value = "default.yaml")]
+    /// The DHT node configuration file
+    #[arg(short, long, value_name = "FILE", default_value = "node.yaml")]
     config: String,
+
+    /// The ActiveProxy configuration file
+    #[arg(long, value_name = "FILE", default_value = "activeproxy.yaml")]
+    activeproxy_config: String,
 }
 
 /// Notifies once the node has connected to the Boson network.
@@ -50,24 +55,13 @@ impl ConnectionStatusListener for ReadyListener {
 async fn main() {
     let opts = Options::parse();
 
-    let mut builder = configuration::Builder::new();
-    if let Err(e) = builder.load_from(&opts.config) {
-        eprintln!("Error loading configuration: {e}");
-        exit(1);
-    }
-
-     let cfg = match builder.build() {
+    let node_options = match NodeOptionsBuilder::new()
+        .load_from(&opts.config)
+        .and_then(NodeOptionsBuilder::build)
+    {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Error building configuration: {e}");
-            exit(1);
-        }
-    };
-
-    let node_options = match cfg.build_node_options() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Error building node options: {e}");
+            eprintln!("Error building node configuration: {e}");
             exit(1);
         }
     };
@@ -94,27 +88,25 @@ async fn main() {
         println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
-    let ap = match cfg.build_activeproxy_options() {
-        Ok(Some(options)) => {
-            match ActiveProxy::new(Some(node.clone()), options) {
-                Ok(ap) => Some(Arc::new(ap)),
-                Err(e) => {
-                    eprintln!("Creating ActiveProxy client error: {e}");
-                    exit(1);
-                }
-            }
-        }
-        Ok(_) => None,
+    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&opts.activeproxy_config)
+        .and_then(ActiveProxyOptionsBuilder::build)
+    {
+        Ok(options) => options,
         Err(e) => {
-            eprintln!("Error building activeproxy options: {e}");
+            eprintln!("Error building ActiveProxy configuration: {e}");
+            exit(1);
+        }
+    };
+    let ap = match ActiveProxy::new(Some(node.clone()), activeproxy_options) {
+        Ok(ap) => Arc::new(ap),
+        Err(e) => {
+            eprintln!("Creating ActiveProxy client error: {e}");
             exit(1);
         }
     };
 
-    if let Some(ap) = &ap {
-        if let Err(e) = ap.start().await {
-            eprintln!("ActiveProxy client stopped with error: {e}");
-        }
+    if let Err(e) = ap.start().await {
+        eprintln!("ActiveProxy client stopped with error: {e}");
     }
 
     if tokio::signal::ctrl_c().await.is_err() {
@@ -123,9 +115,7 @@ async fn main() {
 
     println!("Shutting down...");
 
-    if let Some(ap) = ap {
-        let _ = ap.stop().await;
-    }
+    let _ = ap.stop().await;
 
     let _ = node.stop().await;
 }

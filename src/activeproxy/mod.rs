@@ -20,9 +20,10 @@ pub(crate) use crate::utils::{
 pub mod options;
 pub mod client;
 
+
 #[cfg(test)]
 mod unitests {
-    //mod test_activeproxy;
+    //mod test_options;
 }
 
 pub use {

@@ -1,4 +1,3 @@
-pub mod cfg;
 pub mod core;
 pub mod did;
 pub mod dht;
@@ -36,10 +35,6 @@ pub(crate) use crate::utils::{
         Promise,
         PromiseFuture
     }
-};
-
-pub use crate::cfg::{
-    configuration::Configuration,
 };
 
 pub use crate::core::{

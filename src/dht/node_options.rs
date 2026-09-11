@@ -1,4 +1,5 @@
 use std::{
+    env,
     fs,
     net::SocketAddr,
     path::Path,
@@ -61,6 +62,34 @@ fn default_port() -> u16 {
 
 fn default_log_console() -> bool {
     true
+}
+
+fn expand_environment_variables(input: &str) -> Result<String> {
+    let mut expanded = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find("${") {
+        let (prefix, after_start) = remaining.split_at(start);
+        expanded.push_str(prefix);
+
+        let end = after_start.find('}').ok_or_else(|| {
+            ArgumentError::new("unterminated environment variable reference")
+        })?;
+        let name = &after_start[2..end];
+        if name.is_empty() {
+            return Err(ArgumentError::new("empty environment variable name"));
+        }
+        let value = env::var(name).map_err(|_| {
+            ArgumentError::new(format!(
+                "environment variable `{name}` is not set"
+            ))
+        })?;
+        expanded.push_str(&value);
+        remaining = &after_start[end + 1..];
+    }
+
+    expanded.push_str(remaining);
+    Ok(expanded)
 }
 
 #[derive(Debug, Clone)]
@@ -160,8 +189,10 @@ impl NodeOptionsBuilder {
     }
 
     pub fn read_from(mut self, yaml: &str) -> Result<Self> {
-        let parsed = serde_yaml::from_str::<SerdeNodeOptions>(yaml)
+        let expanded_yaml = expand_environment_variables(yaml)?;
+        let parsed = serde_yaml::from_str::<SerdeNodeOptions>(&expanded_yaml)
             .map_err(|e| ArgumentError::new(format!("invalid node YAML format: {e}")))?;
+
         self.options.private_key = signature::PrivateKey::try_from(parsed.private_key.as_str())?;
         self.options.host4 = parsed
             .ipv4
@@ -259,5 +290,43 @@ impl NodeOptionsBuilder {
             return Err(ArgumentError::new("Either host4 or host6 must be specified"));
         }
         Ok(self.options)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_from_expands_environment_variables_before_parsing() {
+        let private_key = signature::KeyPair::random().to_private_key().to_string();
+        let yaml = format!(
+            "ipv4: true\nprivateKey: ${{NODE_OPTIONS_TEST_PRIVATE_KEY}}\ndatabaseUri: storage.db\n"
+        );
+        unsafe {
+            env::set_var("NODE_OPTIONS_TEST_PRIVATE_KEY", &private_key);
+        }
+
+        let options = NodeOptionsBuilder::new()
+            .read_from(&yaml)
+            .expect("environment-backed configuration should parse");
+
+        assert_eq!(options.options.private_key.to_string(), private_key);
+        unsafe {
+            env::remove_var("NODE_OPTIONS_TEST_PRIVATE_KEY");
+        }
+    }
+
+    #[test]
+    fn read_from_reports_missing_environment_variables() {
+        let result = NodeOptionsBuilder::new().read_from(
+            "ipv4: true\nprivateKey: ${NODE_OPTIONS_TEST_MISSING}\ndatabaseUri: storage.db\n",
+        );
+
+        let error = match result {
+            Ok(_) => panic!("missing environment variable should fail"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("NODE_OPTIONS_TEST_MISSING"));
     }
 }

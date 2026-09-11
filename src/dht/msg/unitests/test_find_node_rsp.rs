@@ -12,11 +12,11 @@ fn make_node_info4_with_port(port: u16) -> NodeInfo {
 }
 
 fn make_node_info4() -> NodeInfo {
-    make_node_info4_with_port(39001)
+    make_node_info4_with_port(39011)
 }
 
 fn make_node_info6() -> NodeInfo {
-    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    let addr = format!("[::1]:{}", 39011).parse::<SocketAddr>().unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 

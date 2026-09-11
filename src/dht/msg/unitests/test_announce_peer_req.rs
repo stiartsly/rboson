@@ -12,7 +12,7 @@ fn make_peer() -> PeerInfo {
         None,
         vec![9; 64],
         123456,
-        "127.0.0.1:39001".to_string(),
+        "127.0.0.1:39011".to_string(),
         Some(vec![1, 2, 3]),
     )
 }

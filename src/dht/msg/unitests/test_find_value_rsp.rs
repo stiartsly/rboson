@@ -9,12 +9,12 @@ use crate::{
 };
 
 fn make_node_info4() -> NodeInfo {
-    let addr = format!("127.0.0.1:{}", 39001).parse::<SocketAddr>().unwrap();
+    let addr = format!("127.0.0.1:{}", 39011).parse::<SocketAddr>().unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 
 fn make_node_info6() -> NodeInfo {
-    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    let addr = format!("[::1]:{}", 39011).parse::<SocketAddr>().unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 

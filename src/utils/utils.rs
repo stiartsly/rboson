@@ -1,8 +1,9 @@
 use std::result::Result as StdResult;
 use serde::{
-    Deserialize, Deserializer,
-    Serialize, Serializer
+    de::{self, Error, SeqAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::fmt;
 use crate::{
     core::version,
     Id,
@@ -73,7 +74,7 @@ where
                 } else {
                     hex::decode(&s)
                 }
-                .map_err(serde::de::Error::custom)
+                .map_err(Error::custom)
             })
             .transpose()?
     } else {
@@ -83,7 +84,7 @@ where
     match opt {
         Some(raw) => {
             let nonce = Nonce::try_from(raw.as_slice())
-                .map_err(|e| serde::de::Error::custom(format!("invalid nonce: {}", e)))?;
+                .map_err(|e| Error::custom(format!("invalid nonce: {}", e)))?;
             Ok(Some(nonce))
         }
         _ => Ok(None),
@@ -119,13 +120,13 @@ where
         let s = String::deserialize(de)?;
         if s.starts_with("0x") {
             let hex_str = &s[2..];
-            let bytes = hex::decode(hex_str).map_err(serde::de::Error::custom)?;
+            let bytes = hex::decode(hex_str).map_err(Error::custom)?;
             Ok(bytes)
         } else {
-            Err(serde::de::Error::custom("invalid hex string"))
+            Err(Error::custom("invalid hex string"))
         }
     } else {
-        Vec::<u8>::deserialize(de)
+        de.deserialize_any(ByteVecVisitor)
     }
 }
 
@@ -139,16 +140,71 @@ where
             Some(s) => {
                 if s.starts_with("0x") {
                     let hex_str = &s[2..];
-                    let bytes = hex::decode(hex_str).map_err(serde::de::Error::custom)?;
+                    let bytes = hex::decode(hex_str).map_err(Error::custom)?;
                     Ok(Some(bytes))
                 } else {
-                    Err(serde::de::Error::custom("invalid hex string"))
+                    Err(Error::custom("invalid hex string"))
                 }
             }
             _ => Ok(None),
         }
     } else {
-        Option::<Vec<u8>>::deserialize(de)
+        de.deserialize_option(OptionalByteVecVisitor)
+    }
+}
+
+struct ByteVecVisitor;
+
+impl<'de> Visitor<'de> for ByteVecVisitor {
+    type Value = Vec<u8>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a CBOR byte string or sequence of bytes")
+    }
+
+    fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(value.to_vec())
+    }
+
+    fn visit_byte_buf<E>(self, value: Vec<u8>) -> StdResult<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(value)
+    }
+
+    fn visit_seq<A>(self, sequence: A) -> StdResult<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        Vec::<u8>::deserialize(de::value::SeqAccessDeserializer::new(sequence))
+    }
+}
+
+struct OptionalByteVecVisitor;
+
+impl<'de> Visitor<'de> for OptionalByteVecVisitor {
+    type Value = Option<Vec<u8>>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an optional CBOR byte string or sequence of bytes")
+    }
+
+    fn visit_none<E>(self) -> StdResult<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(None)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> StdResult<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_bytes(deserializer).map(Some)
     }
 }
 
@@ -158,8 +214,7 @@ where
 {
     let seq = i32::deserialize(de)?;
     if seq < 0 {
-        println!("######>>>> seq: {}", seq);
-        return Err(serde::de::Error::custom("seq must be larger than or equal to 0"));
+        return Err(Error::custom("seq must be larger than or equal to 0"));
     }
     Ok(seq)
 }
@@ -169,7 +224,7 @@ where  D: Deserializer<'de>,
 {
     let seq = Option::<i32>::deserialize(de)?.unwrap_or(-1);
     if seq < -1 {
-        return Err(serde::de::Error::custom("expected_seq must be larger than or equal to -1"));
+        return Err(Error::custom("expected_seq must be larger than or equal to -1"));
     }
     Ok(seq)
 }
@@ -178,16 +233,6 @@ pub(crate) const fn default_expected_seq() -> i32 { -1 }
 
 pub(crate) fn is_default_expected_seq(seq: &i32) -> bool {
     *seq == -1
-}
-
-pub(crate) fn deserialize_count<'de, D>(de: D) -> StdResult<i32, D::Error>
-where  D: Deserializer<'de>,
-{
-    let count = i32::deserialize(de)?;
-    if count < 0 {
-        return Err(serde::de::Error::custom("count must be larger than or equal to -1"));
-    }
-    Ok(count)
 }
 
 pub(crate) fn serialize_ver<S>(ver: &i32, se: S) -> StdResult<S::Ok, S::Error>

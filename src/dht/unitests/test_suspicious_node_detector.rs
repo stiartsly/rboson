@@ -10,7 +10,7 @@ use crate::core::{
 #[test]
 fn test_observe_and_last_known_id() {
     let mut detector = DefaultSuspiciousNodeDetector::default();
-    let addr = "127.0.0.1:39001".parse::<SocketAddr>().unwrap();
+    let addr = "127.0.0.1:39011".parse::<SocketAddr>().unwrap();
     let id = Id::random();
 
     detector.observe(addr, id);

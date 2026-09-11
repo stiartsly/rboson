@@ -65,7 +65,11 @@ struct SerdeFindValueResponse {
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "tok", default)]
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     token: i32,
 
     #[serde(
@@ -140,17 +144,16 @@ impl Into<SerdeFindValueResponse> for FindValueResponse {
 impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
     type Error = Error;
     fn try_from(s: SerdeFindValueResponse) -> Result<Self> {
-        if s.value.is_none() &&
-            s.nodes4.is_none() &&
-            s.nodes6.is_none() {
-            return Err(ProtocolError::new("either \"n4\", \"n6\" or \"v\" must be present"));
+        if s.value.is_none() && s.nodes4.is_none() && s.nodes6.is_none() {
+            return Err(ProtocolError::new(
+                "either \"n4\", \"n6\" or \"v\" must be present"
+            ));
         }
 
-        if s.value.is_some() && (
-            s.nodes4.is_some() ||
-            s.nodes6.is_some()
-        ) {
-            return Err(ProtocolError::new("\"v\" cannot be combined with \"n4\" or \"n6\""));
+        if  (s.nodes4.is_some() || s.nodes6.is_some()) && s.value.is_some(){
+            return Err(ProtocolError::new(
+                "\"v\" cannot be combined with \"n4\" or \"n6\""
+            ));
         }
 
         if let Some(data) = s.value {

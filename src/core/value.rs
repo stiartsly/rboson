@@ -330,6 +330,7 @@ impl Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
         write!(f, "id:{}", self.id())?;
         if self.is_mutable() {
             write!(
@@ -351,6 +352,7 @@ impl fmt::Display for Value {
             self.seq,
             hex::encode(self.data.as_slice())
         )?;
+        write!(f, "}}")?;
         Ok(())
     }
 }

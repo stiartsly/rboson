@@ -46,12 +46,25 @@ impl LookupResponse for FindPeerResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindPeerResponse {
-    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "n4",
+        skip_serializing_if = "utils::is_default"
+    )]
     nodes4: Option<Vec<NodeInfo>>,
-    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
+
+    #[serde(
+        rename = "n6",
+        skip_serializing_if = "utils::is_default"
+    )]
     nodes6: Option<Vec<NodeInfo>>,
-    #[serde(rename = "tok", default)]
+
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     token: i32,
+
     #[serde(
         rename = "p",
         default,
@@ -59,24 +72,22 @@ struct SerdeFindPeerResponse {
         deserialize_with = "deserialize_peers",
         skip_serializing_if = "utils::is_default"
     )]
-    peers: Option<Vec<PeerInfo>>,
+    peers: Vec<PeerInfo>,
 }
 
-fn serialize_peers<S>(peers: &Option<Vec<PeerInfo>>, serializer: S) -> StdResult<S::Ok, S::Error>
+fn serialize_peers<S>(peers: &Vec<PeerInfo>, serializer: S) -> StdResult<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    match peers {
-        Some(peers) if serializer.is_human_readable() => peers.serialize(serializer),
-        Some(peers) => {
-            let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
-            serializer.serialize_bytes(&packed)
-        }
-        _ => serializer.serialize_none(),
+    if serializer.is_human_readable() {
+        peers.serialize(serializer)
+    } else {
+        let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_bytes(&packed)
     }
 }
 
-fn deserialize_peers<'de, D>(deserializer: D) -> StdResult<Option<Vec<PeerInfo>>, D::Error>
+fn deserialize_peers<'de, D>(deserializer: D) -> StdResult<Vec<PeerInfo>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -109,31 +120,7 @@ where
         }
     }
 
-    struct OptionalPeersVisitor;
-
-    impl<'de> Visitor<'de> for OptionalPeersVisitor {
-        type Value = Option<Vec<PeerInfo>>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("an optional packed peer list")
-        }
-
-        fn visit_none<E>(self) -> StdResult<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            Ok(None)
-        }
-
-        fn visit_some<D>(self, deserializer: D) -> StdResult<Self::Value, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_any(PeersVisitor).map(Some)
-        }
-    }
-
-    deserializer.deserialize_option(OptionalPeersVisitor)
+    deserializer.deserialize_any(PeersVisitor)
 }
 
 impl Into<SerdeFindPeerResponse> for FindPeerResponse {
@@ -142,7 +129,7 @@ impl Into<SerdeFindPeerResponse> for FindPeerResponse {
             nodes4: self.nodes4().map(|v| v.to_vec()),
             nodes6: self.nodes6().map(|v| v.to_vec()),
             token: self.token(),
-            peers: self.peers().map(|v| v.to_vec()),
+            peers: self.peers().map(|v| v.to_vec()).unwrap_or(Vec::new()),
         }
     }
 }
@@ -151,21 +138,20 @@ impl TryFrom<SerdeFindPeerResponse> for FindPeerResponse {
     type Error = Error;
 
     fn try_from(s: SerdeFindPeerResponse) -> Result<Self> {
-        if s.peers.is_none() && s.nodes4.is_none() && s.nodes6.is_none() {
+        if s.peers.is_empty() && s.nodes4.is_none() && s.nodes6.is_none() {
             return Err(ProtocolError::new(
                 "either \"n4\", \"n6\" or \"p\" must be present",
             ));
         }
-
-        if s.peers.is_some() && (s.nodes4.is_some() || s.nodes6.is_some()) {
+        if !s.peers.is_empty() && (s.nodes4.is_some() || s.nodes6.is_some()) {
             return Err(ProtocolError::new(
                 "\"p\" cannot be combined with \"n4\" or \"n6\"",
             ));
         }
 
-        Ok(match s.peers {
-            Some(peers) => FindPeerResponse::with_peers(peers),
-            _ => FindPeerResponse::with_nodes(s.nodes4, s.nodes6),
+        Ok(match s.peers.is_empty() {
+            false => FindPeerResponse::with_peers(s.peers),
+            true => FindPeerResponse::with_nodes(s.nodes4, s.nodes6),
         })
     }
 }

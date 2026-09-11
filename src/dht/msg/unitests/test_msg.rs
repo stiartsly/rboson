@@ -86,4 +86,26 @@ mod tests {
             .expect("missing target field");
         assert!(matches!(encoded_target, serde_cbor::Value::Bytes(bytes) if bytes.len() == Id::BYTES));
     }
+
+    #[test]
+    fn test_deserialize_find_peer_response_byte_string_fields() {
+        let encoded = hex::decode(
+            "bf617918446174192e426172bf617081bf62696458202601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c6373696758401011a3e2ddc824f0aeae011e68266a4ef8da83824f64cf4ddc7b3d3aa7eb6ab4c7d43ea906fefcd820be951b48cf3e4584a70f89b7bfff6be9e770586e93d80361656f7777772e6578616d706c652e636f6dffff61761a4f520001ff",
+        )
+        .expect("fixture must be valid hex");
+
+        let message: Message =
+            serde_cbor::from_slice(&encoded).expect("find-peer response must deserialize");
+
+        assert_eq!(message.kind() as u8, Kind::Response as u8);
+        assert_eq!(message.method() as u8, Method::FindPeer as u8);
+        assert_eq!(message.txid(), 11842);
+        let Some(msg::Body::FindPeerResponse(response)) = message.body() else {
+            panic!("expected a find-peer response body");
+        };
+        let peers = response.peers().expect("response must contain peers");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].endpoint(), "www.example.com");
+        assert_eq!(peers[0].signature().len(), 64);
+    }
 }

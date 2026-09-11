@@ -8,14 +8,14 @@ use crate::dht::{
 fn make_node() -> NodeInfo {
      NodeInfo::new(
         Id::random(),
-        "1.1.1.1:39001".parse().unwrap(),
+        "1.1.1.1:39011".parse().unwrap(),
     )
 }
 
 fn make_bucket_entry() -> KBucketEntry {
     let mut entry = KBucketEntry::new(
         Id::random(),
-        "1.1.1.1:39001".parse().unwrap(),
+        "1.1.1.1:39011".parse().unwrap(),
     );
     entry.set_reachable(true);
     entry.set_ver(1);

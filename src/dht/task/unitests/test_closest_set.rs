@@ -15,7 +15,7 @@ fn make_candidate(distance: usize) -> Rc<RefCell<CandidateNode>> {
     let id = Id::try_from_bit_at(Id::BITS - distance).unwrap();
     let node = NodeInfo::new(
         id,
-        format!("1.1.1.{}:39001", distance).parse().unwrap(),
+        format!("1.1.1.{}:39011", distance).parse().unwrap(),
     );
     Rc::new(RefCell::new(node.into()))
 }

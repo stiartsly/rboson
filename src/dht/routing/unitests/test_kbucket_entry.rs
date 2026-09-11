@@ -11,7 +11,7 @@ use crate::dht::{
 fn make_entry() -> KBucketEntry {
     KBucketEntry::new(
         Id::random(),
-        "127.0.0.1:39001".parse::<SocketAddr>().unwrap(),
+        "127.0.0.1:39011".parse::<SocketAddr>().unwrap(),
     )
 }
 

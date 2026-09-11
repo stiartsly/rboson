@@ -62,7 +62,7 @@ mod tests {
 
         let candidate = NodeInfo::new(
             Id::random(),
-            "1.1.1.1:39001".parse().unwrap(),
+            "1.1.1.1:39011".parse().unwrap(),
         );
         task.with_inject_candidates(vec![candidate.clone()]);
         assert_eq!(task.candidate_size(), 1);

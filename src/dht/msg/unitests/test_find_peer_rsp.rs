@@ -5,14 +5,14 @@ use crate::{
 use std::net::SocketAddr;
 
 fn make_node_info4() -> NodeInfo {
-    let addr = format!("127.0.0.1:{}", 39001)
+    let addr = format!("127.0.0.1:{}", 39011)
         .parse::<SocketAddr>()
         .unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 
 fn make_node_info6() -> NodeInfo {
-    let addr = format!("[::1]:{}", 39001).parse::<SocketAddr>().unwrap();
+    let addr = format!("[::1]:{}", 39011).parse::<SocketAddr>().unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 
@@ -103,6 +103,36 @@ mod tests {
     }
 
     #[test]
+    fn test_serde_with_only_ipv4_nodes() {
+        let node4 = make_node_info4();
+        let response = FindPeerResponse::with_nodes(Some(vec![node4.clone()]), None);
+
+        let encoded = serde_cbor::to_vec(&response).expect("Serialization failed");
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
+
+        assert_eq!(decoded.token(), 0);
+        assert_eq!(decoded.nodes4(), Some([node4].as_slice()));
+        assert!(decoded.nodes6().is_none());
+        assert!(decoded.peers().is_none());
+    }
+
+    #[test]
+    fn test_serde_with_only_ipv6_nodes() {
+        let node6 = make_node_info6();
+        let response = FindPeerResponse::with_nodes(None, Some(vec![node6.clone()]));
+
+        let encoded = serde_cbor::to_vec(&response).expect("Serialization failed");
+        let decoded: FindPeerResponse =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
+
+        assert_eq!(decoded.token(), 0);
+        assert!(decoded.nodes4().is_none());
+        assert_eq!(decoded.nodes6(), Some([node6].as_slice()));
+        assert!(decoded.peers().is_none());
+    }
+
+    #[test]
     fn test_serde_with_peer() {
         let peer = make_peer(8080);
         let rsp = FindPeerResponse::with_peers(vec![peer.clone()]);
@@ -118,8 +148,9 @@ mod tests {
         let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
         let encoded_value: serde_cbor::Value =
             serde_cbor::from_slice(&encoded).expect("Response should decode as CBOR");
-        let serde_cbor::Value::Map(fields) = encoded_value else {
-            panic!("Find peer response should encode as a CBOR map");
+        let fields = match encoded_value {
+            serde_cbor::Value::Map(fields) => fields,
+            _ => panic!("Find peer response should encode as a CBOR map"),
         };
         let peers = fields.iter().find_map(|(key, value)| match key {
             serde_cbor::Value::Text(name) if name == "p" => Some(value),

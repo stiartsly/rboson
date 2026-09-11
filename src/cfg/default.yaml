@@ -16,7 +16,7 @@ databaseUri: jdbc:sqlite:node.db
 
 logLevel: debug
 logFile: launcher.log
-logConsole: false
+logConsole: true
 
 # Initial entry points to the DHT network.
 # Format: [ NodeID (Base58), IPAddress, Port ]

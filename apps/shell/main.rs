@@ -128,6 +128,10 @@ struct Options {
     /// The port to listen on
     #[arg(short = 'p', long, value_name = "PORT")]
     port: Option<u16>,
+
+    /// Enable log output on the console
+    #[arg(long)]
+    log: bool,
 }
 
 /// Builds the interactive shell's subcommand tree.
@@ -262,13 +266,13 @@ async fn execute_command(
                     if val.is_empty() {
                         println!("\x1b[32mFound no peers !!!\x1b[0m");
                     } else {
-                        println!("Found {} peers, listed below: ", val.len());
+                        println!("\x1b[32mFound {} peers, listed below: \x1b[0m", val.len());
                         for (i, item) in val.iter().enumerate() {
-                            println!("peer [{}]: {}", i, item);
+                            println!("\x1b[32mpeer [{}]: {}\x1b[0m", i, item);
                         }
                     }
                 }
-                Err(e) => println!("error: {}", e),
+                Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
             }
         }
         Some(("findvalue", m)) => {
@@ -277,12 +281,12 @@ async fn execute_command(
             };
             println!("Attempting to find value with id: {valueid} ...");
             match node.find_value(&valueid, -1, None).await {
-                Ok(Some(val)) => println!("Found value: {}", val),
-                Ok(None) => println!("\x1b[32mFound no values !!!!\x1b[0m"),
-                Err(e) => println!("error: {}", e),
+                Ok(Some(val)) => println!("\x1b[32mFound value: {}\x1b[0m", val),
+                Ok(_) => println!("\x1b[32mFound no values !!!!\x1b[0m"),
+                Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
             }
         }
-        Some(("log", m)) => match m.get_one::<String>("STATE").map(String::as_str) {
+        Some(("log", m )) => match m.get_one::<String>("STATE").map(String::as_str) {
             Some("off") => {
                 logger::disable_console_output();
                 println!("Console log output disabled. Logs continue in the configured log file.");
@@ -341,6 +345,8 @@ async fn main() {
     if let Some(port) = opts.port {
         builder.with_port(port);
     }
+
+    builder.with_log_console(opts.log);
     let config = match builder.build() {
         Ok(v) => v,
         Err(e) => {
@@ -364,6 +370,7 @@ async fn main() {
             return;
         }
     };
+
     let node = match Node::new(node_options) {
         Ok(node) => node,
         Err(e) => {

@@ -38,7 +38,7 @@ fn make_closestset(token: i32) -> ClosestSet {
     let target = Id::random();
     let candidate = NodeInfo::new(
         Id::random(),
-        "1.1.1.1:39001".parse().unwrap(),
+        "1.1.1.1:39011".parse().unwrap(),
     );
     let mut cn: CandidateNode = candidate.into();
     cn.set_token(token);
@@ -135,4 +135,3 @@ mod tests {
         assert!(task.is_completed());
     }
 }
-

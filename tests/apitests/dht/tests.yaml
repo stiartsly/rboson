@@ -32,8 +32,8 @@ ipv4: true
 # ipv6: true
 
 # Port number for DHT UDP traffic.
-# The default port is 39001. Ensure this port is open in your firewall (UDP).
-port: 39001
+# The default port is 39011. Ensure this port is open in your firewall (UDP).
+port: 39011
 
 # Node private key
 # This key defines your node's long-term identity on the network.
@@ -83,10 +83,10 @@ databaseUri: storage.db
 bootstraps:
   - - 2dLbPsaySh9EGWwpgreYiLEPG3NDhaojj7DBBfSsRr6k
     - 203.0.113.5
-    - 39001
+    - 39011
   - - 7jFV8w7eivjGEpaDu4V38EZ16CDhn4JutEdtGBWC67rF
     - 198.51.100.8
-    - 39001
+    - 39011
 
 # Security: Throttles high-frequency requests from single peers to mitigate DoS.
 # Default: true

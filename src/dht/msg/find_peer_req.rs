@@ -1,4 +1,5 @@
-use std::fmt;
+use std::{fmt, result::Result as StdResult};
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 use crate::{
     utils,
@@ -72,10 +73,20 @@ struct SerdeFindPeerRequest {
 
     #[serde(
         rename = "e",
-        deserialize_with = "utils::deserialize_count",
+        deserialize_with = "deserialize_count",
         skip_serializing_if = "utils::is_default"
     )]
     expected_count: i32,
+}
+
+fn deserialize_count<'de, D>(de: D) -> StdResult<i32, D::Error>
+where  D: Deserializer<'de>,
+{
+    let count = i32::deserialize(de)?;
+    if count < 0 {
+        return Err(DeError::custom("count must be larger than or equal to 0"));
+    }
+    Ok(count)
 }
 
 impl Into<SerdeFindPeerRequest> for FindPeerRequest {

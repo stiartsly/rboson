@@ -22,7 +22,7 @@ mod tests {
 
         let node4 = make_node(4, "1.1.1.4", 39004);
         let node2 = make_node(2, "1.1.1.2", 39002);
-        let node1 = make_node(1, "1.1.1.1", 39001);
+        let node1 = make_node(1, "1.1.1.1", 39011);
         let node3 = make_node(3, "1.1.1.3", 39003);
 
         candidates.add(vec![
@@ -46,7 +46,7 @@ mod tests {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 4);
 
-        let first = make_node(3, "1.1.1.1", 39001);
+        let first = make_node(3, "1.1.1.1", 39011);
         let second = make_node(1, "1.1.1.1", 39002);
 
         candidates.add(vec![
@@ -63,7 +63,7 @@ mod tests {
     fn test_add_rejects_candidates_when_all_entries_are_inflight() {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 2);
-        let first = make_node(1, "1.1.1.1", 39001);
+        let first = make_node(1, "1.1.1.1", 39011);
         let second = make_node(2, "1.1.1.2", 39002);
         let third = make_node(3, "1.1.1.3", 39003);
 
@@ -82,7 +82,7 @@ mod tests {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::with_developer_mode(target, 4, true);
 
-        let first = make_node(3, "1.1.1.1", 39001);
+        let first = make_node(3, "1.1.1.1", 39011);
         let second = make_node(1, "1.1.1.1", 39002);
 
         candidates.add(vec![first.clone().into(), second.clone().into()]);
@@ -97,13 +97,13 @@ mod tests {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 4);
 
-        let keep = make_node(1, "1.1.1.1", 39001);
+        let keep = make_node(1, "1.1.1.1", 39011);
         let remove_a = make_node(2, "1.1.1.2", 39002);
         let remove_b = make_node(3, "1.1.1.3", 39003);
 
         candidates.add(vec![keep.clone().into(), remove_a.clone().into(), remove_b.clone().into()]);
         candidates.remove_if(|cn| {
-            cn.borrow().addr().port() != 39001
+            cn.borrow().addr().port() != 39011
         });
 
         assert_eq!(candidates.size(), 1);
@@ -120,7 +120,7 @@ mod tests {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 2);
 
-        let first = make_node(1, "1.1.1.1", 39001);
+        let first = make_node(1, "1.1.1.1", 39011);
         let second = make_node(2, "1.1.1.2", 39002);
         let third = make_node(3, "1.1.1.3", 39003);
 
@@ -142,7 +142,7 @@ mod tests {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 4);
 
-        let closest = make_node(1, "1.1.1.1", 39001);
+        let closest = make_node(1, "1.1.1.1", 39011);
         let middle = make_node(2, "1.1.1.2", 39002);
         let farthest = make_node(3, "1.1.1.3", 39003);
         candidates.add(vec![

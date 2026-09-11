@@ -139,6 +139,7 @@ async fn main() {
         .with_data_dir(path.as_str())
         .with_private_key(private_key)
         .with_log_level(log::LevelFilter::Debug)
+        .with_log_console(true)
         .with_database_uri("jdbc:sqlite:node.db");
 
     for bootstrap_node in bootstrap_nodes {

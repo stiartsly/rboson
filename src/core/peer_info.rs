@@ -361,6 +361,7 @@ impl Hash for PeerInfo {
 
 impl fmt::Display for PeerInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
         write!(f, "id:{}", self.pk)?;
         write!(f, ",endpoint:{}", self.endpoint)?;
         if self.fingerprint != 0 {
@@ -376,6 +377,7 @@ impl fmt::Display for PeerInfo {
             write!(f, ",nodeSig:0x{}", hex::encode(node_sig))?;
         }
         write!(f, ",sig:0x{}", hex::encode(&self.sig))?;
+        write!(f, "}}")?;
         Ok(())
     }
 }

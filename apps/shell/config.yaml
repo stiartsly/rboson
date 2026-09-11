@@ -74,7 +74,7 @@ logConsole: false
 #  # Database connection URI.
 #  uri: jdbc:sqlite:node.db
 
-dataDir: .shell_data
+dataDir: .boson_shell
 databaseUri: jdbc:sqlite:node.db
 
   # Connection pool size. 0 uses the default for the specific driver.

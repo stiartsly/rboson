@@ -12,7 +12,7 @@ use boson::{
     cfg::configuration,
     core::logger,
     dht::{ConnectionStatus, ConnectionStatusListener, Node},
-    signature::PrivateKey,
+    signature::{KeyPair, PrivateKey},
     Id, Network,
 };
 use log::{debug, info, warn};
@@ -142,6 +142,7 @@ struct Options {
 ///   - `findnode <ID>`
 ///   - `findpeer <ID> [-c/--count <COUNT>]`
 ///   - `findvalue <ID>`
+///   - `identity`
 ///   - `log [on|off]`
 ///   - `status`
 fn build_cli() -> Command {
@@ -187,6 +188,14 @@ fn build_cli() -> Command {
                 .arg(arg!(<ID> "Target value id (base58)"))
         )
         .subcommand(
+            Command::new("keygen")
+                .about("Generate a random key identity")
+        )
+        .subcommand(
+            Command::new("me")
+                .about("Show my key identity")
+        )
+        .subcommand(
             Command::new("log")
                 .about("Enable or disable console log output; logs are always written to the file")
                 .arg(
@@ -197,7 +206,7 @@ fn build_cli() -> Command {
         )
         .subcommand(
             Command::new("status")
-                .about("Show this node's id")
+                .about("Show this node's status")
         )
 }
 
@@ -285,6 +294,21 @@ async fn execute_command(
                 Ok(_) => println!("\x1b[32mFound no values !!!!\x1b[0m"),
                 Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
             }
+        }
+        Some(("keygen", _)) => {
+            let keypair = KeyPair::random();
+            let id = Id::from(keypair.public_key());
+            println!("  User ID     : {}", id.to_base58());
+            println!("  DID         : {}", id.to_did_string());
+            println!("  Public Key  : {}", keypair.public_key());
+            println!("  Private Key : {} (base58)", keypair.private_key().to_base58());
+            println!("              : {} (hex)", keypair.private_key().to_hexstr());
+            println!("\nKeep the private key secret. It controls this identity.")
+        }
+        Some(("me", _)) => {
+            println!("My key identity:");
+            println!("  User ID     : {}", node.id().to_base58());
+            println!("  DID         : {}", node.id().to_did_string());
         }
         Some(("log", m )) => match m.get_one::<String>("STATE").map(String::as_str) {
             Some("off") => {

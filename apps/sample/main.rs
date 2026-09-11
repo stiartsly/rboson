@@ -76,7 +76,7 @@ fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mut path = get_storage_path(".sample_node");
+    let mut path = get_storage_path(".boson_sample");
     let mut port = 39010 as u16;
     let mut bootstrap_nodes = Vec::new();
 

@@ -152,7 +152,7 @@ impl AsRef<[u8]> for PrivateKey {
 
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{}", hex::encode(self.0))?;
+        write!(f, "{}", self.to_hexstr())?;
         Ok(())
     }
 }

@@ -642,7 +642,7 @@ fn config_paths() -> Vec<PathBuf> {
 
 impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "node config:")?;
+        write!(f, "configuration:")?;
         if let Some(ref host4) = self.host4.as_ref() {
             write!(f, "\n\thost4\t\t:{}", host4)?;
         }

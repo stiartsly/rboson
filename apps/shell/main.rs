@@ -2,6 +2,7 @@ use clap::{arg, value_parser, ArgMatches, Command, Parser};
 use reedline::{ExternalPrinter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
 use std::{
     borrow::Cow,
+    env,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
@@ -345,9 +346,15 @@ async fn execute_command(
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
+    let config = opts
+        .config
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var("NODE_CONFIG").ok())
+        .unwrap_or_else(|| "apps/shell/node.yaml".to_string());
 
     let mut builder = match NodeOptionsBuilder::new()
-        .load_from(opts.config.as_deref().unwrap_or("config.yaml"))
+        .load_from(&config)
     {
         Ok(builder) => builder,
         Err(e) => {

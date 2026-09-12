@@ -1,8 +1,8 @@
 ipv4: true
 ipv6: false
-port: 39011
+port: 39003
 
-privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
+privateKey: 0x7cc749a50b4ccc2693bcfa473bec8f780a52b25c64f4f8e3b8d0d5a09c6f020968114057d7aa3cb5d75d1aa6120ddd271f594d86c2a7b81f902e1ecc1eb3cac8
 
 dataDir: .boson_launcher
 databaseUri: jdbc:sqlite:node.db

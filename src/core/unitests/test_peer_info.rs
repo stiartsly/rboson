@@ -107,6 +107,7 @@ mod tests {
         assert_eq!(peer.sequence_number(), des.sequence_number());
         assert_eq!(peer.endpoint(), des.endpoint());
         assert_eq!(peer.fingerprint(), des.fingerprint());
+        assert!(des.is_valid());
     }
 
     #[test]

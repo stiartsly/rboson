@@ -58,7 +58,7 @@ impl ActiveProxyClient {
         let upstream_endpoint = format!(
             "{}{}:{}", options.upstream_scheme(), options.upstream_host(), options.upstream_port()
         );
-        let rest = upstream_endpoint.strip_prefix("tcp://").unwrap_or(&upstream_endpoint);
+        let rest = upstream_endpoint.strip_prefix("http://").unwrap_or(&upstream_endpoint);
         let upstream_sockaddr = rest.to_socket_addrs()
             .map_err(|e| {
                 error!("Failed to resolve address '{rest}', network error: {e}");

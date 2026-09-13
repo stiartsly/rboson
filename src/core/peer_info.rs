@@ -125,13 +125,9 @@ impl PeerInfo {
 
         if let Some(identity) = node_identity.as_ref() {
             let id = identity.lock().unwrap().id().clone();
-
-            let mut sha = Sha256::new();
-            sha.update(pk.as_bytes());
-            sha.update(id.as_bytes());
-            let digest = sha.finalize().to_vec();
-
-            let sig = identity.lock().unwrap().sign_into(&digest)?;
+            let sig = identity.lock().unwrap().sign_into(
+                Self::node_digest(&pk, &id, fingerprint, seq).as_slice()
+            )?;
 
             nodeid = Some(id);
             node_sig = Some(sig);
@@ -299,17 +295,14 @@ impl PeerInfo {
             if node_sig.len() != signature::Signature::BYTES {
                 return false;
             }
-            let mut sha = Sha256::new();
-            sha.update(self.pk.as_bytes());
-            sha.update(nodeid.as_bytes());
-            let digest = sha.finalize().to_vec();
-
-            return signature::verify(
-                digest.as_slice(),
+            if !signature::verify(
+                Self::node_digest(&self.pk, nodeid, self.fingerprint, self.seq).as_slice(),
                 node_sig.as_slice(),
                 &nodeid.to_signature_key(),
             )
-            .unwrap_or(false);
+            .unwrap_or(false) {
+                return false;
+            }
         } else if self.node_sig.is_some() {
             return false;
         }
@@ -335,6 +328,15 @@ impl PeerInfo {
         if let Some(extra) = self.extra.as_ref() {
             sha.update(extra.as_slice());
         }
+        sha.finalize().to_vec()
+    }
+
+    fn node_digest(pk: &Id, nodeid: &Id, fingerprint: u64, seq: i32) -> Vec<u8> {
+        let mut sha = Sha256::new();
+        sha.update(pk.as_bytes());
+        sha.update(nodeid.as_bytes());
+        sha.update(fingerprint.to_be_bytes());
+        sha.update(seq.to_be_bytes());
         sha.finalize().to_vec()
     }
 }

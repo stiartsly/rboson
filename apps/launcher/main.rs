@@ -1,6 +1,9 @@
-use std::process::exit;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    process::exit,
+    sync::Arc,
+    time::Duration,
+};
+use std::env;
 
 use clap::Parser;
 use tokio::sync::Notify;
@@ -25,12 +28,12 @@ use boson::{
 #[command(about = "Boson launcher service", long_about = None)]
 struct Options {
     /// The DHT node configuration file
-    #[arg(short, long, value_name = "FILE", default_value = "node.yaml")]
-    config: String,
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<String>,
 
     /// The ActiveProxy configuration file
-    #[arg(long, value_name = "FILE", default_value = "activeproxy.yaml")]
-    activeproxy_config: String,
+    #[arg(long, value_name = "FILE")]
+    activeproxy_config: Option<String>,
 }
 
 /// Notifies once the node has connected to the Boson network.
@@ -54,9 +57,15 @@ impl ConnectionStatusListener for ReadyListener {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
+    let config = opts
+        .config
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var("NODE_CONFIG").ok())
+        .unwrap_or_else(|| "apps/launcher/node.yaml".to_string());
 
     let node_options = match NodeOptionsBuilder::new()
-        .load_from(&opts.config)
+        .load_from(config)
         .and_then(NodeOptionsBuilder::build)
     {
         Ok(v) => v,
@@ -88,7 +97,14 @@ async fn main() {
         println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
-    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&opts.activeproxy_config)
+    let config = opts
+        .activeproxy_config
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
+        .unwrap_or_else(|| "apps/launcher/activeproxy.yaml".to_string());
+
+    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&config)
         .and_then(ActiveProxyOptionsBuilder::build)
     {
         Ok(options) => options,

@@ -50,7 +50,7 @@ impl Task for PendingTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         unreachable!("TaskManager lifecycle test does not access DHT")
     }
 

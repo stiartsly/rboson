@@ -28,12 +28,12 @@ pub(crate) struct ValueAnnounceTask {
     value: Value,
     expected_seq: i32,
 
-    dht: Rc<RefCell<DHT>>
+    dht: Rc<DHT>
 }
 
 impl ValueAnnounceTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
+        dht: Rc<DHT>,
         value: Value,
         expected_seq: i32,
     ) -> Self {
@@ -84,7 +84,7 @@ impl Task for ValueAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 

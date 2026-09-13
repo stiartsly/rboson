@@ -1,7 +1,4 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-};
+use std::rc::Rc;
 use crate::{
     Id,
     Network,
@@ -14,7 +11,7 @@ use crate::dht::{
 };
 use super::test_utils::make_test_dht;
 
-fn make_dht() -> Rc<RefCell<DHT>> {
+fn make_dht() -> Rc<DHT> {
     make_test_dht(Network::IPv4, "127.0.0.1")
 }
 

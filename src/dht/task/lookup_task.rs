@@ -70,7 +70,7 @@ pub(crate) trait LookupTask: Task {
     }
 
     fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
-        let ni = self.dht().borrow().ni();
+        let ni = self.dht().ni();
         let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();
@@ -95,9 +95,9 @@ pub(crate) trait LookupTask: Task {
 
     fn seed_candidates(&mut self, target: Id) {
         let entries: Vec<KBucketEntry> = {
-            let rt = self.dht().borrow().rt();
+            let rt = self.dht().rt();
             let mut closest = KClosestNodes::new(
-                &rt.borrow(),
+                &rt,
                 target,
                 KBucket::MAX_ENTRIES * 3
             );

@@ -21,14 +21,14 @@ pub(crate) struct PeerAnnounceTask {
     peer: PeerInfo,
     expected_seq: i32,
 
-    dht: Rc<RefCell<DHT>>,
+    dht: Rc<DHT>,
 }
 
 const MAX_TODO_ENTRIES: usize = 24;
 
 impl PeerAnnounceTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
+        dht: Rc<DHT>,
         peer: PeerInfo,
         expected_seq: i32
     ) -> Self {
@@ -80,7 +80,7 @@ impl Task for PeerAnnounceTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 

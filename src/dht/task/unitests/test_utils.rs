@@ -1,6 +1,5 @@
 use std::{
     rc::Rc,
-    cell::RefCell,
     sync::{Arc, Mutex}
 };
 use tokio::sync::mpsc;
@@ -27,7 +26,7 @@ impl ConnectionStatusListener for NoopConnectionStatusListener {}
 /// Create a minimal in-process DHT for unit tests. The node binds to
 /// `host:0` (OS-assigned port), uses an in-memory SQLite store, and
 /// has no bootstrap nodes.
-pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<RefCell<DHT>> {
+pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<DHT> {
     let identity  = Arc::new(CryptoIdentity::new());
     let storage: Arc<Mutex<dyn DataStorage>> = Arc::new(Mutex::new(SqliteStorage::new()));
     let token_man = Arc::new(TokenManager::new());
@@ -43,8 +42,5 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<RefCell<DHT>> {
     let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
     let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
-    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);
-    let dht = Rc::new(RefCell::new(dht));
-    dht.borrow_mut().weak = Rc::downgrade(&dht);
-    dht
+    DHT::new(options, network, host.to_string(), 0, None, timer_client)
 }

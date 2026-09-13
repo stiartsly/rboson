@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    rc::{Rc, Weak},
+    rc::Rc,
     sync::Arc,
     cell::RefCell,
     collections::HashMap,
@@ -39,28 +39,26 @@ pub(crate) struct RpcServer {
     ni                  : NodeInfo,
 
     suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
-    pending_calls       : HashMap<TxId, Rc<RefCell<RpcCall>>>,
+    pending_calls       : RefCell<HashMap<TxId, Rc<RefCell<RpcCall>>>>,
 
-    recv_packets        : u32,
-    recv_packets_at_last_reachable_check: u32,
-    last_reachable_check: SystemTime,
-    is_reachable        : bool,
+    recv_packets        : RefCell<u32>,
+    recv_packets_at_last_reachable_check: RefCell<u32>,
+    last_reachable_check: RefCell<SystemTime>,
+    is_reachable        : RefCell<bool>,
 
-    reachable_handler   : Option<LocalBoxHandler<bool>>,
-    message_handler     : Option<LocalBoxHandler<Rc<Message>>>,
-    callsent_handler    : Option<EasyHandler<Id>>,
-    calltimeout_handler : Option<EasyHandler<Id>>,
+    reachable_handler   : RefCell<Option<LocalBoxHandler<bool>>>,
+    message_handler     : RefCell<Option<LocalBoxHandler<Rc<Message>>>>,
+    callsent_handler    : RefCell<Option<EasyHandler<Id>>>,
+    calltimeout_handler : RefCell<Option<EasyHandler<Id>>>,
 
-    start_time          : Option<SystemTime>,
-    is_running          : bool,
+    start_time          : RefCell<Option<SystemTime>>,
+    is_running          : RefCell<bool>,
 
     timer_client        : Rc<TimerClient>,
-    reachable_check_task: Option<u64>,
+    reachable_check_task: RefCell<Option<u64>>,
 
-    tx_socket           : Option<Rc<StdUdpSocket>>,
-    rx_socket           : Option<Rc<StdUdpSocket>>,
-
-    cloned              : Weak<RefCell<RpcServer>>,
+    tx_socket           : RefCell<Option<Rc<StdUdpSocket>>>,
+    rx_socket           : RefCell<Option<Rc<StdUdpSocket>>>,
 }
 
 impl RpcServer {
@@ -73,91 +71,86 @@ impl RpcServer {
         identity: Arc<CryptoIdentity>,
         timer_client: Rc<TimerClient>,
         suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
-    ) -> Self {
+    ) -> Rc<Self> {
 
-        Self {
+        Rc::new(Self {
             ni,
             identity,
             suspicious_node_detector,
-            pending_calls       : HashMap::new(),
-            recv_packets        : 0,
-            recv_packets_at_last_reachable_check: 0,
-            last_reachable_check: SystemTime::now(),
-            is_reachable        : false,
-            reachable_handler   : None,
-            message_handler     : None,
-            callsent_handler    : None,
-            calltimeout_handler : None,
-            start_time          : None,
-            is_running          : false,
+            pending_calls       : RefCell::new(HashMap::new()),
+            recv_packets        : RefCell::new(0),
+            recv_packets_at_last_reachable_check: RefCell::new(0),
+            last_reachable_check: RefCell::new(SystemTime::now()),
+            is_reachable        : RefCell::new(false),
+            reachable_handler   : RefCell::new(None),
+            message_handler     : RefCell::new(None),
+            callsent_handler    : RefCell::new(None),
+            calltimeout_handler : RefCell::new(None),
+            start_time          : RefCell::new(None),
+            is_running          : RefCell::new(false),
             timer_client,
-            reachable_check_task: None,
-
-            tx_socket           : None,
-            rx_socket           : None,
-
-            cloned              : Weak::new(),
-        }
+            reachable_check_task: RefCell::new(None),
+            tx_socket           : RefCell::new(None),
+            rx_socket           : RefCell::new(None),
+        })
     }
 
-    pub(crate) fn set_cloned(&mut self, cloned: Weak<RefCell<RpcServer>>) {
-        self.cloned = cloned;
-    }
-
-    async fn check_reachability(&mut self) {
+    async fn check_reachability(self: &Rc<Self>) {
         let now = SystemTime::now();
 
-        if self.recv_packets != self.recv_packets_at_last_reachable_check {
+        if *self.recv_packets.borrow() != *self.recv_packets_at_last_reachable_check.borrow() {
             self.set_reachable(true).await;
-            self.last_reachable_check = now;
-            self.recv_packets_at_last_reachable_check = self.recv_packets;
+            *self.last_reachable_check.borrow_mut() = now;
+            *self.recv_packets_at_last_reachable_check.borrow_mut() = *self.recv_packets.borrow();
             return;
         }
 
-        if crate::elapsed_ms!(self.last_reachable_check) > Self::REACHABILITY_TIMEOUT as u128 &&
-            self.recv_packets != 0 &&
-            self.recv_packets_at_last_reachable_check != 0 {
+        if crate::elapsed_ms!(*self.last_reachable_check.borrow()) > Self::REACHABILITY_TIMEOUT as u128 &&
+            *self.recv_packets.borrow() != 0 &&
+            *self.recv_packets_at_last_reachable_check.borrow() != 0 {
             self.set_reachable(false).await;
         }
     }
 
-    pub(crate) async fn set_reachable(&mut self, reachable: bool) {
-        if self.is_reachable == reachable {
+    pub(crate) async fn set_reachable(self: &Rc<Self>, reachable: bool) {
+        if *self.is_reachable.borrow() == reachable {
             return;
         }
-        self.is_reachable = reachable;
-        if let Some(h) = self.reachable_handler.take() {
+        *self.is_reachable.borrow_mut() = reachable;
+        let handler = self.reachable_handler.borrow_mut().take();
+        if let Some(h) = handler {
             h.cb(reachable).await;
-            self.reachable_handler = Some(h);
+            *self.reachable_handler.borrow_mut() = Some(h);
         }
     }
 
-    pub(crate) fn reachable_handler(&mut self, consumer: LocalBoxHandler<bool>) {
-        self.reachable_handler = Some(consumer);
+    pub(crate) fn reachable_handler(self: &Rc<Self>, consumer: LocalBoxHandler<bool>) {
+        *self.reachable_handler.borrow_mut() = Some(consumer);
     }
 
-    pub(crate) fn is_reachable(&self) -> bool {
-        self.is_reachable
+    pub(crate) fn is_reachable(self: &Rc<Self>) -> bool {
+        *self.is_reachable.borrow()
     }
 
-    pub(crate) fn has_pending_calls(&self) -> bool {
-        !self.pending_calls.is_empty()
+    pub(crate) fn has_pending_calls(self: &Rc<Self>) -> bool {
+        !self.pending_calls.borrow().is_empty()
     }
 
-    pub(crate) fn message_handler(&mut self, consumer: LocalBoxHandler<Rc<Message>>) {
-        self.message_handler = Some(consumer);
+    pub(crate) fn message_handler(self: &Rc<Self>, consumer: LocalBoxHandler<Rc<Message>>) {
+        *self.message_handler.borrow_mut() = Some(consumer);
     }
 
-    pub(crate) fn callsent_handler(&mut self, consumer: EasyHandler<Id>) {
-        self.callsent_handler = Some(consumer);
+    pub(crate) fn callsent_handler(self: &Rc<Self>, consumer: EasyHandler<Id>) {
+        *self.callsent_handler.borrow_mut() = Some(consumer);
     }
 
-    pub(crate) fn calltimeout_handler(&mut self, consumer: EasyHandler<Id>) {
-        self.calltimeout_handler = Some(consumer);
+    pub(crate) fn calltimeout_handler(self: &Rc<Self>, consumer: EasyHandler<Id>) {
+        *self.calltimeout_handler.borrow_mut() = Some(consumer);
     }
 
-    pub(crate) fn rx_tokio_socket(&self) -> Result<UdpSocket> {
-        let std_socket = self.rx_socket.as_ref().ok_or_else(|| -> Error {
+    pub(crate) fn rx_tokio_socket(self: &Rc<Self>) -> Result<UdpSocket> {
+        let socket = self.rx_socket.borrow().clone();
+        let std_socket = socket.as_ref().ok_or_else(|| -> Error {
             NetworkError::new("RPC server socket not initialized")
         })?.as_ref().try_clone().map_err(|e| {
             NetworkError::new(format!("Failed to clone UDP socket: {e}")) as Error
@@ -171,35 +164,35 @@ impl RpcServer {
         })
     }
 
-    pub(crate) async fn start(&mut self) -> Result<()> {
+    pub(crate) async fn start(self: &Rc<Self>) -> Result<()> {
         let socket_addr = self.ni.address();
         let socket = StdUdpSocket::bind(socket_addr).map_err(|e| {
             error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
             NetworkError::new(format!("{e}"))
         })?;
         let socket = Rc::new(socket);
-        self.rx_socket = Some(socket.clone());
-        self.tx_socket = Some(socket.clone());
+        *self.rx_socket.borrow_mut() = Some(socket.clone());
+        *self.tx_socket.borrow_mut() = Some(socket.clone());
 
         Ok(())
     }
 
-    pub(crate) fn prepare(&mut self) -> bool {
+    pub(crate) fn prepare(self: &Rc<Self>) -> bool {
         let now = SystemTime::now();
-        self.start_time = Some(now);
-        self.is_running = true;
+        *self.start_time.borrow_mut() = Some(now);
+        *self.is_running.borrow_mut() = true;
 
-        self.is_reachable   = true;
-        self.last_reachable_check = now;
+        *self.is_reachable.borrow_mut() = true;
+        *self.last_reachable_check.borrow_mut() = now;
 
-        let cloned = self.cloned.upgrade().expect("RpcServer weak reference not set");
+        let server = self.clone();
         let result = self.timer_client.add_timer(
             Self::REACHABILITY_CHECK_INTERVAL,
             Some(Self::REACHABILITY_CHECK_INTERVAL),
             LocalBoxHandler::new(move |_| {
-                let server = cloned.clone();
+                let server = server.clone();
                 Box::pin(async move {
-                    server.borrow_mut().check_reachability().await;
+                    server.check_reachability().await;
                 })
             })
         );
@@ -208,36 +201,36 @@ impl RpcServer {
             error!("Failed to set reachability check timer.");
             return false;
         };
-        self.reachable_check_task = Some(timer_id);
+        *self.reachable_check_task.borrow_mut() = Some(timer_id);
         true
     }
 
-    pub(crate) async fn stop(&mut self) {
-        self.reachable_handler = None;
-        if !self.is_running {
+    pub(crate) async fn stop(self: &Rc<Self>) {
+        *self.reachable_handler.borrow_mut() = None;
+        if !*self.is_running.borrow() {
             return;
         }
 
-        if let Some(timer_id) = self.reachable_check_task.take() {
+        if let Some(timer_id) = self.reachable_check_task.borrow_mut().take() {
             if let Err(e) = self.timer_client.cancel_timer(timer_id) {
                 warn!("Failed to cancel reachability check timer: {e}");
             }
         }
 
-        self.pending_calls.clear();
+        self.pending_calls.borrow_mut().clear();
 
-        self.tx_socket  = None;
-        self.rx_socket  = None;
-        self.start_time = None;
-        self.is_running = false;
+        *self.tx_socket.borrow_mut()  = None;
+        *self.rx_socket.borrow_mut()  = None;
+        *self.start_time.borrow_mut() = None;
+        *self.is_running.borrow_mut() = false;
 
-        self.is_reachable = false;
+        *self.is_reachable.borrow_mut() = false;
 
         info!("RPC server stopped at {}", self.ni.address());
     }
 
-    pub(crate) fn send_call(&mut self, mut call: RpcCall) -> Result<()> {
-        if self.pending_calls.len() >= Self::MAX_ACTIVE_CALLS {
+    pub(crate) fn send_call(self: &Rc<Self>, mut call: RpcCall) -> Result<()> {
+        if self.pending_calls.borrow().len() >= Self::MAX_ACTIVE_CALLS {
             call.fail();
             return Err(StateError::new(format!(
                 "Maximum number of active RPC calls ({}) reached",
@@ -247,18 +240,18 @@ impl RpcServer {
 
         let txid = call.txid();
         let target_id = call.target_id();
-        let rs = self.cloned.upgrade().expect("RpcServer weak reference not set");
+        let rs = self.clone();
 
         let handler = EasyHandler::new(move |_| {
-            let existing = rs.borrow_mut().pending_calls.remove(&txid);
+            let existing = rs.pending_calls.borrow_mut().remove(&txid);
             if existing.is_none() {
                 return;
             }
 
-            let handler = rs.borrow_mut().calltimeout_handler.take();
+            let handler = rs.calltimeout_handler.borrow_mut().take();
             if let Some(h) = handler {
                 h.cb(&target_id);
-                rs.borrow_mut().calltimeout_handler = Some(h);
+                *rs.calltimeout_handler.borrow_mut() = Some(h);
             }
         });
 
@@ -271,7 +264,7 @@ impl RpcServer {
         msg.set_nodeid(self.identity.id().clone());
         msg.set_associated_call(call.clone());
 
-        self.pending_calls.insert(txid, call.clone());
+        self.pending_calls.borrow_mut().insert(txid, call.clone());
 
         let msg = Rc::new(msg);
         call.borrow_mut().set_request(msg.clone());
@@ -279,13 +272,15 @@ impl RpcServer {
         match self.send_msg(&msg) {
             Ok(_) => {
                 call.borrow_mut().sent();
-                if let Some(h) = self.callsent_handler.as_ref() {
+                let handler = self.callsent_handler.borrow_mut().take();
+                if let Some(h) = handler {
                     let target_id = call.borrow().target_id();
                     h.cb(&target_id);
+                    *self.callsent_handler.borrow_mut() = Some(h);
                 }
             },
             Err(e) => {
-                let _ = self.pending_calls.remove(&txid);
+                let _ = self.pending_calls.borrow_mut().remove(&txid);
                 call.borrow_mut().fail();
                 return Err(e);
             }
@@ -293,7 +288,7 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(crate) fn send_msg(&self, msg: &Message) -> Result<usize> {
+    pub(crate) fn send_msg(self: &Rc<Self>, msg: &Message) -> Result<usize> {
         // Deserialize message to bytes
         let data = serde_cbor::to_vec(msg).map_err(|e| -> Error {
             ProtocolError::new(format!("Failed to serialize message: {e}"))
@@ -317,7 +312,8 @@ impl RpcServer {
         }
 
         // Send message to remote node
-        let tx = self.tx_socket.as_ref().ok_or_else(|| -> Error {
+        let socket = self.tx_socket.borrow().clone();
+        let tx = socket.as_ref().ok_or_else(|| -> Error {
             NetworkError::new("RPC server socket not initialized")
         })?;
         let sent_len = tx.send_to(
@@ -343,31 +339,31 @@ impl RpcServer {
     }
 
     #[inline]
-    fn malformed_message(&self, from: SocketAddr) {
+    fn malformed_message(self: &Rc<Self>, from: SocketAddr) {
         if let Some(detector) = &self.suspicious_node_detector {
             detector.borrow_mut().malformed_message(from);
         }
     }
 
     #[inline]
-    fn observe_message(&self, from: SocketAddr, id: Id) {
+    fn observe_message(self: &Rc<Self>, from: SocketAddr, id: Id) {
         if let Some(detector) = &self.suspicious_node_detector {
             detector.borrow_mut().observe(from, id);
         }
     }
 
     #[inline]
-    fn inconsistent_socket(&self, from: SocketAddr, id: Id) {
+    fn inconsistent_socket(self: &Rc<Self>, from: SocketAddr, id: Id) {
         if let Some(detector) = &self.suspicious_node_detector {
             detector.borrow_mut().inconsistent(from, Some(id));
         }
     }
 
-    pub(crate) async fn handle_packet(server: Rc<RefCell<Self>>, data: &[u8], from: SocketAddr) {
+    pub(crate) async fn handle_packet(server: Rc<Self>, data: &[u8], from: SocketAddr) {
         let minimal_len = Id::BYTES + Nonce::BYTES + CryptoBox::MAC_BYTES + Message::MIN_BYTES;
         if data.len() < minimal_len {
             warn!("Ignored invalid packet from {}: too short", from);
-            server.borrow().malformed_message(from);
+            server.malformed_message(from);
             return;
         }
 
@@ -376,18 +372,18 @@ impl RpcServer {
             Ok(id) => id,
             Err(e) => {
                 warn!("Ignored invalid packet from {}: {e}", from);
-                server.borrow().malformed_message(from);
+                server.malformed_message(from);
                 return;
             }
         };
 
         // Decrypting message data.
-        let identity = server.borrow().identity.clone();
+        let identity = server.identity.clone();
         let decrypted = match identity.decrypt_into(&from_id, &data[Id::BYTES..]) {
             Ok(d) => d,
             Err(e) => {
                 warn!("Ignored invalid packet from {}: {e}", from);
-                server.borrow().malformed_message(from);
+                server.malformed_message(from);
                 return;
             }
         };
@@ -397,17 +393,16 @@ impl RpcServer {
             Ok(m) => m,
             Err(e) => {
                 warn!("Ignored invalid packet from {}: {e}", from);
-                server.borrow().malformed_message(from);
+                server.malformed_message(from);
                 return;
             }
         };
         msg.set_nodeid(from_id);
         msg.set_remote(from_id, from);
 
-        {
-            let mut server = server.borrow_mut();
-            server.recv_packets = server.recv_packets.wrapping_add(1);
-        }
+        let mut recv_packets = server.recv_packets.borrow_mut();
+        *recv_packets = recv_packets.wrapping_add(1);
+        drop(recv_packets);
 
         debug!("Received message {}_{} from {}@{}: {}",
             msg.method(), msg.kind(), from_id, from, msg);
@@ -415,19 +410,19 @@ impl RpcServer {
         // Handle request message.
         let is_req = msg.is_req();
         if is_req {
-            let handler = server.borrow_mut().message_handler.take();
+            let handler = server.message_handler.borrow_mut().take();
             if let Some(handler) = handler {
                 handler.cb(Rc::new(msg)).await;
-                server.borrow_mut().message_handler = Some(handler);
+                *server.message_handler.borrow_mut() = Some(handler);
             }
             return;
         }
 
         // Handle response or error message, matching with pending call.
         let msg_id = msg.txid();
-        let call_opt = server.borrow_mut().pending_calls.remove(&msg_id);
+        let call_opt = server.pending_calls.borrow_mut().remove(&msg_id);
         let Some(call) = call_opt else {
-            server.borrow().observe_message(from, from_id);
+            server.observe_message(from, from_id);
 
             warn!("Can not find RPC call for {} with txid {}, discard the message",
                 msg.method(), msg.txid());
@@ -452,7 +447,7 @@ impl RpcServer {
                 warn!("Node address does not be consistent, ignored. request: {}@{} <- response: {}@{}",
                     target_id, req.remote_addr(), from_id, from);
 
-                server.borrow().inconsistent_socket(from, from_id);
+                server.inconsistent_socket(from, from_id);
                 // but expect an upcoming timeout if it's really just a misbehaving node
                 locked.respond_inconsistent_socket();
                 return;
@@ -465,7 +460,7 @@ impl RpcServer {
                     msg.method(), from_id, from, req.method());
 
                 locked.respond_wrong_method();
-                server.borrow().malformed_message(from);
+                server.malformed_message(from);
                 drop(locked);
                 return;
             }
@@ -473,10 +468,10 @@ impl RpcServer {
             locked.respond(msg.clone());
         }
 
-        let handler = server.borrow_mut().message_handler.take();
+        let handler = server.message_handler.borrow_mut().take();
         if let Some(handler) = handler {
             handler.cb(msg).await;
-            server.borrow_mut().message_handler = Some(handler);
+            *server.message_handler.borrow_mut() = Some(handler);
         };
     }
 }

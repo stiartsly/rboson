@@ -114,7 +114,7 @@ pub(crate) trait Task {
     fn as_task(&self) -> &dyn Task;
     fn as_any(&self) -> &dyn Any;
 
-    fn dht(&self) -> Rc<RefCell<DHT>>;
+    fn dht(&self) -> Rc<DHT>;
 
     fn task_id(&self) -> i32 {
         self.data().taskid
@@ -395,15 +395,14 @@ pub(crate) trait Task {
 
         let dht = self.dht();
         let _ = tokio::task::spawn_local(async move {
-            let rs = dht.borrow().rs();
-            let _ = rs.borrow_mut()
-                .send_call(call)
+            let rs = dht.rs();
+            let _ = rs.send_call(call)
                 .map_err(|e| log::error!("{e}"));
         });
     }
 
     fn network(&self) -> Network {
-        self.dht().borrow().network()
+        self.dht().network()
     }
 }
 

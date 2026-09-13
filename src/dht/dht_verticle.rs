@@ -1,7 +1,6 @@
 use std::{
     rc::Rc,
     pin::Pin,
-    cell::RefCell,
     path::PathBuf,
     result::Result as StdResult,
     sync::{mpsc as std_mpsc, Arc, Mutex},
@@ -241,7 +240,7 @@ pub(crate) struct VerticleOptions {
 }
 
 pub(crate) struct Verticle {
-    dht         : Rc<RefCell<DHT>>,
+    dht         : Rc<DHT>,
     timerman    : TimerManager,
 
     event_rx    : mpsc::UnboundedReceiver<CallEvent>,
@@ -266,13 +265,12 @@ impl Verticle {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<TimerCmd>();
         let timer_client = Rc::new(TimerClient::new(cmd_tx));
-        let dht = Rc::new(RefCell::new(DHT::new(
+        let dht = DHT::new(
             options,
             network, host, port,
             persist_file,
             timer_client
-        )));
-        dht.borrow_mut().weak = Rc::downgrade(&dht);
+        );
 
         let timerman = TimerManager::new();
         Ok(Self {
@@ -285,11 +283,11 @@ impl Verticle {
     }
 
     async fn start0(&mut self) -> Result<()> {
-        self.dht.borrow_mut().start0().await
+        self.dht.start0().await
     }
 
     fn ni(&self) -> NodeInfo {
-        self.dht.borrow().ni()
+        self.dht.ni()
     }
 
     fn handle_events(
@@ -305,7 +303,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
-                    dht.borrow_mut().bootstrap(nodes, promise).await;
+                    dht.bootstrap(nodes, promise).await;
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -319,7 +317,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<Option<NodeInfo>>::pair();
-                    dht.borrow().find_node(target, option, promise);
+                    dht.find_node(target, option, promise);
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -334,7 +332,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<Option<Value>>::pair();
-                    dht.borrow().find_value(target, expected_seq, option, promise);
+                    dht.find_value(target, expected_seq, option, promise);
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -348,7 +346,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
-                    dht.borrow().store_value(value, expected_seq, promise);
+                    dht.store_value(value, expected_seq, promise);
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -364,7 +362,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
-                    dht.borrow().find_peer(target, expected_seq, expected_count, option, promise);
+                    dht.find_peer(target, expected_seq, expected_count, option, promise);
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -378,7 +376,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
-                    dht.borrow().announce_peer(peer, expected_seq, promise);
+                    dht.announce_peer(peer, expected_seq, promise);
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -388,7 +386,7 @@ impl Verticle {
                 let dht = self.dht.clone();
                 pending.push(async move {
                     let (promise, future) = Promise::<()>::pair();
-                    let _ = dht.borrow_mut().start(promise).await;
+                    let _ = dht.start(promise).await;
                     let _ = complete.send(
                         future.await.map_err(|e| format!("{e}"))
                     );
@@ -421,8 +419,8 @@ impl Verticle {
         let mut buf = vec![0u8; 2048];
         let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output=()>>>>::new();
 
-        let cloned_server = self.dht.borrow().rs();
-        let socket = match cloned_server.borrow().rx_tokio_socket() {
+        let cloned_server = self.dht.rs();
+        let socket = match cloned_server.rx_tokio_socket() {
             Ok(socket) => socket,
             Err(e) => {
                 error!("Failed to get rx socket: {e}");
@@ -430,9 +428,9 @@ impl Verticle {
             }
         };
 
-        if !cloned_server.borrow_mut().prepare() {
+        if !cloned_server.prepare() {
             error!("Failed to prepare RPC server");
-            self.dht.borrow_mut().stop().await;
+            self.dht.stop().await;
             return;
         }
 
@@ -447,7 +445,7 @@ impl Verticle {
                 packet = socket.recv_from(&mut buf) => {
                     match packet {
                         Ok((len, from)) => {
-                            let rs = self.dht.borrow().rs();
+                            let rs = self.dht.rs();
                             RpcServer::handle_packet(rs, &buf[..len], from).await;
                         }
                         Err(e) => {
@@ -469,7 +467,7 @@ impl Verticle {
         }
 
         self.timerman.stop_all();
-        self.dht.borrow_mut().stop().await;
+        self.dht.stop().await;
         info!("DHT verticle exited run_loop");
     }
 }

@@ -32,70 +32,70 @@ struct SerdeRoutingTable {
 
 pub(crate) struct RoutingTable {
     nodeid  : Id,
-    buckets : RBTree<Prefix, Rc<RefCell<KBucket>>>,
-    updated : SystemTime,
-    saved   : SystemTime,
+    buckets : RefCell<RBTree<Prefix, Rc<RefCell<KBucket>>>>,
+    updated : RefCell<SystemTime>,
+    saved   : RefCell<SystemTime>,
 }
 
 impl RoutingTable {
     const _MAX_PERSIST_AGE_MILLIS: u64 = 24 * 60 * 60 * 1000;
 
-    pub(crate) fn new(nodeid: Id) -> Self {
+    pub(crate) fn new(nodeid: Id) -> Rc<Self> {
         let prefix = Prefix::new();
         let bucket = Rc::new(RefCell::new(KBucket::home_bucket(prefix)));
         let mut bs = RBTree::new();
         bs.insert(prefix, bucket);
 
-        Self {
+        Rc::new(Self {
             nodeid  : nodeid,
-            buckets : bs,
-            updated : SystemTime::UNIX_EPOCH,
-            saved   : SystemTime::UNIX_EPOCH,
-        }
+            buckets : RefCell::new(bs),
+            updated : RefCell::new(SystemTime::UNIX_EPOCH),
+            saved   : RefCell::new(SystemTime::UNIX_EPOCH),
+        })
     }
 
-    pub(crate) fn size(&self) -> usize {
-        self.buckets.len()
+    pub(crate) fn size(self: &Rc<Self>) -> usize {
+        self.buckets.borrow().len()
     }
 
-    pub(crate) fn is_home_bucket(&self, p: &Prefix) -> bool {
+    pub(crate) fn is_home_bucket(self: &Rc<Self>, p: &Prefix) -> bool {
         p.is_prefix_of(&self.nodeid)
     }
 
-    pub(crate) fn nodeid(&self) -> &Id {
+    pub(crate) fn nodeid(self: &Rc<Self>) -> &Id {
         &self.nodeid
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.buckets.is_empty()
+    pub(crate) fn is_empty(self: &Rc<Self>) -> bool {
+        self.buckets.borrow().is_empty()
     }
 
-    pub(crate) fn bucket(&self, target: &Id) -> Rc<RefCell<KBucket>> {
-        self.buckets.iter()
+    pub(crate) fn bucket(self: &Rc<Self>, target: &Id) -> Rc<RefCell<KBucket>> {
+        self.buckets.borrow().iter()
             .find(|(k,_)| k.is_prefix_of(target))
             .map(|(_,v)| v.clone())
             .expect("panic: no bucket found, should never happen")
     }
 
-    pub(crate) fn buckets(&self) -> Vec<Rc<RefCell<KBucket>>> {
-        self.buckets.values().cloned().collect()
+    pub(crate) fn buckets(self: &Rc<Self>) -> Vec<Rc<RefCell<KBucket>>> {
+        self.buckets.borrow().values().cloned().collect()
     }
 
-    pub(crate) fn bucket_entry(&self, id: &Id) -> Option<KBucketEntry> {
+    pub(crate) fn bucket_entry(self: &Rc<Self>, id: &Id) -> Option<KBucketEntry> {
         self.bucket(id).borrow().entry(Some(id))
     }
 
-    pub(crate) fn random_entry(&self) -> Option<KBucketEntry> {
+    pub(crate) fn random_entry(self: &Rc<Self>) -> Option<KBucketEntry> {
         self.bucket(&Id::random()).borrow().entry(None)
     }
 
     #[allow(unused)]
-    pub(crate) fn contains(&self, id: &Id) -> bool {
+    pub(crate) fn contains(self: &Rc<Self>, id: &Id) -> bool {
         self.bucket(id).borrow().contains(id)
     }
 
-    pub(crate) fn number_of_entries(&self) -> usize {
-        self.buckets.values().map(|v| v.borrow().size()).sum()
+    pub(crate) fn number_of_entries(self: &Rc<Self>) -> usize {
+        self.buckets.borrow().values().map(|v| v.borrow().size()).sum()
     }
 
     pub(crate) fn index_of(buckets: &Vec<Rc<RefCell<KBucket>>>, id: &Id) -> usize {
@@ -128,33 +128,33 @@ impl RoutingTable {
         }
     }
 
-    pub(crate) fn put(&mut self, entry: KBucketEntry) {
+    pub(crate) fn put(self: &Rc<Self>, entry: KBucketEntry) {
         self._put(entry);
-        self.updated = SystemTime::now();
+        *self.updated.borrow_mut() = SystemTime::now();
     }
 
-    pub(crate) fn remove(&mut self, id: &Id) -> Option<KBucketEntry> {
+    pub(crate) fn remove(self: &Rc<Self>, id: &Id) -> Option<KBucketEntry> {
         self._remove(id).map(|entry| {
-            self.updated = SystemTime::now();
+            *self.updated.borrow_mut() = SystemTime::now();
             entry
         })
     }
 
-    pub(crate) fn on_timeout(&self, id: &Id) {
+    pub(crate) fn on_timeout(self: &Rc<Self>, id: &Id) {
         self._on_timeout(id)
     }
 
-    pub(crate) fn on_request_sent(&self, id: &Id) {
+    pub(crate) fn on_request_sent(self: &Rc<Self>, id: &Id) {
         self._on_request_sent(id)
     }
 
     #[allow(unused)]
-    pub(crate) fn on_responded(&mut self, id: &Id, rtt: u64) {
+    pub(crate) fn on_responded(self: &Rc<Self>, id: &Id, rtt: u64) {
         self.bucket(id).borrow_mut().on_responded(id, rtt);
     }
 
     // The bucket has already been removed from the routing table
-    fn _split(&mut self, bucket: Rc<RefCell<KBucket>>) {
+    fn _split(self: &Rc<Self>, bucket: Rc<RefCell<KBucket>>) {
         let borrowed = bucket.borrow();
         let prefix = borrowed.prefix();
 
@@ -178,21 +178,21 @@ impl RoutingTable {
         );
     }
 
-    fn modify(&mut self,
+    fn modify(self: &Rc<Self>,
         to_remove: Vec<Rc<RefCell<KBucket>>>,
         to_add: Vec<Rc<RefCell<KBucket>>>
     ) {
         for bucket in to_remove {
             let prefix = *bucket.borrow().prefix();
-            self.buckets.remove(&prefix);
+            self.buckets.borrow_mut().remove(&prefix);
         }
         for bucket in to_add {
             let prefix = *bucket.borrow().prefix();
-            self.buckets.insert(prefix, bucket);
+            self.buckets.borrow_mut().insert(prefix, bucket);
         }
     }
 
-    fn _put(&mut self, entry: KBucketEntry) {
+    fn _put(self: &Rc<Self>, entry: KBucketEntry) {
         let entry_id = entry.id();
         let mut bucket = self.bucket(entry_id);
 
@@ -217,7 +217,7 @@ impl RoutingTable {
             .is_prefix_of(entry.id())
     }
 
-    fn _remove(&self, id: &Id) -> Option<KBucketEntry> {
+    fn _remove(self: &Rc<Self>, id: &Id) -> Option<KBucketEntry> {
         let bucket = self.bucket(id);
         let mut borrow_mut = bucket.borrow_mut();
 
@@ -228,11 +228,11 @@ impl RoutingTable {
         borrow_mut._remove_bad_entry(to_remove, true)
     }
 
-    fn _on_timeout(&self, id: &Id) {
+    fn _on_timeout(self: &Rc<Self>, id: &Id) {
         self.bucket(id).borrow_mut().on_timeout(id);
     }
 
-    fn _on_request_sent(&self, id: &Id) {
+    fn _on_request_sent(self: &Rc<Self>, id: &Id) {
         self.bucket(id).borrow_mut().on_request_sent(id);
     }
 
@@ -241,11 +241,11 @@ impl RoutingTable {
     // does not exceed the maximum allowed.
 	// This helps reduce fragmentation and maintain efficient bucket structure.
 	//
-    fn _merge_buckets(&mut self) {
-        debug!("Trying to merge buckets({})... ", self.buckets.len());
+    fn _merge_buckets(self: &Rc<Self>) {
+        debug!("Trying to merge buckets({})... ", self.buckets.borrow().len());
         let mut idx = 0;
-        while idx < self.buckets.len() {
-            let buckets = self.buckets.iter()
+        while idx < self.buckets.borrow().len() {
+            let buckets = self.buckets.borrow().iter()
                     .map(|(_, v)| v.clone())
                     .collect::<Vec<_>>();
 
@@ -292,19 +292,19 @@ impl RoutingTable {
                     idx -= 2; // Adjust index to re-check after merge
                 }
             }
-            debug!("Finished merge buckets({})... ", self.buckets.len());
+            debug!("Finished merge buckets({})... ", self.buckets.borrow().len());
         }
     }
 
     pub(crate) fn maintenance(
-        &mut self,
+        self: &Rc<Self>,
         bootstrap_ids: &[Id],
         handler: EasyHandler<Rc<RefCell<KBucket>>>
     ){
         self._merge_buckets();
-        self.updated = SystemTime::now();
+        *self.updated.borrow_mut() = SystemTime::now();
 
-        let buckets = self.buckets.values().cloned();
+        let buckets = self.buckets.borrow().values().cloned().collect::<Vec<_>>();
         for bucket in buckets {
             let mut borrowed = bucket.borrow_mut();
             borrowed.cleanup(&self.nodeid, bootstrap_ids,
@@ -326,8 +326,8 @@ impl RoutingTable {
         }
     }
 
-    pub(crate) fn save(&mut self, path: &Path) -> Result<()> {
-        if self.updated <= self.saved {
+    pub(crate) fn save(self: &Rc<Self>, path: &Path) -> Result<()> {
+        if *self.updated.borrow() <= *self.saved.borrow() {
             return Ok(());
         }
 
@@ -342,7 +342,7 @@ impl RoutingTable {
             if path.exists() {
                 fs::remove_file(path)?;
             }
-            self.saved = SystemTime::now();
+            *self.saved.borrow_mut() = SystemTime::now();
             return Ok(());
         }
 
@@ -351,7 +351,7 @@ impl RoutingTable {
         }
 
         let mut entries = Vec::with_capacity(self.number_of_entries());
-        for item in self.buckets.values() {
+        for item in self.buckets.borrow().values() {
             entries.extend(item.borrow().entries());
         }
 
@@ -367,11 +367,11 @@ impl RoutingTable {
         fs::write(&tmp_path, bytes)?;
         fs::rename(&tmp_path, &path)?;
 
-        self.saved = saved;
+        *self.saved.borrow_mut() = saved;
         Ok(())
     }
 
-    pub(crate) fn load(&mut self, path: &Path) -> Result<()> {
+    pub(crate) fn load(self: &Rc<Self>, path: &Path) -> Result<()> {
         const MAX_AGE: u64 = 24 * 60 * 60 * 1000;
 
         if !path.exists() || !path.is_file() {
@@ -409,11 +409,11 @@ impl fmt::Display for RoutingTable {
         write!(f, "nodeId:{}\n", self.nodeid)?;
         write!(f,
             "buckets:{}/ entries:{}\n",
-            self.size(),
-            self.number_of_entries()
+            self.buckets.borrow().len(),
+            self.buckets.borrow().values().map(|v| v.borrow().size()).sum::<usize>()
         )?;
 
-        self.buckets.values().for_each(|v| {
+        self.buckets.borrow().values().for_each(|v| {
             _ = write!(f, "* {}", v.borrow());
         });
         Ok(())

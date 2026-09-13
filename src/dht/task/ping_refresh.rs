@@ -23,13 +23,13 @@ pub(crate) struct PingRefreshTask {
 	// Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
-    dht: Rc<RefCell<DHT>>
+    dht: Rc<DHT>
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
 
 impl PingRefreshTask {
-    pub(crate) fn new(dht: Rc<RefCell<DHT>>) -> Self {
+    pub(crate) fn new(dht: Rc<DHT>) -> Self {
         Self {
             base_data: TaskData::new(),
             todo: Rc::new(RefCell::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
@@ -87,7 +87,7 @@ impl Task for PingRefreshTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 
@@ -112,9 +112,8 @@ impl Task for PingRefreshTask {
             target_id
         );
 
-        let rt = self.dht().borrow().rt();
-        let mut borrowed_rt = rt.borrow_mut();
-        borrowed_rt.remove(&target_id);
+        let rt = self.dht().rt();
+        rt.remove(&target_id);
     }
 
     fn iterate(&mut self) {

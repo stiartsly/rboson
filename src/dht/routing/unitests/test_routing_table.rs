@@ -2,6 +2,7 @@ use std::{
     fs,
     net::SocketAddr,
     path::PathBuf,
+    rc::Rc,
     time::SystemTime,
 };
 
@@ -33,9 +34,9 @@ fn make_reachable_entry(id: Id, addr: &str) -> KBucketEntry {
     entry
 }
 
-fn fill_and_split_table() -> (RoutingTable, Id, Id) {
+fn fill_and_split_table() -> (Rc<RoutingTable>, Id, Id) {
     let local_id = Id::zero();
-    let mut rt = RoutingTable::new(local_id);
+    let rt = RoutingTable::new(local_id);
 
     for i in 0..KBucket::MAX_ENTRIES {
         let id = make_id(0x00, i as u8 + 1);
@@ -65,7 +66,7 @@ mod tests {
     #[test]
     fn test_put_and_remove() {
         let local_id = Id::random();
-        let mut rt = RoutingTable::new(local_id);
+        let rt = RoutingTable::new(local_id);
 
         assert_eq!(rt.size(), 1);
         assert_eq!(rt.is_empty(), false);
@@ -121,7 +122,7 @@ mod tests {
     #[test]
     fn test_send_timeout_and_responded() {
         let local_id = Id::random();
-        let mut rt = RoutingTable::new(local_id);
+        let rt = RoutingTable::new(local_id);
         let id = make_id(0x00, 2);
         let entry = make_reachable_entry(id, "127.0.0.1:32001");
         rt.put(entry);
@@ -145,7 +146,7 @@ mod tests {
         let path = cache_path("empty");
         fs::write(&path, []).expect("Failed to create empty cache");
 
-        let mut rt = RoutingTable::new(Id::random());
+        let rt = RoutingTable::new(Id::random());
         rt.load(&path).expect("Empty cache should load successfully");
 
         assert_eq!(rt.number_of_entries(), 0);
@@ -156,7 +157,7 @@ mod tests {
     fn test_save_empty_table_removes_cache() {
         let path = cache_path("remove-empty");
         let id = make_id(0x00, 1);
-        let mut rt = RoutingTable::new(Id::random());
+        let rt = RoutingTable::new(Id::random());
         rt.put(make_reachable_entry(id, "127.0.0.1:32000"));
         rt.save(&path).expect("Failed to save populated routing table");
         assert!(path.exists());

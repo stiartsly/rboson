@@ -1,5 +1,6 @@
 use std::{
     net::SocketAddr,
+    rc::Rc,
 };
 
 use crate::{
@@ -30,12 +31,12 @@ fn make_kentry(id: Id, port: u16) -> KBucketEntry {
     entry
 }
 
-fn make_rt(local_id: Id) -> RoutingTable {
+fn make_rt(local_id: Id) -> Rc<RoutingTable> {
     RoutingTable::new(local_id)
 }
 
-fn make_split_rt() -> RoutingTable {
-    let mut rt = make_rt(Id::zero());
+fn make_split_rt() -> Rc<RoutingTable> {
+    let rt = make_rt(Id::zero());
     for i in 0..KBucket::MAX_ENTRIES {
         rt.put(make_kentry(make_id(0x00, i as u8 + 1), 33000 + i as u16));
     }
@@ -43,23 +44,23 @@ fn make_split_rt() -> RoutingTable {
     rt
 }
 
-fn build_rt_with_local_entry() -> RoutingTable {
+fn build_rt_with_local_entry() -> Rc<RoutingTable> {
     let local_id = make_id(0x00, 1);
-    let mut rt = make_rt(local_id);
+    let rt = make_rt(local_id);
     rt.put(make_kentry(local_id, 35000));
     rt.put(make_kentry(make_id(0x00, 2), 35001));
     rt.put(make_kentry(make_id(0x80, 1), 35002));
     rt
 }
 
-fn make_small_rt() -> RoutingTable {
-    let mut rt = make_rt(Id::zero());
+fn make_small_rt() -> Rc<RoutingTable> {
+    let rt = make_rt(Id::zero());
     rt.put(make_kentry(make_id(0x00, 1), 36000));
     rt.put(make_kentry(make_id(0x80, 1), 36001));
     rt
 }
 
-fn make_closest(rt: &RoutingTable, target: Id, capacity: usize) -> KClosestNodes {
+fn make_closest(rt: &Rc<RoutingTable>, target: Id, capacity: usize) -> KClosestNodes {
     KClosestNodes::new(rt, target, capacity)
 }
 

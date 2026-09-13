@@ -1,7 +1,6 @@
 use std::{
     any::Any,
     rc::Rc,
-    cell::RefCell,
 };
 use crate::{Id, Value, EasyHandler};
 use crate::dht::{
@@ -20,12 +19,12 @@ pub(crate) struct ValueLookupTask {
     lookup_data: LookupTaskData,
 
     result  : EligibleValue,
-    dht     : Rc<RefCell<DHT>>,
+    dht     : Rc<DHT>,
 }
 
 impl ValueLookupTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
+        dht: Rc<DHT>,
         target: Id,
         expected_seq: i32,
         done_on_eligible_result: bool
@@ -74,7 +73,7 @@ impl Task for ValueLookupTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 

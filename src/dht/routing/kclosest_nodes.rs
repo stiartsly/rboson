@@ -25,7 +25,7 @@ pub(crate) struct KClosestNodes {
 
 impl KClosestNodes {
     pub(crate) fn new(
-        rt: &RoutingTable,
+        rt: &Rc<RoutingTable>,
         target: Id,
         capacity: usize
     ) -> Self {

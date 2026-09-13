@@ -1,6 +1,5 @@
 use std::{
     rc::Rc,
-    cell::RefCell,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
@@ -30,7 +29,7 @@ pub(super) fn make_dht(
     identity: Arc<CryptoIdentity>,
     network: Network,
     host: &str,
-) -> (Rc<RefCell<DHT>>, mpsc::UnboundedReceiver<LocalBoxTimerCmd>) {
+) -> (Rc<DHT>, mpsc::UnboundedReceiver<LocalBoxTimerCmd>) {
     let tokenman = Arc::new(TokenManager::new());
     let storage: Arc<Mutex<dyn DataStorage>> = Arc::new(Mutex::new(SqliteStorage::new()));
     let listener: Arc<dyn ConnectionStatusListener> = Arc::new(NoopConnectionStatusListener);
@@ -46,8 +45,6 @@ pub(super) fn make_dht(
     };
 
     let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);
-    let dht = Rc::new(RefCell::new(dht));
-    dht.borrow_mut().weak = Rc::downgrade(&dht);
     (dht, rx)
 }
 
@@ -89,29 +86,29 @@ mod tests {
                 let (dht, _timer_rx) = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
 
                 let (promise, future) = Promise::pair();
-                let _ = dht.borrow_mut().start0().await;
-                let _ = dht.borrow_mut().start(promise).await;
+                let _ = dht.start0().await;
+                let _ = dht.start(promise).await;
                 future.await.expect("start promise should resolve");
 
-                assert_eq!(dht.borrow().network().is_ipv4(), true);
-                assert_eq!(dht.borrow().id(), identity.id());
-                assert_eq!(dht.borrow().ni().address().ip().to_string(), "127.0.0.1");
-                assert_eq!(dht.borrow().rt().borrow().size(), 1);
+                assert_eq!(dht.network().is_ipv4(), true);
+                assert_eq!(dht.id(), identity.id());
+                assert_eq!(dht.ni().address().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.rt().size(), 1);
 
-                dht.borrow_mut().stop().await;
+                dht.stop().await;
 
                 let (promise, future) = Promise::pair();
-                let _ = dht.borrow_mut().start0().await;
-                let _ = dht.borrow_mut().start(promise).await;
+                let _ = dht.start0().await;
+                let _ = dht.start(promise).await;
                 future.await.expect("start promise should resolve");
 
-                assert_eq!(dht.borrow().network().is_ipv4(), true);
-                assert_eq!(dht.borrow().id(), identity.id());
-                assert_eq!(dht.borrow().ni().address().ip().to_string(), "127.0.0.1");
-                assert_eq!(dht.borrow().rt().borrow().size(), 1);
+                assert_eq!(dht.network().is_ipv4(), true);
+                assert_eq!(dht.id(), identity.id());
+                assert_eq!(dht.ni().address().ip().to_string(), "127.0.0.1");
+                assert_eq!(dht.rt().size(), 1);
 
                 println!("Stopping DHT >>> line:{}", line!());
-                dht.borrow_mut().stop().await;
+                dht.stop().await;
             }));
 
             println!("DHT verticle thread exiting >>> line:{}", line!());

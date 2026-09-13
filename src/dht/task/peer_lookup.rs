@@ -1,7 +1,6 @@
 use std::{
     any::Any,
     rc::Rc,
-    cell::RefCell
 };
 use crate::{Id, PeerInfo, EasyHandler};
 use crate::dht::{
@@ -20,12 +19,12 @@ pub(crate) struct PeerLookupTask {
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Rc<RefCell<DHT>>
+    dht: Rc<DHT>
 }
 
 impl PeerLookupTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
+        dht: Rc<DHT>,
         target: Id,
         expected_seq: i32,
         expected_count: usize,
@@ -75,7 +74,7 @@ impl Task for PeerLookupTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 

@@ -1,7 +1,6 @@
 use std::{
     any::Any,
     rc::Rc,
-    cell::RefCell
 };
 use crate::{Id, NodeInfo, EasyHandler};
 use crate::dht::{
@@ -27,12 +26,12 @@ pub(crate) struct NodeLookupTask {
     want_target: bool,
 
     result  : Option<NodeInfo>,
-    dht     : Rc<RefCell<DHT>>,
+    dht     : Rc<DHT>,
 }
 
 impl NodeLookupTask {
     pub(crate) fn new(
-        dht: Rc<RefCell<DHT>>,
+        dht: Rc<DHT>,
         target: Id,
         done_on_eligible_result: bool
     ) -> Self {
@@ -112,7 +111,7 @@ impl Task for NodeLookupTask {
         self
     }
 
-    fn dht(&self) -> Rc<RefCell<DHT>> {
+    fn dht(&self) -> Rc<DHT> {
         self.dht.clone()
     }
 

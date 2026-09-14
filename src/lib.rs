@@ -2,6 +2,7 @@ pub mod core;
 pub mod did;
 pub mod dht;
 pub mod activeproxy;
+pub mod director;
 pub mod messaging;
 
 pub(crate) mod utils {

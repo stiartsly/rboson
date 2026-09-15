@@ -1,12 +1,6 @@
-use crate::{
-    PeerInfo,
-    signature,
-    Id,
-    Result,
-    errors::ArgumentError,
-};
-use std::{fs, path::Path};
+use crate::{errors::ArgumentError, signature, Id, PeerInfo, Result};
 use serde::Deserialize;
+use std::{fs, path::Path};
 
 #[derive(Debug, Deserialize)]
 struct SerdeOptions {
@@ -46,31 +40,31 @@ struct SerdeUpstream {
 }
 
 pub struct Options {
-    server_peerid   : Id,
+    server_peerid: Id,
     // when set, skips DHT resolution of `server_peerid`.
-    server_peer     : Option<PeerInfo>,
+    server_peer: Option<PeerInfo>,
 
     // when set, skips DHT resolution of `server_peerid`.
-    service_host    : Option<String>,
-    service_port    : u16,
+    service_host: Option<String>,
+    service_port: u16,
 
     // The client identity that authenticates to the service:
     // a user identity and a per-device key.
-    user_id         : Id,
-    user_key        : Option<signature::KeyPair>,
-    device_key      : signature::KeyPair,
+    user_id: Id,
+    user_key: Option<signature::KeyPair>,
+    device_key: signature::KeyPair,
 
     // The upstream information, which is the local service provider that
     // the ActiveProxy will forward requests to.
-    upstream_host   : String,
-    upstream_port   : u16,
-    upstream_scheme : String,
+    upstream_host: String,
+    upstream_port: u16,
+    upstream_scheme: String,
 
-    name_access     : bool,
-    announce_peer   : bool,
+    name_access: bool,
+    announce_peer: bool,
 
     // The file path to cache the peer information for the service peer
-    data_dir       : String,
+    data_dir: String,
 }
 
 impl Options {
@@ -131,43 +125,43 @@ impl Options {
 }
 
 pub struct OptionsBuilder {
-    data_dir        : Option<String>,
-    server_peerid   : Id,
-    server_peer     : Option<PeerInfo>,
-    service_host    : Option<String>,
-    service_port    : Option<u16>,
+    data_dir: Option<String>,
+    server_peerid: Id,
+    server_peer: Option<PeerInfo>,
+    service_host: Option<String>,
+    service_port: Option<u16>,
 
-    user_id         : Option<Id>,
-    user_key        : Option<signature::KeyPair>,
-    device_key      : Option<signature::KeyPair>,
+    user_id: Option<Id>,
+    user_key: Option<signature::KeyPair>,
+    device_key: Option<signature::KeyPair>,
 
-    upstream_host   : Option<String>,
-    upstream_port   : Option<u16>,
-    upstream_scheme : String,
+    upstream_host: Option<String>,
+    upstream_port: Option<u16>,
+    upstream_scheme: String,
 
-    name_access     : bool,
-    announce_peer   : bool,
+    name_access: bool,
+    announce_peer: bool,
 }
 
 impl OptionsBuilder {
     pub fn new(peerid: Id) -> Self {
         Self {
-            data_dir        : None,
-            server_peerid   : peerid,
-            server_peer     : None,
-            service_host    : None,
-            service_port    : None,
+            data_dir: None,
+            server_peerid: peerid,
+            server_peer: None,
+            service_host: None,
+            service_port: None,
 
-            user_id         : None,
-            user_key        : None,
-            device_key      : None,
+            user_id: None,
+            user_key: None,
+            device_key: None,
 
-            upstream_host   : None,
-            upstream_port   : None,
-            upstream_scheme : Options::DEFAULT_SCHEME.to_string(),
+            upstream_host: None,
+            upstream_port: None,
+            upstream_scheme: Options::DEFAULT_SCHEME.to_string(),
 
-            name_access     : false,
-            announce_peer   : false,
+            name_access: false,
+            announce_peer: false,
         }
     }
 
@@ -213,8 +207,9 @@ impl OptionsBuilder {
 
     pub fn load_from(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let yaml = fs::read_to_string(path)
-            .map_err(|e| ArgumentError::new(format!("Reading config {} failed: {e}", path.display())))?;
+        let yaml = fs::read_to_string(path).map_err(|e| {
+            ArgumentError::new(format!("Reading config {} failed: {e}", path.display()))
+        })?;
         Self::read_from(&yaml)
     }
 
@@ -317,19 +312,19 @@ impl OptionsBuilder {
         };
 
         Ok(Options {
-            data_dir        : self.data_dir.take().unwrap_or_else(|| ".".into()),
-            server_peerid   : self.server_peerid,
-            server_peer     : self.server_peer.take(),
-            service_host    : self.service_host.take(),
-            service_port    : self.service_port.unwrap_or(Options::DEFAULT_PORT),
+            data_dir: self.data_dir.take().unwrap_or_else(|| ".".into()),
+            server_peerid: self.server_peerid,
+            server_peer: self.server_peer.take(),
+            service_host: self.service_host.take(),
+            service_port: self.service_port.unwrap_or(Options::DEFAULT_PORT),
             user_id,
-            user_key        : self.user_key.take(),
+            user_key: self.user_key.take(),
             device_key,
             upstream_host,
             upstream_port,
-            upstream_scheme : self.upstream_scheme,
-            name_access     : self.name_access,
-            announce_peer   : self.announce_peer,
+            upstream_scheme: self.upstream_scheme,
+            name_access: self.name_access,
+            announce_peer: self.announce_peer,
         })
     }
 }

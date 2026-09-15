@@ -1,46 +1,33 @@
+use log::{debug, error, info, trace, warn};
 use std::{
+    cell::{Cell, RefCell},
     mem,
-    cell::RefCell,
-    rc::Rc,
     net::SocketAddr,
+    rc::Rc,
     time::{Duration, SystemTime},
 };
-use tokio::io::{
-    split,
-    ReadHalf,
-    WriteHalf,
-    AsyncReadExt,
-    AsyncWriteExt
-};
+use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
-use log::{error, info, debug, trace, warn};
 
 use crate::{
-    Id,
-    Result,
-    elapsed_ms,
-    cryptobox,
-    CryptoContext,
     core::errors::{MalformedError, ProtocolError, StateError},
+    cryptobox, elapsed_ms, CryptoContext, Id, Result,
 };
 
 use super::{
-    random_timeshift,
-    packet,
-    packet_type::PacketType,
+    connection_handler::ConnectionHandler, packet, packet_type::PacketType, random_timeshift,
     state::State,
-    connection_handler::ConnectionHandler,
 };
 
 // packet size (2 bytes) + packet type (1 byte)
 const PACKET_HEADER_BYTES: usize = mem::size_of::<u16>() + mem::size_of::<u8>();
-const KEEPALIVE_INTERVAL:    u128 = 60000;   // 60 seconds
-const MAX_KEEP_ALIVE_RETRY:  u128 = 3;
-const HEALTH_CHECK_INTERVAL: u64  = 10 * 1000; // 10 seconds, drives the run() loop's keepalive ticks
-// A relayed connection is fully torn down only after three disconnect confirmations:
-// the local upstream end, the server DISCONNECT, and the matching DISCONNECT_ACK.
-const DISCONNECT_CONFIRMS:  i32 = 3;
+const KEEPALIVE_INTERVAL: u128 = 60000; // 60 seconds
+const MAX_KEEP_ALIVE_RETRY: u128 = 3;
+const HEALTH_CHECK_INTERVAL: u64 = 10 * 1000; // 10 seconds, drives the run() loop's keepalive ticks
+                                              // A relayed connection is fully torn down only after three disconnect confirmations:
+                                              // the local upstream end, the server DISCONNECT, and the matching DISCONNECT_ACK.
+const DISCONNECT_CONFIRMS: i32 = 3;
 
 fn get_packet_type(packet: &[u8]) -> Result<PacketType> {
     if packet.len() < PACKET_HEADER_BYTES {
@@ -56,23 +43,24 @@ fn get_packet_type(packet: &[u8]) -> Result<PacketType> {
 }
 
 pub(crate) struct ProxyConnection {
-    conn_id             : i32,
-    state               : RefCell<State>,
-    keepalive           : RefCell<SystemTime>,
-    disconnect_confirms : RefCell<i32>,
+    conn_id: i32,
+    state: RefCell<State>,
+    keepalive: RefCell<SystemTime>,
+    disconnect_confirms: RefCell<i32>,
+    opened: Cell<bool>,
 
-    handler             : Rc<dyn ConnectionHandler>,
+    handler: Rc<dyn ConnectionHandler>,
 
-    relay_rx            : RefCell<Option<ReadHalf<TcpStream>>>,
-    relay_tx            : RefCell<Option<WriteHalf<TcpStream>>>,
+    relay_rx: RefCell<Option<ReadHalf<TcpStream>>>,
+    relay_tx: RefCell<Option<WriteHalf<TcpStream>>>,
 
-    upstream_rx         : RefCell<Option<ReadHalf<TcpStream>>>,
-    upstream_tx         : RefCell<Option<WriteHalf<TcpStream>>>,
+    upstream_rx: RefCell<Option<ReadHalf<TcpStream>>>,
+    upstream_tx: RefCell<Option<WriteHalf<TcpStream>>>,
 
-    stickybuf           : RefCell<Vec<u8>>,
+    stickybuf: RefCell<Vec<u8>>,
 
-    peer_context        : Rc<RefCell<CryptoContext>>,
-    session_context     : Rc<RefCell<Option<CryptoContext>>>,
+    peer_context: Rc<RefCell<CryptoContext>>,
+    session_context: Rc<RefCell<Option<CryptoContext>>>,
 }
 
 impl ProxyConnection {
@@ -85,28 +73,33 @@ impl ProxyConnection {
     ) -> Rc<Self> {
         let (rx, tx) = split(stream);
         Rc::new(Self {
-                conn_id:            cid,
-                state:              RefCell::new(State::Initializing),
-                keepalive:          RefCell::new(SystemTime::now()),
-                disconnect_confirms: RefCell::new(0),
+            conn_id: cid,
+            state: RefCell::new(State::Initializing),
+            keepalive: RefCell::new(SystemTime::now()),
+            disconnect_confirms: RefCell::new(0),
+            opened: Cell::new(false),
 
-                handler,
+            handler,
 
-                relay_rx:           RefCell::new(Some(rx)),
-                relay_tx:           RefCell::new(Some(tx)),
+            relay_rx: RefCell::new(Some(rx)),
+            relay_tx: RefCell::new(Some(tx)),
 
-                upstream_rx:        RefCell::new(None),
-                upstream_tx:        RefCell::new(None),
+            upstream_rx: RefCell::new(None),
+            upstream_tx: RefCell::new(None),
 
-                stickybuf:          RefCell::new(Vec::with_capacity(4 * 1024)),
+            stickybuf: RefCell::new(Vec::with_capacity(4 * 1024)),
 
-                peer_context,
-                session_context,
+            peer_context,
+            session_context,
         })
     }
 
     pub(crate) fn cid(self: &Rc<Self>) -> i32 {
         self.conn_id
+    }
+
+    pub(crate) fn was_opened(&self) -> bool {
+        self.opened.get()
     }
 
     fn allow(self: &Rc<Self>, addr: SocketAddr) -> bool {
@@ -143,7 +136,11 @@ impl ProxyConnection {
         } else {
             // Disconnected from the client side before connecting to the upstream:
             // drop the socket, keep the state.
-            debug!("Connection {} dropped the upstream socket in {} state", self.cid(), self.state.borrow());
+            debug!(
+                "Connection {} dropped the upstream socket in {} state",
+                self.cid(),
+                self.state.borrow()
+            );
             *self.upstream_rx.borrow_mut() = None;
             *self.upstream_tx.borrow_mut() = None;
         }
@@ -159,7 +156,10 @@ impl ProxyConnection {
             match writer.write(&payload[written..]).await {
                 Ok(len) => written += len,
                 Err(e) => {
-                    error!("Connection {} failed to send {label} packet to proxy socket: {e}", self.cid());
+                    error!(
+                        "Connection {} failed to send {label} packet to proxy socket: {e}",
+                        self.cid()
+                    );
                     *self.relay_tx.borrow_mut() = Some(writer);
                     self.close().await?;
                     return Err(e.into());
@@ -168,7 +168,10 @@ impl ProxyConnection {
         }
 
         *self.relay_tx.borrow_mut() = Some(writer);
-        trace!("Connection {} sent {label} packet to proxy socket", self.cid());
+        trace!(
+            "Connection {} sent {label} packet to proxy socket",
+            self.cid()
+        );
         Ok(())
     }
 
@@ -191,7 +194,7 @@ impl ProxyConnection {
             device_id,
             client_session_pk,
             name_access,
-            device_sig
+            device_sig,
         );
         let payload = auth.encode(&mut self.peer_context.borrow_mut())?;
         self.send_packet("AUTH", payload).await
@@ -229,18 +232,23 @@ impl ProxyConnection {
         if *self.state.borrow() == State::Closed {
             return Ok(());
         }
-        self.send_packet("DISCONNECT", packet::Disconnect::encode()).await
+        self.send_packet("DISCONNECT", packet::Disconnect::encode())
+            .await
     }
 
     async fn send_disconnect_ack(self: &Rc<Self>) -> Result<()> {
         if *self.state.borrow() == State::Closed {
             return Ok(());
         }
-        self.send_packet("DISCONNECT_ACK", packet::DisconnectAck::encode()).await
+        self.send_packet("DISCONNECT_ACK", packet::DisconnectAck::encode())
+            .await
     }
 
     async fn send_data(self: &Rc<Self>, data: Vec<u8>) -> Result<()> {
-        let session_context = self.session_context.borrow().clone()
+        let session_context = self
+            .session_context
+            .borrow()
+            .clone()
             .ok_or_else(|| StateError::new("session crypto context is not established"))?;
         let mut ctx = session_context;
         let payload = packet::Data::new(data).encode(&mut ctx)?;
@@ -262,7 +270,9 @@ impl ProxyConnection {
                     return Ok(());
                 }
 
-                self.stickybuf.borrow_mut().extend_from_slice(&input[..need]);
+                self.stickybuf
+                    .borrow_mut()
+                    .extend_from_slice(&input[..need]);
                 pos += need;
                 remaining -= need;
             }
@@ -278,11 +288,15 @@ impl ProxyConnection {
 
             let need = packet_size - self.stickybuf.borrow().len();
             if remaining < need {
-                self.stickybuf.borrow_mut().extend_from_slice(&input[pos..pos + remaining]);
+                self.stickybuf
+                    .borrow_mut()
+                    .extend_from_slice(&input[pos..pos + remaining]);
                 return Ok(());
             }
 
-            self.stickybuf.borrow_mut().extend_from_slice(&input[pos..pos + need]);
+            self.stickybuf
+                .borrow_mut()
+                .extend_from_slice(&input[pos..pos + need]);
             pos += need;
             remaining -= need;
 
@@ -296,7 +310,9 @@ impl ProxyConnection {
 
         while remaining > 0 {
             if remaining < PACKET_HEADER_BYTES {
-                self.stickybuf.borrow_mut().extend_from_slice(&input[pos..pos + remaining]);
+                self.stickybuf
+                    .borrow_mut()
+                    .extend_from_slice(&input[pos..pos + remaining]);
                 return Ok(());
             }
 
@@ -307,7 +323,9 @@ impl ProxyConnection {
             }
 
             if remaining < packet_size {
-                self.stickybuf.borrow_mut().extend_from_slice(&input[pos..pos + remaining]);
+                self.stickybuf
+                    .borrow_mut()
+                    .extend_from_slice(&input[pos..pos + remaining]);
                 return Ok(());
             }
 
@@ -328,20 +346,34 @@ impl ProxyConnection {
             let packet_type = match get_packet_type(packet) {
                 Ok(t) => t,
                 Err(e) => {
-                    error!("Connection {} got malformed packet from proxy socket: {e}", self.cid());
+                    error!(
+                        "Connection {} got malformed packet from proxy socket: {e}",
+                        self.cid()
+                    );
                     return self.close().await;
                 }
             };
 
-            trace!("Connection {} got {packet_type} packet ({} bytes) from proxy socket", self.cid(), packet.len());
+            trace!(
+                "Connection {} got {packet_type} packet ({} bytes) from proxy socket",
+                self.cid(),
+                packet.len()
+            );
 
             if !self.state.borrow().accept(&packet_type) {
-                error!("Connection {} cannot accept {packet_type} packet in {} state", self.cid(), self.state.borrow());
+                error!(
+                    "Connection {} cannot accept {packet_type} packet in {} state",
+                    self.cid(),
+                    self.state.borrow()
+                );
                 return self.close().await;
             }
 
             if let Err(e) = self.dispatch_packet(&packet_type, packet).await {
-                error!("Connection {} got invalid {packet_type} packet from proxy socket: {e}", self.cid());
+                error!(
+                    "Connection {} got invalid {packet_type} packet from proxy socket: {e}",
+                    self.cid()
+                );
                 return self.close().await;
             }
 
@@ -351,62 +383,91 @@ impl ProxyConnection {
         match packet::Challenge::decode(packet) {
             Ok(challenge) => {
                 if let Err(e) = self.handle_challenge(challenge).await {
-                    error!("Connection {} got invalid CHALLENGE packet from proxy socket: {e}", self.cid());
+                    error!(
+                        "Connection {} got invalid CHALLENGE packet from proxy socket: {e}",
+                        self.cid()
+                    );
                     return self.close().await;
                 }
                 Ok(())
-            },
+            }
             Err(e) => {
-                error!("Connection {} got malformed CHALLENGE packet from proxy socket: {e}", self.cid());
+                error!(
+                    "Connection {} got malformed CHALLENGE packet from proxy socket: {e}",
+                    self.cid()
+                );
                 self.close().await
             }
         }
     }
 
-    async fn dispatch_packet(self: &Rc<Self>, packet_type: &PacketType, packet: &[u8]) -> Result<()> {
+    async fn dispatch_packet(
+        self: &Rc<Self>,
+        packet_type: &PacketType,
+        packet: &[u8],
+    ) -> Result<()> {
         match packet_type {
             PacketType::AuthAck(_) => {
                 let ack = packet::AuthAck::decode(packet, &self.peer_context.borrow())?;
                 self.handle_auth_ack(ack)
-            },
+            }
             PacketType::AttachAck(_) => {
                 let ack = packet::AttachAck::decode(packet)?;
                 self.handle_attach_ack(ack)
-            },
+            }
             PacketType::PingAck(_) => {
                 let ack = packet::PingAck::decode(packet)?;
                 self.handle_ping_ack(ack)
-            },
+            }
             PacketType::Connect(_) => {
-                let session_context = self.session_context.borrow().clone()
-                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+                let session_context =
+                    self.session_context.borrow().clone().ok_or_else(|| {
+                        StateError::new("session crypto context is not established")
+                    })?;
                 let conn = packet::Connect::decode(packet, &session_context)?;
                 self.handle_connect(conn).await
-            },
+            }
             PacketType::Data(_) => {
-                let session_context = self.session_context.borrow().clone()
-                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
+                let session_context =
+                    self.session_context.borrow().clone().ok_or_else(|| {
+                        StateError::new("session crypto context is not established")
+                    })?;
                 let data = packet::Data::decode(packet, &session_context)?;
                 self.handle_data(data).await
-            },
+            }
             PacketType::Disconnect(_) => {
                 let d = packet::Disconnect::decode(packet)?;
                 self.handle_disconnect(d).await
-            },
+            }
             PacketType::DisconnectAck(_) => {
                 let d = packet::DisconnectAck::decode(packet)?;
                 self.handle_disconnect_ack(d).await
-            },
+            }
             PacketType::Error(_) => {
-                let session_context = self.session_context.borrow().clone()
-                    .ok_or_else(|| StateError::new("session crypto context is not established"))?;
-                let err = packet::Error::decode(packet, &session_context)?;
-                error!("Connection {} got ERROR response from the server, error: {}: {}",
-                    self.cid(), err.code(), err.message().unwrap_or_default());
-                Err(ProtocolError::new("Packet error"))
-            },
+                let err = if let Some(session_context) = self.session_context.borrow().as_ref() {
+                    packet::Error::decode(packet, session_context)?
+                } else {
+                    packet::Error::decode(packet, &self.peer_context.borrow())?
+                };
+                let message = err.message().unwrap_or_default();
+                error!(
+                    "Connection {} got ERROR response from the server, error: {}: {}",
+                    self.cid(),
+                    err.code(),
+                    message
+                );
+                Err(ProtocolError::new(format!(
+                    "Server rejected the proxy connection ({}): {}",
+                    err.code(),
+                    message
+                )))
+            }
             _ => {
-                error!("INTERNAL ERROR: Connection {} got wrong {packet_type} packet in {} state", self.cid(), self.state.borrow());
+                error!(
+                    "INTERNAL ERROR: Connection {} got wrong {packet_type} packet in {} state",
+                    self.cid(),
+                    self.state.borrow()
+                );
                 Ok(())
             }
         }
@@ -420,10 +481,14 @@ impl ProxyConnection {
     fn handle_auth_ack(self: &Rc<Self>, ack: packet::AuthAck) -> Result<()> {
         self.handler.authenticated(
             self,
-            ack.server_session_pk(), ack.max_connections() as i32, ack.name_access(),
-            ack.endpoint(), ack.named_endpoint(),
+            ack.server_session_pk(),
+            ack.max_connections() as i32,
+            ack.name_access(),
+            ack.endpoint(),
+            ack.named_endpoint(),
         );
         *self.state.borrow_mut() = State::Idling;
+        self.opened.set(true);
         self.on_opened();
         info!("Connection {} opened.", self.cid());
         Ok(())
@@ -431,6 +496,7 @@ impl ProxyConnection {
 
     fn handle_attach_ack(self: &Rc<Self>, _ack: packet::AttachAck) -> Result<()> {
         *self.state.borrow_mut() = State::Idling;
+        self.opened.set(true);
         self.on_opened();
         info!("Connection {} opened.", self.cid());
         Ok(())
@@ -461,18 +527,20 @@ impl ProxyConnection {
             handler.busy(&connection);
         });
 
-
         debug!("Connection {} connecting to the upstream...", self.cid());
         match self.open_upstream().await {
             Ok(()) => {
                 debug!("Connection {} connected to the upstream", self.cid());
                 self.connect_upstream();
                 self.send_connect_ack(true).await
-            },
+            }
             Err(e) => {
                 *self.state.borrow_mut() = State::Idling;
                 self.on_idle();
-                error!("Connection {} failed to connect to upstream: {e}", self.cid());
+                error!(
+                    "Connection {} failed to connect to upstream: {e}",
+                    self.cid()
+                );
                 self.send_connect_ack(false).await
             }
         }
@@ -496,7 +564,10 @@ impl ProxyConnection {
             match tx.write(&payload[written..]).await {
                 Ok(len) => written += len,
                 Err(e) => {
-                    error!("Connection {} failed to write data to upstream: {e}", self.cid());
+                    error!(
+                        "Connection {} failed to write data to upstream: {e}",
+                        self.cid()
+                    );
                     close_upstream = true;
                     break;
                 }
@@ -509,7 +580,11 @@ impl ProxyConnection {
             return Ok(());
         }
 
-        trace!("Connection {} sent {} bytes data to upstream", self.cid(), payload.len());
+        trace!(
+            "Connection {} sent {} bytes data to upstream",
+            self.cid(),
+            payload.len()
+        );
         Ok(())
     }
 
@@ -549,7 +624,10 @@ impl ProxyConnection {
         let mut disconnect_confirms = self.disconnect_confirms.borrow_mut();
         *disconnect_confirms += 1;
         if *disconnect_confirms == DISCONNECT_CONFIRMS {
-            trace!("Connection {} disconnect confirmed, changing state to idle", self.cid());
+            trace!(
+                "Connection {} disconnect confirmed, changing state to idle",
+                self.cid()
+            );
             *self.state.borrow_mut() = State::Idling;
             *disconnect_confirms = 0;
             drop(disconnect_confirms);
@@ -568,7 +646,10 @@ impl ProxyConnection {
     pub(crate) async fn check_keepalive(self: &Rc<Self>) -> Result<()> {
         if elapsed_ms!(*self.keepalive.borrow()) >= MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
             warn!("Connection {} keep alive timeout, closing now", self.cid());
-            return Err(StateError::new(format!("Connection {} is dead", self.cid())));
+            return Err(StateError::new(format!(
+                "Connection {} is dead",
+                self.cid()
+            )));
         }
 
         let random_shift = random_timeshift() as u128 * 1000; // max 10 seconds
@@ -631,7 +712,7 @@ impl ProxyConnection {
             Tick,
         }
 
-        let mut relay_buff    = vec![0u8; 0x7FFF];
+        let mut relay_buff = vec![0u8; 0x7FFF];
         let mut upstream_buff = vec![0u8; 0x7FFF];
         let duration = Duration::from_millis(HEALTH_CHECK_INTERVAL);
         let mut ticker = time::interval_at(Instant::now() + duration, duration);
@@ -664,11 +745,11 @@ impl ProxyConnection {
                     Err(e) => {
                         error!("Connection {} read relay stream error: {e}", self.cid());
                         Action::Close
-                    },
+                    }
                     Ok(0) => {
                         info!("Connection {} read EOF from relay stream", self.cid());
                         Action::Close
-                    },
+                    }
                     Ok(len) => {
                         if let Err(e) = self.on_relay_data(&relay_buff[..len]).await {
                             error!("Connection {} relay handling error: {e}", self.cid());
@@ -682,11 +763,11 @@ impl ProxyConnection {
                     Err(e) => {
                         error!("Connection {} read upstream stream error: {e}", self.cid());
                         Action::CloseUpstream
-                    },
+                    }
                     Ok(0) => {
                         info!("Connection {} read EOF from upstream", self.cid());
                         Action::CloseUpstream
-                    },
+                    }
                     Ok(len) => {
                         if self.on_upstream_data(&upstream_buff[..len]).await.is_ok() {
                             Action::Continue
@@ -701,7 +782,7 @@ impl ProxyConnection {
                     } else {
                         Action::Close
                     }
-                },
+                }
             };
 
             match action {

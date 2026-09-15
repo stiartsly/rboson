@@ -1,34 +1,30 @@
-mod utils;
-mod session;
-mod verticle;
 mod connection;
 mod connection_handler;
 mod connection_registry;
-mod packet_type;
 mod packet;
+mod packet_type;
+mod session;
 mod state;
+mod utils;
+mod verticle;
 
 pub(crate) use crate::utils::{
     handler::LocalBoxHandler,
-    timer_client::{
-        LocalBoxTimerClient,
-        LocalBoxTimerCmd,
-    },
+    timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
     timer_manager::LocalBoxTimerManager,
 };
 
-pub mod options;
 pub mod client;
-
+pub mod options;
 
 #[cfg(test)]
 mod unitests {
-    //mod test_options;
+    mod test_options;
 }
 
 pub use {
-    options::{Options, OptionsBuilder},
     client::ActiveProxyClient,
+    options::{Options, OptionsBuilder},
 };
 
 /*
@@ -51,9 +47,9 @@ fn random_boolean(input: bool) -> u8 {
     }
 }
 */
-pub(crate)
-fn random_timeshift() -> u32 {
-    unsafe { // max is 10s
+pub(crate) fn random_timeshift() -> u32 {
+    unsafe {
+        // max is 10s
         libsodium_sys::randombytes_random() % 10
     }
 }

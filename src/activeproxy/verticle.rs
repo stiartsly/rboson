@@ -1,3 +1,4 @@
+use log::info;
 use std::{
     net::SocketAddr,
     rc::Rc,
@@ -5,41 +6,38 @@ use std::{
     sync::{mpsc as std_mpsc, Arc},
     thread::JoinHandle,
 };
-use log::info;
 use tokio::{
     runtime,
     sync::{mpsc, oneshot},
     task,
 };
 
+use super::{
+    session::ProxySession, LocalBoxTimerClient as TimerClient, LocalBoxTimerCmd as TimerCmd,
+    LocalBoxTimerManager as TimerManager,
+};
 use crate::{
-    Id,
     dht::Node,
     errors::{Result, StateError},
-    signature,
-};
-use super::{
-    LocalBoxTimerCmd as TimerCmd,
-    LocalBoxTimerClient as TimerClient,
-    LocalBoxTimerManager as TimerManager,
-    session::ProxySession
+    signature, Id,
 };
 
 pub(crate) struct VerticleClient {
-    event_tx  : mpsc::UnboundedSender<Event>,
-    handle  : Option<JoinHandle<()>>,
+    event_tx: mpsc::UnboundedSender<Event>,
+    handle: Option<JoinHandle<()>>,
 }
 
 enum Event {
-    Start   { complete: oneshot::Sender<StdResult<(),String>> },
-    Stop    { complete: oneshot::Sender<StdResult<(),String>> },
+    Start {
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    Stop {
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
 }
 
 impl VerticleClient {
-    fn new(
-        event_tx: mpsc::UnboundedSender<Event>,
-        handle: JoinHandle<()>
-    ) -> Self {
+    fn new(event_tx: mpsc::UnboundedSender<Event>, handle: JoinHandle<()>) -> Self {
         Self {
             event_tx,
             handle: Some(handle),
@@ -50,9 +48,12 @@ impl VerticleClient {
         info!("Starting ActiveProxy verticle");
 
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(Event::Start { complete: tx }).is_ok() {
-            let _ = rx.await;
-        }
+        self.event_tx
+            .send(Event::Start { complete: tx })
+            .map_err(|_| StateError::new("ActiveProxy verticle event channel closed"))?;
+        rx.await
+            .map_err(|_| StateError::new("ActiveProxy verticle startup channel closed"))?
+            .map_err(StateError::new)?;
 
         info!("ActiveProxy verticle started");
         Ok(())
@@ -75,14 +76,15 @@ impl VerticleClient {
 }
 
 pub(crate) struct VerticleOptions {
-    pub(super) node                        : Option<Arc<Node>>,
-    pub(super) service_peerid              : Id,
-    pub(super) service_endpoint            : String,
-    pub(super) upstream_addr               : SocketAddr,
-    pub(super) user_id                     : Id,
-    pub(super) device_key                  : signature::PrivateKey,
-    pub(super) name_access_enabled         : bool,
-    pub(super) announce_peer_enabled       : bool,
+    pub(super) node: Option<Arc<Node>>,
+    pub(super) service_peerid: Id,
+    pub(super) service_endpoint: String,
+    pub(super) upstream_addr: SocketAddr,
+    pub(super) upstream_endpoint: String,
+    pub(super) user_id: Id,
+    pub(super) device_key: signature::PrivateKey,
+    pub(super) name_access_enabled: bool,
+    pub(super) announce_peer_enabled: bool,
 }
 
 impl VerticleOptions {
@@ -91,35 +93,36 @@ impl VerticleOptions {
         service_peerid: Id,
         service_endpoint: String,
         upstream_addr: SocketAddr,
+        upstream_endpoint: String,
         user_id: Id,
         device_key: signature::PrivateKey,
+        name_access_enabled: bool,
+        announce_peer_enabled: bool,
     ) -> Self {
         Self {
             node,
             service_peerid,
             service_endpoint,
             upstream_addr,
+            upstream_endpoint,
             user_id,
             device_key,
-            name_access_enabled: false,
-            announce_peer_enabled: false,
+            name_access_enabled,
+            announce_peer_enabled,
         }
     }
 }
 
 pub(crate) struct Verticle {
-    session         : Rc<ProxySession>,
-    timer_manager   : TimerManager,
-    event_rx          : mpsc::UnboundedReceiver<Event>,
-    tmr_rx          : mpsc::UnboundedReceiver<TimerCmd>,
-    quit            : bool,
+    session: Rc<ProxySession>,
+    timer_manager: TimerManager,
+    event_rx: mpsc::UnboundedReceiver<Event>,
+    tmr_rx: mpsc::UnboundedReceiver<TimerCmd>,
+    quit: bool,
 }
 
 impl Verticle {
-    fn new(
-        options: VerticleOptions,
-        event_rx: mpsc::UnboundedReceiver<Event>
-    ) -> Result<Self> {
+    fn new(options: VerticleOptions, event_rx: mpsc::UnboundedReceiver<Event>) -> Result<Self> {
         let (tmr_tx, tmr_rx) = mpsc::unbounded_channel::<TimerCmd>();
         let timer_client = TimerClient::new(tmr_tx);
         let timer_manager = TimerManager::new();
@@ -139,9 +142,7 @@ impl Verticle {
                     let session = self.session.clone();
                     async move {
                         let result = session.start().await;
-                        let _ = complete.send(
-                            result.map_err(|e| e.to_string())
-                        );
+                        let _ = complete.send(result.map_err(|e| e.to_string()));
                     }
                 });
             }
@@ -155,11 +156,14 @@ impl Verticle {
 
     fn handle_command(&mut self, cmd: TimerCmd) {
         match cmd {
-            TimerCmd::Add { timer_id, delay, interval, cb } =>
-                self.timer_manager.add_timer(timer_id, delay, interval, cb),
+            TimerCmd::Add {
+                timer_id,
+                delay,
+                interval,
+                cb,
+            } => self.timer_manager.add_timer(timer_id, delay, interval, cb),
 
-            TimerCmd::Cancel { timer_id } =>
-                self.timer_manager.cancel_timer(timer_id),
+            TimerCmd::Cancel { timer_id } => self.timer_manager.cancel_timer(timer_id),
 
             TimerCmd::Stop { complete } => {
                 self.timer_manager.stop_all();
@@ -210,7 +214,7 @@ pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
                 Ok(mut v) => {
                     let _ = reply_tx.send(Ok(()));
                     v.run_loop().await;
-                },
+                }
                 Err(e) => {
                     let _ = reply_tx.send(Err(e.to_string()));
                 }
@@ -221,6 +225,8 @@ pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
     match reply_rx.recv() {
         Ok(Ok(())) => Ok(VerticleClient::new(event_tx, handle)),
         Ok(Err(msg)) => Err(StateError::new(msg)),
-        Err(_) => Err(StateError::new("ActiveProxy verticle startup channel closed")),
+        Err(_) => Err(StateError::new(
+            "ActiveProxy verticle startup channel closed",
+        )),
     }
 }

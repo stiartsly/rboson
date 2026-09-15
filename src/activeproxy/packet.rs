@@ -2,25 +2,12 @@ use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    Id,
-    Result,
-    Identity,
-    CryptoContext,
+    core::errors::MalformedError, cryptobox, signature, CryptoContext, Id, Identity, Result,
     Signature,
-    cryptobox,
-    signature,
-    core::errors::MalformedError,
 };
 
 use super::packet_type::{
-    PacketType,
-    AuthType,
-    AttachType,
-    PingType,
-    ConnType,
-    DisconnType,
-    DataType,
-    ErrType,
+    AttachType, AuthType, ConnType, DataType, DisconnType, ErrType, PacketType, PingType,
 };
 
 pub(crate) const VERSION: i32 = 1;
@@ -61,7 +48,7 @@ impl Challenge {
         }
 
         let challenge = packet[mem::size_of::<u16>()..].to_vec();
-        Ok(Self {challenge})
+        Ok(Self { challenge })
     }
 }
 
@@ -77,21 +64,21 @@ impl Challenge {
  *      - padding
  */
 pub(crate) struct Auth {
-    version:            u16,
-    user_id:            Id,
-    device_id:          Id,
-    client_session_pk:  cryptobox::PublicKey,
-    name_access:        bool,
-    device_sig:         Vec<u8>,
+    version: u16,
+    user_id: Id,
+    device_id: Id,
+    client_session_pk: cryptobox::PublicKey,
+    name_access: bool,
+    device_sig: Vec<u8>,
 }
 
 #[allow(dead_code)]
 impl Auth {
     const SECRET_BYTES: usize = mem::size_of::<u16>()
-            + Id::BYTES
-            + cryptobox::PublicKey::BYTES
-            + mem::size_of::<u8>()
-            + Signature::BYTES;
+        + Id::BYTES
+        + cryptobox::PublicKey::BYTES
+        + mem::size_of::<u8>()
+        + Signature::BYTES;
 
     pub(crate) const BYTES: usize = HEADER_BYTES                        // packet header
             + Id::BYTES                                                 // device Id
@@ -112,7 +99,7 @@ impl Auth {
             device_id,
             client_session_pk,
             name_access,
-            device_sig
+            device_sig,
         }
     }
 
@@ -151,7 +138,8 @@ impl Auth {
         secret[pos..pos + Id::BYTES].copy_from_slice(&self.user_id);
         pos += Id::BYTES;
 
-        secret[pos..pos + cryptobox::PublicKey::BYTES].copy_from_slice(self.client_session_pk.as_bytes());
+        secret[pos..pos + cryptobox::PublicKey::BYTES]
+            .copy_from_slice(self.client_session_pk.as_bytes());
         pos += cryptobox::PublicKey::BYTES;
 
         secret[pos] = self.name_access as u8;
@@ -177,7 +165,7 @@ impl Auth {
         signature::verify(
             challenge,
             &self.device_sig,
-            &self.device_id.to_signature_key()
+            &self.device_id.to_signature_key(),
         )
     }
 
@@ -191,7 +179,8 @@ impl Auth {
         pos += Id::BYTES;
 
         let cipher = &packet[pos..];
-        let secret = identity.decrypt_into(&device_id, cipher)
+        let secret = identity
+            .decrypt_into(&device_id, cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         if secret.len() < Self::SECRET_BYTES {
@@ -205,9 +194,8 @@ impl Auth {
         let user_id = Id::try_from_bytes(&secret[pos..pos + Id::BYTES])?;
         pos += Id::BYTES;
 
-        let client_session_pk = cryptobox::PublicKey::try_from(
-            &secret[pos..pos + cryptobox::PublicKey::BYTES]
-        )?;
+        let client_session_pk =
+            cryptobox::PublicKey::try_from(&secret[pos..pos + cryptobox::PublicKey::BYTES])?;
         pos += cryptobox::PublicKey::BYTES;
 
         let name_access = secret[pos] == 1;
@@ -221,7 +209,7 @@ impl Auth {
             device_id,
             client_session_pk,
             name_access,
-            device_sig
+            device_sig,
         })
     }
 }
@@ -238,10 +226,10 @@ impl Auth {
  */
 pub(crate) struct AuthAck {
     server_session_pk: cryptobox::PublicKey,
-    max_connections:   u16,
-    name_access:       bool,
-    endpoint:          String,
-    named_endpoint:    Option<String>,
+    max_connections: u16,
+    name_access: bool,
+    endpoint: String,
+    named_endpoint: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -267,7 +255,7 @@ impl AuthAck {
             max_connections,
             name_access,
             endpoint,
-            named_endpoint
+            named_endpoint,
         }
     }
 
@@ -292,17 +280,19 @@ impl AuthAck {
     }
 
     pub(crate) fn encode(&self, crypto_context: &mut CryptoContext) -> Result<Vec<u8>> {
-        let endpoints_size = self.endpoint.len()
-            + self.named_endpoint.as_ref().map_or(0, |s| s.len());
+        let endpoints_size =
+            self.endpoint.len() + self.named_endpoint.as_ref().map_or(0, |s| s.len());
 
         let padding = random_padding(Self::MIN_BYTES + endpoints_size);
         let mut secret = vec![0u8; Self::MIN_SECRET_BYTES + endpoints_size + padding.len()];
 
         let mut pos = 0;
-        secret[pos..pos + cryptobox::PublicKey::BYTES].copy_from_slice(self.server_session_pk.as_bytes());
+        secret[pos..pos + cryptobox::PublicKey::BYTES]
+            .copy_from_slice(self.server_session_pk.as_bytes());
         pos += cryptobox::PublicKey::BYTES;
 
-        secret[pos..pos + mem::size_of::<u16>()].copy_from_slice(&self.max_connections.to_be_bytes());
+        secret[pos..pos + mem::size_of::<u16>()]
+            .copy_from_slice(&self.max_connections.to_be_bytes());
         pos += mem::size_of::<u16>();
 
         secret[pos] = self.name_access as u8;
@@ -340,7 +330,8 @@ impl AuthAck {
         }
 
         let cipher = &packet[HEADER_BYTES..];
-        let secret = crypto_context.decrypt_into(cipher)
+        let secret = crypto_context
+            .decrypt_into(cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         if secret.len() < Self::MIN_SECRET_BYTES {
@@ -348,9 +339,8 @@ impl AuthAck {
         }
 
         let mut pos = 0;
-        let server_session_pk = cryptobox::PublicKey::try_from(
-            &secret[pos..pos + cryptobox::PublicKey::BYTES]
-        )?;
+        let server_session_pk =
+            cryptobox::PublicKey::try_from(&secret[pos..pos + cryptobox::PublicKey::BYTES])?;
         pos += cryptobox::PublicKey::BYTES;
 
         let max_connections = u16::from_be_bytes([secret[pos], secret[pos + 1]]);
@@ -370,8 +360,9 @@ impl AuthAck {
 
         let mut named_endpoint = None;
         if pos < secret.len() && secret[pos] != 0 {
-            let end = find_terminator(&secret, pos)
-                .ok_or_else(|| MalformedError::new("missing null terminator for the named endpoint"))?;
+            let end = find_terminator(&secret, pos).ok_or_else(|| {
+                MalformedError::new("missing null terminator for the named endpoint")
+            })?;
             named_endpoint = Some(String::from_utf8_lossy(&secret[pos..end]).into_owned());
         }
 
@@ -384,7 +375,7 @@ impl AuthAck {
             max_connections,
             name_access,
             endpoint,
-            named_endpoint
+            named_endpoint,
         })
     }
 }
@@ -399,9 +390,9 @@ impl AuthAck {
  *      - padding
  */
 pub(crate) struct Attach {
-    device_id:          Id,
-    client_session_pk:  cryptobox::PublicKey,
-    device_sig:         Vec<u8>,
+    device_id: Id,
+    client_session_pk: cryptobox::PublicKey,
+    device_sig: Vec<u8>,
 }
 
 #[allow(dead_code)]
@@ -415,12 +406,12 @@ impl Attach {
     pub(crate) fn new(
         device_id: Id,
         client_session_pk: cryptobox::PublicKey,
-        device_sig: Vec<u8>
+        device_sig: Vec<u8>,
     ) -> Self {
         Self {
             device_id,
             client_session_pk,
-            device_sig
+            device_sig,
         }
     }
 
@@ -441,7 +432,8 @@ impl Attach {
         let mut secret = vec![0u8; Self::SECRET_BYTES + padding.len()];
 
         let mut pos = 0;
-        secret[pos..pos + cryptobox::PublicKey::BYTES].copy_from_slice(self.client_session_pk.as_bytes());
+        secret[pos..pos + cryptobox::PublicKey::BYTES]
+            .copy_from_slice(self.client_session_pk.as_bytes());
         pos += cryptobox::PublicKey::BYTES;
 
         secret[pos..pos + self.device_sig.len()].copy_from_slice(&self.device_sig);
@@ -464,7 +456,7 @@ impl Attach {
         signature::verify(
             challenge,
             &self.device_sig,
-            &self.device_id.to_signature_key()
+            &self.device_id.to_signature_key(),
         )
     }
 
@@ -478,7 +470,8 @@ impl Attach {
         pos += Id::BYTES;
 
         let cipher = &packet[pos..];
-        let secret = identity.decrypt_into(&device_id, cipher)
+        let secret = identity
+            .decrypt_into(&device_id, cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         if secret.len() < Self::SECRET_BYTES {
@@ -486,9 +479,8 @@ impl Attach {
         }
 
         let mut pos = 0;
-        let client_session_pk = cryptobox::PublicKey::try_from(
-            &secret[pos..pos + cryptobox::PublicKey::BYTES]
-        )?;
+        let client_session_pk =
+            cryptobox::PublicKey::try_from(&secret[pos..pos + cryptobox::PublicKey::BYTES])?;
         pos += cryptobox::PublicKey::BYTES;
 
         let device_sig = secret[pos..pos + Signature::BYTES].to_vec();
@@ -496,7 +488,7 @@ impl Attach {
         Ok(Self {
             device_id,
             client_session_pk,
-            device_sig
+            device_sig,
         })
     }
 }
@@ -555,15 +547,15 @@ impl PingAck {
  *      - padding
  */
 pub(crate) struct Connect {
-    address:    IpAddr,
-    port:       u16,
+    address: IpAddr,
+    port: u16,
 }
 
 #[allow(dead_code)]
 impl Connect {
     const SECRET_BYTES: usize = mem::size_of::<u16>()   // port
         + mem::size_of::<u8>()                          // addrlen
-        + 16;                                           // addr (16 bytes for both IPv4 and IPv6)
+        + 16; // addr (16 bytes for both IPv4 and IPv6)
 
     pub(crate) const BYTES: usize = HEADER_BYTES        // packet header
         + cryptobox::Nonce::BYTES + cryptobox::CryptoBox::MAC_BYTES // encryption header
@@ -617,7 +609,8 @@ impl Connect {
         }
 
         let cipher = &packet[HEADER_BYTES..];
-        let secret = crypto_context.decrypt_into(cipher)
+        let secret = crypto_context
+            .decrypt_into(cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         if secret.len() < Self::SECRET_BYTES {
@@ -639,14 +632,18 @@ impl Connect {
                 secret[pos],
                 secret[pos + 1],
                 secret[pos + 2],
-                secret[pos + 3])
-            ),
+                secret[pos + 3],
+            )),
             16 => {
                 let mut octets = [0u8; 16];
                 octets.copy_from_slice(&secret[pos..pos + 16]);
                 IpAddr::V6(Ipv6Addr::from(octets))
-            },
-            _ => return Err(MalformedError::new(format!("invalid address length: {addr_len}"))),
+            }
+            _ => {
+                return Err(MalformedError::new(format!(
+                    "invalid address length: {addr_len}"
+                )))
+            }
         };
 
         Ok(Self { address, port })
@@ -764,7 +761,8 @@ impl Data {
         }
 
         let cipher = &packet[HEADER_BYTES..];
-        let data = crypto_context.decrypt_into(cipher)
+        let data = crypto_context
+            .decrypt_into(cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         Ok(Self { data })
@@ -772,8 +770,8 @@ impl Data {
 }
 
 pub(crate) struct Error {
-    code:       i16,
-    message:    Option<String>,
+    code: i16,
+    message: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -830,7 +828,8 @@ impl Error {
         }
 
         let cipher = &packet[HEADER_BYTES..];
-        let secret = crypto_context.decrypt_into(cipher)
+        let secret = crypto_context
+            .decrypt_into(cipher)
             .map_err(|e| MalformedError::new(format!("failed to decrypt packet: {e}")))?;
 
         if secret.len() < Self::MIN_SECRET_BYTES {

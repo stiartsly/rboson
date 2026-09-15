@@ -1,8 +1,4 @@
-use crate::{
-    activeproxy::OptionsBuilder,
-    signature::KeyPair,
-    Id,
-};
+use crate::{activeproxy::OptionsBuilder, signature::KeyPair, Id};
 
 #[test]
 fn test_activeproxy_configuration_builds_options() {

@@ -1,12 +1,9 @@
-use std::{
-    collections::HashMap,
-    marker::PhantomData,
-};
+use std::{collections::HashMap, marker::PhantomData};
 
 pub(crate) struct ConnectionRegistry<T> {
-    connections : HashMap<i32, bool>,
-    inflight    : usize,
-    phantom     : PhantomData<T>,
+    connections: HashMap<i32, bool>,
+    inflight: usize,
+    phantom: PhantomData<T>,
 }
 
 impl<T> ConnectionRegistry<T> {

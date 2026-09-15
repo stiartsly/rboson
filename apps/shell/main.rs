@@ -19,6 +19,7 @@ use log::{debug, info, warn};
 
 mod announce_peer;
 mod announce_value;
+mod login;
 
 struct ConnectionReadiness {
     connected_networks: AtomicU8,
@@ -117,6 +118,10 @@ struct Options {
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
 
+    /// The Director configuration file
+    #[arg(long, value_name = "FILE", default_value = "apps/shell/director.yaml")]
+    director_config: String,
+
     /// The data directory
     #[arg(short, long, value_name = "PATH")]
     datadir: Option<String>,
@@ -142,7 +147,9 @@ struct Options {
 ///   - `findnode <ID>`
 ///   - `findpeer <ID> [-c/--count <COUNT>]`
 ///   - `findvalue <ID>`
-///   - `identity`
+///   - `keygen`
+///   - `login`
+///   - `me`
 ///   - `log [on|off]`
 ///   - `status`
 fn build_cli() -> Command {
@@ -192,8 +199,12 @@ fn build_cli() -> Command {
                 .about("Generate a random key identity")
         )
         .subcommand(
+            Command::new("login")
+                .about("Log in to the super node, registering the built-in account if necessary")
+        )
+        .subcommand(
             Command::new("me")
-                .about("Show my key identity")
+                .about("Show the super node and current user profile")
         )
         .subcommand(
             Command::new("log")
@@ -235,6 +246,7 @@ async fn execute_command(
     private_key: &PrivateKey,
     readiness: &ConnectionReadiness,
     external_printer: &ExternalPrinter<String>,
+    login_session: &mut login::Session,
 ) {
     // Reedline only renders its external output while it is reading input.
     // Send logs directly to the terminal until this command has finished.
@@ -301,16 +313,19 @@ async fn execute_command(
             println!("  User ID     : {}", id.to_base58());
             println!("  DID         : {}", id.to_did_string());
             println!("  Public Key  : {}", keypair.public_key());
-            println!("  Private Key : {} (base58)", keypair.private_key().to_base58());
-            println!("              : {} (hex)", keypair.private_key().to_hexstr());
+            println!(
+                "  Private Key : {} (base58)",
+                keypair.private_key().to_base58()
+            );
+            println!(
+                "              : {} (hex)",
+                keypair.private_key().to_hexstr()
+            );
             println!("\nKeep the private key secret. It controls this identity.")
         }
-        Some(("me", _)) => {
-            println!("My key identity:");
-            println!("  User ID     : {}", node.id().to_base58());
-            println!("  DID         : {}", node.id().to_did_string());
-        }
-        Some(("log", m )) => match m.get_one::<String>("STATE").map(String::as_str) {
+        Some(("login", _)) => login_session.login().await,
+        Some(("me", _)) => login_session.show_me().await,
+        Some(("log", m)) => match m.get_one::<String>("STATE").map(String::as_str) {
             Some("off") => {
                 logger::disable_console_output();
                 println!("Console log output disabled. Logs continue in the configured log file.");
@@ -346,6 +361,16 @@ async fn execute_command(
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
+    let mut login_session = match login::Session::load_from(&opts.director_config) {
+        Ok(session) => session,
+        Err(e) => {
+            println!(
+                "Loading Director configuration '{}' failed: {e}",
+                opts.director_config
+            );
+            return;
+        }
+    };
     let config = opts
         .config
         .as_deref()
@@ -353,9 +378,7 @@ async fn main() {
         .or_else(|| env::var("NODE_CONFIG").ok())
         .unwrap_or_else(|| "apps/shell/node.yaml".to_string());
 
-    let mut builder = match NodeOptionsBuilder::new()
-        .load_from(&config)
-    {
+    let mut builder = match NodeOptionsBuilder::new().load_from(&config) {
         Ok(builder) => builder,
         Err(e) => {
             println!("Loading node configuration failed: {e}");
@@ -457,6 +480,7 @@ async fn main() {
                             &private_key,
                             &readiness,
                             &log_printer,
+                            &mut login_session,
                         )
                         .await
                     }
@@ -473,5 +497,38 @@ async fn main() {
 
     if let Err(e) = node.stop().await {
         println!("Stopping node failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn director_commands_are_available() {
+        assert_eq!(
+            build_cli()
+                .try_get_matches_from(["login"])
+                .unwrap()
+                .subcommand_name(),
+            Some("login")
+        );
+        assert_eq!(
+            build_cli()
+                .try_get_matches_from(["me"])
+                .unwrap()
+                .subcommand_name(),
+            Some("me")
+        );
+    }
+
+    #[test]
+    fn director_config_argument_defaults_and_accepts_override() {
+        let defaults = Options::try_parse_from(["shell"]).unwrap();
+        assert_eq!(defaults.director_config, "apps/shell/director.yaml");
+
+        let overridden =
+            Options::try_parse_from(["shell", "--director-config", "custom.yaml"]).unwrap();
+        assert_eq!(overridden.director_config, "custom.yaml");
     }
 }

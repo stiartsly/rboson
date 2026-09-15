@@ -1,0 +1,17 @@
+director:
+  url: https://director.example
+  nodeId: ${SUPER_NODEID}
+  insecure: false
+
+user:
+  id: ${USERID}
+  privateKey: ${USER_PRIVATE_KEY}
+  name: Alice
+  email: alice@example.com
+  bio: Boson user
+  passphrase: secret
+
+device:
+  privateKey: "${DEVICE_PRIVATE_KEY}"
+  name: Laptop
+  app: Boson

@@ -1,7 +1,8 @@
 director:
   url: https://47.101.142.224:9000
   nodeId: GhVW54uEd179PzRPpaiENKZuMezMNExTP6bXRK3rLDAQ
-  insecure: false
+  # This development endpoint presents an internal, self-signed certificate.
+  insecure: true
 
 user:
   id: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg
@@ -9,7 +10,7 @@ user:
   name: Alice
   email: dummpy@example.com
   bio: Boson user
-  passphrase: secret
+  passphrase: test_secret_123
 
 device:
   privateKey: "0x869c5a431268de9bfda43db0908e0cbdfe37516762a0b24cb3f08291228fd6ff2a123fe345b5beed47a5a106aba8695a2a170928ffb082ea8a5a3bc2a5b757a3"

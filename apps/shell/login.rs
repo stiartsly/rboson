@@ -105,6 +105,7 @@ mod tests {
         let session = Session::load_from("apps/shell/director.yaml").unwrap();
 
         assert_eq!(session.client.options().director_url().scheme(), "https");
+        assert!(session.client.options().insecure());
         assert!(session.client.options().user_key().is_some());
         assert!(session.client.options().device_key().is_some());
         assert!(!session.logged_in);

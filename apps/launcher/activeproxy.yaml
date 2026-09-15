@@ -3,16 +3,16 @@
 # The host and port are optional. If omitted, the client will perform a DHT lookup to resolve
 # the peer’s network address. If provided, these values will be used directly as the peer’s address.
 service:
-  peerId: 8okgUMSQHfnvTSEB9rjquvF6mMbhnPZD93Xir95BpD2b
-  host: 66.42.74.13
+  peerId: 7BcZ49fhqaxpNA9BwABy4gpZqWrfMX8Xytze426tvxrN
+  host: 47.101.142.224
   port: 9090
 
 # Client credentials.
 # The user id and the device private key are required.
 client:
-  # userPrivateKey: WD4dkEd3Jv9itgYj8hW7VvgBu4muGCTyuaQcCKQH4EZbW1rUyiEu3DaZ7td72er17kJkEUTsjUsgTSk8stpZE62
-  userId: 3iighwS988Gp3axKuB2VbUU39DYym3WJcGyxX1MUHDQr
-  devicePrivateKey: 25mK4Jzkk8CRnTuEQ77D7j2k87RTnXP8JLHAMvqpchNhB8eAk7VASG32uQoLd8FrtvwmP26R7RABi79HRaqCibbb
+  userPrivateKey: 0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d13410da72883c6da7a6be00c2e5d70bbbf9a90c10bb099d01a656af2955e4af79
+  userId: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg
+  devicePrivateKey: 0x869c5a431268de9bfda43db0908e0cbdfe37516762a0b24cb3f08291228fd6ff2a123fe345b5beed47a5a106aba8695a2a170928ffb082ea8a5a3bc2a5b757a3
 
 # Upstream server configuration.
 # The host and port are mandatory, The scheme is optional, defaults to "tcp://".

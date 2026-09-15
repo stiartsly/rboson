@@ -9,7 +9,9 @@ use clap::Parser;
 use tokio::sync::Notify;
 
 use boson::{
+    Id,
     Network,
+    Result,
     dht::{
         Node,
         ConnectionStatus,
@@ -20,6 +22,13 @@ use boson::{
         ActiveProxyClient as ActiveProxy,
         OptionsBuilder as ActiveProxyOptionsBuilder,
     },
+    director::{
+        DirectorClient,
+        DirectorOptionsBuilder,
+        NotFoundError,
+        UnauthorizedError,
+    },
+    errors::{ArgumentError, StateError},
 };
 
 #[derive(Parser, Debug)]
@@ -34,6 +43,10 @@ struct Options {
     /// The ActiveProxy configuration file
     #[arg(long, value_name = "FILE")]
     activeproxy_config: Option<String>,
+
+    /// The Director configuration used to admit the ActiveProxy device
+    #[arg(long, value_name = "FILE")]
+    director_config: Option<String>,
 }
 
 /// Notifies once the node has connected to the Boson network.
@@ -54,9 +67,118 @@ impl ConnectionStatusListener for ReadyListener {
     }
 }
 
+async fn ensure_device_admitted(
+    director: &DirectorClient,
+    user_id: &Id,
+    device_id: &Id,
+) -> Result<()> {
+    if director.user_id() != Some(user_id) {
+        return Err(ArgumentError::new(
+            "Director and ActiveProxy configurations use different user identities",
+        ));
+    }
+    if director.device_id() != Some(device_id) {
+        return Err(ArgumentError::new(
+            "Director and ActiveProxy configurations use different device identities",
+        ));
+    }
+
+    let devices = match director.list_devices().await {
+        Ok(devices) => devices,
+        Err(e)
+            if e.downcast_ref::<UnauthorizedError>().is_some()
+                || e.downcast_ref::<NotFoundError>().is_some() =>
+        {
+            director.register_user().await?;
+            director.list_devices().await?
+        }
+        Err(e) => return Err(e),
+    };
+
+    if devices.iter().any(|device| device.id() == device_id) {
+        println!("ActiveProxy device {device_id} is admitted by the Director.");
+        return Ok(());
+    }
+
+    let registration = director.options().registration();
+    let name = registration.device_name().ok_or_else(|| {
+        StateError::new("Director device.name is required to register the ActiveProxy device")
+    })?;
+    let app = registration.app_name().ok_or_else(|| {
+        StateError::new("Director device.app is required to register the ActiveProxy device")
+    })?;
+    director
+        .register_device(name, app, registration.passphrase())
+        .await?;
+
+    let admitted = director
+        .list_devices()
+        .await?
+        .iter()
+        .any(|device| device.id() == device_id);
+    if !admitted {
+        return Err(StateError::new(format!(
+            "Director did not return the newly registered device {device_id}"
+        )));
+    }
+
+    println!("Registered ActiveProxy device {device_id} with the Director.");
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
+
+    let activeproxy_config = opts
+        .activeproxy_config
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
+        .unwrap_or_else(|| "apps/launcher/activeproxy.yaml".to_string());
+    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&activeproxy_config)
+        .and_then(ActiveProxyOptionsBuilder::build)
+    {
+        Ok(options) => options,
+        Err(e) => {
+            eprintln!("Error building ActiveProxy configuration: {e}");
+            exit(1);
+        }
+    };
+
+    let director_config = opts
+        .director_config
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var("DIRECTOR_CONFIG").ok())
+        .unwrap_or_else(|| "apps/launcher/director.yaml".to_string());
+    let director_options = match DirectorOptionsBuilder::load_from(&director_config)
+        .and_then(DirectorOptionsBuilder::build)
+    {
+        Ok(options) => options,
+        Err(e) => {
+            eprintln!("Error building Director configuration: {e}");
+            exit(1);
+        }
+    };
+    let director = match DirectorClient::new(director_options) {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Creating Director client failed: {e}");
+            exit(1);
+        }
+    };
+    let activeproxy_user_id = activeproxy_options.user_id().clone();
+    let activeproxy_device_id = Id::from(activeproxy_options.device_key().public_key());
+    if let Err(e) = ensure_device_admitted(
+        &director,
+        &activeproxy_user_id,
+        &activeproxy_device_id,
+    ).await {
+        eprintln!("Admitting the ActiveProxy device through the Director failed: {e}");
+        exit(1);
+    }
+
     let config = opts
         .config
         .as_deref()
@@ -97,22 +219,6 @@ async fn main() {
         println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
-    let config = opts
-        .activeproxy_config
-        .as_deref()
-        .map(str::to_owned)
-        .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
-        .unwrap_or_else(|| "apps/launcher/activeproxy.yaml".to_string());
-
-    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&config)
-        .and_then(ActiveProxyOptionsBuilder::build)
-    {
-        Ok(options) => options,
-        Err(e) => {
-            eprintln!("Error building ActiveProxy configuration: {e}");
-            exit(1);
-        }
-    };
     let ap = match ActiveProxy::new(Some(node.clone()), activeproxy_options) {
         Ok(ap) => Arc::new(ap),
         Err(e) => {

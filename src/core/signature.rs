@@ -97,36 +97,35 @@ impl TryFrom<&str> for PrivateKey {
     type Error = Error;
     fn try_from(input: &str) -> Result<Self> {
         let mut bytes = vec![0u8; Self::BYTES];
-        match input.starts_with("0x") {
-            true => {
-                hex::decode_to_slice(&input[2..], &mut bytes[..]).map_err(|e| match e {
-                    FromHexError::InvalidHexCharacter { c, index } => ArgumentError::new(format!(
-                        "Invalid hex character {} at position {}",
-                        c, index
-                    )),
-                    FromHexError::OddLength => {
-                        ArgumentError::new(format!("Odd hex string length {}", input.len()))
-                    }
-                    FromHexError::InvalidStringLength => {
-                        ArgumentError::new(format!("Invalid hex string length"))
-                    }
-                })?;
-            }
-            false => {
-                bs58::decode(input)
-                    .with_alphabet(bs58::Alphabet::DEFAULT)
-                    .onto(&mut bytes[..])
-                    .map_err(|e| match e {
-                        decode::Error::BufferTooSmall => {
-                            ArgumentError::new(format!("Invalid base58 string length"))
-                        }
-                        decode::Error::InvalidCharacter { character, index } => ArgumentError::new(
-                            format!("Invalid base58 character {} at {}", character, index),
-                        ),
-                        _ => ArgumentError::new(format!("Invalid base58 with unknown error")),
-                    })?;
-            }
-        };
+        if input.starts_with("0x") {
+            hex::decode_to_slice(&input[2..], &mut bytes[..]).map_err(|e| match e {
+                FromHexError::InvalidHexCharacter { c, index } => ArgumentError::new(format!(
+                    "Invalid hex character {} at position {}",
+                    c, index
+                )),
+                FromHexError::OddLength => {
+                    ArgumentError::new(format!("Odd hex string length {}", input.len()))
+                }
+                FromHexError::InvalidStringLength => {
+                    ArgumentError::new(format!("Invalid hex string length"))
+                }
+            })?;
+            return Ok(PrivateKey(bytes.try_into().unwrap()))
+        }
+
+        // Decode as base58 if it doesn't start with "0x"
+        bs58::decode(input)
+            .with_alphabet(bs58::Alphabet::DEFAULT)
+            .onto(&mut bytes[..])
+            .map_err(|e| match e {
+                decode::Error::BufferTooSmall => {
+                    ArgumentError::new(format!("Invalid base58 string length"))
+                }
+                decode::Error::InvalidCharacter { character, index } => ArgumentError::new(
+                    format!("Invalid base58 character {} at {}", character, index),
+                ),
+                _ => ArgumentError::new(format!("Invalid base58 with unknown error")),
+            })?;
         Ok(PrivateKey(bytes.try_into().unwrap()))
     }
 }

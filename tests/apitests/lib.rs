@@ -29,6 +29,11 @@ mod did {
     mod vp;
 }
 
+#[cfg(test)]
+mod director {
+    mod client;
+}
+
 /*
 #[cfg(test)]
 mod messaging {

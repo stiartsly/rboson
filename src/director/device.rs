@@ -16,15 +16,19 @@ pub struct Device {
     #[serde(default)]
     pub app: Option<String>,
 
+    #[serde(default)]
     #[serde(rename="createdAt")]
-    pub created_at: u64,
+    pub created_at: Option<u64>,
 
+    #[serde(default)]
     #[serde(rename="updatedAt")]
-    pub updated_at: u64,
+    pub updated_at: Option<u64>,
 
+    #[serde(default)]
     #[serde(rename="lastSeen")]
-    pub last_seen: u64,
+    pub last_seen: Option<u64>,
 
+    #[serde(default)]
     #[serde(rename="lastAddress")]
     pub last_address: Option<String>,
 }
@@ -47,15 +51,15 @@ impl Device {
     }
 
     pub fn created_at(&self) -> u64 {
-        self.created_at
+        self.created_at.unwrap_or(0)
     }
 
     pub fn updated_at(&self) -> u64 {
-        self.updated_at
+        self.updated_at.unwrap_or(0)
     }
 
     pub fn last_seen(&self) -> u64 {
-        self.last_seen
+        self.last_seen.unwrap_or(0)
     }
 
     pub fn last_address(&self) -> Option<&str> {
@@ -72,7 +76,7 @@ impl fmt::Display for Device {
             self.user_id,
             self.name,
             self.app,
-            self.last_seen,
+            self.last_seen(),
         )
     }
 }

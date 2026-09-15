@@ -1,34 +1,21 @@
+use reqwest::{Client, Method, StatusCode};
+use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-use reqwest::{Client, Method, StatusCode};
-use serde_json::{json, Value};
 use url::Url;
 
 use super::pow::{self, Solution};
 use super::{
+    base64url,
     errors::{
-        ConflictError,
-        ForbiddenError,
-        InvalidRequestError,
-        NotFoundError,
-        PassphraseRequiredError,
-        RateLimitError,
-        RegistrationDisabledError,
-        ServerError,
-        ServiceBusyError,
+        ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, PassphraseRequiredError,
+        RateLimitError, RegistrationDisabledError, ServerError, ServiceBusyError,
         UnauthorizedError,
     },
-    base64url, sign_nonce,
-    Device,
-    NodeStatus,
+    sign_nonce, Avatar, Device, NodeStatus, Plan, Profile, ProfileUpdate, Subscription, UserPlan,
     UserRegistration,
-    Avatar,
-    Plan, UserPlan,
-    Profile,
-    ProfileUpdate,
-    Subscription,
 };
 use crate::{
     errors::{ArgumentError, MalformedError, NetworkError, Result, StateError},
@@ -39,27 +26,35 @@ use crate::{
 const API_PREFIX: &str = "api/v1/client";
 const AUTH_NONCE_BYTES: usize = 32;
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct DirectorClientBuilder {
     director_url: Option<Url>,
     node_id: Option<Id>,
     user_key: Option<KeyPair>,
     user_id: Option<Id>,
     device_key: Option<KeyPair>,
+    insecure: bool,
+}
+
+impl std::fmt::Debug for DirectorClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DirectorClientBuilder")
+            .field("director_url", &self.director_url)
+            .field("node_id", &self.node_id)
+            .field("user_id", &self.user_id)
+            .field("has_user_key", &self.user_key.is_some())
+            .field("has_device_key", &self.device_key.is_some())
+            .field("insecure", &self.insecure)
+            .finish()
+    }
 }
 
 impl DirectorClientBuilder {
     pub fn new() -> Self {
-        Self {
-            director_url: None,
-            node_id: None,
-            user_key: None,
-            user_id: None,
-            device_key: None,
-        }
+        Self::default()
     }
 
-    pub fn with_director_url(&mut self, url: impl AsRef<str>) -> Result<&mut Self> {
+    pub fn with_director_url(mut self, url: impl AsRef<str>) -> Result<Self> {
         let url = Url::parse(url.as_ref()).map_err(|e| InvalidRequestError::new(e.to_string()))?;
         if !matches!(url.scheme(), "http" | "https") {
             return Err(InvalidRequestError::new(
@@ -69,24 +64,30 @@ impl DirectorClientBuilder {
         self.director_url = Some(url);
         Ok(self)
     }
-    pub fn with_node_id(&mut self, node_id: Id) -> &mut Self {
+
+    pub fn with_insecure(mut self, insecure: bool) -> Self {
+        self.insecure = insecure;
+        self
+    }
+
+    pub fn with_node_id(mut self, node_id: Id) -> Self {
         self.node_id = Some(node_id);
         self
     }
 
-    pub fn with_user_key(&mut self, key: KeyPair) -> &mut Self {
+    pub fn with_user_key(mut self, key: KeyPair) -> Self {
         self.user_id = Some(Id::from(key.public_key()));
         self.user_key = Some(key);
         self
     }
 
-    pub fn with_user_id(&mut self, user_id: Id) -> &mut Self {
+    pub fn with_user_id(mut self, user_id: Id) -> Self {
         self.user_key = None;
         self.user_id = Some(user_id);
         self
     }
 
-    pub fn with_device_key(&mut self, key: KeyPair) -> &mut Self {
+    pub fn with_device_key(mut self, key: KeyPair) -> Self {
         self.device_key = Some(key);
         self
     }
@@ -112,25 +113,8 @@ impl DirectorClientBuilder {
             self.user_key.clone(),
             self.user_id,
             self.device_key.clone(),
+            self.insecure,
         )
-    }
-}
-
-impl std::fmt::Debug for DirectorClientBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DirectorClientBuilder")
-            .field("director_url", &self.director_url)
-            .field("node_id", &self.node_id)
-            .field("user_id", &self.user_id)
-            .field("has_user_key", &self.user_key.is_some())
-            .field("has_device_key", &self.device_key.is_some())
-            .finish()
-    }
-}
-
-impl Default for DirectorClientBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -169,6 +153,7 @@ impl DirectorClient {
         user_key: Option<KeyPair>,
         user_id: Option<Id>,
         device_key: Option<KeyPair>,
+        insecure: bool,
     ) -> Result<Self> {
         let mut base_url = director_url;
         let path = base_url.path().trim_end_matches('/');
@@ -181,8 +166,11 @@ impl DirectorClient {
         base_url.set_query(None);
         base_url.set_fragment(None);
 
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        let mut client_builder = Client::builder().redirect(reqwest::redirect::Policy::none());
+        if insecure {
+            client_builder = client_builder.danger_accept_invalid_certs(true);
+        }
+        let client = client_builder
             .build()
             .map_err(|e| NetworkError::new(e.to_string()))?;
         let device_id = device_key.as_ref().map(|key| Id::from(key.public_key()));
@@ -251,9 +239,7 @@ impl DirectorClient {
             .and_then(Value::as_str)
             .ok_or_else(|| MalformedError::new("missing 'id'"))?;
 
-        Id::try_from_base58(id).map_err(|e| {
-            MalformedError::new(e.to_string()).into()
-        })
+        Id::try_from_base58(id).map_err(|e| MalformedError::new(e.to_string()).into())
     }
 
     pub async fn get_node_status(&self) -> Result<NodeStatus> {
@@ -309,7 +295,8 @@ impl DirectorClient {
             initial_device_key,
             &challenge,
             solution,
-        ).await
+        )
+        .await
     }
 
     pub async fn register_device(
@@ -634,7 +621,8 @@ impl DirectorClient {
     }
 
     async fn http_get(&self, path: &str, authenticated: bool) -> Result<Value> {
-        self.http_call(Method::GET, path, None, None, authenticated).await
+        self.http_call(Method::GET, path, None, None, authenticated)
+            .await
     }
 
     async fn http_get_json<T: serde::de::DeserializeOwned>(
@@ -642,7 +630,9 @@ impl DirectorClient {
         path: &str,
         authenticated: bool,
     ) -> Result<T> {
-        let response = self.raw(Method::GET, path, None, None, authenticated).await?;
+        let response = self
+            .raw(Method::GET, path, None, None, authenticated)
+            .await?;
         let response = self.check_response(response).await?;
         response
             .json()
@@ -681,21 +671,22 @@ impl DirectorClient {
         } else {
             None
         };
-        let mut request = self.client.request(method.clone(), self.url(path)?);
+        let mut request = self.client.request(method, self.url(path)?);
         if let Some(token) = token.as_ref() {
             request = request.bearer_auth(token);
         }
-        if let Some(json) = &json {
-            request = request.json(json);
+        if let Some(json) = json {
+            request = request.json(&json);
         }
-        if let Some((body, content_type)) = &binary {
+        if let Some((body, content_type)) = binary {
             request = request
                 .header(reqwest::header::CONTENT_TYPE, content_type)
-                .body(body.clone());
+                .body(body);
         }
-        let response = request.send().await.map_err(|e|
-            NetworkError::new(e.to_string())
-        )?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| NetworkError::new(e.to_string()))?;
         if authenticated && response.status() == StatusCode::UNAUTHORIZED {
             self.clear_token();
             let err_text = response.text().await.unwrap_or_default();
@@ -725,13 +716,11 @@ impl DirectorClient {
         let mut body = json!({"userId": user_id, "nonce": base64url(&nonce)});
         if let Some(key) = &self.user_key {
             body["userSig"] =
-                json!(sign_nonce(key, &nonce).map_err(|e|
-                    MalformedError::new(e.to_string()))?);
+                json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
         } else if let Some(key) = &self.device_key {
             body["deviceId"] = json!(self.device_id);
             body["deviceSig"] =
-                json!(sign_nonce(key, &nonce).map_err(|e|
-                    MalformedError::new(e.to_string()))?);
+                json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
         } else {
             return Err(StateError::new("This call needs a user identity"));
         }

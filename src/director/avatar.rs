@@ -22,6 +22,10 @@ impl Avatar {
 
 impl fmt::Display for Avatar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Avatar {{ content_type: {}, size: {} }}", self.content_type, self.data.len())
+        write!(f,
+            "Avatar {{ content_type: {}, size: {} }}",
+            self.content_type,
+            self.data.len()
+        )
     }
 }

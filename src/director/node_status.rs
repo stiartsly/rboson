@@ -1,9 +1,7 @@
-use crate::Id;
+use std::fmt;
+use std::time::{Duration, SystemTime};
 use serde::Deserialize;
-use std::{
-    fmt,
-    time::{Duration, SystemTime},
-};
+use crate::Id;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct NodeStatus {
@@ -76,12 +74,18 @@ impl NodeStatus {
 }
 
 impl fmt::Display for NodeStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "NodeStatus {{ node_id: {}, name: {:?}, version: {:?}, running: {}, services: {:?} }}",
-            self.node_id, self.name, self.version, self.running, self.services
-        )
+            self.node_id,
+            self.name,
+            self.version,
+            self.running,
+            self.services
+        )?;
+        write!(f, "software: {:?}", self.software())?;
+        Ok(())
     }
 }
 
@@ -121,7 +125,10 @@ impl fmt::Display for Service {
         write!(
             f,
             "Service {{ service_id: {}, service_name: {:?}, peer_id: {}, endpoint: {:?} }}",
-            self.service_id, self.service_name, self.peer_id, self.endpoint
+            self.service_id,
+            self.service_name,
+            self.peer_id,
+            self.endpoint
         )
     }
 }

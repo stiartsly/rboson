@@ -75,12 +75,12 @@ async fn test_register_user() {
         respond(&mut stream, &json!([])).await;
     });
 
-    let mut builder = DirectorClient::builder();
-    builder
+    let client = DirectorClient::builder()
         .with_director_url(format!("http://{address}"))
         .unwrap()
-        .with_user_key(user_key);
-    let client = builder.build().unwrap();
+        .with_user_key(user_key)
+        .build()
+        .unwrap();
     client
         .register_user(
             UserRegistration::new()

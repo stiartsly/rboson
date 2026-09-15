@@ -40,55 +40,60 @@ fn create_node() -> (Arc<Node>, std::path::PathBuf) {
     (node, path)
 }
 
-#[test]
-#[serial]
-fn dht_registry_new() {
-    let (node, path) = create_node();
-    let registry = DHTRegistry::new(node, None);
-    let _resolver = registry.resolver();
-    drop(registry);
-    let _ = fs::remove_dir_all(path);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[tokio::test]
-#[serial]
-async fn register_rejects_negative_version() {
-    let (node, path) = create_node();
-    let registry = DHTRegistry::new(node, None);
-    let identity = CryptoIdentity::new();
-    let card = boson::did::Card::builder(identity.clone()).build().unwrap();
+    #[test]
+    #[serial]
+    fn dht_registry_new() {
+        let (node, path) = create_node();
+        let registry = DHTRegistry::new(node, None);
+        let _resolver = registry.resolver();
+        drop(registry);
+        let _ = fs::remove_dir_all(path);
+    }
 
-    assert!(registry.register(&identity, &card, -1).await.is_err());
-    drop(registry);
-    let _ = fs::remove_dir_all(path);
-}
+    #[tokio::test]
+    #[serial]
+    async fn register_rejects_negative_version() {
+        let (node, path) = create_node();
+        let registry = DHTRegistry::new(node, None);
+        let identity = CryptoIdentity::new();
+        let card = boson::did::Card::builder(identity.clone()).build().unwrap();
 
-#[tokio::test]
-#[serial]
-async fn register_rejects_identity_mismatch() {
-    let (node, path) = create_node();
-    let registry = DHTRegistry::new(node, None);
-    let identity = CryptoIdentity::new();
-    let other = CryptoIdentity::new();
-    let card = boson::did::Card::builder(other).build().unwrap();
+        assert!(registry.register(&identity, &card, -1).await.is_err());
+        drop(registry);
+        let _ = fs::remove_dir_all(path);
+    }
 
-    assert!(registry.register(&identity, &card, 0).await.is_err());
-    drop(registry);
-    let _ = fs::remove_dir_all(path);
-}
+    #[tokio::test]
+    #[serial]
+    async fn register_rejects_identity_mismatch() {
+        let (node, path) = create_node();
+        let registry = DHTRegistry::new(node, None);
+        let identity = CryptoIdentity::new();
+        let other = CryptoIdentity::new();
+        let card = boson::did::Card::builder(other).build().unwrap();
 
-#[tokio::test]
-#[serial]
-async fn register_stores_card() {
-    let (node, path) = create_node();
-    node.start().await.unwrap();
-    let registry = DHTRegistry::new(node.clone(), None);
-    let identity = CryptoIdentity::new();
-    let card = boson::did::Card::builder(identity.clone()).build().unwrap();
+        assert!(registry.register(&identity, &card, 0).await.is_err());
+        drop(registry);
+        let _ = fs::remove_dir_all(path);
+    }
 
-    registry.register(&identity, &card, 0).await.unwrap();
-    node.stop().await.unwrap();
-    drop(registry);
-    drop(node);
-    let _ = fs::remove_dir_all(path);
+    #[tokio::test]
+    #[serial]
+    async fn register_stores_card() {
+        let (node, path) = create_node();
+        node.start().await.unwrap();
+        let registry = DHTRegistry::new(node.clone(), None);
+        let identity = CryptoIdentity::new();
+        let card = boson::did::Card::builder(identity.clone()).build().unwrap();
+
+        registry.register(&identity, &card, 0).await.unwrap();
+        node.stop().await.unwrap();
+        drop(registry);
+        drop(node);
+        let _ = fs::remove_dir_all(path);
+    }
 }

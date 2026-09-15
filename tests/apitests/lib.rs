@@ -34,12 +34,10 @@ mod director {
     mod client;
 }
 
-/*
 #[cfg(test)]
 mod messaging {
     mod client;
 }
-*/
 
 // helper function
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {

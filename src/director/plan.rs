@@ -1,5 +1,5 @@
-use std::fmt;
 use serde::Deserialize;
+use std::fmt;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum Cycle {
@@ -69,7 +69,10 @@ impl Plan {
 
 impl fmt::Display for Plan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Plan {{ id: {}, name: {}, price: {}, currency: {}, cycle: {:?} }}",
-            self.id, self.name, self.price, self.currency, self.cycle)
+        write!(
+            f,
+            "Plan {{ id: {}, name: {}, price: {}, currency: {}, cycle: {:?} }}",
+            self.id, self.name, self.price, self.currency, self.cycle
+        )
     }
 }

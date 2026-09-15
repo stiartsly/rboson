@@ -1,4 +1,4 @@
-use crate::director::{DirectorClient, UserRegistration};
+use crate::director::{DirectorClient, DirectorOptions};
 use crate::{signature::KeyPair, Id};
 use base64::Engine;
 use serde_json::{json, Value};
@@ -75,22 +75,17 @@ async fn test_register_user() {
         respond(&mut stream, &json!([])).await;
     });
 
-    let client = DirectorClient::builder()
-        .with_director_url(format!("http://{address}"))
+    let options = DirectorOptions::builder(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
+        .with_user_name("Alice")
+        .with_user_email("alice@example.com")
+        .with_user_bio("Boson user")
+        .with_user_passphrase("secret")
         .build()
         .unwrap();
-    client
-        .register_user(
-            UserRegistration::new()
-                .with_name("Alice")
-                .with_email("alice@example.com")
-                .with_bio("Boson user")
-                .with_passphrase("secret"),
-        )
-        .await
-        .unwrap();
+    let client = DirectorClient::new(options).unwrap();
+    client.register_user().await.unwrap();
     assert!(client.list_devices().await.unwrap().is_empty());
     server.await.unwrap();
 }
@@ -116,13 +111,13 @@ async fn test_register_device_path() {
         respond(&mut stream, &json!({})).await;
     });
 
-    let client = DirectorClient::builder()
-        .with_director_url(format!("http://{address}"))
+    let options = DirectorOptions::builder(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
         .with_device_key(device_key)
         .build()
         .unwrap();
+    let client = DirectorClient::new(options).unwrap();
 
     client
         .register_device("Laptop", "BosonApp", None)
@@ -134,34 +129,40 @@ async fn test_register_device_path() {
 #[tokio::test]
 async fn test_url_prefix_deduplication() {
     let user_key = KeyPair::random();
-    let client1 = DirectorClient::builder()
-        .with_director_url("https://director.example.com")
-        .unwrap()
-        .with_user_key(user_key.clone())
-        .build()
-        .unwrap();
+    let client1 = DirectorClient::new(
+        DirectorOptions::builder("https://director.example.com")
+            .unwrap()
+            .with_user_key(user_key.clone())
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         client1.director_url().as_str(),
         "https://director.example.com/api/v1/client/"
     );
 
-    let client2 = DirectorClient::builder()
-        .with_director_url("https://director.example.com/api/v1/client")
-        .unwrap()
-        .with_user_key(user_key.clone())
-        .build()
-        .unwrap();
+    let client2 = DirectorClient::new(
+        DirectorOptions::builder("https://director.example.com/api/v1/client")
+            .unwrap()
+            .with_user_key(user_key.clone())
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         client2.director_url().as_str(),
         "https://director.example.com/api/v1/client/"
     );
 
-    let client3 = DirectorClient::builder()
-        .with_director_url("https://director.example.com/api/v1/client/")
-        .unwrap()
-        .with_user_key(user_key)
-        .build()
-        .unwrap();
+    let client3 = DirectorClient::new(
+        DirectorOptions::builder("https://director.example.com/api/v1/client/")
+            .unwrap()
+            .with_user_key(user_key)
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         client3.director_url().as_str(),
         "https://director.example.com/api/v1/client/"
@@ -170,11 +171,11 @@ async fn test_url_prefix_deduplication() {
 
 #[tokio::test]
 async fn test_client_close_state() {
-    let client = DirectorClient::builder()
-        .with_director_url("https://director.example.com")
+    let options = DirectorOptions::builder("https://director.example.com")
         .unwrap()
         .build()
         .unwrap();
+    let client = DirectorClient::new(options).unwrap();
 
     assert!(!client.is_closed());
     client.close();
@@ -182,7 +183,10 @@ async fn test_client_close_state() {
 
     let result = client.get_node_id().await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().downcast_ref::<crate::errors::StateError>().is_some());
+    assert!(result
+        .unwrap_err()
+        .downcast_ref::<crate::errors::StateError>()
+        .is_some());
 }
 
 #[tokio::test]
@@ -202,12 +206,12 @@ async fn test_get_avatar_none() {
             .unwrap();
     });
 
-    let client = DirectorClient::builder()
-        .with_director_url(format!("http://{address}"))
+    let options = DirectorOptions::builder(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
         .build()
         .unwrap();
+    let client = DirectorClient::new(options).unwrap();
 
     let avatar = client.get_avatar().await.unwrap();
     assert!(avatar.is_none());
@@ -236,12 +240,12 @@ async fn test_json_error_message_parsing() {
         stream.write_all(&err_body).await.unwrap();
     });
 
-    let client = DirectorClient::builder()
-        .with_director_url(format!("http://{address}"))
+    let options = DirectorOptions::builder(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
         .build()
         .unwrap();
+    let client = DirectorClient::new(options).unwrap();
 
     let result = client.get_profile().await;
     let err = result.unwrap_err();

@@ -1,4 +1,4 @@
-use boson::director::{DirectorClient, UserRegistration};
+use boson::director::{DirectorClient, DirectorOptions};
 use boson::{signature::KeyPair, Id, Result};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -23,12 +23,12 @@ fn get_director_url() -> String {
 async fn test_fetch_node_status() {
     let url = get_director_url();
 
-    let client = DirectorClient::builder()
-        .with_director_url(url)
+    let options = DirectorOptions::builder(url)
         .expect("Failed to set director URL")
         .with_insecure(true)
         .build()
-        .expect("Failed to build DirectorClient");
+        .expect("Failed to build DirectorOptions");
+    let client = DirectorClient::new(options).expect("Failed to build DirectorClient");
 
     let node_id = client.get_node_id().await.expect("Failed to fetch node ID");
     println!("Successfully fetched node ID: {}", node_id.to_base58());
@@ -51,11 +51,11 @@ async fn test_login_and_fetch_profile() -> Result<()> {
     let user_id = Id::from(user_key.public_key());
     assert_eq!(user_id.to_base58(), DEFAULT_USER_ID);
 
-    let client = DirectorClient::builder()
-        .with_director_url(get_director_url())?
+    let options = DirectorOptions::builder(get_director_url())?
         .with_user_key(user_key)
         .with_insecure(true)
         .build()?;
+    let client = DirectorClient::new(options)?;
 
     let profile = client.get_profile().await?;
     println!("Successfully fetched profile: {profile}");
@@ -70,28 +70,22 @@ async fn test_register_new_user() -> Result<()> {
     let url = get_director_url();
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
-
-    let client = DirectorClient::builder()
-        .with_director_url(&url)?
-        .with_user_key(user_key.clone())
-        .with_device_key(device_key)
-        .with_insecure(true)
-        .build()?;
-
     let user_name = format!("user_{:08x}", rand::random::<u32>());
     let email = format!("{user_name}@example.com");
-    let mut registration = UserRegistration::new()
-        .with_name(user_name.clone())
-        .with_email(email)
-        .with_bio("Registered via DirectorClient apitest")
-        .with_initial_device("APITestDevice", "BosonAPITest");
 
-    let passphrase = Some("test_secret_123");
-    if let Some(pass) = passphrase {
-        registration = registration.with_passphrase(pass);
-    }
+    let options = DirectorOptions::builder(&url)?
+        .with_user_key(user_key.clone())
+        .with_device_key(device_key)
+        .with_user_name(user_name.clone())
+        .with_user_email(email)
+        .with_user_bio("Registered via DirectorClient apitest")
+        .with_user_passphrase("test_secret_123")
+        .with_initial_device("APITestDevice", "BosonAPITest")
+        .with_insecure(true)
+        .build()?;
+    let client = DirectorClient::new(options)?;
 
-    client.register_user(registration).await?;
+    client.register_user().await?;
 
     // Verify registration succeeded and authenticated calls work
     let profile = client.get_profile().await?;
@@ -220,24 +214,22 @@ async fn register_user_on_director(
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
-    let client = DirectorClient::builder()
-        .with_director_url(&url)?
+    let mut builder = DirectorOptions::builder(&url)?
         .with_user_key(user_key.clone())
         .with_device_key(device_key)
-        .with_insecure(true)
-        .build()?;
-
-    let mut registration = UserRegistration::new()
-        .with_name(user_name)
-        .with_email(email)
-        .with_bio("Registered via DirectorClient apitest")
-        .with_initial_device("APITestDevice", "BosonAPITest");
+        .with_user_name(user_name)
+        .with_user_email(email)
+        .with_user_bio("Registered via DirectorClient apitest")
+        .with_initial_device("APITestDevice", "BosonAPITest")
+        .with_insecure(true);
 
     if let Some(pass) = passphrase {
-        registration = registration.with_passphrase(pass);
+        builder = builder.with_user_passphrase(pass);
     }
 
-    client.register_user(registration).await?;
+    let options = builder.build()?;
+    let client = DirectorClient::new(options)?;
+    client.register_user().await?;
     Ok((client, user_key))
 }
 

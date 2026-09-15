@@ -1,13 +1,13 @@
-use std::fmt;
-use serde::Deserialize;
 use crate::Id;
+use serde::Deserialize;
+use std::fmt;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Device {
-    #[serde(rename="id")]
+    #[serde(rename = "id")]
     pub id: Id,
 
-    #[serde(rename="userId")]
+    #[serde(rename = "userId")]
     pub user_id: Id,
 
     #[serde(default)]
@@ -17,19 +17,19 @@ pub struct Device {
     pub app: Option<String>,
 
     #[serde(default)]
-    #[serde(rename="createdAt")]
+    #[serde(rename = "createdAt")]
     pub created_at: Option<u64>,
 
     #[serde(default)]
-    #[serde(rename="updatedAt")]
+    #[serde(rename = "updatedAt")]
     pub updated_at: Option<u64>,
 
     #[serde(default)]
-    #[serde(rename="lastSeen")]
+    #[serde(rename = "lastSeen")]
     pub last_seen: Option<u64>,
 
     #[serde(default)]
-    #[serde(rename="lastAddress")]
+    #[serde(rename = "lastAddress")]
     pub last_address: Option<String>,
 }
 

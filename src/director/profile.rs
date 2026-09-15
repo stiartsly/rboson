@@ -1,11 +1,11 @@
-use std::fmt;
-use std::time::{SystemTime, Duration};
-use serde::Deserialize;
 use crate::Id;
+use serde::Deserialize;
+use std::fmt;
+use std::time::{Duration, SystemTime};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Profile {
-    #[serde(rename="id")]
+    #[serde(rename = "id")]
     id: Id,
     #[serde(default)]
     admin: bool,
@@ -17,13 +17,13 @@ pub struct Profile {
     email: Option<String>,
     #[serde(default)]
     bio: Option<String>,
-    #[serde(rename="createdAt")]
+    #[serde(rename = "createdAt")]
     created_at: u64,
-    #[serde(rename="updatedAt")]
+    #[serde(rename = "updatedAt")]
     updated_at: u64,
-    #[serde(rename="planName")]
+    #[serde(rename = "planName")]
     plan_name: String,
-    #[serde(rename="passphraseProtected")]
+    #[serde(rename = "passphraseProtected")]
     passphrase_protected: bool,
 }
 
@@ -74,12 +74,7 @@ impl fmt::Display for Profile {
         write!(
             f,
             "Profile{{id={}, name={:?}, email={:?}, plan={}, admin={}, passphrase_protected={}}}",
-            self.id,
-            self.name,
-            self.email,
-            self.plan_name,
-            self.admin,
-            self.passphrase_protected
+            self.id, self.name, self.email, self.plan_name, self.admin, self.passphrase_protected
         )
     }
 }

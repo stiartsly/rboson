@@ -1,34 +1,37 @@
 mod client;
 mod device;
 mod errors;
+mod options;
 mod pow;
 
-mod node_status;
-mod user_registration;
 mod avatar;
+mod node_status;
 mod plan;
-mod user_plan;
 mod profile;
 mod profile_update;
 mod subscription;
+mod user_plan;
+mod user_registration;
 
 pub use {
-    client::{DirectorClient, DirectorClientBuilder},
-    errors::*,
-    device::Device,
-    node_status::{NodeStatus, Service},
-    user_registration::UserRegistration,
     avatar::Avatar,
-    plan::{Plan, Cycle},
-    user_plan::UserPlan,
+    client::DirectorClient,
+    device::Device,
+    errors::*,
+    node_status::{NodeStatus, Service},
+    options::{DirectorOptions, DirectorOptionsBuilder},
+    plan::{Cycle, Plan},
     profile::Profile,
     profile_update::ProfileUpdate,
-    subscription::{Subscription, Status},
+    subscription::{Status, Subscription},
+    user_plan::UserPlan,
+    user_registration::UserRegistration,
 };
 
 #[cfg(test)]
 mod unitests {
     mod test_client;
+    mod test_options;
     //mod unitests;
 }
 

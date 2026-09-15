@@ -11,10 +11,8 @@ impl ProfileUpdate {
     }
 
     pub fn with_name(mut self, name: Option<String>) -> Self {
-        self.fields.insert(
-            "name".to_string(),
-            name.map_or(Value::Null, Value::String),
-        );
+        self.fields
+            .insert("name".to_string(), name.map_or(Value::Null, Value::String));
         self
     }
 
@@ -27,10 +25,8 @@ impl ProfileUpdate {
     }
 
     pub fn with_bio(mut self, value: Option<String>) -> Self {
-        self.fields.insert(
-            "bio".to_string(),
-            value.map_or(Value::Null, Value::String),
-        );
+        self.fields
+            .insert("bio".to_string(), value.map_or(Value::Null, Value::String));
         self
     }
 
@@ -50,10 +46,7 @@ impl ProfileUpdate {
                     name.to_owned(),
                     value.clone().map_or(Value::Null, Value::String),
                 );*/
-                fields.insert(
-                    name.to_owned(),
-                    value.clone()
-                );
+                fields.insert(name.to_owned(), value.clone());
             }
         }
         fields

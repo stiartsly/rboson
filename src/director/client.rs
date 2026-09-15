@@ -14,11 +14,11 @@ use super::{
         RateLimitError, RegistrationDisabledError, ServerError, ServiceBusyError,
         UnauthorizedError,
     },
-    sign_nonce, Avatar, Device, NodeStatus, Plan, Profile, ProfileUpdate, Subscription, UserPlan,
-    UserRegistration,
+    sign_nonce, Avatar, Device, DirectorOptions, NodeStatus, Plan, Profile, ProfileUpdate,
+    Subscription, UserPlan, UserRegistration,
 };
 use crate::{
-    errors::{ArgumentError, MalformedError, NetworkError, Result, StateError},
+    errors::{MalformedError, NetworkError, Result, StateError},
     signature::KeyPair,
     Id,
 };
@@ -26,105 +26,10 @@ use crate::{
 const API_PREFIX: &str = "api/v1/client";
 const AUTH_NONCE_BYTES: usize = 32;
 
-#[derive(Default, Clone)]
-pub struct DirectorClientBuilder {
-    director_url: Option<Url>,
-    node_id: Option<Id>,
-    user_key: Option<KeyPair>,
-    user_id: Option<Id>,
-    device_key: Option<KeyPair>,
-    insecure: bool,
-}
-
-impl std::fmt::Debug for DirectorClientBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DirectorClientBuilder")
-            .field("director_url", &self.director_url)
-            .field("node_id", &self.node_id)
-            .field("user_id", &self.user_id)
-            .field("has_user_key", &self.user_key.is_some())
-            .field("has_device_key", &self.device_key.is_some())
-            .field("insecure", &self.insecure)
-            .finish()
-    }
-}
-
-impl DirectorClientBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_director_url(mut self, url: impl AsRef<str>) -> Result<Self> {
-        let url = Url::parse(url.as_ref()).map_err(|e| InvalidRequestError::new(e.to_string()))?;
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err(InvalidRequestError::new(
-                "Director URL must use http or https",
-            ));
-        }
-        self.director_url = Some(url);
-        Ok(self)
-    }
-
-    pub fn with_insecure(mut self, insecure: bool) -> Self {
-        self.insecure = insecure;
-        self
-    }
-
-    pub fn with_node_id(mut self, node_id: Id) -> Self {
-        self.node_id = Some(node_id);
-        self
-    }
-
-    pub fn with_user_key(mut self, key: KeyPair) -> Self {
-        self.user_id = Some(Id::from(key.public_key()));
-        self.user_key = Some(key);
-        self
-    }
-
-    pub fn with_user_id(mut self, user_id: Id) -> Self {
-        self.user_key = None;
-        self.user_id = Some(user_id);
-        self
-    }
-
-    pub fn with_device_key(mut self, key: KeyPair) -> Self {
-        self.device_key = Some(key);
-        self
-    }
-
-    pub fn build(&self) -> Result<DirectorClient> {
-        let director_url = self
-            .director_url
-            .clone()
-            .ok_or_else(|| ArgumentError::new("Director URL is required"))?;
-
-        if self.user_id.is_none() && self.device_key.is_some() {
-            return Err(ArgumentError::new(
-                "A device key requires a user key or user ID",
-            ));
-        }
-        if self.user_id.is_some() && self.user_key.is_none() && self.device_key.is_none() {
-            return Err(ArgumentError::new("A user ID requires a device key"));
-        }
-
-        DirectorClient::new(
-            director_url,
-            self.node_id,
-            self.user_key.clone(),
-            self.user_id,
-            self.device_key.clone(),
-            self.insecure,
-        )
-    }
-}
-
 pub struct DirectorClient {
     client: Client,
     base_url: Url,
-    node_id: Option<Id>,
-    user_key: Option<KeyPair>,
-    user_id: Option<Id>,
-    device_key: Option<KeyPair>,
+    options: DirectorOptions,
     device_id: Option<Id>,
     token: Mutex<Option<String>>,
     closed: AtomicBool,
@@ -134,8 +39,8 @@ impl std::fmt::Debug for DirectorClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DirectorClient")
             .field("base_url", &self.base_url)
-            .field("node_id", &self.node_id)
-            .field("user_id", &self.user_id)
+            .field("node_id", &self.options.node_id())
+            .field("user_id", &self.options.user_id())
             .field("device_id", &self.device_id)
             .field("is_closed", &self.is_closed())
             .finish()
@@ -143,19 +48,8 @@ impl std::fmt::Debug for DirectorClient {
 }
 
 impl DirectorClient {
-    pub fn builder() -> DirectorClientBuilder {
-        DirectorClientBuilder::new()
-    }
-
-    fn new(
-        director_url: Url,
-        node_id: Option<Id>,
-        user_key: Option<KeyPair>,
-        user_id: Option<Id>,
-        device_key: Option<KeyPair>,
-        insecure: bool,
-    ) -> Result<Self> {
-        let mut base_url = director_url;
+    pub fn new(options: DirectorOptions) -> Result<Self> {
+        let mut base_url = options.director_url().clone();
         let path = base_url.path().trim_end_matches('/');
         let path = if path.ends_with(API_PREFIX) {
             format!("{path}/")
@@ -167,21 +61,18 @@ impl DirectorClient {
         base_url.set_fragment(None);
 
         let mut client_builder = Client::builder().redirect(reqwest::redirect::Policy::none());
-        if insecure {
+        if options.insecure() {
             client_builder = client_builder.danger_accept_invalid_certs(true);
         }
         let client = client_builder
             .build()
             .map_err(|e| NetworkError::new(e.to_string()))?;
-        let device_id = device_key.as_ref().map(|key| Id::from(key.public_key()));
+        let device_id = options.device_key().map(|key| Id::from(key.public_key()));
 
         Ok(Self {
             client,
             base_url,
-            node_id,
-            user_key,
-            user_id,
-            device_key,
+            options,
             device_id,
             token: Mutex::new(None),
             closed: AtomicBool::new(false),
@@ -192,12 +83,16 @@ impl DirectorClient {
         &self.base_url
     }
 
+    pub fn options(&self) -> &DirectorOptions {
+        &self.options
+    }
+
     pub fn node_id(&self) -> Option<&Id> {
-        self.node_id.as_ref()
+        self.options.node_id()
     }
 
     pub fn user_id(&self) -> Option<&Id> {
-        self.user_id.as_ref()
+        self.options.user_id()
     }
 
     pub fn device_id(&self) -> Option<&Id> {
@@ -247,24 +142,28 @@ impl DirectorClient {
         self.http_get_json("node", false).await
     }
 
-    pub async fn register_user(&self, registration: UserRegistration) -> Result<()> {
+    pub async fn register_user(&self) -> Result<()> {
+        self.register_user_with(self.options.registration()).await
+    }
+
+    pub async fn register_user_with(&self, registration: &UserRegistration) -> Result<()> {
         self.check_open()?;
 
         let user_key = self
-            .user_key
-            .as_ref()
+            .options
+            .user_key()
             .ok_or_else(|| StateError::new("Registering a user needs the user key"))?;
 
         let initial_device_key = if registration.has_initial_device() {
-            Some(self.device_key.as_ref().ok_or_else(|| {
+            Some(self.options.device_key().ok_or_else(|| {
                 StateError::new("Registering an initial device needs the device key")
             })?)
         } else {
             None
         };
 
-        let node_id = match self.node_id {
-            Some(node_id) => node_id,
+        let node_id = match self.options.node_id() {
+            Some(node_id) => *node_id,
             _ => self.get_node_id().await?,
         };
         let challenge = self.fetch_challenge().await?;
@@ -289,7 +188,7 @@ impl DirectorClient {
         .map_err(|error| StateError::new(error))?;
 
         self.submit_registration(
-            &registration,
+            registration,
             node_id,
             user_key,
             initial_device_key,
@@ -305,7 +204,7 @@ impl DirectorClient {
         app: &str,
         passphrase: Option<&str>,
     ) -> Result<()> {
-        let key = self.device_key.as_ref().ok_or_else(|| {
+        let key = self.options.device_key().ok_or_else(|| {
             StateError::new("No device key configured; pass a device key to register")
         })?;
         self.register_device_with_key(key, name, app, passphrase)
@@ -613,7 +512,7 @@ impl DirectorClient {
         }
     }
     fn check_identity(&self) -> Result<()> {
-        if self.user_id.is_none() {
+        if self.options.user_id().is_none() {
             Err(StateError::new("This call needs a user identity"))
         } else {
             Ok(())
@@ -710,14 +609,16 @@ impl DirectorClient {
             return Ok(token);
         }
         let user_id = self
-            .user_id
+            .options
+            .user_id()
+            .copied()
             .ok_or_else(|| StateError::new("This call needs a user identity"))?;
         let nonce = crate::random_array::<AUTH_NONCE_BYTES>();
         let mut body = json!({"userId": user_id, "nonce": base64url(&nonce)});
-        if let Some(key) = &self.user_key {
+        if let Some(key) = self.options.user_key() {
             body["userSig"] =
                 json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
-        } else if let Some(key) = &self.device_key {
+        } else if let Some(key) = self.options.device_key() {
             body["deviceId"] = json!(self.device_id);
             body["deviceSig"] =
                 json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);

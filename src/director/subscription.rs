@@ -18,21 +18,21 @@ impl std::fmt::Display for Status {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Subscription {
-    #[serde(rename="id")]
+    #[serde(rename = "id")]
     pub id: u64,
-    #[serde(rename="planId")]
+    #[serde(rename = "planId")]
     pub plan_id: i32,
-    #[serde(rename="planName", default)]
+    #[serde(rename = "planName", default)]
     pub plan_name: Option<String>,
-    #[serde(rename="status")]
+    #[serde(rename = "status")]
     pub status: Status,
-    #[serde(rename="startDate")]
+    #[serde(rename = "startDate")]
     pub start_date: u64,
-    #[serde(rename="endDate")]
+    #[serde(rename = "endDate")]
     pub end_date: u64,
-    #[serde(rename="createdAt")]
+    #[serde(rename = "createdAt")]
     pub created_at: u64,
-    #[serde(rename="updatedAt")]
+    #[serde(rename = "updatedAt")]
     pub updated_at: u64,
 }
 

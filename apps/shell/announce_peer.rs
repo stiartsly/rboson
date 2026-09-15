@@ -47,6 +47,10 @@ pub(crate) async fn announce(
     );
     match node.announce_peer(&peer, -1, false).await {
         Ok(_) => println!("\x1b[32mPeer {} announced successfully.\x1b[0m", peer.id()),
-        Err(e) => println!("\x1b[31mFailed to announce peer {}: {}\x1b[0m", peer.id(), e),
+        Err(e) => println!(
+            "\x1b[31mFailed to announce peer {}: {}\x1b[0m",
+            peer.id(),
+            e
+        ),
     }
 }

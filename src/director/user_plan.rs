@@ -1,5 +1,5 @@
-use std::fmt;
 use super::{Plan, Subscription};
+use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct UserPlan {
@@ -36,9 +36,7 @@ impl fmt::Display for UserPlan {
         write!(
             f,
             "UserPlan {{ name: {}, plan: {:?}, subscription: {:?} }}",
-            self.name,
-            self.plan,
-            self.subscription
+            self.name, self.plan, self.subscription
         )
     }
 }

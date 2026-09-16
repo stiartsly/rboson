@@ -11,7 +11,7 @@ use boson::{
         PeerBuilder, Result,
         ImmutableBuilder as ValueBuilder,
     },
-    dht::{Node, NodeOptionsBuilder},
+    dht::{Node, NodeOptions},
 };
 use crate::{
     create_random_bytes,
@@ -49,9 +49,7 @@ fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
     );
 
     fs::write(&config_path, yaml)?;
-    let options = NodeOptionsBuilder::new()
-        .load_from(&config_path).unwrap()
-        .build().unwrap();
+    let options = NodeOptions::load(&config_path).unwrap();
     Ok(Node::new(options)?)
 }
 

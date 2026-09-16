@@ -144,7 +144,7 @@ pub mod node;
 
 pub use crate::dht::{
     node::Node,
-    node_options::{NodeOptions, NodeOptionsBuilder},
+    node_options::{NodeOptions, DEFAULT_DHT_PORT, DEFAULT_DATA_DIR, DEFAULT_DATABASE_URI},
     lookup_option::LookupOption,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,

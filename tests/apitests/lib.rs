@@ -10,8 +10,8 @@ mod core {
 
 #[cfg(test)]
 mod dht {
-    mod config;
     mod node;
+    mod node_options;
 }
 
 #[cfg(test)]

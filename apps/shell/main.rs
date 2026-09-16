@@ -11,7 +11,7 @@ use std::{
 
 use boson::{
     core::logger,
-    dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptionsBuilder},
+    dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
     signature::{KeyPair, PrivateKey},
     Id, Network,
 };
@@ -378,20 +378,20 @@ async fn main() {
         .or_else(|| env::var("NODE_CONFIG").ok())
         .unwrap_or_else(|| "apps/shell/node.yaml".to_string());
 
-    let mut builder = match NodeOptionsBuilder::new().load_from(&config) {
-        Ok(builder) => builder,
+    let mut node_options = match NodeOptions::load(&config) {
+        Ok(options) => options,
         Err(e) => {
             println!("Loading node configuration failed: {e}");
             return;
         }
     };
     if let Some(datadir) = opts.datadir.as_deref() {
-        builder = builder.with_data_dir(datadir);
+        node_options = node_options.with_data_dir(datadir);
     }
     if let Some(key) = opts.privatekey.as_deref() {
         match PrivateKey::try_from(key) {
             Ok(private_key) => {
-                builder = builder.with_private_key(private_key);
+                node_options = node_options.with_private_key(private_key);
             }
             Err(e) => {
                 println!("Invalid private key: {e}");
@@ -400,18 +400,11 @@ async fn main() {
         }
     }
     if let Some(port) = opts.port {
-        builder = builder.with_port(port);
+        node_options = node_options.with_port(port);
     }
     if opts.log {
-        builder = builder.with_log_console(true);
+        node_options = node_options.with_log_console(true);
     }
-    let node_options = match builder.build() {
-        Ok(v) => v,
-        Err(e) => {
-            println!("Building node configuration failed: {e}");
-            return;
-        }
-    };
 
     let private_key = node_options.private_key().clone();
     let readiness = Arc::new(ConnectionReadiness::new());

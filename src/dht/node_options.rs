@@ -1,23 +1,222 @@
-use std::{
-    env,
-    fs,
-    net::SocketAddr,
-    path::Path,
-};
-
+use std::{fmt, env, fs, net::SocketAddr};
+use std::path::{Path, PathBuf};
 use log::LevelFilter;
 use serde::Deserialize;
 use crate::{
     NodeInfo,
     signature,
-    errors::{Result, ArgumentError, IOError},
+    errors::{Error, Result, ArgumentError, IOError},
 };
 
-const DEFAULT_DHT_PORT: u16 = 39001;
-const DATA_DIR: &str = ".";
-const DATABASE_URI: &str = "storage.db";
+pub const DEFAULT_DHT_PORT: u16 = 39001;
+pub const DEFAULT_DATA_DIR: &str = ".";
+pub const DEFAULT_DATABASE_URI: &str = "storage.db";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "SerdeNodeOptions")]
+pub struct NodeOptions {
+    host4           : Option<String>,
+    host6           : Option<String>,
+    port            : u16,
+
+    private_key     : signature::PrivateKey,
+
+    data_dir        : PathBuf,
+    database_uri    : String,
+    bootstrap_nodes : Vec<NodeInfo>,
+
+    log_level       : LevelFilter,
+    log_file        : Option<String>,
+    log_console     : bool,
+
+    developer_mode  : bool,
+}
+
+impl NodeOptions {
+    pub fn new() -> Self {
+        NodeOptions {
+            host4           : None,
+            host6           : None,
+            port            : DEFAULT_DHT_PORT,
+            private_key     : signature::KeyPair::random().to_private_key(),
+            data_dir        : DEFAULT_DATA_DIR.into(),
+            database_uri    : DEFAULT_DATABASE_URI.into(),
+            bootstrap_nodes : Vec::new(),
+            log_level       : LevelFilter::Info,
+            log_file        : None,
+            log_console     : true,
+            developer_mode  : false,
+        }
+    }
+
+    pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
+        let expanded_yaml = expand_environ_vars(yaml.as_ref())?;
+        serde_yaml::from_str::<SerdeNodeOptions>(&expanded_yaml)
+            .map_err(|e|
+                ArgumentError::new(format!("invalid YAML format: {e}"))
+            )?
+            .try_into()
+    }
+
+    pub fn read(yaml: impl AsRef<str>) -> Result<Self> {
+        Self::parse(yaml)
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let yaml = fs::read_to_string(path.as_ref())
+            .map_err(|e|
+                IOError::new(format!("Reading config {} failed: {e}", path.as_ref().display()))
+            )?;
+        Self::parse(&yaml)
+    }
+
+    pub fn with_host4(mut self, host: impl Into<String>) -> Self {
+        self.host4 = Some(host.into());
+        self
+    }
+
+    pub fn with_host6(mut self, host: impl Into<String>) -> Self {
+        self.host6 = Some(host.into());
+        self
+    }
+
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    pub fn with_private_key(mut self, private_key: signature::PrivateKey) -> Self {
+        self.private_key = private_key;
+        self
+    }
+
+    pub fn with_data_dir(mut self, data_dir: impl AsRef<str>) -> Self {
+        self.data_dir = PathBuf::from(data_dir.as_ref());
+        self
+    }
+
+    pub fn with_database_uri(mut self, database_uri: impl Into<String>) -> Self {
+        self.database_uri = database_uri.into();
+        self
+    }
+
+    pub fn with_bootstrap_nodes(mut self, nodes: Vec<NodeInfo>) -> Self {
+        self.bootstrap_nodes = nodes;
+        self
+    }
+
+    pub fn with_log_level(mut self, level: LevelFilter) -> Self {
+        self.log_level = level;
+        self
+    }
+
+    pub fn with_log_file(mut self, log_file: impl Into<String>) -> Self {
+        self.log_file = Some(log_file.into());
+        self
+    }
+
+    pub fn enable_log_console(mut self, log_console: bool) -> Self {
+        self.log_console = log_console;
+        self
+    }
+
+    pub fn with_log_console(self, log_console: bool) -> Self {
+        self.enable_log_console(log_console)
+    }
+
+    pub fn enable_developer_mode(mut self) -> Self {
+        self.developer_mode = true;
+        self
+    }
+
+    pub fn host4(&self) -> Option<&str> {
+        self.host4.as_deref()
+    }
+
+    pub fn host6(&self) -> Option<&str> {
+        self.host6.as_deref()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn private_key(&self) -> &signature::PrivateKey {
+        &self.private_key
+    }
+
+    pub fn data_dir(&self) -> &str {
+        self.data_dir.to_str().unwrap_or(DEFAULT_DATA_DIR)
+    }
+
+    pub fn database_uri(&self) -> &str {
+        &self.database_uri
+    }
+
+    pub fn bootstrap_nodes(&self) -> &[NodeInfo] {
+        &self.bootstrap_nodes
+    }
+
+    pub fn log_level(&self) -> LevelFilter {
+        self.log_level
+    }
+
+    pub fn log_file(&self) -> Option<&str> {
+        self.log_file.as_deref()
+    }
+
+    pub fn log_console_enabled(&self) -> bool {
+        self.log_console
+    }
+
+    pub fn log_console(&self) -> bool {
+        self.log_console
+    }
+
+    pub fn developer_mode_enabled(&self) -> bool {
+        self.developer_mode
+    }
+
+    pub fn developer_mode(&self) -> bool {
+        self.developer_mode
+    }
+}
+
+impl Default for NodeOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TryFrom<&str> for NodeOptions {
+    type Error = Error;
+
+    fn try_from(yaml: &str) -> Result<Self> {
+        Self::read(yaml)
+    }
+}
+
+impl fmt::Display for NodeOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Configuration: {{ host4: {:?}, host6: {:?}, port: {}, data_dir: {}, database_uri: {}, bootstrap_nodes: {:?}, log_level: {:?}, log_file: {:?}, log_console: {}, developer_mode: {} }}",
+            self.host4,
+            self.host6,
+            self.port,
+            self.data_dir(),
+            self.database_uri,
+            self.bootstrap_nodes,
+            self.log_level,
+            self.log_file,
+            self.log_console,
+            self.developer_mode
+        )
+    }
+}
 
 #[derive(Debug, Deserialize)]
+//#[serde(deny_unknown_fields)]
 struct SerdeNodeOptions {
     #[serde(rename = "privateKey")]
     private_key: String,
@@ -28,17 +227,75 @@ struct SerdeNodeOptions {
     #[serde(rename = "dataDir")]
     data_dir: Option<String>,
     #[serde(rename = "databaseUri")]
-    database_uri: String,
+    database_uri: Option<String>,
     #[serde(default)]
     bootstraps: Vec<SerdeNodeEntry>,
     #[serde(rename = "logLevel")]
     log_level: Option<String>,
     #[serde(rename = "logFile")]
     log_file: Option<String>,
-    #[serde(rename = "logConsole", default = "default_log_console")]
-    log_console: bool,
+    #[serde(rename = "logConsole")]
+    log_console: Option<bool>,
     #[serde(rename = "enableDeveloperMode", default)]
     developer_mode: bool,
+}
+
+impl TryFrom<SerdeNodeOptions> for NodeOptions {
+    type Error = Error;
+
+    fn try_from(options: SerdeNodeOptions) -> Result<Self> {
+        let private_key = signature::PrivateKey::try_from(
+            options.private_key.as_str()
+        )?;
+        let host4 = options
+            .ipv4
+            .unwrap_or(false)
+            .then(|| crate::local_addr(true).map(|addr| addr.to_string()))
+            .transpose()?;
+        let host6 = options
+            .ipv6
+            .unwrap_or(false)
+            .then(|| crate::local_addr(false).map(|addr| addr.to_string()))
+            .transpose()?;
+
+        let data_dir = expand_relative_path(
+            &options
+                .data_dir
+                .unwrap_or(DEFAULT_DATA_DIR.to_string())
+        )?;
+        let database_uri = options
+            .database_uri
+            .unwrap_or(DEFAULT_DATABASE_URI.to_string());
+
+        let log_level = options
+            .log_level
+            .as_deref()
+            .and_then(|level| level.parse().ok())
+            .unwrap_or(LevelFilter::Info);
+        let log_console = options
+            .log_console
+            .unwrap_or(true);
+
+        let bootstrap_nodes = options
+            .bootstraps
+            .into_iter()
+            .map(NodeInfo::try_from)
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
+            host4,
+            host6,
+            port: options.port,
+            private_key,
+            data_dir,
+            database_uri,
+            bootstrap_nodes,
+            log_level,
+            log_file: options.log_file,
+            log_console,
+            developer_mode: options.developer_mode,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,22 +317,18 @@ fn default_port() -> u16 {
     DEFAULT_DHT_PORT
 }
 
-fn default_log_console() -> bool {
-    true
-}
-
-fn expand_environment_variables(input: &str) -> Result<String> {
+fn expand_environ_vars(input: &str) -> Result<String> {
     let mut expanded = String::with_capacity(input.len());
     let mut remaining = input;
 
     while let Some(start) = remaining.find("${") {
-        let (prefix, after_start) = remaining.split_at(start);
+        let (prefix, after) = remaining.split_at(start);
         expanded.push_str(prefix);
 
-        let end = after_start.find('}').ok_or_else(|| {
+        let end = after.find('}').ok_or_else(|| {
             ArgumentError::new("unterminated environment variable reference")
         })?;
-        let name = &after_start[2..end];
+        let name = &after[2..end];
         if name.is_empty() {
             return Err(ArgumentError::new("empty environment variable name"));
         }
@@ -85,248 +338,33 @@ fn expand_environment_variables(input: &str) -> Result<String> {
             ))
         })?;
         expanded.push_str(&value);
-        remaining = &after_start[end + 1..];
+        remaining = &after[end + 1..];
     }
 
     expanded.push_str(remaining);
     Ok(expanded)
 }
 
-#[derive(Debug, Clone)]
-pub struct NodeOptions {
-    host4           : Option<String>,
-    host6           : Option<String>,
-    port            : u16,
+fn expand_relative_path(input: &str) -> Result<PathBuf> {
+    let data_dir = input;
+    let home_dir = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
 
-    private_key     : signature::PrivateKey,
+    let relative = if data_dir == "~" {
+        Some("")
+    } else {
+        data_dir.strip_prefix("~/")
+    };
 
-    data_dir        : String,
-    database_uri    : String,
-    bootstrap_nodes : Vec<NodeInfo>,
-
-    log_level       : LevelFilter,
-    log_file        : Option<String>,
-    log_console     : bool,
-
-    developer_mode  : bool,
-}
-
-#[allow(unused)]
-impl NodeOptions {
-    fn new() -> Self {
-        NodeOptions {
-            host4           : None,
-            host6           : None,
-            port            : DEFAULT_DHT_PORT,
-            private_key     : signature::KeyPair::random().to_private_key(),
-            data_dir        : DATA_DIR.to_string(),
-            database_uri    : DATABASE_URI.to_string(),
-            bootstrap_nodes : Vec::new(),
-            log_level       : LevelFilter::Info,
-            log_file        : None,
-            log_console     : true,
-            developer_mode  : false,
-        }
-    }
-    pub fn builder() -> NodeOptionsBuilder {
-        NodeOptionsBuilder::new()
-    }
-
-    pub fn host4(&self) -> Option<&str> {
-        self.host4.as_deref()
-    }
-
-    pub fn host6(&self) -> Option<&str> {
-        self.host6.as_deref()
-    }
-
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-
-    pub fn private_key(&self) -> &signature::PrivateKey {
-        &self.private_key
-    }
-
-    pub fn data_dir(&self) -> &str {
-        &self.data_dir
-    }
-
-    pub fn database_uri(&self) -> &str {
-        &self.database_uri
-    }
-
-    pub fn bootstrap_nodes(&self) -> &[NodeInfo] {
-        &self.bootstrap_nodes
-    }
-
-    pub fn log_level(&self) -> LevelFilter {
-        self.log_level
-    }
-
-    pub fn log_file(&self) -> Option<&str> {
-        self.log_file.as_deref()
-    }
-
-    pub fn log_console(&self) -> bool {
-        self.log_console
-    }
-
-    pub fn developer_mode(&self) -> bool {
-        self.developer_mode
-    }
-}
-
-pub struct NodeOptionsBuilder {
-    options: NodeOptions,
-}
-
-impl NodeOptionsBuilder {
-    pub fn new() -> Self {
-        Self {
-            options: NodeOptions::new(),
-        }
-    }
-
-    pub fn read_from(mut self, yaml: &str) -> Result<Self> {
-        let expanded_yaml = expand_environment_variables(yaml)?;
-        let parsed = serde_yaml::from_str::<SerdeNodeOptions>(&expanded_yaml)
-            .map_err(|e| ArgumentError::new(format!("invalid node YAML format: {e}")))?;
-
-        self.options.private_key = signature::PrivateKey::try_from(parsed.private_key.as_str())?;
-        self.options.host4 = parsed
-            .ipv4
-            .unwrap_or(false)
-            .then(|| crate::local_addr(true).map(|address| address.to_string()))
-            .transpose()?;
-        self.options.host6 = parsed
-            .ipv6
-            .unwrap_or(false)
-            .then(|| crate::local_addr(false).map(|address| address.to_string()))
-            .transpose()?;
-        self.options.port = parsed.port;
-        self.options.data_dir = parsed.data_dir.unwrap_or_else(|| DATA_DIR.to_string());
-        self.options.database_uri = parsed.database_uri;
-        self.options.bootstrap_nodes = parsed
-            .bootstraps
-            .into_iter()
-            .map(NodeInfo::try_from)
-            .collect::<Result<Vec<_>>>()?;
-        self.options.log_level = parsed
-            .log_level
-            .as_deref()
-            .and_then(|level| level.parse().ok())
-            .unwrap_or(LevelFilter::Info);
-        self.options.log_file = parsed.log_file;
-        self.options.log_console = parsed.log_console;
-        self.options.developer_mode = parsed.developer_mode;
-        Ok(self)
-    }
-
-    pub fn load_from(self, path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let yaml = fs::read_to_string(path)
-            .map_err(|e| IOError::new(format!("Reading config {} failed: {e}", path.display())))?;
-        self.read_from(&yaml)
-    }
-
-    pub fn with_host4(mut self, host: &str) -> Self {
-        self.options.host4 = Some(host.to_string());
-        self
-    }
-
-    pub fn with_host6(mut self, host: &str) -> Self {
-        self.options.host6 = Some(host.to_string());
-        self
-    }
-
-    pub fn with_port(mut self, port: u16) -> Self {
-        self.options.port = port;
-        self
-    }
-
-    pub fn with_private_key(mut self, private_key: signature::PrivateKey) -> Self {
-        self.options.private_key = private_key;
-        self
-    }
-
-    pub fn with_data_dir(mut self, data_dir: &str) -> Self {
-        self.options.data_dir = data_dir.to_string();
-        self
-    }
-
-    pub fn with_database_uri(mut self, database_uri: &str) -> Self {
-        self.options.database_uri = database_uri.to_string();
-        self
-    }
-
-    pub fn with_bootstrap_nodes(mut self, nodes: Vec<NodeInfo>) -> Self {
-        self.options.bootstrap_nodes = nodes;
-        self
-    }
-
-    pub fn with_log_level(mut self, level: LevelFilter) -> Self {
-        self.options.log_level = level;
-        self
-    }
-
-    pub fn with_log_file(mut self, log_file: &str) -> Self {
-        self.options.log_file = Some(log_file.to_string());
-        self
-    }
-
-    pub fn with_log_console(mut self, log_console: bool) -> Self {
-        self.options.log_console = log_console;
-        self
-    }
-
-    pub fn enable_developer_mode(mut self) -> Self {
-        self.options.developer_mode = true;
-        self
-    }
-
-    pub fn build(self) -> Result<NodeOptions> {
-        if self.options.host4.is_none() && self.options.host6.is_none() {
-            return Err(ArgumentError::new("Either host4 or host6 must be specified"));
-        }
-        Ok(self.options)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_from_expands_environment_variables_before_parsing() {
-        let private_key = signature::KeyPair::random().to_private_key().to_string();
-        let yaml = format!(
-            "ipv4: true\nprivateKey: ${{NODE_OPTIONS_TEST_PRIVATE_KEY}}\ndatabaseUri: storage.db\n"
-        );
-        unsafe {
-            env::set_var("NODE_OPTIONS_TEST_PRIVATE_KEY", &private_key);
-        }
-
-        let options = NodeOptionsBuilder::new()
-            .read_from(&yaml)
-            .expect("environment-backed configuration should parse");
-
-        assert_eq!(options.options.private_key.to_string(), private_key);
-        unsafe {
-            env::remove_var("NODE_OPTIONS_TEST_PRIVATE_KEY");
-        }
-    }
-
-    #[test]
-    fn read_from_reports_missing_environment_variables() {
-        let result = NodeOptionsBuilder::new().read_from(
-            "ipv4: true\nprivateKey: ${NODE_OPTIONS_TEST_MISSING}\ndatabaseUri: storage.db\n",
-        );
-
-        let error = match result {
-            Ok(_) => panic!("missing environment variable should fail"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("NODE_OPTIONS_TEST_MISSING"));
+    match relative {
+        Some(relative) => {
+            let home_dir = home_dir.ok_or_else(|| ArgumentError::new(format!(
+                "Data path {data_dir} can not be expanded because the home directory is unavailable"
+            )))?;
+            let path = home_dir.join(relative);
+            Ok(path)
+        },
+        _ => Ok(PathBuf::from(data_dir)),
     }
 }

@@ -24,13 +24,11 @@ mod tests {
             "boson-node-lifecycle-{}-{unique}",
             std::process::id(),
         ));
-        let options = NodeOptions::builder()
+        let options = NodeOptions::new()
             .with_host4("127.0.0.1")
             .with_port(0)
             .with_data_dir(data_dir.to_str().unwrap())
-            .with_database_uri("jdbc:sqlite:node.db")
-            .build()
-            .unwrap();
+            .with_database_uri("jdbc:sqlite:node.db");
         let node = Node::new(options).unwrap();
 
         let (first, second) = tokio::join!(node.start(), node.start());
@@ -47,12 +45,10 @@ mod tests {
             "boson-node-info-{}",
             std::process::id(),
         ));
-        let options = NodeOptions::builder()
+        let options = NodeOptions::new()
             .with_host4("127.0.0.1")
             .with_data_dir(data_dir.to_str().unwrap())
-            .with_database_uri("jdbc:sqlite:node.db")
-            .build()
-            .unwrap();
+            .with_database_uri("jdbc:sqlite:node.db");
         let node = Node::new(options).unwrap();
 
         assert!(node.node_info().is_err());
@@ -66,12 +62,10 @@ mod tests {
             "boson-node-find-peer-{}",
             std::process::id(),
         ));
-        let options = NodeOptions::builder()
+        let options = NodeOptions::new()
             .with_host4("127.0.0.1")
             .with_data_dir(data_dir.to_str().unwrap())
-            .with_database_uri("jdbc:sqlite:node.db")
-            .build()
-            .unwrap();
+            .with_database_uri("jdbc:sqlite:node.db");
         let node = Node::new(options).unwrap();
 
         assert!(node

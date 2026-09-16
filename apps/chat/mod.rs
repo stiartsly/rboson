@@ -203,17 +203,14 @@ fn print_contact(contact: &dyn Contact) {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "msging", version = "1.0", about = "Boson messaging shell")]
+#[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
 struct Options {
-    /// Messaging YAML configuration file.
     #[arg(short, long, value_name = "FILE")]
     config: String,
 
-    /// Retained for command-line compatibility; registration is service-managed.
     #[arg(long)]
     shadow: bool,
 
-    /// Retained for command-line compatibility.
     #[arg(short = 'D', long)]
     daemonize: bool,
 }
@@ -221,7 +218,7 @@ struct Options {
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("msging: {error}");
+        eprintln!("chat: {error}");
         std::process::exit(1);
     }
 }

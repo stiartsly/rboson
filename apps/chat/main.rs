@@ -23,9 +23,9 @@ use boson::messaging::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "Messaging")]
+#[command(name = "chat")]
 #[command(version = "1.0")]
-#[command(about = "Boson Messaging", long_about = None)]
+#[command(about = "Boson messaging chat", long_about = None)]
 struct Options {
     /// The configuration file
     #[arg(short, long, value_name = "FILE")]

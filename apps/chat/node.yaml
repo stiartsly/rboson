@@ -16,11 +16,11 @@ port: 39001
 privateKey: 0xb31f8644cc27187ca6f7720794d3835314a3ce88f7dc2d0ec2b7f325d1a2ebbd2601fdbd7a5797ef45cad3046f4e40e549039a93b6c56d5951b657bd8eb69f3c
 
 logLevel: debug
-logFile: shell.log
+logFile: chat.log
 logConsole: true
 
 # Root directory for persistent data.
-dataDir: "~/.boson_shell"
+dataDir: "~/.boson_chat"
 
 # Persistence Layer Configuration.
 databaseUri: jdbc:sqlite:node.db

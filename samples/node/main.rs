@@ -11,7 +11,7 @@ use boson::{
     Node,
     NodeInfo,
     signature,
-    dht::NodeOptionsBuilder,
+    dht::NodeOptions,
 };
 
 fn get_storage_path(input: &str) -> String {
@@ -132,17 +132,15 @@ async fn main() {
     };
 
     let private_key = load_or_generate_key(&path);
-    let mut builder = NodeOptionsBuilder::new()
+    let options = NodeOptions::new()
         .with_port(port)
         .with_host4(&ip_str)
         .with_data_dir(path.as_str())
         .with_private_key(private_key)
         .with_log_level(log::LevelFilter::Debug)
         .with_log_console(true)
-        .with_database_uri("jdbc:sqlite:node.db");
-
-    builder = builder.with_bootstrap_nodes(bootstrap_nodes);
-    let options = builder.build().unwrap();
+        .with_database_uri("jdbc:sqlite:node.db")
+        .with_bootstrap_nodes(bootstrap_nodes);
     let node = Node::new(options).unwrap();
     let _ = node.start().await;
 

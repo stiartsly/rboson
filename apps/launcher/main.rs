@@ -16,7 +16,7 @@ use boson::{
         Node,
         ConnectionStatus,
         ConnectionStatusListener,
-        NodeOptionsBuilder,
+        NodeOptions,
     },
     activeproxy::{
         ActiveProxyClient as ActiveProxy,
@@ -186,10 +186,7 @@ async fn main() {
         .or_else(|| env::var("NODE_CONFIG").ok())
         .unwrap_or_else(|| "apps/launcher/node.yaml".to_string());
 
-    let node_options = match NodeOptionsBuilder::new()
-        .load_from(config)
-        .and_then(NodeOptionsBuilder::build)
-    {
+    let node_options = match NodeOptions::load(config) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error building node configuration: {e}");

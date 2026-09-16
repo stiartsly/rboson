@@ -442,6 +442,10 @@ impl Node {
         Ok(())
     }
 
+    pub fn options(&self) -> &NodeOptions {
+        &self.options
+    }
+
     pub fn id(&self) -> &Id {
         self.identity.id()
     }

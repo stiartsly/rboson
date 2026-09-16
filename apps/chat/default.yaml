@@ -1,0 +1,14 @@
+service:
+  peerId: G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ
+  # Required until DHT service discovery is wired into the new client.
+  endpoint: mqtt://155.138.245.211:1883
+
+client:
+  userPrivateKey: 4h6M3ySLfG3VDLsYdCshDyLzb9547HMEJg6JqCmk3DymmwX4p3jRGXZ5bU87NY6Qhv3bV4pyCJRGTiCStyp2fpFY
+  devicePrivateKey: 2oxKR27n9a3S2S52jGVSEYUGS3qzbqjVA4hGEyRkvPNq8aSwJvTA54XTPfcH61J1L1rPU2TjsrafnTAHvza4FYxW
+
+dataDir: .im_data/messaging
+
+database:
+  uri: jdbc:sqlite:photonmessaging.db
+  poolSize: 1

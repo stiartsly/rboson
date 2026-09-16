@@ -1,5 +1,5 @@
 [package]
-name = "rphoton"
+name = "rboson"
 version = "0.1.0"
 edition = "2021"
 
@@ -17,7 +17,7 @@ path = "tests/apitests/lib.rs"
 
 [[bin]]
 name = "anode"
-path = "apps/sample/main.rs"
+path = "samples/node/main.rs"
 
 [[bin]]
 name = "shell"
@@ -27,9 +27,13 @@ path = "apps/shell/main.rs"
 name = "launcher"
 path = "apps/launcher/main.rs"
 
-#[[bin]]
-#name = "im"
-#path = "apps/im/mod.rs"
+[[bin]]
+name = "chat"
+path = "apps/chat/mod.rs"
+
+[[bin]]
+name = "identity"
+path = "tools/identity/main.rs"
 
 [features]
 devp        = ["inspect"]

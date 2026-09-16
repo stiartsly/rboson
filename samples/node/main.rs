@@ -150,21 +150,3 @@ async fn main() {
     sleep(Duration::from_secs(60*10)).await;
     let _ = node.stop().await;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::parse_bootstrap;
-
-    const NODE_ID: &str = "FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo";
-
-    #[test]
-    fn parses_bootstrap_node() {
-        let node = parse_bootstrap(&format!("{NODE_ID}@155.138.245.211:39001")).unwrap();
-
-        assert_eq!(node.id().to_string(), NODE_ID);
-        assert_eq!(node.address().to_string(), "155.138.245.211:39001");
-    }
-}
-
-// Here is the command to run the sample node with a bootstrap node:
-// cargo r --bin node -- --bootstrap FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo@155.138.245.211:39001

@@ -1,0 +1,13 @@
+service:
+  peerId: G5Q4WoLh1gfyiZQ4djRPAp6DxJBoUDY22dimtN2n6hFZ
+  endpoint: mqtt://155.138.245.211:1883
+
+client:
+  userPrivateKey: 4JKJki4FJmfUWgx9Nhg5WPyixVn8bDWBuCzjcsoQHkGUn1MwG4oW5hke7531DX6dJzzeWM79gAe6rPDP4eYciF9z
+  devicePrivateKey: fVE3c1Gat39tbVbHBFNpeNCDUmAioZKHKrqi6x4tjUZtFWiRzQqBzVaR5ajfpv6rtSFGtypMX2Ui2zSVpD9kmfx
+
+dataDir: .dev1_data/messaging
+
+database:
+  uri: jdbc:sqlite:photonmessaging.db
+  poolSize: 1

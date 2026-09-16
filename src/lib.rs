@@ -90,9 +90,8 @@ pub use crate::dht::{
 };
 
 pub use crate::activeproxy::{
-    ActiveProxyClient,
+    Client,
     Options,
-    OptionsBuilder,
 };
 
 #[macro_export]

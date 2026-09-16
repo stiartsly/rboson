@@ -19,8 +19,8 @@ use boson::{
         NodeOptions,
     },
     activeproxy::{
-        ActiveProxyClient as ActiveProxy,
-        OptionsBuilder as ActiveProxyOptionsBuilder,
+        Client as ActiveProxy,
+        Options as ActiveProxyOptions,
     },
     director::{
         DirectorClient,
@@ -136,9 +136,7 @@ async fn main() {
         .map(str::to_owned)
         .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
         .unwrap_or_else(|| "apps/launcher/activeproxy.yaml".to_string());
-    let activeproxy_options = match ActiveProxyOptionsBuilder::load_from(&activeproxy_config)
-        .and_then(ActiveProxyOptionsBuilder::build)
-    {
+    let activeproxy_options = match ActiveProxyOptions::load(&activeproxy_config) {
         Ok(options) => options,
         Err(e) => {
             eprintln!("Error building ActiveProxy configuration: {e}");
@@ -168,11 +166,14 @@ async fn main() {
             exit(1);
         }
     };
-    let activeproxy_user_id = activeproxy_options.user_id().clone();
-    let activeproxy_device_id = Id::from(activeproxy_options.device_key().public_key());
+
+    let activeproxy_userid = activeproxy_options.user_id().clone();
+    let activeproxy_device_key = activeproxy_options.device_key();
+
+    let activeproxy_device_id = Id::from(activeproxy_device_key.public_key());
     if let Err(e) = ensure_device_admitted(
         &director,
-        &activeproxy_user_id,
+        &activeproxy_userid,
         &activeproxy_device_id,
     ).await {
         eprintln!("Admitting the ActiveProxy device through the Director failed: {e}");

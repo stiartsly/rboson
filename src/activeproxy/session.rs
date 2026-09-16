@@ -186,23 +186,6 @@ impl ProxySession {
     }
 
     async fn setup_periodic_tasks(self: &Rc<Self>) -> Result<()> {
-        let Some(ref node) = self.node else {
-            return Ok(());
-        };
-
-        let node = node.clone();
-        let peerid = self.peer_id().clone();
-        let _ = self.timer_client.add_timer(
-            30 * 1000,
-            Some(30 * 1000),
-            LocalBoxHandler::new(move |_| {
-                let node = node.clone();
-                Box::pin(async move {
-                    let _ = super::utils::lookup_peer(node, &peerid).await;
-                })
-            }),
-        )?;
-
         let session = self.clone();
         let _ = self.timer_client.add_timer(
             PERIODIC_CHECK_INTERVAL,

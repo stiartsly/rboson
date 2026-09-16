@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn test_loaded_then_overridden_functions() {
+    fn test_load_then_overridden() {
         let loaded_key = KeyPair::random().to_private_key();
         let replacement_key = KeyPair::random().to_private_key();
         let config = ConfigFile::new(&yaml(
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn load_expands_environment_variables() {
+    fn test_load_expands_environment_variables() {
         let private_key = KeyPair::random().to_private_key();
         let private_key_value = private_key.to_string();
         let variables = [

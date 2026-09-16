@@ -15,6 +15,12 @@ mod dht {
 }
 
 #[cfg(test)]
+mod activeproxy {
+    mod options;
+    mod client;
+}
+
+#[cfg(test)]
 mod did {
     mod card;
     mod credential;

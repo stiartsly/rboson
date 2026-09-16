@@ -5,7 +5,6 @@ mod packet;
 mod packet_type;
 mod session;
 mod state;
-mod utils;
 mod verticle;
 
 pub(crate) use crate::utils::{
@@ -17,14 +16,9 @@ pub(crate) use crate::utils::{
 pub mod client;
 pub mod options;
 
-#[cfg(test)]
-mod unitests {
-    mod test_options;
-}
-
 pub use {
-    client::ActiveProxyClient,
-    options::{Options, OptionsBuilder},
+    client::ActiveProxyClient as Client,
+    options::Options,
 };
 
 /*

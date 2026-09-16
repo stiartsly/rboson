@@ -1,44 +1,16 @@
-use crate::{errors::ArgumentError, signature, Id, PeerInfo, Result};
+use core::convert::TryFrom;
+use std::{env, fs, path::Path};
 use serde::Deserialize;
-use std::{fs, path::Path};
+use crate::{
+    errors::{Error, Result, ArgumentError, IOError},
+    signature, Id, PeerInfo,
+};
 
-#[derive(Debug, Deserialize)]
-struct SerdeOptions {
-    service: SerdeService,
-    client: SerdeClient,
-    upstream: SerdeUpstream,
-    #[serde(rename = "nameAccess", default)]
-    name_access: bool,
-    #[serde(rename = "announcePeer", default)]
-    announce_peer: bool,
-}
+pub const DEFAULT_SCHEME: &'static str = "tcp://";
+pub const DEFAULT_PORT: u16 = 9090;
 
-#[derive(Debug, Deserialize)]
-struct SerdeService {
-    #[serde(rename = "peerId")]
-    peer_id: Id,
-    host: Option<String>,
-    port: Option<u16>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SerdeClient {
-    #[serde(rename = "userId")]
-    user_id: Option<Id>,
-    #[serde(rename = "userPrivateKey")]
-    user_private_key: Option<String>,
-    #[serde(rename = "devicePrivateKey")]
-    device_private_key: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SerdeUpstream {
-    host: String,
-    port: u16,
-    #[serde(default)]
-    scheme: Option<String>,
-}
-
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "SerdeOptions")]
 pub struct Options {
     server_peerid: Id,
     // when set, skips DHT resolution of `server_peerid`.
@@ -62,14 +34,113 @@ pub struct Options {
 
     name_access: bool,
     announce_peer: bool,
-
-    // The file path to cache the peer information for the service peer
-    data_dir: String,
 }
 
 impl Options {
-    const DEFAULT_SCHEME: &'static str = "tcp://";
-    const DEFAULT_PORT: u16 = 9090;
+    pub fn new(peerid: Id, userid: Id) -> Self {
+        Self {
+            server_peerid: peerid,
+            server_peer: None,
+            service_host: None,
+            service_port: DEFAULT_PORT,
+            user_id: userid,
+            user_key: None,
+            device_key: signature::KeyPair::random(),
+            upstream_host: "127.0.0.1".to_string(),
+            upstream_port: 8080,
+            upstream_scheme: DEFAULT_SCHEME.to_string(),
+            name_access: false,
+            announce_peer: false,
+        }
+    }
+
+    pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
+        let expanded_yaml = expand_environ_vars(yaml.as_ref())?;
+        serde_yaml::from_str::<SerdeOptions>(&expanded_yaml)
+            .map_err(|e| ArgumentError::new(format!("invalid active proxy YAML format: {e}")))?
+            .try_into()
+    }
+
+    pub fn read(yaml: impl AsRef<str>) -> Result<Self> {
+        Self::parse(yaml)
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let yaml = fs::read_to_string(path)
+            .map_err(|e| IOError::new(format!("Reading config {} failed: {e}", path.display())))?;
+        Self::parse(yaml)
+    }
+
+    pub fn with_peerid(mut self, peerid: Id) -> Self {
+        self.server_peerid = peerid;
+        self
+    }
+
+    pub fn with_peer(mut self, peer: PeerInfo) -> Self {
+        self.server_peerid = peer.id().clone();
+        self.server_peer = Some(peer);
+        self
+    }
+
+    pub fn with_service_host(mut self, host: impl Into<String>) -> Self {
+        self.service_host = Some(host.into());
+        self
+    }
+
+    pub fn with_service_port(mut self, port: u16) -> Self {
+        self.service_port = port;
+        self
+    }
+
+    pub fn with_userid(mut self, userid: Id) -> Self {
+        self.user_id = userid;
+        self
+    }
+
+    pub fn with_user_key(mut self, user_key: signature::KeyPair) -> Self {
+        self.user_id = Id::from(user_key.public_key());
+        self.user_key = Some(user_key);
+        self
+    }
+
+    pub fn with_generated_user_key(self) -> Self {
+        self.with_user_key(signature::KeyPair::random())
+    }
+
+    pub fn with_device_key(mut self, device_key: signature::KeyPair) -> Self {
+        self.device_key = device_key;
+        self
+    }
+
+    pub fn with_generated_device_key(self) -> Self {
+        self.with_device_key(signature::KeyPair::random())
+    }
+
+    pub fn with_upstream_host(mut self, host: impl Into<String>) -> Self {
+        self.upstream_host = host.into();
+        self
+    }
+
+    pub fn with_upstream_port(mut self, port: u16) -> Self {
+        self.upstream_port = port;
+        self
+    }
+
+    pub fn with_upstream_scheme(mut self, scheme: impl Into<String>) -> Self {
+        self.upstream_scheme = scheme.into();
+        self
+    }
+
+    pub fn with_name_access(mut self, enabled: bool) -> Self {
+        self.name_access = enabled;
+        self
+    }
+
+    pub fn with_announce_peer(mut self, enabled: bool) -> Self {
+        self.announce_peer = enabled;
+        self
+    }
 
     pub fn service_peerid(&self) -> &Id {
         &self.server_peerid
@@ -119,212 +190,133 @@ impl Options {
         self.announce_peer
     }
 
-    pub fn data_dir(&self) -> &str {
-        &self.data_dir
+    pub fn check_valid(&self) -> Result<()> {
+        if self.upstream_host.is_empty() {
+            return Err(ArgumentError::new("upstream_host is empty"));
+        }
+        if self.upstream_port == 0 {
+            return Err(ArgumentError::new("upstream_port is not set"));
+        }
+        if self.upstream_scheme.is_empty() {
+            return Err(ArgumentError::new("upstream_scheme is empty"));
+        }
+        Ok(())
     }
 }
 
-pub struct OptionsBuilder {
-    data_dir: Option<String>,
-    server_peerid: Id,
-    server_peer: Option<PeerInfo>,
-    service_host: Option<String>,
-    service_port: Option<u16>,
+impl TryFrom<&str> for Options {
+    type Error = Error;
 
-    user_id: Option<Id>,
-    user_key: Option<signature::KeyPair>,
-    device_key: Option<signature::KeyPair>,
+    fn try_from(yaml: &str) -> Result<Self> {
+        Self::parse(yaml)
+    }
+}
 
-    upstream_host: Option<String>,
-    upstream_port: Option<u16>,
-    upstream_scheme: String,
-
+#[derive(Debug, Deserialize)]
+struct SerdeOptions {
+    service: SerdeService,
+    client: SerdeClient,
+    upstream: SerdeUpstream,
+    #[serde(rename = "nameAccess", default)]
     name_access: bool,
+    #[serde(rename = "announcePeer", default)]
     announce_peer: bool,
 }
 
-impl OptionsBuilder {
-    pub fn new(peerid: Id) -> Self {
-        Self {
-            data_dir: None,
-            server_peerid: peerid,
-            server_peer: None,
-            service_host: None,
-            service_port: None,
+impl TryFrom<SerdeOptions> for Options {
+    type Error = Error;
 
-            user_id: None,
-            user_key: None,
-            device_key: None,
+    fn try_from(options: SerdeOptions) -> Result<Self> {
+        let user_key = options.client.user_private_key.as_deref().map(
+            signature::PrivateKey::try_from
+        ).transpose()?
+        .map(signature::KeyPair::from);
 
-            upstream_host: None,
-            upstream_port: None,
-            upstream_scheme: Options::DEFAULT_SCHEME.to_string(),
-
-            name_access: false,
-            announce_peer: false,
-        }
-    }
-
-    pub fn read_from(yaml: &str) -> Result<Self> {
-        let parsed = serde_yaml::from_str::<SerdeOptions>(yaml)
-            .map_err(|e| ArgumentError::new(format!("invalid ActiveProxy YAML format: {e}")))?;
-        let user_key = parsed
-            .client
-            .user_private_key
-            .as_deref()
-            .map(signature::PrivateKey::try_from)
-            .transpose()?;
-        let mut builder = Self::new(parsed.service.peer_id.clone())
-            .with_upstream_host(parsed.upstream.host)
-            .with_upstream_port(parsed.upstream.port)
-            .with_device_key(signature::KeyPair::from(&signature::PrivateKey::try_from(
-                parsed.client.device_private_key.as_str(),
-            )?))
-            .with_name_access(parsed.name_access)
-            .with_announce_peer(parsed.announce_peer);
-
-        if let Some(scheme) = parsed.upstream.scheme {
-            builder = builder.with_upstream_scheme(scheme);
-        }
-        if let (Some(host), Some(port)) = (parsed.service.host, parsed.service.port) {
-            builder = builder.with_service(parsed.service.peer_id, host, port);
-        }
-        match (parsed.client.user_id, user_key) {
-            (Some(user_id), Some(user_key)) => {
-                let keypair = signature::KeyPair::from(user_key);
-                if user_id != Id::from(keypair.public_key()) {
-                    return Err(ArgumentError::new("userId does not match userPrivateKey"));
-                }
-                Ok(builder.with_user_key(keypair))
-            }
-            (Some(user_id), _) => Ok(builder.with_user_id(user_id)),
-            (None, Some(user_key)) => Ok(builder.with_user_key(signature::KeyPair::from(user_key))),
-            (None, None) => Err(ArgumentError::new(
-                "ActiveProxy client requires userId or userPrivateKey",
-            )),
-        }
-    }
-
-    pub fn load_from(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let yaml = fs::read_to_string(path).map_err(|e| {
-            ArgumentError::new(format!("Reading config {} failed: {e}", path.display()))
+        let device_sk = signature::PrivateKey::try_from(
+            options.client.device_private_key.as_str()
+        ).map_err(|e| {
+            ArgumentError::new(&format!("failed to parse device private key: {}", e))
         })?;
-        Self::read_from(&yaml)
-    }
+        let device_key = signature::KeyPair::from(&device_sk);
 
-    pub fn with_data_dir(mut self, data_dir: impl Into<String>) -> Self {
-        self.data_dir = Some(data_dir.into());
-        self
-    }
+        let userid_matched = user_key.as_ref().map(|k|
+            options.client.user_id == Id::from(k.public_key())
+        ).unwrap_or(true);
 
-    pub fn with_service_peerid(mut self, peerid: Id) -> Self {
-        self.server_peerid = peerid;
-        self.server_peer = None;
-        self
-    }
+        if !userid_matched {
+            return Err(ArgumentError::new("userId does not match userPrivateKey"));
+        }
 
-    pub fn with_service_peer(mut self, peer: PeerInfo) -> Self {
-        self.server_peerid = peer.id().clone();
-        self.server_peer = Some(peer);
-        self
-    }
-
-    pub fn with_service(mut self, peerid: Id, host: impl Into<String>, port: u16) -> Self {
-        self.server_peerid = peerid;
-        self.server_peer = None;
-        self.service_host = Some(host.into());
-        self.service_port = Some(port);
-        self
-    }
-
-    pub fn with_service_host(mut self, host: impl Into<String>) -> Self {
-        self.service_host = Some(host.into());
-        self
-    }
-
-    pub fn with_service_port(mut self, port: u16) -> Self {
-        self.service_port = Some(port);
-        self
-    }
-
-    // Sets the client identity by user id only; clears any previously set user key.
-    pub fn with_user_id(mut self, user_id: Id) -> Self {
-        self.user_id = Some(user_id);
-        self.user_key = None;
-        self
-    }
-
-    // Sets the client identity by user key; the user id is derived from it.
-    pub fn with_user_key(mut self, user_key: signature::KeyPair) -> Self {
-        self.user_id = Some(Id::from(user_key.public_key()));
-        self.user_key = Some(user_key);
-        self
-    }
-
-    pub fn with_generated_user_key(self) -> Self {
-        let user_key = signature::KeyPair::random();
-        self.with_user_key(user_key)
-    }
-
-    pub fn with_device_key(mut self, device_key: signature::KeyPair) -> Self {
-        self.device_key = Some(device_key);
-        self
-    }
-
-    pub fn with_upstream_host(mut self, host: impl Into<String>) -> Self {
-        self.upstream_host = Some(host.into());
-        self
-    }
-
-    pub fn with_upstream_port(mut self, port: u16) -> Self {
-        self.upstream_port = Some(port);
-        self
-    }
-
-    pub fn with_upstream_scheme(mut self, scheme: impl Into<String>) -> Self {
-        self.upstream_scheme = scheme.into();
-        self
-    }
-
-    pub fn with_name_access(mut self, enabled: bool) -> Self {
-        self.name_access = enabled;
-        self
-    }
-
-    pub fn with_announce_peer(mut self, enabled: bool) -> Self {
-        self.announce_peer = enabled;
-        self
-    }
-
-    pub fn build(mut self) -> Result<Options> {
-        let Some(upstream_host) = self.upstream_host.take() else {
-            return Err(ArgumentError::new("upstream_host is required"));
-        };
-        let Some(upstream_port) = self.upstream_port.take() else {
-            return Err(ArgumentError::new("upstream_port is required"));
-        };
-        let Some(user_id) = self.user_id.take() else {
-            return Err(ArgumentError::new("user_id (or user_key) is required"));
-        };
-        let Some(device_key) = self.device_key.take() else {
-            return Err(ArgumentError::new("device_key is required"));
-        };
-
-        Ok(Options {
-            data_dir: self.data_dir.take().unwrap_or_else(|| ".".into()),
-            server_peerid: self.server_peerid,
-            server_peer: self.server_peer.take(),
-            service_host: self.service_host.take(),
-            service_port: self.service_port.unwrap_or(Options::DEFAULT_PORT),
-            user_id,
-            user_key: self.user_key.take(),
+        Ok(Self {
+            server_peerid: options.service.peer_id,
+            server_peer: None,
+            service_host: options.service.host,
+            service_port: options.service.port.unwrap_or(DEFAULT_PORT),
+            user_id: options.client.user_id,
+            user_key,
             device_key,
-            upstream_host,
-            upstream_port,
-            upstream_scheme: self.upstream_scheme,
-            name_access: self.name_access,
-            announce_peer: self.announce_peer,
+            upstream_host: options.upstream.host,
+            upstream_port: options.upstream.port,
+            upstream_scheme: options
+                .upstream
+                .scheme
+                .unwrap_or_else(|| DEFAULT_SCHEME.to_string()),
+            name_access: options.name_access,
+            announce_peer: options.announce_peer,
         })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeService {
+    #[serde(rename = "peerId")]
+    peer_id: Id,
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeClient {
+    #[serde(rename = "userId")]
+    user_id: Id,
+    #[serde(rename = "userPrivateKey")]
+    user_private_key: Option<String>,
+    #[serde(rename = "devicePrivateKey")]
+    device_private_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SerdeUpstream {
+    host: String,
+    port: u16,
+    #[serde(default)]
+    scheme: Option<String>,
+}
+
+fn expand_environ_vars(input: &str) -> Result<String> {
+    let mut expanded = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find("${") {
+        let (prefix, after) = remaining.split_at(start);
+        expanded.push_str(prefix);
+
+        let end = after.find('}').ok_or_else(|| {
+            ArgumentError::new("unterminated environment variable reference")
+        })?;
+        let name = &after[2..end];
+        if name.is_empty() {
+            return Err(ArgumentError::new("empty environment variable name"));
+        }
+        let value = env::var(name).map_err(|_| {
+            ArgumentError::new(format!(
+                "environment variable `{name}` is not set"
+            ))
+        })?;
+        expanded.push_str(&value);
+        remaining = &after[end + 1..];
+    }
+
+    expanded.push_str(remaining);
+    Ok(expanded)
 }

@@ -1,10 +1,7 @@
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use std::{
     cell::Cell,
-    fs::File,
-    io::Read,
     net::{SocketAddr, ToSocketAddrs},
-    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -22,7 +19,6 @@ use super::{
 pub struct ActiveProxyClient {
     options: Options,
     node: Option<Arc<Node>>,
-    cache_file: PathBuf,
 
     service_peerid: Id,
     service_peer: Arc<Mutex<Option<PeerInfo>>>,
@@ -37,13 +33,7 @@ pub struct ActiveProxyClient {
 
 impl ActiveProxyClient {
     pub fn new(node: Option<Arc<Node>>, options: Options) -> Result<Arc<Self>> {
-        let path = PathBuf::from(options.data_dir()).join("activeproxy");
-        if let Err(e) = std::fs::create_dir_all(&path) {
-            return Err(ArgumentError::new(format!(
-                "Failed to create ActiveProxy cache dir {}: {e}",
-                path.display()
-            )));
-        }
+        options.check_valid()?;
 
         if node.is_none() && options.service_peer().is_none() && options.service_host().is_none() {
             return Err(ArgumentError::new(
@@ -73,13 +63,16 @@ impl ActiveProxyClient {
             })?;
 
         let mut endpoint = None;
-        if let Some(host) = options.service_host() {
+        if let Some(peer) = options.service_peer() {
+            if !peer.is_valid() {
+                return Err(ArgumentError::new(format!(
+                    "Invalid ActiveProxy service peer {}",
+                    peer.id()
+                )));
+            }
+            endpoint = Some(peer.endpoint().to_string());
+        } else if let Some(host) = options.service_host() {
             endpoint = Some(format!("{}:{}", host, options.service_port()));
-        } else if let Some(peer) = options.service_peer() {
-            endpoint = Some(peer.endpoint().to_string());
-        } else if let Some(peer) = load_peer(&path, options.service_peerid()) {
-            debug!("ActiveProxy loaded peer {} from cached file.", peer.id());
-            endpoint = Some(peer.endpoint().to_string());
         } else if node.is_none() {
             return Err(ArgumentError::new(
                 "ActiveProxy requires a DHT node to lookup a service peer information.",
@@ -88,7 +81,6 @@ impl ActiveProxyClient {
 
         Ok(Arc::new(Self {
             node,
-            cache_file: path.to_path_buf(),
             service_peerid: options.service_peerid().clone(),
             service_peer: Arc::new(Mutex::new(options.service_peer().cloned())),
             service_endpoint: endpoint,
@@ -143,16 +135,24 @@ impl ActiveProxyClient {
     }
 
     pub async fn start(&self) -> Result<()> {
-        match self.service_peer() {
-            Some(_) => {}
-            _ => {
-                let node = self.node().unwrap();
-                let peer = super::utils::lookup_peer(node, self.service_peerid()).await?;
-                if let Some(peer) = peer {
-                    super::utils::save_peer(self.cache_file.as_path(), &peer);
-                    *self.service_peer.lock().unwrap() = Some(peer);
-                }
-            }
+        if self.service_endpoint().is_none() {
+            let node = self.node().ok_or_else(|| {
+                ArgumentError::new(
+                    "ActiveProxy requires a DHT node to lookup service peer information"
+                )
+            })?;
+            let peer = node
+                .find_peer(self.service_peerid(), -1, 4, None)
+                .await?
+                .into_iter()
+                .find(|peer| peer.id() == self.service_peerid() && peer.is_valid())
+                .ok_or_else(|| {
+                    NetworkError::new(format!(
+                        "No valid peer found for ActiveProxy service {}",
+                        self.service_peerid()
+                    ))
+                })?;
+            *self.service_peer.lock().unwrap() = Some(peer);
         }
 
         let service_endpoint = self.service_endpoint().ok_or_else(|| {
@@ -171,7 +171,7 @@ impl ActiveProxyClient {
             self.options.user_id().clone(),
             self.options.device_key().private_key().clone(),
             self.options.is_name_access_enabled(),
-            self.options.is_announce_peer_enabled(),
+            self.node.is_some() && self.options.is_announce_peer_enabled(),
         );
 
         let client = verticle::deploy(options).map_err(|e| {
@@ -202,41 +202,4 @@ impl ActiveProxyClient {
 
         info!("ActiveProxy instance stopped.");
     }
-}
-
-fn load_peer(path: &Path, peerid: &Id) -> Option<PeerInfo> {
-    let mut buf = vec![];
-    let _ = File::open(path)
-        .map(|mut fp| {
-            _ = fp.read_to_end(&mut buf);
-        })
-        .map_err(|e| {
-            warn!(
-                "Failed to open cached file {} with error: {e}.",
-                path.display()
-            );
-            None::<File>
-        })
-        .ok()?;
-
-    let peer: PeerInfo = serde_json::from_reader(buf.as_slice())
-        .map_err(|e| {
-            warn!(
-                "Failed to parse data from cached file {} with error: {e} - \
-            cached file might be broken",
-                path.display()
-            );
-            None::<PeerInfo>
-        })
-        .ok()?;
-
-    if !peer.is_valid() || peer.id() != peerid {
-        warn!(
-            "The cached peer {} is invalid or outdated since it does not match the expected {}",
-            peer.id(),
-            peerid
-        );
-        return None;
-    }
-    Some(peer)
 }

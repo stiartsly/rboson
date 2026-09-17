@@ -38,6 +38,7 @@ mod did {
 #[cfg(test)]
 mod director {
     mod client;
+    mod options;
 }
 
 #[cfg(test)]

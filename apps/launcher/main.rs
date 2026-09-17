@@ -24,7 +24,7 @@ use boson::{
     },
     director::{
         DirectorClient,
-        DirectorOptionsBuilder,
+        DirectorOptions,
         NotFoundError,
         UnauthorizedError,
     },
@@ -150,9 +150,7 @@ async fn main() {
         .map(str::to_owned)
         .or_else(|| env::var("DIRECTOR_CONFIG").ok())
         .unwrap_or_else(|| "apps/launcher/director.yaml".to_string());
-    let director_options = match DirectorOptionsBuilder::load_from(&director_config)
-        .and_then(DirectorOptionsBuilder::build)
-    {
+    let director_options = match DirectorOptions::load(&director_config) {
         Ok(options) => options,
         Err(e) => {
             eprintln!("Error building Director configuration: {e}");

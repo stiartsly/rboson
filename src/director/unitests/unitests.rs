@@ -7,10 +7,10 @@ use crate::{errors::ArgumentError, signature::KeyPair, Id};
 #[test]
 fn builder_rejects_incomplete_device_identity() {
     let device = KeyPair::random();
-    let builder = DirectorOptions::builder("https://director.example")
+    let options = DirectorOptions::from_url("https://director.example")
         .unwrap()
         .with_device_key(device);
-    let result = builder.build();
+    let result = options.check_valid();
 
     let error = match result {
         Ok(_) => panic!("device-only configuration must fail"),
@@ -25,12 +25,10 @@ fn builder_derives_user_and_device_ids() {
     let device = KeyPair::random();
     let expected_user = Id::from(user.public_key());
     let expected_device = Id::from(device.public_key());
-    let options = DirectorOptions::builder("https://director.example/prefix/")
+    let options = DirectorOptions::from_url("https://director.example/prefix/")
         .unwrap()
         .with_user_key(user)
-        .with_device_key(device)
-        .build()
-        .unwrap();
+        .with_device_key(device);
     let client = DirectorClient::new(options).unwrap();
 
     assert_eq!(client.user_id(), Some(&expected_user));

@@ -1,5 +1,5 @@
 use boson::{
-    director::{DirectorClient, DirectorOptionsBuilder, NotFoundError, Profile, UnauthorizedError},
+    director::{DirectorClient, DirectorOptions, NotFoundError, Profile, UnauthorizedError},
     Result,
 };
 use std::path::Path;
@@ -11,7 +11,7 @@ pub(crate) struct Session {
 
 impl Session {
     pub(crate) fn load_from(path: impl AsRef<Path>) -> Result<Self> {
-        let options = DirectorOptionsBuilder::load_from(path)?.build()?;
+        let options = DirectorOptions::load(path)?;
         Ok(Self {
             client: DirectorClient::new(options)?,
             logged_in: false,

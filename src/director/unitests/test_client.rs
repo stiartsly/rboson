@@ -75,15 +75,13 @@ async fn test_register_user() {
         respond(&mut stream, &json!([])).await;
     });
 
-    let options = DirectorOptions::builder(format!("http://{address}"))
+    let options = DirectorOptions::from_url(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
         .with_user_name("Alice")
         .with_user_email("alice@example.com")
         .with_user_bio("Boson user")
-        .with_user_passphrase("secret")
-        .build()
-        .unwrap();
+        .with_user_passphrase("secret");
     let client = DirectorClient::new(options).unwrap();
     client.register_user().await.unwrap();
     assert!(client.list_devices().await.unwrap().is_empty());
@@ -111,12 +109,10 @@ async fn test_register_device_path() {
         respond(&mut stream, &json!({})).await;
     });
 
-    let options = DirectorOptions::builder(format!("http://{address}"))
+    let options = DirectorOptions::from_url(format!("http://{address}"))
         .unwrap()
         .with_user_key(user_key)
-        .with_device_key(device_key)
-        .build()
-        .unwrap();
+        .with_device_key(device_key);
     let client = DirectorClient::new(options).unwrap();
 
     client
@@ -130,11 +126,9 @@ async fn test_register_device_path() {
 async fn test_url_prefix_deduplication() {
     let user_key = KeyPair::random();
     let client1 = DirectorClient::new(
-        DirectorOptions::builder("https://director.example.com")
+        DirectorOptions::from_url("https://director.example.com")
             .unwrap()
-            .with_user_key(user_key.clone())
-            .build()
-            .unwrap(),
+            .with_user_key(user_key.clone()),
     )
     .unwrap();
     assert_eq!(
@@ -143,11 +137,9 @@ async fn test_url_prefix_deduplication() {
     );
 
     let client2 = DirectorClient::new(
-        DirectorOptions::builder("https://director.example.com/api/v1/client")
+        DirectorOptions::from_url("https://director.example.com/api/v1/client")
             .unwrap()
-            .with_user_key(user_key.clone())
-            .build()
-            .unwrap(),
+            .with_user_key(user_key.clone()),
     )
     .unwrap();
     assert_eq!(
@@ -156,11 +148,9 @@ async fn test_url_prefix_deduplication() {
     );
 
     let client3 = DirectorClient::new(
-        DirectorOptions::builder("https://director.example.com/api/v1/client/")
+        DirectorOptions::from_url("https://director.example.com/api/v1/client/")
             .unwrap()
-            .with_user_key(user_key)
-            .build()
-            .unwrap(),
+            .with_user_key(user_key),
     )
     .unwrap();
     assert_eq!(
@@ -171,10 +161,7 @@ async fn test_url_prefix_deduplication() {
 
 #[tokio::test]
 async fn test_client_close_state() {
-    let options = DirectorOptions::builder("https://director.example.com")
-        .unwrap()
-        .build()
-        .unwrap();
+    let options = DirectorOptions::from_url("https://director.example.com").unwrap();
     let client = DirectorClient::new(options).unwrap();
 
     assert!(!client.is_closed());
@@ -206,11 +193,9 @@ async fn test_get_avatar_none() {
             .unwrap();
     });
 
-    let options = DirectorOptions::builder(format!("http://{address}"))
+    let options = DirectorOptions::from_url(format!("http://{address}"))
         .unwrap()
-        .with_user_key(user_key)
-        .build()
-        .unwrap();
+        .with_user_key(user_key);
     let client = DirectorClient::new(options).unwrap();
 
     let avatar = client.get_avatar().await.unwrap();
@@ -240,11 +225,9 @@ async fn test_json_error_message_parsing() {
         stream.write_all(&err_body).await.unwrap();
     });
 
-    let options = DirectorOptions::builder(format!("http://{address}"))
+    let options = DirectorOptions::from_url(format!("http://{address}"))
         .unwrap()
-        .with_user_key(user_key)
-        .build()
-        .unwrap();
+        .with_user_key(user_key);
     let client = DirectorClient::new(options).unwrap();
 
     let result = client.get_profile().await;

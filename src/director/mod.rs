@@ -19,7 +19,7 @@ pub use {
     device::Device,
     errors::*,
     node_status::{NodeStatus, Service},
-    options::{DirectorOptions, DirectorOptionsBuilder},
+    options::DirectorOptions,
     plan::{Cycle, Plan},
     profile::Profile,
     profile_update::ProfileUpdate,
@@ -31,7 +31,6 @@ pub use {
 #[cfg(test)]
 mod unitests {
     mod test_client;
-    mod test_options;
     //mod unitests;
 }
 

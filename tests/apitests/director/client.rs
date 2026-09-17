@@ -27,11 +27,9 @@ mod tests {
     async fn test_fetch_node_status() {
         let url = get_director_url();
 
-        let options = DirectorOptions::builder(url)
+        let options = DirectorOptions::from_url(url)
             .expect("Failed to set director URL")
-            .with_insecure(true)
-            .build()
-            .expect("Failed to build DirectorOptions");
+            .with_insecure(true);
         let client = DirectorClient::new(options).expect("Failed to build DirectorClient");
 
         let node_id = client.get_node_id().await.expect("Failed to fetch node ID");
@@ -55,10 +53,9 @@ mod tests {
         let user_id = Id::from(user_key.public_key());
         assert_eq!(user_id.to_base58(), DEFAULT_USER_ID);
 
-        let options = DirectorOptions::builder(get_director_url())?
+        let options = DirectorOptions::from_url(get_director_url())?
             .with_user_key(user_key)
-            .with_insecure(true)
-            .build()?;
+            .with_insecure(true);
         let client = DirectorClient::new(options)?;
 
         let profile = client.get_profile().await?;
@@ -77,7 +74,7 @@ mod tests {
         let user_name = format!("user_{:08x}", rand::random::<u32>());
         let email = format!("{user_name}@example.com");
 
-        let options = DirectorOptions::builder(&url)?
+        let options = DirectorOptions::from_url(&url)?
             .with_user_key(user_key.clone())
             .with_device_key(device_key)
             .with_user_name(user_name.clone())
@@ -85,8 +82,7 @@ mod tests {
             .with_user_bio("Registered via DirectorClient apitest")
             .with_user_passphrase("test_secret_123")
             .with_initial_device("APITestDevice", "BosonAPITest")
-            .with_insecure(true)
-            .build()?;
+            .with_insecure(true);
         let client = DirectorClient::new(options)?;
 
         client.register_user().await?;
@@ -219,7 +215,7 @@ async fn register_user_on_director(
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
-    let mut builder = DirectorOptions::builder(&url)?
+    let mut options = DirectorOptions::from_url(&url)?
         .with_user_key(user_key.clone())
         .with_device_key(device_key)
         .with_user_name(user_name)
@@ -229,10 +225,9 @@ async fn register_user_on_director(
         .with_insecure(true);
 
     if let Some(pass) = passphrase {
-        builder = builder.with_user_passphrase(pass);
+        options = options.with_user_passphrase(pass);
     }
 
-    let options = builder.build()?;
     let client = DirectorClient::new(options)?;
     client.register_user().await?;
     Ok((client, user_key))

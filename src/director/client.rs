@@ -49,6 +49,8 @@ impl std::fmt::Debug for DirectorClient {
 
 impl DirectorClient {
     pub fn new(options: DirectorOptions) -> Result<Self> {
+        options.check_valid()?;
+
         let mut base_url = options.director_url().clone();
         let path = base_url.path().trim_end_matches('/');
         let path = if path.ends_with(API_PREFIX) {

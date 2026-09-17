@@ -1,16 +1,15 @@
 use crate::director::{
-    models::{base64url, sign_nonce},
-    DirectorClient, DirectorOptions, ProfileUpdate, UserRegistration,
+    base64url, sign_nonce, Client, Options, ProfileUpdate, UserRegistration,
 };
 use crate::{errors::ArgumentError, signature::KeyPair, Id};
 
 #[test]
 fn builder_rejects_incomplete_device_identity() {
     let device = KeyPair::random();
-    let options = DirectorOptions::from_url("https://director.example")
+    let options = Options::new("https://director.example")
         .unwrap()
-        .with_device_key(device);
-    let result = options.check_valid();
+        .with_device_private_key(device.private_key().clone());
+    let result = options.check_completion();
 
     let error = match result {
         Ok(_) => panic!("device-only configuration must fail"),
@@ -25,11 +24,12 @@ fn builder_derives_user_and_device_ids() {
     let device = KeyPair::random();
     let expected_user = Id::from(user.public_key());
     let expected_device = Id::from(device.public_key());
-    let options = DirectorOptions::from_url("https://director.example/prefix/")
+    let options = Options::new("https://director.example/prefix/")
         .unwrap()
-        .with_user_key(user)
-        .with_device_key(device);
-    let client = DirectorClient::new(options).unwrap();
+        .with_user_id(expected_user.clone())
+        .with_user_private_key(user.private_key().clone())
+        .with_device_private_key(device.private_key().clone());
+    let client = Client::new(options).unwrap();
 
     assert_eq!(client.user_id(), Some(&expected_user));
     assert_eq!(client.device_id(), Some(&expected_device));

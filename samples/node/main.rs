@@ -80,7 +80,7 @@ async fn main() {
     let mut port = 39010 as u16;
     let mut bootstrap_nodes = Vec::new();
 
-    let ip_str = match get_current_ip_address() {
+    let host = match get_current_ip_address() {
         Some(addr) => addr,
         _ => return,
     }.to_string();
@@ -90,7 +90,7 @@ async fn main() {
     let mut iter = args.iter().skip(1);
     while let Some(argv) = iter.next() {
         match argv.as_str() {
-            "--store" => {
+            "--datadir" => {
                 if let Some(arg) = iter.next() {
                     path = arg.clone();
                 }
@@ -132,19 +132,18 @@ async fn main() {
     };
 
     let private_key = load_or_generate_key(&path);
-    let options = NodeOptions::new()
+    let options = NodeOptions::new(private_key)
         .with_port(port)
-        .with_host4(&ip_str)
+        .with_host4(host.as_str())
         .with_data_dir(path.as_str())
-        .with_private_key(private_key)
         .with_log_level(log::LevelFilter::Debug)
         .with_log_console(true)
-        .with_database_uri("jdbc:sqlite:node.db")
         .with_bootstrap_nodes(bootstrap_nodes);
+
     let node = Node::new(options).unwrap();
     let _ = node.start().await;
 
-    println!("Target node running on {}:{} (storage: {})", ip_str, port, path);
+    println!("The sample node is running on {}:{}", host, port);
     sleep(Duration::from_secs(60*10)).await;
     let _ = node.stop().await;
 }

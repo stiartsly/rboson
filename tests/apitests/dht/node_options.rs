@@ -67,22 +67,18 @@ mod tests {
 
     #[test]
     fn test_default_options() {
-        let options = NodeOptions::new();
-        let default = NodeOptions::default();
+        let sk = KeyPair::random().to_private_key();
+        let options = NodeOptions::new(sk.clone());
 
-        for options in [&options, &default] {
-            assert_eq!(options.host4(), None);
-            assert_eq!(options.host6(), None);
-            assert_eq!(options.port(), dht::DEFAULT_DHT_PORT);
-            assert!(!options.private_key().to_string().is_empty());
-            assert_eq!(options.data_dir(), dht::DEFAULT_DATA_DIR);
-            assert_eq!(options.database_uri(), dht::DEFAULT_DATABASE_URI);
-            assert!(options.bootstrap_nodes().is_empty());
-            assert_eq!(options.log_level(), LevelFilter::Info);
-            assert_eq!(options.log_file(), None);
-            assert!(options.log_console_enabled());
-            assert!(!options.developer_mode_enabled());
-        }
+        assert_eq!(options.private_key(), &sk);
+        assert_eq!(options.host4(), None);
+        assert_eq!(options.host6(), None);
+        assert_eq!(options.port(), dht::DEFAULT_DHT_PORT);
+        assert_eq!(options.data_dir(), ".");
+        assert_eq!(options.log_file(), None);
+        assert_eq!(options.log_console(), true);
+        assert_eq!(options.developer_mode(), false);
+        assert_eq!(options.bootstrap_nodes().len(), 0);
     }
 
     #[test]
@@ -99,7 +95,6 @@ mod tests {
         assert_eq!(options.port(), 39011);
         assert_eq!(options.private_key(), &private_key);
         assert_eq!(options.data_dir(), "parse-data");
-        assert_eq!(options.database_uri(), "parse.db");
         assert_eq!(options.bootstrap_nodes().len(), 1);
         assert_eq!(
             options.bootstrap_nodes()[0].id().to_base58(),
@@ -110,38 +105,35 @@ mod tests {
         assert_eq!(options.log_level(), LevelFilter::Debug);
         assert_eq!(options.log_file(), Some("parse.log"));
         assert!(!options.log_console_enabled());
-        assert!(options.developer_mode_enabled());
+        assert!(options.developer_mode());
     }
 
     #[test]
     fn test_options_with_funs() {
-        let private_key = KeyPair::random().to_private_key();
+        let sk = KeyPair::random().to_private_key();
         let bootstrap = NodeInfo::new(Id::random(), "127.0.0.1:39013".parse().unwrap());
 
-        let options = NodeOptions::new()
+        let options = NodeOptions::new(sk.clone())
             .with_host4("127.0.0.1")
             .with_host6("::1")
             .with_port(39014)
-            .with_private_key(private_key.clone())
             .with_data_dir("set-data")
-            .with_database_uri("set.db")
             .with_bootstrap_nodes(vec![bootstrap.clone()])
             .with_log_level(LevelFilter::Trace)
             .with_log_file("set.log")
-            .enable_log_console(false)
+            .with_log_console(false)
             .enable_developer_mode();
 
         assert_eq!(options.host4(), Some("127.0.0.1"));
         assert_eq!(options.host6(), Some("::1"));
         assert_eq!(options.port(), 39014);
-        assert_eq!(options.private_key(), &private_key);
+        assert_eq!(options.private_key(), &sk);
         assert_eq!(options.data_dir(), "set-data");
-        assert_eq!(options.database_uri(), "set.db");
         assert_eq!(options.bootstrap_nodes(), &[bootstrap]);
         assert_eq!(options.log_level(), LevelFilter::Trace);
         assert_eq!(options.log_file(), Some("set.log"));
         assert!(!options.log_console_enabled());
-        assert!(options.developer_mode_enabled());
+        assert!(options.developer_mode());
     }
 
     #[test]
@@ -164,11 +156,10 @@ mod tests {
             .with_port(39016)
             .with_private_key(replacement_key.clone())
             .with_data_dir("replacement-data")
-            .with_database_uri("replacement.db")
             .with_bootstrap_nodes(vec![replacement_bootstrap.clone()])
             .with_log_level(LevelFilter::Warn)
             .with_log_file("replacement.log")
-            .enable_log_console(true)
+            .enable_log_console()
             .enable_developer_mode();
 
         assert_eq!(options.host4(), Some("192.0.2.1"));
@@ -176,12 +167,11 @@ mod tests {
         assert_eq!(options.port(), 39016);
         assert_eq!(options.private_key(), &replacement_key);
         assert_eq!(options.data_dir(), "replacement-data");
-        assert_eq!(options.database_uri(), "replacement.db");
         assert_eq!(options.bootstrap_nodes(), &[replacement_bootstrap]);
         assert_eq!(options.log_level(), LevelFilter::Warn);
         assert_eq!(options.log_file(), Some("replacement.log"));
         assert!(options.log_console_enabled());
-        assert!(options.developer_mode_enabled());
+        assert!(options.developer_mode());
     }
 
     #[test]
@@ -214,7 +204,6 @@ mod tests {
         assert_eq!(options.port(), 39011);
         assert_eq!(options.private_key(), &private_key);
         assert_eq!(options.data_dir(), "environment-data");
-        assert_eq!(options.database_uri(), "environment.db");
         assert_eq!(options.bootstrap_nodes().len(), 1);
         assert_eq!(
             options.bootstrap_nodes()[0].id().to_base58(),
@@ -225,7 +214,7 @@ mod tests {
         assert_eq!(options.log_level(), LevelFilter::Debug);
         assert_eq!(options.log_file(), Some("environment.log"));
         assert!(!options.log_console_enabled());
-        assert!(options.developer_mode_enabled());
+        assert!(options.developer_mode());
 
         for (name, _) in variables {
             unsafe {

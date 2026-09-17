@@ -1,4 +1,4 @@
-use boson::director::{DirectorClient, DirectorOptions};
+use boson::director::{Client, Options, UserRegistration};
 use boson::{signature::KeyPair, Id, Result};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -27,17 +27,20 @@ mod tests {
     async fn test_fetch_node_status() {
         let url = get_director_url();
 
-        let options = DirectorOptions::from_url(url)
+        let options = Options::new(url)
             .expect("Failed to set director URL")
             .with_insecure(true);
-        let client = DirectorClient::new(options).expect("Failed to build DirectorClient");
+        let client = Client::new(options).expect("Failed to build Director client");
 
-        let node_id = client.get_node_id().await.expect("Failed to fetch node ID");
+        let node_id = client
+            .fetch_node_id()
+            .await
+            .expect("Failed to fetch node ID");
         println!("Successfully fetched node ID: {}", node_id.to_base58());
         assert_eq!(node_id.to_base58(), DEFAULT_DIRECTOR_NODEID);
 
         let status = client
-            .get_node_status()
+            .fetch_node_status()
             .await
             .expect("Failed to fetch node status");
         println!("status: {}", status);
@@ -53,10 +56,11 @@ mod tests {
         let user_id = Id::from(user_key.public_key());
         assert_eq!(user_id.to_base58(), DEFAULT_USER_ID);
 
-        let options = DirectorOptions::from_url(get_director_url())?
-            .with_user_key(user_key)
+        let options = Options::new(get_director_url())?
+            .with_user_id(user_id)
+            .with_user_private_key(user_key.private_key().clone())
             .with_insecure(true);
-        let client = DirectorClient::new(options)?;
+        let client = Client::new(options)?;
 
         let profile = client.get_profile().await?;
         println!("Successfully fetched profile: {profile}");
@@ -74,16 +78,20 @@ mod tests {
         let user_name = format!("user_{:08x}", rand::random::<u32>());
         let email = format!("{user_name}@example.com");
 
-        let options = DirectorOptions::from_url(&url)?
-            .with_user_key(user_key.clone())
-            .with_device_key(device_key)
-            .with_user_name(user_name.clone())
-            .with_user_email(email)
-            .with_user_bio("Registered via DirectorClient apitest")
-            .with_user_passphrase("test_secret_123")
-            .with_initial_device("APITestDevice", "BosonAPITest")
+        let options = Options::new(&url)?
+            .with_user_id(Id::from(user_key.public_key()))
+            .with_user_private_key(user_key.private_key().clone())
+            .with_device_private_key(device_key.private_key().clone())
+            .with_registration(
+                UserRegistration::new()
+                    .with_name(user_name.clone())
+                    .with_email(email)
+                    .with_bio("Registered via Director client apitest")
+                    .with_passphrase("test_secret_123")
+                    .with_initial_device("APITestDevice", "BosonAPITest"),
+            )
             .with_insecure(true);
-        let client = DirectorClient::new(options)?;
+        let client = Client::new(options)?;
 
         client.register_user().await?;
 
@@ -158,7 +166,7 @@ mod tests {
                     "id": registered_user_id,
                     "name": "Bob",
                     "email": "bob@example.com",
-                    "bio": "Registered via DirectorClient apitest",
+                    "bio": "Registered via Director client apitest",
                     "admin": false,
                     "createdAt": 1700000000,
                     "updatedAt": 1700000000,
@@ -210,25 +218,36 @@ async fn register_user_on_director(
     user_name: &str,
     email: &str,
     passphrase: Option<&str>,
-) -> Result<(DirectorClient, KeyPair)> {
+) -> Result<(Client, KeyPair)> {
     let url = format!("http://{address}");
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
-    let mut options = DirectorOptions::from_url(&url)?
-        .with_user_key(user_key.clone())
-        .with_device_key(device_key)
-        .with_user_name(user_name)
-        .with_user_email(email)
-        .with_user_bio("Registered via DirectorClient apitest")
-        .with_initial_device("APITestDevice", "BosonAPITest")
+    let mut options = Options::new(&url)?
+        .with_user_id(Id::from(user_key.public_key()))
+        .with_user_private_key(user_key.private_key().clone())
+        .with_device_private_key(device_key.private_key().clone())
+        .with_registration(
+            UserRegistration::new()
+                .with_name(user_name)
+                .with_email(email)
+                .with_bio("Registered via Director client apitest")
+                .with_initial_device("APITestDevice", "BosonAPITest"),
+        )
         .with_insecure(true);
 
     if let Some(pass) = passphrase {
-        options = options.with_user_passphrase(pass);
+        options = options.with_registration(
+            UserRegistration::new()
+                .with_name(user_name)
+                .with_email(email)
+                .with_bio("Registered via Director client apitest")
+                .with_passphrase(pass)
+                .with_initial_device("APITestDevice", "BosonAPITest"),
+        );
     }
 
-    let client = DirectorClient::new(options)?;
+    let client = Client::new(options)?;
     client.register_user().await?;
     Ok((client, user_key))
 }

@@ -1,10 +1,9 @@
 use std::{
+    env,
     process::exit,
     sync::Arc,
     time::Duration,
 };
-use std::env;
-
 use clap::Parser;
 use tokio::sync::Notify;
 
@@ -19,17 +18,24 @@ use boson::{
         NodeOptions,
     },
     activeproxy::{
-        Client as ActiveProxy,
+        Client as ActiveProxyClient,
         Options as ActiveProxyOptions,
     },
     director::{
-        DirectorClient,
-        DirectorOptions,
+        Client as DirectorClient,
+        Options as DirectorOptions,
         NotFoundError,
         UnauthorizedError,
     },
     errors::{ArgumentError, StateError},
 };
+
+const DEFAULT_ACTIVEPROXY_CONFIG: &str = "apps/launcher/activeproxy.yaml";
+const DEFAULT_NODE_CONFIG: &str = "apps/launcher/node.yaml";
+
+const DEFAULT_DIRECTOR_URL: &str = "https://47.101.142.224:9000";
+//const DEFAULT_DIRECTOR_NODEID: &str = "GhVW54uEd179PzRPpaiENKZuMezMNExTP6bXRK3rLDAQ";
+const DEFAULT_INSECURE: bool = true;
 
 #[derive(Parser, Debug)]
 #[command(name = "launcher")]
@@ -44,9 +50,9 @@ struct Options {
     #[arg(long, value_name = "FILE")]
     activeproxy_config: Option<String>,
 
-    /// The Director configuration used to admit the ActiveProxy device
-    #[arg(long, value_name = "FILE")]
-    director_config: Option<String>,
+    /// Director service url
+    #[arg(long, value_name = "URL")]
+    director_url: Option<String>,
 }
 
 /// Notifies once the node has connected to the Boson network.
@@ -100,7 +106,9 @@ async fn ensure_device_admitted(
         return Ok(());
     }
 
-    let registration = director.options().registration();
+    let registration = director.options().registration().ok_or_else(|| {
+        StateError::new("Director registration settings are required to register the ActiveProxy device")
+    })?;
     let name = registration.device_name().ok_or_else(|| {
         StateError::new("Director device.name is required to register the ActiveProxy device")
     })?;
@@ -128,62 +136,71 @@ async fn ensure_device_admitted(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let opts = Options::parse();
+    let options = Options::parse();
 
-    let activeproxy_config = opts
+    let ap_config = options
         .activeproxy_config
         .as_deref()
         .map(str::to_owned)
         .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
-        .unwrap_or_else(|| "apps/launcher/activeproxy.yaml".to_string());
-    let activeproxy_options = match ActiveProxyOptions::load(&activeproxy_config) {
-        Ok(options) => options,
+        .unwrap_or(DEFAULT_ACTIVEPROXY_CONFIG.to_string());
+
+    let ap_opts = match ActiveProxyOptions::load(&ap_config) {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("Error building ActiveProxy configuration: {e}");
             exit(1);
         }
     };
+    if let Err(e) = ap_opts.check_completeness() {
+        eprintln!("{e}");
+        exit(1);
+    }
 
-    let director_config = opts
-        .director_config
+    let director_url = options
+        .director_url
         .as_deref()
         .map(str::to_owned)
-        .or_else(|| env::var("DIRECTOR_CONFIG").ok())
-        .unwrap_or_else(|| "apps/launcher/director.yaml".to_string());
-    let director_options = match DirectorOptions::load(&director_config) {
-        Ok(options) => options,
-        Err(e) => {
-            eprintln!("Error building Director configuration: {e}");
-            exit(1);
-        }
-    };
-    let director = match DirectorClient::new(director_options) {
-        Ok(client) => client,
-        Err(e) => {
-            eprintln!("Creating Director client failed: {e}");
-            exit(1);
-        }
-    };
+        .or_else(|| env::var("DIRECTOR_URL").ok())
+        .unwrap_or(DEFAULT_DIRECTOR_URL.to_string());
 
-    let activeproxy_userid = activeproxy_options.user_id().clone();
-    let activeproxy_device_key = activeproxy_options.device_key();
+    let dir_opts = DirectorOptions::new(director_url)
+        .unwrap()
+        .with_insecure(DEFAULT_INSECURE)
+        .with_user_id(ap_opts.user_id().cloned().unwrap())
+        //.with_user_private_key(ap_opts.user_private_key().cloned().unwrap())
+        .with_device_private_key(ap_opts.device_private_key().cloned().unwrap());
 
-    let activeproxy_device_id = Id::from(activeproxy_device_key.public_key());
+    if let Err(e) = dir_opts.check_completeness() {
+        eprintln!("{e}");
+        exit(1);
+    }
+
+    let director = DirectorClient::new(dir_opts)
+        .map_err(|e| {
+            eprintln!("Creating Director client error: {e}");
+            exit(1);
+        })
+        .unwrap();
+
+    let user_id = ap_opts.user_id().cloned().unwrap();
+    let device_id = ap_opts.device_id().cloned().unwrap();
+
     if let Err(e) = ensure_device_admitted(
         &director,
-        &activeproxy_userid,
-        &activeproxy_device_id,
+        &user_id,
+        &device_id,
     ).await {
         eprintln!("Admitting the ActiveProxy device through the Director failed: {e}");
         exit(1);
     }
 
-    let config = opts
+    let config = options
         .config
         .as_deref()
         .map(str::to_owned)
         .or_else(|| env::var("NODE_CONFIG").ok())
-        .unwrap_or_else(|| "apps/launcher/node.yaml".to_string());
+        .unwrap_or_else(|| DEFAULT_NODE_CONFIG.to_string());
 
     let node_options = match NodeOptions::load(config) {
         Ok(v) => v,
@@ -215,7 +232,7 @@ async fn main() {
         println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
-    let ap = match ActiveProxy::new(Some(node.clone()), activeproxy_options) {
+    let ap = match ActiveProxyClient::new(Some(node.clone()), ap_opts) {
         Ok(ap) => Arc::new(ap),
         Err(e) => {
             eprintln!("Creating ActiveProxy client error: {e}");

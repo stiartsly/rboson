@@ -38,7 +38,7 @@ bootstraps:
 
 # Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
 # Default: true
-enableSuspiciousNodeDetector: true
+#enableSuspiciousNodeDetector: true
 
 # Development: Allows participation in the DHT using local/private IPs (RFC1918).
 # WARNING: Setting this to 'true' in a public or production deployment may lead to routing issues.

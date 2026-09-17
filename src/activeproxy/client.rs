@@ -33,7 +33,7 @@ pub struct ActiveProxyClient {
 
 impl ActiveProxyClient {
     pub fn new(node: Option<Arc<Node>>, options: Options) -> Result<Arc<Self>> {
-        options.check_valid()?;
+        options.check_completeness()?;
 
         if node.is_none() && options.service_peer().is_none() && options.service_host().is_none() {
             return Err(ArgumentError::new(
@@ -90,6 +90,10 @@ impl ActiveProxyClient {
             running: Cell::new(false),
             options,
         }))
+    }
+
+    pub fn options(&self) -> &Options {
+        &self.options
     }
 
     pub fn node(&self) -> Option<Arc<Node>> {
@@ -168,8 +172,8 @@ impl ActiveProxyClient {
             service_endpoint,
             self.upstream_socketaddr().clone(),
             self.upstream_endpoint().to_string(),
-            self.options.user_id().clone(),
-            self.options.device_key().private_key().clone(),
+            self.options.user_id().unwrap().clone(),
+            self.options.device_private_key().unwrap().clone(),
             self.options.is_name_access_enabled(),
             self.node.is_some() && self.options.is_announce_peer_enabled(),
         );

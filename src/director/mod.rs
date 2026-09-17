@@ -15,11 +15,11 @@ mod user_registration;
 
 pub use {
     avatar::Avatar,
-    client::DirectorClient,
+    client::Client,
     device::Device,
     errors::*,
     node_status::{NodeStatus, Service},
-    options::DirectorOptions,
+    options::DirectorOptions as Options,
     plan::{Cycle, Plan},
     profile::Profile,
     profile_update::ProfileUpdate,
@@ -31,7 +31,6 @@ pub use {
 #[cfg(test)]
 mod unitests {
     mod test_client;
-    //mod unitests;
 }
 
 pub(crate) fn base64url(bytes: &[u8]) -> String {
@@ -41,8 +40,8 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn sign_nonce(
-    key: &crate::signature::KeyPair,
+    key: &crate::signature::PrivateKey,
     nonce: &[u8],
 ) -> Result<String, crate::Error> {
-    Ok(base64url(&key.private_key().sign_into(nonce)?))
+    Ok(base64url(&key.sign_into(nonce)?))
 }

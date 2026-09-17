@@ -1,17 +1,43 @@
+# Director configuration
+#
 director:
-  url: https://director.example
+  #
+  url: https://director.example.com
   nodeId: ${SUPER_NODEID}
   insecure: false
 
+
+# Client identity and authentication configuration.
+#
+# Both user-level and device-level private keys are required to establish
+# authenticated communication with the messaging service.
 user:
   id: ${USERID}
+  # Private key representing the user identity.
+  #
+  # This key is shared across all devices owned by the same user.
+  # Keep this value secret.
   privateKey: ${USER_PRIVATE_KEY}
+
+
   name: Alice
   email: alice@example.com
   bio: Boson user
   passphrase: secret
 
+
+# Device identity and authentication configuration.
+#
+# Both user-level and device-level private keys are required to establish
+# authenticated communication with the messaging service.
 device:
-  privateKey: "${DEVICE_PRIVATE_KEY}"
+  # Private key representing the device identity.
+  #
+  # Each device should have a unique key. This allows the system to
+  # distinguish between multiple devices belonging to the same user.
+  # Keep this value secret.
+  privateKey: ${DEVICE_PRIVATE_KEY}
+
+
   name: Laptop
   app: Boson

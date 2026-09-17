@@ -4,13 +4,15 @@ use log::LevelFilter;
 use serde::Deserialize;
 use crate::{
     NodeInfo,
-    signature,
+    signature::{KeyPair, PrivateKey},
     errors::{Error, Result, ArgumentError, IOError},
 };
 
 pub const DEFAULT_DHT_PORT: u16 = 39001;
-pub const DEFAULT_DATA_DIR: &str = ".";
-pub const DEFAULT_DATABASE_URI: &str = "storage.db";
+
+const DEFAULT_DATA_DIR: &str = ".";
+const DEFAULT_DATABASE_URI: &str = "jdbc:sqlite:node.db";
+
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(try_from = "SerdeNodeOptions")]
@@ -19,7 +21,7 @@ pub struct NodeOptions {
     host6           : Option<String>,
     port            : u16,
 
-    private_key     : signature::PrivateKey,
+    keypair         : KeyPair,
 
     data_dir        : PathBuf,
     database_uri    : String,
@@ -33,12 +35,12 @@ pub struct NodeOptions {
 }
 
 impl NodeOptions {
-    pub fn new() -> Self {
-        NodeOptions {
+    pub fn new(sk: PrivateKey) -> Self {
+        Self {
             host4           : None,
             host6           : None,
             port            : DEFAULT_DHT_PORT,
-            private_key     : signature::KeyPair::random().to_private_key(),
+            keypair         : KeyPair::from(sk),
             data_dir        : DEFAULT_DATA_DIR.into(),
             database_uri    : DEFAULT_DATABASE_URI.into(),
             bootstrap_nodes : Vec::new(),
@@ -75,9 +77,19 @@ impl NodeOptions {
         self
     }
 
+    pub fn enable_host4(self) -> Result<Self> {
+        let host = crate::local_addr(true).map(|v|v.to_string())?;
+        Ok(self.with_host4(host))
+    }
+
     pub fn with_host6(mut self, host: impl Into<String>) -> Self {
         self.host6 = Some(host.into());
         self
+    }
+
+    pub fn enable_host6(self) -> Result<Self> {
+        let host = crate::local_addr(false).map(|v|v.to_string())?;
+        Ok(self.with_host6(host))
     }
 
     pub fn with_port(mut self, port: u16) -> Self {
@@ -85,18 +97,18 @@ impl NodeOptions {
         self
     }
 
-    pub fn with_private_key(mut self, private_key: signature::PrivateKey) -> Self {
-        self.private_key = private_key;
+    pub fn with_private_key(mut self, private_key: PrivateKey) -> Self {
+        self.keypair = KeyPair::from(private_key);
         self
     }
 
-    pub fn with_data_dir(mut self, data_dir: impl AsRef<str>) -> Self {
+    pub fn with_keypair(mut self, keypair: KeyPair) -> Self {
+        self.keypair = keypair;
+        self
+    }
+
+    pub fn with_data_dir(mut self, data_dir: impl AsRef<Path>) -> Self {
         self.data_dir = PathBuf::from(data_dir.as_ref());
-        self
-    }
-
-    pub fn with_database_uri(mut self, database_uri: impl Into<String>) -> Self {
-        self.database_uri = database_uri.into();
         self
     }
 
@@ -115,18 +127,29 @@ impl NodeOptions {
         self
     }
 
-    pub fn enable_log_console(mut self, log_console: bool) -> Self {
+    pub fn enable_log_console(self) -> Self {
+        self.with_log_console(true)
+    }
+
+    pub fn with_log_console(mut self, log_console: bool) -> Self {
         self.log_console = log_console;
         self
     }
 
-    pub fn with_log_console(self, log_console: bool) -> Self {
-        self.enable_log_console(log_console)
+    pub fn enable_developer_mode(self) -> Self {
+        self.with_developer_mode(true)
     }
 
-    pub fn enable_developer_mode(mut self) -> Self {
-        self.developer_mode = true;
+    pub fn with_developer_mode(mut self, developer_mode: bool) -> Self {
+        self.developer_mode = developer_mode;
         self
+    }
+
+    pub fn check_completeness(&self) -> Result<()> {
+        if self.host4.is_none() && self.host6.is_none() {
+            return Err(IOError::new("At least one of host4 or host6 must be set"));
+        }
+        Ok(())
     }
 
     pub fn host4(&self) -> Option<&str> {
@@ -141,8 +164,8 @@ impl NodeOptions {
         self.port
     }
 
-    pub fn private_key(&self) -> &signature::PrivateKey {
-        &self.private_key
+    pub fn private_key(&self) -> &PrivateKey {
+        self.keypair.private_key()
     }
 
     pub fn data_dir(&self) -> &str {
@@ -173,18 +196,8 @@ impl NodeOptions {
         self.log_console
     }
 
-    pub fn developer_mode_enabled(&self) -> bool {
-        self.developer_mode
-    }
-
     pub fn developer_mode(&self) -> bool {
         self.developer_mode
-    }
-}
-
-impl Default for NodeOptions {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -200,7 +213,7 @@ impl fmt::Display for NodeOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Configuration: {{ host4: {:?}, host6: {:?}, port: {}, data_dir: {}, database_uri: {}, bootstrap_nodes: {:?}, log_level: {:?}, log_file: {:?}, log_console: {}, developer_mode: {} }}",
+            "Node Options: {{ host4: {:?}, host6: {:?}, port: {}, data_dir: {}, database_uri: {}, bootstrap_nodes: {:?}, log_level: {:?}, log_file: {:?}, log_console: {}, developer_mode: {} }}",
             self.host4,
             self.host6,
             self.port,
@@ -216,7 +229,7 @@ impl fmt::Display for NodeOptions {
 }
 
 #[derive(Debug, Deserialize)]
-//#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct SerdeNodeOptions {
     #[serde(rename = "privateKey")]
     private_key: String,
@@ -227,7 +240,7 @@ struct SerdeNodeOptions {
     #[serde(rename = "dataDir")]
     data_dir: Option<String>,
     #[serde(rename = "databaseUri")]
-    database_uri: Option<String>,
+    _database_uri: Option<String>,
     #[serde(default)]
     bootstraps: Vec<SerdeNodeEntry>,
     #[serde(rename = "logLevel")]
@@ -243,58 +256,44 @@ struct SerdeNodeOptions {
 impl TryFrom<SerdeNodeOptions> for NodeOptions {
     type Error = Error;
 
-    fn try_from(options: SerdeNodeOptions) -> Result<Self> {
-        let private_key = signature::PrivateKey::try_from(
-            options.private_key.as_str()
-        )?;
-        let host4 = options
-            .ipv4
-            .unwrap_or(false)
-            .then(|| crate::local_addr(true).map(|addr| addr.to_string()))
-            .transpose()?;
-        let host6 = options
-            .ipv6
-            .unwrap_or(false)
-            .then(|| crate::local_addr(false).map(|addr| addr.to_string()))
-            .transpose()?;
+    fn try_from(sopts: SerdeNodeOptions) -> Result<Self> {
+        let sk = PrivateKey::try_from(sopts.private_key.as_str())?;
+        let mut opts = Self::new(sk);
+        if sopts.ipv4.unwrap_or(false) {
+            opts = opts.enable_host4()?;
+        }
+        if sopts.ipv6.unwrap_or(false) {
+            opts = opts.enable_host6()?;
+        }
+        opts = opts.with_port(sopts.port);
 
         let data_dir = expand_relative_path(
-            &options
+            &sopts
                 .data_dir
                 .unwrap_or(DEFAULT_DATA_DIR.to_string())
         )?;
-        let database_uri = options
-            .database_uri
-            .unwrap_or(DEFAULT_DATABASE_URI.to_string());
+        opts = opts.with_data_dir(data_dir);
 
-        let log_level = options
+        let log_level = sopts
             .log_level
             .as_deref()
             .and_then(|level| level.parse().ok())
             .unwrap_or(LevelFilter::Info);
-        let log_console = options
-            .log_console
-            .unwrap_or(true);
+        opts = opts.with_log_level(log_level);
+        opts = opts.with_log_console(sopts.log_console.unwrap_or(true));
 
-        let bootstrap_nodes = options
+        if let Some(log_file) = sopts.log_file {
+            opts = opts.with_log_file(log_file);
+        }
+
+        let bootstrap_nodes = sopts
             .bootstraps
             .into_iter()
             .map(NodeInfo::try_from)
             .collect::<Result<Vec<_>>>()?;
-
-        Ok(Self {
-            host4,
-            host6,
-            port: options.port,
-            private_key,
-            data_dir,
-            database_uri,
-            bootstrap_nodes,
-            log_level,
-            log_file: options.log_file,
-            log_console,
-            developer_mode: options.developer_mode,
-        })
+        opts = opts.with_bootstrap_nodes(bootstrap_nodes);
+        opts = opts.with_developer_mode(sopts.developer_mode);
+        Ok(opts)
     }
 }
 

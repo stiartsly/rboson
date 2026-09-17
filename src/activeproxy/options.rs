@@ -1,9 +1,10 @@
 use core::convert::TryFrom;
-use std::{env, fs, path::Path};
+use std::{env, fs, path::Path, sync::Arc};
 use serde::Deserialize;
 use crate::{
     errors::{Error, Result, ArgumentError, IOError},
-    signature, Id, PeerInfo,
+    signature::{KeyPair, PrivateKey}, Id, PeerInfo,
+    dht::Node,
 };
 
 pub const DEFAULT_SCHEME: &'static str = "tcp://";
@@ -22,9 +23,10 @@ pub struct Options {
 
     // The client identity that authenticates to the service:
     // a user identity and a per-device key.
-    user_id: Id,
-    user_key: Option<signature::KeyPair>,
-    device_key: signature::KeyPair,
+    user_id: Option<Id>,
+    user_key: Option<KeyPair>,
+    device_id: Option<Id>,
+    device_key: Option<KeyPair>,
 
     // The upstream information, which is the local service provider that
     // the ActiveProxy will forward requests to.
@@ -37,15 +39,16 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn new(peerid: Id, userid: Id) -> Self {
+    pub fn new(peerid: Id) -> Self {
         Self {
             server_peerid: peerid,
             server_peer: None,
             service_host: None,
             service_port: DEFAULT_PORT,
-            user_id: userid,
+            user_id: None,
             user_key: None,
-            device_key: signature::KeyPair::random(),
+            device_id: None,
+            device_key: None,
             upstream_host: "127.0.0.1".to_string(),
             upstream_port: 8080,
             upstream_scheme: DEFAULT_SCHEME.to_string(),
@@ -94,27 +97,36 @@ impl Options {
     }
 
     pub fn with_userid(mut self, userid: Id) -> Self {
-        self.user_id = userid;
+        self.user_id = Some(userid);
         self
     }
 
-    pub fn with_user_key(mut self, user_key: signature::KeyPair) -> Self {
-        self.user_id = Id::from(user_key.public_key());
+    pub fn with_user_private_key(self, private_key: PrivateKey) -> Self {
+        self.with_user_keypair(KeyPair::from(private_key))
+    }
+
+    pub fn with_user_keypair(mut self, user_key: KeyPair) -> Self {
+        self.user_id = Some(Id::from(user_key.public_key()));
         self.user_key = Some(user_key);
         self
     }
 
     pub fn with_generated_user_key(self) -> Self {
-        self.with_user_key(signature::KeyPair::random())
+        self.with_user_keypair(KeyPair::random())
     }
 
-    pub fn with_device_key(mut self, device_key: signature::KeyPair) -> Self {
-        self.device_key = device_key;
+    pub fn with_device_private_key(self, private_key: PrivateKey) -> Self {
+        self.with_device_keypair(KeyPair::from(private_key))
+    }
+
+    pub fn with_device_keypair(mut self, device_key: KeyPair) -> Self {
+        self.device_id = Some(Id::from(device_key.public_key()));
+        self.device_key = Some(device_key);
         self
     }
 
     pub fn with_generated_device_key(self) -> Self {
-        self.with_device_key(signature::KeyPair::random())
+        self.with_device_keypair(KeyPair::random())
     }
 
     pub fn with_upstream_host(mut self, host: impl Into<String>) -> Self {
@@ -158,16 +170,20 @@ impl Options {
         self.service_port
     }
 
-    pub fn user_id(&self) -> &Id {
-        &self.user_id
+    pub fn user_id(&self) -> Option<&Id> {
+        self.user_id.as_ref()
     }
 
-    pub fn user_key(&self) -> Option<&signature::KeyPair> {
-        self.user_key.as_ref()
+    pub fn user_private_key(&self) -> Option<&PrivateKey> {
+        self.user_key.as_ref().map(|kp| kp.private_key())
     }
 
-    pub fn device_key(&self) -> &signature::KeyPair {
-        &self.device_key
+    pub fn device_id(&self) -> Option<&Id> {
+        self.device_id.as_ref()
+    }
+
+    pub fn device_private_key(&self) -> Option<&PrivateKey> {
+        self.device_key.as_ref().map(|kp| kp.private_key())
     }
 
     pub fn upstream_host(&self) -> &str {
@@ -190,7 +206,14 @@ impl Options {
         self.announce_peer
     }
 
-    pub fn check_valid(&self) -> Result<()> {
+    pub fn check_completeness(&self) -> Result<()> {
+        if self.user_id.is_none() {
+            return Err(ArgumentError::new("user_id is not set"));
+        }
+        if self.device_key.is_none() {
+            return Err(ArgumentError::new("device_private_key is not set"));
+        }
+
         if self.upstream_host.is_empty() {
             return Err(ArgumentError::new("upstream_host is empty"));
         }
@@ -201,6 +224,11 @@ impl Options {
             return Err(ArgumentError::new("upstream_scheme is empty"));
         }
         Ok(())
+    }
+
+    pub fn lookup_peer(self, _node: Arc<Node>) -> Result<Self> {
+        // TODO:
+        Ok(self)
     }
 }
 
@@ -226,44 +254,48 @@ struct SerdeOptions {
 impl TryFrom<SerdeOptions> for Options {
     type Error = Error;
 
-    fn try_from(options: SerdeOptions) -> Result<Self> {
-        let user_key = options.client.user_private_key.as_deref().map(
-            signature::PrivateKey::try_from
-        ).transpose()?
-        .map(signature::KeyPair::from);
+    fn try_from(sopts: SerdeOptions) -> Result<Self> {
+        let mut opts = Options::new(sopts.service.peer_id);
 
-        let device_sk = signature::PrivateKey::try_from(
-            options.client.device_private_key.as_str()
-        ).map_err(|e| {
-            ArgumentError::new(&format!("failed to parse device private key: {}", e))
-        })?;
-        let device_key = signature::KeyPair::from(&device_sk);
+        let user_key = sopts.client.user_private_key.as_deref().map(
+            PrivateKey::try_from
+        )
+        .transpose()?
+        .map(KeyPair::from);
 
-        let userid_matched = user_key.as_ref().map(|k|
-            options.client.user_id == Id::from(k.public_key())
-        ).unwrap_or(true);
-
-        if !userid_matched {
-            return Err(ArgumentError::new("userId does not match userPrivateKey"));
+        if let Some(key) = user_key {
+            if sopts.client.user_id != Id::from(key.public_key()) {
+                return Err(ArgumentError::new("userId does not match userPrivateKey"));
+            }
+            opts = opts.with_user_keypair(key);
         }
 
-        Ok(Self {
-            server_peerid: options.service.peer_id,
-            server_peer: None,
-            service_host: options.service.host,
-            service_port: options.service.port.unwrap_or(DEFAULT_PORT),
-            user_id: options.client.user_id,
-            user_key,
-            device_key,
-            upstream_host: options.upstream.host,
-            upstream_port: options.upstream.port,
-            upstream_scheme: options
-                .upstream
-                .scheme
-                .unwrap_or_else(|| DEFAULT_SCHEME.to_string()),
-            name_access: options.name_access,
-            announce_peer: options.announce_peer,
-        })
+        let device_sk = sopts.client.device_private_key.as_deref().map(
+            PrivateKey::try_from
+        )
+        .transpose()?
+        .map(KeyPair::from);
+
+        if let Some(key) = device_sk {
+            opts = opts.with_device_keypair(key);
+        }
+
+        if let Some(host) = sopts.service.host {
+            opts = opts.with_service_host(host);
+            opts = opts.with_service_port(
+                sopts.service.port.unwrap_or(DEFAULT_PORT)
+            );
+        }
+
+        opts = opts.with_upstream_host(sopts.upstream.host);
+        opts = opts.with_upstream_port(sopts.upstream.port);
+        opts = opts.with_upstream_scheme(
+            sopts.upstream.scheme.unwrap_or_else(|| DEFAULT_SCHEME.to_string())
+        );
+        opts = opts.with_name_access(sopts.name_access);
+        opts = opts.with_announce_peer(sopts.announce_peer);
+
+        Ok(opts)
     }
 }
 
@@ -279,10 +311,10 @@ struct SerdeService {
 struct SerdeClient {
     #[serde(rename = "userId")]
     user_id: Id,
-    #[serde(rename = "userPrivateKey")]
+    #[serde(rename = "userPrivateKey", default)]
     user_private_key: Option<String>,
-    #[serde(rename = "devicePrivateKey")]
-    device_private_key: String,
+    #[serde(rename = "devicePrivateKey", default)]
+    device_private_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

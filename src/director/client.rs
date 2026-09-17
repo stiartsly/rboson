@@ -1,4 +1,4 @@
-use reqwest::{Client, Method, StatusCode};
+use reqwest::{self, Method, StatusCode};
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -14,30 +14,30 @@ use super::{
         RateLimitError, RegistrationDisabledError, ServerError, ServiceBusyError,
         UnauthorizedError,
     },
-    sign_nonce, Avatar, Device, DirectorOptions, NodeStatus, Plan, Profile, ProfileUpdate,
+    sign_nonce, Avatar, Device, Options, NodeStatus, Plan, Profile, ProfileUpdate,
     Subscription, UserPlan, UserRegistration,
 };
 use crate::{
     errors::{MalformedError, NetworkError, Result, StateError},
-    signature::KeyPair,
+    signature,
     Id,
 };
 
 const API_PREFIX: &str = "api/v1/client";
 const AUTH_NONCE_BYTES: usize = 32;
 
-pub struct DirectorClient {
-    client: Client,
+pub struct Client {
+    client: reqwest::Client,
     base_url: Url,
-    options: DirectorOptions,
+    options: Options,
     device_id: Option<Id>,
     token: Mutex<Option<String>>,
     closed: AtomicBool,
 }
 
-impl std::fmt::Debug for DirectorClient {
+impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DirectorClient")
+        f.debug_struct("Client")
             .field("base_url", &self.base_url)
             .field("node_id", &self.options.node_id())
             .field("user_id", &self.options.user_id())
@@ -47,9 +47,9 @@ impl std::fmt::Debug for DirectorClient {
     }
 }
 
-impl DirectorClient {
-    pub fn new(options: DirectorOptions) -> Result<Self> {
-        options.check_valid()?;
+impl Client {
+    pub fn new(options: Options) -> Result<Self> {
+        options.check_completeness()?;
 
         let mut base_url = options.director_url().clone();
         let path = base_url.path().trim_end_matches('/');
@@ -62,14 +62,18 @@ impl DirectorClient {
         base_url.set_query(None);
         base_url.set_fragment(None);
 
-        let mut client_builder = Client::builder().redirect(reqwest::redirect::Policy::none());
-        if options.insecure() {
-            client_builder = client_builder.danger_accept_invalid_certs(true);
+        let mut b = reqwest::Client::builder().redirect(
+            reqwest::redirect::Policy::none()
+        );
+        if options.is_insecure() {
+            b = b.danger_accept_invalid_certs(true);
         }
-        let client = client_builder
+        let client = b
             .build()
             .map_err(|e| NetworkError::new(e.to_string()))?;
-        let device_id = options.device_key().map(|key| Id::from(key.public_key()));
+        let device_id = options.device_private_key()
+            .map(signature::KeyPair::from)
+            .map(|kp| Id::from(kp.public_key()));
 
         Ok(Self {
             client,
@@ -81,12 +85,12 @@ impl DirectorClient {
         })
     }
 
-    pub fn director_url(&self) -> &Url {
-        &self.base_url
+    pub fn options(&self) -> &Options {
+        &self.options
     }
 
-    pub fn options(&self) -> &DirectorOptions {
-        &self.options
+    pub fn director_url(&self) -> &Url {
+        &self.base_url
     }
 
     pub fn node_id(&self) -> Option<&Id> {
@@ -128,24 +132,30 @@ impl DirectorClient {
         self.set_token(None);
     }
 
-    pub async fn get_node_id(&self) -> Result<Id> {
+    pub async fn fetch_node_id(&self) -> Result<Id> {
         self.check_open()?;
         let body = self.http_get("id", false).await?;
-        let id = body
+        let node_id = body
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| MalformedError::new("missing 'id'"))?;
 
-        Id::try_from_base58(id).map_err(|e| MalformedError::new(e.to_string()).into())
+        let id = node_id.parse::<Id>().map_err(|e| {
+            MalformedError::new(format!("error parsing node id {e}"))
+        })?;
+        Ok(id)
     }
 
-    pub async fn get_node_status(&self) -> Result<NodeStatus> {
+    pub async fn fetch_node_status(&self) -> Result<NodeStatus> {
         self.check_open()?;
         self.http_get_json("node", false).await
     }
 
     pub async fn register_user(&self) -> Result<()> {
-        self.register_user_with(self.options.registration()).await
+        let Some(registration) = self.options.registration() else {
+            return Err(StateError::new("No registration configured").into());
+        };
+        self.register_user_with(registration).await
     }
 
     pub async fn register_user_with(&self, registration: &UserRegistration) -> Result<()> {
@@ -153,21 +163,28 @@ impl DirectorClient {
 
         let user_key = self
             .options
-            .user_key()
+            .user_private_key()
+            .map(signature::KeyPair::from)
             .ok_or_else(|| StateError::new("Registering a user needs the user key"))?;
 
         let initial_device_key = if registration.has_initial_device() {
-            Some(self.options.device_key().ok_or_else(|| {
-                StateError::new("Registering an initial device needs the device key")
-            })?)
+            let device_key = self
+                .options
+                .device_private_key()
+                .map(signature::KeyPair::from)
+                .ok_or_else(|| {
+                    StateError::new("Registering an initial device needs the device key")
+                })?;
+            Some(device_key)
         } else {
             None
         };
 
         let node_id = match self.options.node_id() {
-            Some(node_id) => *node_id,
-            _ => self.get_node_id().await?,
+            Some(node_id) => node_id.clone(),
+            _ => self.fetch_node_id().await?,
         };
+
         let challenge = self.fetch_challenge().await?;
         let solve_key = user_key.clone();
         let challenge_nonce = challenge.nonce;
@@ -192,8 +209,8 @@ impl DirectorClient {
         self.submit_registration(
             registration,
             node_id,
-            user_key,
-            initial_device_key,
+            &user_key,
+            initial_device_key.as_ref(),
             &challenge,
             solution,
         )
@@ -206,16 +223,21 @@ impl DirectorClient {
         app: &str,
         passphrase: Option<&str>,
     ) -> Result<()> {
-        let key = self.options.device_key().ok_or_else(|| {
-            StateError::new("No device key configured; pass a device key to register")
-        })?;
-        self.register_device_with_key(key, name, app, passphrase)
+        let key = self
+            .options
+            .device_private_key()
+            .map(signature::KeyPair::from)
+            .ok_or_else(|| {
+                StateError::new("No device key configured; pass a device key to register")
+            })?;
+
+        self.register_device_with_key(&key, name, app, passphrase)
             .await
     }
 
     pub async fn register_device_with_key(
         &self,
-        key: &KeyPair,
+        key: &signature::KeyPair,
         name: &str,
         app: &str,
         passphrase: Option<&str>,
@@ -235,7 +257,7 @@ impl DirectorClient {
             "deviceName": name,
             "appName": app,
             "nonce": base64url(&nonce),
-            "deviceSig": sign_nonce(key, &nonce).map_err(|e|
+            "deviceSig": sign_nonce(key.private_key(), &nonce).map_err(|e|
                 MalformedError::new(e.to_string()))?
         });
         if let Some(passphrase) = passphrase {
@@ -459,8 +481,8 @@ impl DirectorClient {
         &self,
         registration: &UserRegistration,
         node_id: Id,
-        user_key: &KeyPair,
-        initial_device_key: Option<&KeyPair>,
+        user_key: &signature::KeyPair,
+        initial_device_key: Option<&signature::KeyPair>,
         challenge: &Challenge,
         solution: Solution,
     ) -> Result<()> {
@@ -617,10 +639,10 @@ impl DirectorClient {
             .ok_or_else(|| StateError::new("This call needs a user identity"))?;
         let nonce = crate::random_array::<AUTH_NONCE_BYTES>();
         let mut body = json!({"userId": user_id, "nonce": base64url(&nonce)});
-        if let Some(key) = self.options.user_key() {
+        if let Some(key) = self.options.user_private_key() {
             body["userSig"] =
                 json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
-        } else if let Some(key) = self.options.device_key() {
+        } else if let Some(key) = self.options.device_private_key() {
             body["deviceId"] = json!(self.device_id);
             body["deviceSig"] =
                 json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);

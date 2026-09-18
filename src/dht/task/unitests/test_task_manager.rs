@@ -6,12 +6,7 @@ use std::{
 
 use crate::dht::{
     dht::DHT,
-    task::{
-        task_listener::TaskListener,
-        task_manager::TaskManager,
-        Task,
-        TaskData,
-    },
+    task::{task_listener::TaskListener, task_manager::TaskManager, Task, TaskData},
 };
 
 struct PendingTask {
@@ -141,7 +136,10 @@ mod tests {
         assert_eq!(canceled.get(), 0);
         assert_eq!(ended.get(), 1);
 
-        manager.add(Box::new(PendingTask::new(Rc::new(Cell::new(0)), handle.clone())));
+        manager.add(Box::new(PendingTask::new(
+            Rc::new(Cell::new(0)),
+            handle.clone(),
+        )));
         let task = handle.borrow().clone().expect("task should be running");
         task.borrow_mut().with_listener(
             TaskListener::default()

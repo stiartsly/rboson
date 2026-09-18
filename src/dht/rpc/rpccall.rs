@@ -1,33 +1,25 @@
-use std::{
-    rc::{Rc, Weak},
-    cell::RefCell,
-    time::SystemTime
-};
-use log::error;
-use crate::{
-    Id,
-    EasyHandler,
-    LocalBoxHandler,
-    LocalBoxTimerClient as TimerClient
-};
 use crate::dht::{
-    msg::{Message, msg::Kind, msg::TxId},
-    rpc::{
-        Target,
-        Listener as CallListener,
-    },
+    msg::{msg::Kind, msg::TxId, Message},
+    rpc::{Listener as CallListener, Target},
+};
+use crate::{EasyHandler, Id, LocalBoxHandler, LocalBoxTimerClient as TimerClient};
+use log::error;
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+    time::SystemTime,
 };
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 #[repr(u32)]
 pub(crate) enum State {
-    Unsent,     // Call has not been sent yet
-    Sent,       // Call has been sent, awaiting response
-    Stalled,    // Call is delayed, possibly due to network issues
-    Timeout,    // Call timed out without a response
-    _Canceled,   // Call was canceled before completion
-    Err,        // Call failed due to an error
-    Responded,  // Call received a valid response
+    Unsent,    // Call has not been sent yet
+    Sent,      // Call has been sent, awaiting response
+    Stalled,   // Call is delayed, possibly due to network issues
+    Timeout,   // Call timed out without a response
+    _Canceled, // Call was canceled before completion
+    Err,       // Call failed due to an error
+    Responded, // Call received a valid response
 }
 
 impl State {
@@ -37,50 +29,50 @@ impl State {
 }
 
 pub(crate) struct RpcCall {
-    txid            : TxId,
-    target          : Target,
+    txid: TxId,
+    target: Target,
 
     // a transient field to store request message before
     // being nailed as Arc<Message> object.
-    transient       : Option<Message>,
+    transient: Option<Message>,
 
-    req             : Option<Rc<Message>>,
-    rsp             : Option<Rc<Message>>,
+    req: Option<Rc<Message>>,
+    rsp: Option<Rc<Message>>,
 
-    sent_time       : Option<SystemTime>,
-    rsp_time        : Option<SystemTime>,
+    sent_time: Option<SystemTime>,
+    rsp_time: Option<SystemTime>,
 
-    state           : State,
+    state: State,
 
-    listener        : Option<CallListener>,
+    listener: Option<CallListener>,
 
-    timer_id        : Option<u64>,
-    timer_client    : Option<Rc<TimerClient>>,
-    timeout_handler : Option<EasyHandler<()>>,
+    timer_id: Option<u64>,
+    timer_client: Option<Rc<TimerClient>>,
+    timeout_handler: Option<EasyHandler<()>>,
 
-    cloned          : Weak<RefCell<Self>>,
+    cloned: Weak<RefCell<Self>>,
 }
 
 impl RpcCall {
     pub(crate) fn new(target: impl Into<Target>, mut req: Message) -> Self {
         let target: Target = target.into();
-        req.set_remote(target.id(),target.socket_addr());
+        req.set_remote(target.id(), target.socket_addr());
 
         Self {
-            txid            : req.txid(),
+            txid: req.txid(),
             target,
-            transient       : Some(req),
-            req             : None,
-            rsp             : None,
-            sent_time       : None,
-            rsp_time        : None,
-            state           : State::Unsent,
-            listener        : None,
-            timer_id        : None,
-            timer_client    : None,
-            timeout_handler : None,
+            transient: Some(req),
+            req: None,
+            rsp: None,
+            sent_time: None,
+            rsp_time: None,
+            state: State::Unsent,
+            listener: None,
+            timer_id: None,
+            timer_client: None,
+            timeout_handler: None,
 
-            cloned          : Weak::new(),
+            cloned: Weak::new(),
         }
     }
 
@@ -120,15 +112,17 @@ impl RpcCall {
     }
 
     pub(crate) fn nodeid_mismatched(&self) -> bool {
-        self.rsp.as_ref().map(|v| {
-            v.nodeid() != &self.target_id()
-        }).unwrap_or(false)
+        self.rsp
+            .as_ref()
+            .map(|v| v.nodeid() != &self.target_id())
+            .unwrap_or(false)
     }
 
     pub(crate) fn addr_mismatched(&self) -> bool {
-        self.rsp.as_ref().map(|v| {
-            v.remote_addr() != self.req().remote_addr()
-        }).unwrap_or(false)
+        self.rsp
+            .as_ref()
+            .map(|v| v.remote_addr() != self.req().remote_addr())
+            .unwrap_or(false)
     }
 
     pub(crate) fn sent_time(&self) -> Option<SystemTime> {
@@ -179,21 +173,26 @@ impl RpcCall {
         self.listener = Some(l);
     }
 
-    fn set_timeout_timer(&mut self, timeout: u64)
-    {
+    fn set_timeout_timer(&mut self, timeout: u64) {
         let Some(timer_client) = self.timer_client.clone() else {
             error!("Timer client not set for RpcCall");
             return;
         };
 
-        let cloned = self.cloned.upgrade().expect("RpcCall weak reference not set");
-        let result = timer_client.add_timer(timeout, None,
+        let cloned = self
+            .cloned
+            .upgrade()
+            .expect("RpcCall weak reference not set");
+        let result = timer_client.add_timer(
+            timeout,
+            None,
             LocalBoxHandler::new(move |_| {
                 let cloned = cloned.clone();
                 Box::pin(async move {
                     cloned.borrow_mut().check_timeout();
                 })
-        }));
+            }),
+        );
         let Ok(timer_id) = result else {
             error!("Failed to set timeout timer: {}", result.unwrap_err());
             return;
@@ -236,16 +235,15 @@ impl RpcCall {
         self.rsp = Some(rsp.clone());
 
         match rsp.kind() {
-            Kind::Request  => error!("Should not be request message!!"),
+            Kind::Request => error!("Should not be request message!!"),
             Kind::Response => self.update_state(State::Responded),
-            Kind::Error    => self.update_state(State::Err)
+            Kind::Error => self.update_state(State::Err),
         };
     }
 
-
     // Handles a response received from an inconsistent socket
     // (e.g., due to port-mangling NAT).
-	// Transitions to STALLED state to allow retry without treating as an error.
+    // Transitions to STALLED state to allow retry without treating as an error.
     pub(crate) fn respond_inconsistent_socket(&mut self) {
         if self.state != State::Sent {
             return;

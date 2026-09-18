@@ -1,16 +1,13 @@
-use std::{
-    cmp::Ordering,
-    collections::HashMap,
-};
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::{Id, PeerInfo};
 
 pub(crate) struct EligiblePeers {
-    target  : Id,
-    expected_seq    : i32,
-    expected_count  : usize,
-    peers   : HashMap<(Id, u64), PeerInfo>,
-    latest  : bool,
+    target: Id,
+    expected_seq: i32,
+    expected_count: usize,
+    peers: HashMap<(Id, u64), PeerInfo>,
+    latest: bool,
 }
 
 impl EligiblePeers {
@@ -37,8 +34,7 @@ impl EligiblePeers {
     }
 
     pub(crate) fn reached_capacity(&self) -> bool {
-        self.expected_count > 0 &&
-            self.peers.len() >= self.expected_count
+        self.expected_count > 0 && self.peers.len() >= self.expected_count
     }
 
     pub(crate) fn add(&mut self, peers: Vec<PeerInfo>, latest: bool) -> bool {
@@ -89,12 +85,13 @@ impl EligiblePeers {
     fn is_peer_eligible(&self, peer: &PeerInfo) -> bool {
         peer.id() == &self.target
             && peer.is_valid()
-            && (self.expected_seq < 0
-                || peer.sequence_number() >= self.expected_seq)
+            && (self.expected_seq < 0 || peer.sequence_number() >= self.expected_seq)
     }
 
     fn peer_order(&self, left: &PeerInfo, right: &PeerInfo) -> Ordering {
-        right.sequence_number().cmp(&left.sequence_number())
+        right
+            .sequence_number()
+            .cmp(&left.sequence_number())
             .then_with(|| right.is_authenticated().cmp(&left.is_authenticated()))
             .then_with(|| match (left.nodeid(), right.nodeid()) {
                 (Some(l), Some(r)) => self.target.three_way_compare(l, r),

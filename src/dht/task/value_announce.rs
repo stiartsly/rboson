@@ -1,23 +1,11 @@
-use std::{
-    any::Any,
-    rc::Rc,
-    cell::RefCell,
-    collections::VecDeque,
-};
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
-use crate::{
-    Value,
-    EasyHandler,
-};
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    task::{
-        Task, TaskData,
-        ClosestSet,
-        CandidateNode,
-    }
+    task::{CandidateNode, ClosestSet, Task, TaskData},
 };
+use crate::{EasyHandler, Value};
 
 const MAX_TODO_ENTRIES: usize = 24;
 
@@ -28,19 +16,14 @@ pub(crate) struct ValueAnnounceTask {
     value: Value,
     expected_seq: i32,
 
-    dht: Rc<DHT>
+    dht: Rc<DHT>,
 }
 
 impl ValueAnnounceTask {
-    pub(crate) fn new(
-        dht: Rc<DHT>,
-        value: Value,
-        expected_seq: i32,
-    ) -> Self {
+    pub(crate) fn new(dht: Rc<DHT>, value: Value, expected_seq: i32) -> Self {
         Self {
             base_data: TaskData::new(),
-            todo: Rc::new(RefCell::new(
-                VecDeque::with_capacity(MAX_TODO_ENTRIES))),
+            todo: Rc::new(RefCell::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
             value,
             expected_seq,
             dht,
@@ -100,11 +83,7 @@ impl Task for ValueAnnounceTask {
                 self.todo.borrow_mut().pop_front();
                 continue;
             }
-            let msg = msg::store_value_request(
-                self.value.clone(),
-                token,
-                self.expected_seq,
-            );
+            let msg = msg::store_value_request(self.value.clone(), token, self.expected_seq);
 
             let cloned_todo = self.todo.clone();
             let handler = EasyHandler::new(move |_| {
@@ -116,7 +95,6 @@ impl Task for ValueAnnounceTask {
     }
 
     fn is_done(&self) -> bool {
-        self.todo.borrow().is_empty() &&
-            self.data().is_done()
+        self.todo.borrow().is_empty() && self.data().is_done()
     }
 }

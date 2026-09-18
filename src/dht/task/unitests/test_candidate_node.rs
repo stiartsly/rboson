@@ -1,22 +1,12 @@
+use crate::dht::{routing::KBucketEntry, rpc::TargetInfo, task::CandidateNode};
 use crate::{Id, NodeInfo};
-use crate::dht::{
-    rpc::TargetInfo,
-    routing::KBucketEntry,
-    task::CandidateNode,
-};
 
 fn make_node() -> NodeInfo {
-     NodeInfo::new(
-        Id::random(),
-        "1.1.1.1:39011".parse().unwrap(),
-    )
+    NodeInfo::new(Id::random(), "1.1.1.1:39011".parse().unwrap())
 }
 
 fn make_bucket_entry() -> KBucketEntry {
-    let mut entry = KBucketEntry::new(
-        Id::random(),
-        "1.1.1.1:39011".parse().unwrap(),
-    );
+    let mut entry = KBucketEntry::new(Id::random(), "1.1.1.1:39011".parse().unwrap());
     entry.set_reachable(true);
     entry.set_ver(1);
     entry

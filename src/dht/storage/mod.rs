@@ -1,31 +1,18 @@
 pub(crate) mod data_storage;
-pub(crate) mod sqlite_storage;
 pub(crate) mod models;
 mod schema;
 mod sql;
+pub(crate) mod sqlite_storage;
 
-use crate::dht::storage::models::{
-    Valore,
-    NewValore,
-    Peer,
-    NewPeer,
-};
+use crate::dht::storage::models::{NewPeer, NewValore, Peer, Valore};
 
 use crate::dht::storage::schema::valores::{
-    dsl::valores,
-    id              as val_id,
-    persistent      as val_persistent,
-    updated         as val_updated,
+    dsl::valores, id as val_id, persistent as val_persistent, updated as val_updated,
 };
 
 use crate::dht::storage::schema::peers::{
-    dsl::peers,
-    id              as peer_id,
-    fingerprint     as peer_fingerprint,
-    persistent      as peer_persistent,
-    updated         as peer_updated,
-    nodeId          as peer_node_id,
-    sequenceNumber  as peer_seq,
+    dsl::peers, fingerprint as peer_fingerprint, id as peer_id, nodeId as peer_node_id,
+    persistent as peer_persistent, sequenceNumber as peer_seq, updated as peer_updated,
 };
 
 use diesel::prelude::*;
@@ -45,20 +32,42 @@ fn user_version(conn: &mut SqliteConnection) -> i32 {
 }
 
 fn drop_tbs(conn: &mut SqliteConnection) -> bool {
-    diesel::sql_query(sql::DROP_VALUES_TABLE).execute(conn).is_ok()     &&
-    diesel::sql_query(sql::DROP_VALUES_INDEX).execute(conn).is_ok()     &&
-    diesel::sql_query(sql::DROP_PEERS_TABLE).execute(conn).is_ok()      &&
-    diesel::sql_query(sql::DROP_PEERS_INDEX).execute(conn).is_ok()      &&
-    diesel::sql_query(sql::DROP_PEERS_ID_INDEX).execute(conn).is_ok()
+    diesel::sql_query(sql::DROP_VALUES_TABLE)
+        .execute(conn)
+        .is_ok()
+        && diesel::sql_query(sql::DROP_VALUES_INDEX)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::DROP_PEERS_TABLE)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::DROP_PEERS_INDEX)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::DROP_PEERS_ID_INDEX)
+            .execute(conn)
+            .is_ok()
 }
 
 fn create_tbs(conn: &mut SqliteConnection) -> bool {
-    diesel::sql_query(sql::SET_USER_VERSION).execute(conn).is_ok()      &&
-    diesel::sql_query(sql::CREATE_VALUES_TABLE).execute(conn).is_ok()   &&
-    diesel::sql_query(sql::CREATE_VALUES_INDEX).execute(conn).is_ok()   &&
-    diesel::sql_query(sql::CREATE_PEERS_TABLE).execute(conn).is_ok()    &&
-    diesel::sql_query(sql::CREATE_PEERS_INDEX).execute(conn).is_ok()    &&
-    diesel::sql_query(sql::CREATE_PEERS_ID_INDEX).execute(conn).is_ok()
+    diesel::sql_query(sql::SET_USER_VERSION)
+        .execute(conn)
+        .is_ok()
+        && diesel::sql_query(sql::CREATE_VALUES_TABLE)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::CREATE_VALUES_INDEX)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::CREATE_PEERS_TABLE)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::CREATE_PEERS_INDEX)
+            .execute(conn)
+            .is_ok()
+        && diesel::sql_query(sql::CREATE_PEERS_ID_INDEX)
+            .execute(conn)
+            .is_ok()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,10 +75,7 @@ fn create_tbs(conn: &mut SqliteConnection) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // INSERT OR REPLACE INTO valores(...)
-pub(crate) fn put_value(
-    conn: &mut SqliteConnection,
-    v: NewValore,
-) -> Result<bool, Error> {
+pub(crate) fn put_value(conn: &mut SqliteConnection, v: NewValore) -> Result<bool, Error> {
     use crate::dht::storage::schema::valores;
     diesel::replace_into(valores::table)
         .values(&v)
@@ -78,11 +84,9 @@ pub(crate) fn put_value(
 }
 
 // SELECT * FROM valores WHERE id = ?
-pub(crate) fn get_value(
-    conn: &mut SqliteConnection,
-    id: &[u8],
-) -> Result<Option<Valore>, Error> {
-    valores.find(id)
+pub(crate) fn get_value(conn: &mut SqliteConnection, id: &[u8]) -> Result<Option<Valore>, Error> {
+    valores
+        .find(id)
         .select(Valore::as_select())
         .load(conn)
         .and_then(|mut v| Ok(v.pop()))
@@ -90,9 +94,7 @@ pub(crate) fn get_value(
 
 // SELECT * FROM valores
 #[allow(unused)]
-pub(crate) fn get_values(
-    conn: &mut SqliteConnection,
-) -> Result<Vec<Valore>, Error> {
+pub(crate) fn get_values(conn: &mut SqliteConnection) -> Result<Vec<Valore>, Error> {
     valores.select(Valore::as_select()).load(conn)
 }
 
@@ -135,10 +137,7 @@ pub(crate) fn update_value_announced_time(
 }
 
 // DELETE FROM valores WHERE id = ?
-pub(crate) fn remove_value(
-    conn: &mut SqliteConnection,
-    id: &[u8],
-) -> Result<bool, Error> {
+pub(crate) fn remove_value(conn: &mut SqliteConnection, id: &[u8]) -> Result<bool, Error> {
     diesel::delete(valores.filter(val_id.eq(id)))
         .execute(conn)
         .and_then(|deleted| Ok(deleted > 0))
@@ -148,9 +147,10 @@ pub(crate) fn remove_expired_values(
     conn: &mut SqliteConnection,
     expired_before: i64,
 ) -> Result<bool, Error> {
-    diesel::delete(valores
-        .filter(val_persistent.eq(false))
-        .filter(val_updated.le(expired_before))
+    diesel::delete(
+        valores
+            .filter(val_persistent.eq(false))
+            .filter(val_updated.le(expired_before)),
     )
     .execute(conn)
     .and_then(|deleted| Ok(deleted > 0))
@@ -159,10 +159,7 @@ pub(crate) fn remove_expired_values(
 // ─────────────────────────────────────────────────────────────────────────────
 // Peer queries
 // ─────────────────────────────────────────────────────────────────────────────
-pub(crate) fn put_peer(
-    conn: &mut SqliteConnection,
-    peer: NewPeer,
-) -> Result<bool, Error> {
+pub(crate) fn put_peer(conn: &mut SqliteConnection, peer: NewPeer) -> Result<bool, Error> {
     use crate::dht::storage::schema::peers;
     diesel::replace_into(peers::table)
         .values(&peer)
@@ -172,10 +169,7 @@ pub(crate) fn put_peer(
 
 // INSERT OR REPLACE INTO peers(...)
 #[allow(unused)]
-pub(crate) fn put_peers(
-    conn: &mut SqliteConnection,
-    _peers: Vec<NewPeer>,
-) -> Result<bool, Error> {
+pub(crate) fn put_peers(conn: &mut SqliteConnection, _peers: Vec<NewPeer>) -> Result<bool, Error> {
     use crate::dht::storage::schema::peers;
     diesel::replace_into(peers::table)
         .values(&_peers)
@@ -198,10 +192,7 @@ pub(crate) fn get_peer(
 }
 
 // SELECT * FROM peers WHERE id = ?
-pub(crate) fn get_peers_by_id(
-    conn: &mut SqliteConnection,
-    id: &[u8],
-) -> Result<Vec<Peer>, Error> {
+pub(crate) fn get_peers_by_id(conn: &mut SqliteConnection, id: &[u8]) -> Result<Vec<Peer>, Error> {
     peers
         .filter(peer_id.eq(id))
         .select(Peer::as_select())
@@ -282,9 +273,7 @@ pub(crate) fn get_peers_paginated_and_announced_before(
 
 // SELECT * FROM peers
 #[allow(unused)]
-pub(crate) fn get_peers_all(
-    conn: &mut SqliteConnection,
-) -> Result<Vec<Peer>, Error> {
+pub(crate) fn get_peers_all(conn: &mut SqliteConnection) -> Result<Vec<Peer>, Error> {
     peers.select(Peer::as_select()).load(conn)
 }
 
@@ -298,7 +287,7 @@ pub(crate) fn update_peer_announced_time(
     diesel::update(
         peers
             .filter(peer_id.eq(id))
-            .filter(peer_fingerprint.eq(fingerprint))
+            .filter(peer_fingerprint.eq(fingerprint)),
     )
     .set(peer_updated.eq(announced))
     .execute(conn)
@@ -314,17 +303,14 @@ pub(crate) fn remove_peer(
     diesel::delete(
         peers
             .filter(peer_id.eq(id))
-            .filter(peer_fingerprint.eq(fingerprint))
+            .filter(peer_fingerprint.eq(fingerprint)),
     )
     .execute(conn)
     .and_then(|deleted| Ok(deleted > 0))
 }
 
 // DELETE FROM peers WHERE id = ?
-pub(crate) fn remove_peers_by_id(
-    conn: &mut SqliteConnection,
-    id: &[u8],
-) -> Result<bool, Error> {
+pub(crate) fn remove_peers_by_id(conn: &mut SqliteConnection, id: &[u8]) -> Result<bool, Error> {
     diesel::delete(peers.filter(peer_id.eq(id)))
         .execute(conn)
         .and_then(|deleted| Ok(deleted > 0))
@@ -337,7 +323,7 @@ pub(crate) fn remove_expired_peers(
     diesel::delete(
         peers
             .filter(peer_persistent.eq(false))
-            .filter(peer_updated.le(expired_before))
+            .filter(peer_updated.le(expired_before)),
     )
     .execute(conn)
     .and_then(|deleted| Ok(deleted > 0))

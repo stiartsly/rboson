@@ -1,45 +1,27 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-};
-use crate::{
-    Id,
-    Network,
-    NodeInfo,
-    Value,
-};
+use super::test_utils::make_test_dht;
 use crate::dht::{
     dht::DHT,
     task::{
-        task::{Task, State},
-        closest_set::ClosestSet,
         candidate_node::CandidateNode,
+        closest_set::ClosestSet,
+        task::{State, Task},
         value_announce::ValueAnnounceTask,
     },
 };
-use super::test_utils::make_test_dht;
+use crate::{Id, Network, NodeInfo, Value};
+use std::{cell::RefCell, rc::Rc};
 
 fn make_dht() -> Rc<DHT> {
     make_test_dht(Network::IPv4, "127.0.0.1")
 }
 
 fn make_value() -> Value {
-    Value::packed(
-        Some(Id::random()),
-        None,
-        None,
-        None,
-        vec![1, 2, 3, 4],
-        5,
-    )
+    Value::packed(Some(Id::random()), None, None, None, vec![1, 2, 3, 4], 5)
 }
 
 fn make_closestset(token: i32) -> ClosestSet {
     let target = Id::random();
-    let candidate = NodeInfo::new(
-        Id::random(),
-        "1.1.1.1:39011".parse().unwrap(),
-    );
+    let candidate = NodeInfo::new(Id::random(), "1.1.1.1:39011".parse().unwrap());
     let mut cn: CandidateNode = candidate.into();
     cn.set_token(token);
 
@@ -55,7 +37,7 @@ mod tests {
     #[test]
     fn test_default() {
         let value = make_value();
-        let dht   = make_dht();
+        let dht = make_dht();
 
         let task = ValueAnnounceTask::new(dht, value, 7);
         assert!(task.is_unstarted());

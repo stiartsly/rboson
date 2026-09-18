@@ -1,5 +1,5 @@
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Error {
@@ -11,7 +11,10 @@ pub(crate) struct Error {
 
 impl Error {
     pub(crate) fn new(code: i32, description: impl Into<String>) -> Self {
-        Self { code, description: description.into() }
+        Self {
+            code,
+            description: description.into(),
+        }
     }
 
     pub(crate) fn code(&self) -> i32 {
@@ -25,8 +28,7 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_string(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

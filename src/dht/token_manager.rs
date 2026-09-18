@@ -1,11 +1,11 @@
+use crate::Id;
+use sha2::{Digest, Sha256};
 use std::{
     mem,
     net::{IpAddr, SocketAddr},
     sync::Mutex,
-    time::SystemTime
+    time::SystemTime,
 };
-use sha2::{Digest, Sha256};
-use crate::Id;
 
 pub(crate) struct TokenManager {
     session_secret: [u8; 32],
@@ -34,39 +34,30 @@ impl TokenManager {
         }
     }
 
-    pub(crate) fn generate_token(
-        &self,
-        nodeid: &Id,
-        addr: &SocketAddr,
-        target: &Id
-    ) -> i32 {
+    pub(crate) fn generate_token(&self, nodeid: &Id, addr: &SocketAddr, target: &Id) -> i32 {
         generate_token(nodeid, addr, target, &self.timestamp, &self.session_secret)
     }
 
-    pub(crate) fn verify_token(&self,
+    pub(crate) fn verify_token(
+        &self,
         token: i32,
         nodeid: &Id,
         addr: &SocketAddr,
         target: &Id,
     ) -> bool {
         self.update_token_timestamp();
-        if token == generate_token(
-            nodeid,
-            addr,
-            target,
-            &self.timestamp,
-            &self.session_secret
-        ) {
-            return true
+        if token == generate_token(nodeid, addr, target, &self.timestamp, &self.session_secret) {
+            return true;
         }
 
-        token == generate_token(
-            nodeid,
-            addr,
-            target,
-            &self.previous_timestamp,
-            &self.session_secret,
-        )
+        token
+            == generate_token(
+                nodeid,
+                addr,
+                target,
+                &self.previous_timestamp,
+                &self.session_secret,
+            )
     }
 }
 
@@ -86,11 +77,14 @@ fn generate_token(
             IpAddr::V6(_) => 16, // 6bytes for IPv6
         }
         + mem::size_of::<u64>() // timestamp in milliseconds (assuming u64)
-        + secret.len()
+        + secret.len(),
     );
 
-    let duration = timestamp.lock().unwrap()
-        .duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    let duration = timestamp
+        .lock()
+        .unwrap()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
 
     // nodeId + ip + port + targetId + timestamp + sessionSecret
     input.extend_from_slice(nodeid.as_bytes());
@@ -106,9 +100,8 @@ fn generate_token(
     let digest = Sha256::digest(input);
 
     let pos = ((digest[0] & 0xff) & 0x1f) as u8; // mod 32
-    ((((digest[pos as usize] & 0xff) as u32) << 24) |
-        (((digest[(pos as usize + 1) & 0x1f] & 0xff) as u32) << 16)|
-        (((digest[(pos as usize + 2) & 0x1f] & 0xff) as u32) << 8) |
-        ((digest[(pos as usize + 3) & 0x1f] & 0xff) as u32))
-    as i32
+    ((((digest[pos as usize] & 0xff) as u32) << 24)
+        | (((digest[(pos as usize + 1) & 0x1f] & 0xff) as u32) << 16)
+        | (((digest[(pos as usize + 2) & 0x1f] & 0xff) as u32) << 8)
+        | ((digest[(pos as usize + 3) & 0x1f] & 0xff) as u32)) as i32
 }

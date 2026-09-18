@@ -1,24 +1,21 @@
-use crate::{
-    Id,
-    dht::routing::prefix::Prefix,
-};
+use crate::{dht::routing::prefix::Prefix, Id};
 
 /*
- * APIs for testcases.
- - Prefix::new()
- - Prefix::from_id(id, depth);
- - id()
- - depth()
- - is_prefix_of()
- - is_splittable()
- - first()
- - last()
- - parent()
- - split_branch(high_branch)
- - is_sibling_of(..)
- - random_id()
- - Eq
- */
+* APIs for testcases.
+- Prefix::new()
+- Prefix::from_id(id, depth);
+- id()
+- depth()
+- is_prefix_of()
+- is_splittable()
+- first()
+- last()
+- parent()
+- split_branch(high_branch)
+- is_sibling_of(..)
+- random_id()
+- Eq
+*/
 
 #[cfg(test)]
 mod tests {
@@ -69,14 +66,14 @@ mod tests {
 
     #[test]
     fn test_is_splitable() {
-        for i in 0 .. (Id::BITS as i32 -2) {
+        for i in 0..(Id::BITS as i32 - 2) {
             let id = Id::random();
             let prefix = Prefix::from(&id, i);
             assert_eq!(prefix.is_splittable(), true);
         }
 
         let id = Id::random();
-        let prefix = Prefix::from(&id, Id::BITS as i32 -1);
+        let prefix = Prefix::from(&id, Id::BITS as i32 - 1);
         assert_eq!(prefix.is_splittable(), false);
     }
 
@@ -106,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_first() {
-        for i in 0 .. Id::BITS as i32 -1 {
+        for i in 0..Id::BITS as i32 - 1 {
             let id = Id::random();
             let prefix = Prefix::from(&id, i);
             let first = prefix.first();
@@ -116,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_last() {
-        for i in 0 .. Id::BITS as i32 -1 {
+        for i in 0..Id::BITS as i32 - 1 {
             let id = Id::random();
             let prefix = Prefix::from(&id, i);
             let last = prefix.last();
@@ -134,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_randomid() {
-        for i in 0 .. Id::BITS as i32 {
+        for i in 0..Id::BITS as i32 {
             let id = Id::random();
             let prefix = Prefix::from(&id, i);
             let rand_id = prefix.random_id();
@@ -147,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_split_branch() {
-        for i in 0 .. Id::BITS as i32 -1 {
+        for i in 0..Id::BITS as i32 - 1 {
             let id = Id::random();
             let prefix = Prefix::from(&id, i);
             let pl = prefix.split_branch(false);

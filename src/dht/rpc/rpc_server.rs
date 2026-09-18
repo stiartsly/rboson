@@ -1,70 +1,58 @@
+use crate::dht::{
+    msg::{msg::Method, msg::TxId, Message},
+    rpc::RpcCall,
+    suspicious_node_detector::SuspiciousNodeDetector,
+};
+use crate::{
+    cryptobox::Nonce,
+    errors::{CryptoError, Error, NetworkError, ProtocolError, Result, StateError},
+    CryptoBox, CryptoIdentity, EasyHandler, Id, Identity, LocalBoxHandler,
+    LocalBoxTimerClient as TimerClient, NodeInfo,
+};
+use log::{debug, error, info, trace, warn};
 use std::{
-    fmt,
-    rc::Rc,
-    sync::Arc,
     cell::RefCell,
     collections::HashMap,
-    time::SystemTime,
+    fmt,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
+    rc::Rc,
+    sync::Arc,
+    time::SystemTime,
 };
-use log::{info, warn, error, debug, trace};
 use tokio::net::UdpSocket;
-use crate::{
-    CryptoBox,
-    CryptoIdentity,
-    Id, Identity,
-    NodeInfo,
-    cryptobox::Nonce,
-    errors::{
-        Error,
-        Result,
-        CryptoError,
-        NetworkError,
-        ProtocolError,
-        StateError,
-    },
-    LocalBoxTimerClient as TimerClient,
-    EasyHandler,
-    LocalBoxHandler
-};
-use crate::dht::{
-    suspicious_node_detector::SuspiciousNodeDetector,
-    rpc::RpcCall,
-    msg::{Message, msg::Method, msg::TxId},
-};
 
 #[allow(dead_code)]
 pub(crate) struct RpcServer {
-    identity            : Arc<CryptoIdentity>,
-    ni                  : NodeInfo,
+    identity: Arc<CryptoIdentity>,
+    ni: NodeInfo,
 
     suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
-    pending_calls       : RefCell<HashMap<TxId, Rc<RefCell<RpcCall>>>>,
+    pending_calls: RefCell<HashMap<TxId, Rc<RefCell<RpcCall>>>>,
 
-    recv_packets        : RefCell<u32>,
+    recv_packets: RefCell<u32>,
     recv_packets_at_last_reachable_check: RefCell<u32>,
     last_reachable_check: RefCell<SystemTime>,
-    is_reachable        : RefCell<bool>,
+    is_reachable: RefCell<bool>,
 
-    reachable_handler   : RefCell<Option<LocalBoxHandler<bool>>>,
-    message_handler     : RefCell<Option<LocalBoxHandler<Rc<Message>>>>,
-    callsent_handler    : RefCell<Option<EasyHandler<Id>>>,
-    calltimeout_handler : RefCell<Option<EasyHandler<Id>>>,
+    reachable_handler: RefCell<Option<LocalBoxHandler<bool>>>,
+    message_handler: RefCell<Option<LocalBoxHandler<Rc<Message>>>>,
+    callsent_handler: RefCell<Option<EasyHandler<Id>>>,
+    calltimeout_handler: RefCell<Option<EasyHandler<Id>>>,
 
-    start_time          : RefCell<Option<SystemTime>>,
-    is_running          : RefCell<bool>,
+    start_time: RefCell<Option<SystemTime>>,
+    is_running: RefCell<bool>,
 
-    timer_client        : Rc<TimerClient>,
+    timer_client: Rc<TimerClient>,
     reachable_check_task: RefCell<Option<u64>>,
 
-    tx_socket           : RefCell<Option<Rc<StdUdpSocket>>>,
-    rx_socket           : RefCell<Option<Rc<StdUdpSocket>>>,
+    tx_socket: RefCell<Option<Rc<StdUdpSocket>>>,
+    rx_socket: RefCell<Option<Rc<StdUdpSocket>>>,
 }
 
 impl RpcServer {
-    const MAX_ACTIVE_CALLS              : usize = 64;
-    const REACHABILITY_CHECK_INTERVAL   : u64 = 5_000;
-    const REACHABILITY_TIMEOUT          : u64 = 60_000;
+    const MAX_ACTIVE_CALLS: usize = 64;
+    const REACHABILITY_CHECK_INTERVAL: u64 = 5_000;
+    const REACHABILITY_TIMEOUT: u64 = 60_000;
 
     pub(crate) fn new(
         ni: NodeInfo,
@@ -72,26 +60,25 @@ impl RpcServer {
         timer_client: Rc<TimerClient>,
         suspicious_node_detector: Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>,
     ) -> Rc<Self> {
-
         Rc::new(Self {
             ni,
             identity,
             suspicious_node_detector,
-            pending_calls       : RefCell::new(HashMap::new()),
-            recv_packets        : RefCell::new(0),
+            pending_calls: RefCell::new(HashMap::new()),
+            recv_packets: RefCell::new(0),
             recv_packets_at_last_reachable_check: RefCell::new(0),
             last_reachable_check: RefCell::new(SystemTime::now()),
-            is_reachable        : RefCell::new(false),
-            reachable_handler   : RefCell::new(None),
-            message_handler     : RefCell::new(None),
-            callsent_handler    : RefCell::new(None),
-            calltimeout_handler : RefCell::new(None),
-            start_time          : RefCell::new(None),
-            is_running          : RefCell::new(false),
+            is_reachable: RefCell::new(false),
+            reachable_handler: RefCell::new(None),
+            message_handler: RefCell::new(None),
+            callsent_handler: RefCell::new(None),
+            calltimeout_handler: RefCell::new(None),
+            start_time: RefCell::new(None),
+            is_running: RefCell::new(false),
             timer_client,
             reachable_check_task: RefCell::new(None),
-            tx_socket           : RefCell::new(None),
-            rx_socket           : RefCell::new(None),
+            tx_socket: RefCell::new(None),
+            rx_socket: RefCell::new(None),
         })
     }
 
@@ -105,9 +92,11 @@ impl RpcServer {
             return;
         }
 
-        if crate::elapsed_ms!(*self.last_reachable_check.borrow()) > Self::REACHABILITY_TIMEOUT as u128 &&
-            *self.recv_packets.borrow() != 0 &&
-            *self.recv_packets_at_last_reachable_check.borrow() != 0 {
+        if crate::elapsed_ms!(*self.last_reachable_check.borrow())
+            > Self::REACHABILITY_TIMEOUT as u128
+            && *self.recv_packets.borrow() != 0
+            && *self.recv_packets_at_last_reachable_check.borrow() != 0
+        {
             self.set_reachable(false).await;
         }
     }
@@ -150,24 +139,30 @@ impl RpcServer {
 
     pub(crate) fn rx_tokio_socket(self: &Rc<Self>) -> Result<UdpSocket> {
         let socket = self.rx_socket.borrow().clone();
-        let std_socket = socket.as_ref().ok_or_else(|| -> Error {
-            NetworkError::new("RPC server socket not initialized")
-        })?.as_ref().try_clone().map_err(|e| {
-            NetworkError::new(format!("Failed to clone UDP socket: {e}")) as Error
-        })?;
+        let std_socket = socket
+            .as_ref()
+            .ok_or_else(|| -> Error { NetworkError::new("RPC server socket not initialized") })?
+            .as_ref()
+            .try_clone()
+            .map_err(|e| NetworkError::new(format!("Failed to clone UDP socket: {e}")) as Error)?;
 
         std_socket.set_nonblocking(true).map_err(|e| {
             NetworkError::new(format!("Failed to configure UDP socket: {e}")) as Error
         })?;
         UdpSocket::from_std(std_socket).map_err(|e| -> Error {
-            NetworkError::new(format!("Failed to create Tokio UdpSocket from std UdpSocket: {e}"))
+            NetworkError::new(format!(
+                "Failed to create Tokio UdpSocket from std UdpSocket: {e}"
+            ))
         })
     }
 
     pub(crate) async fn start(self: &Rc<Self>) -> Result<()> {
         let socket_addr = self.ni.address();
         let socket = StdUdpSocket::bind(socket_addr).map_err(|e| {
-            error!("Rpc server failed to bind udp socket at {}: {e}", socket_addr);
+            error!(
+                "Rpc server failed to bind udp socket at {}: {e}",
+                socket_addr
+            );
             NetworkError::new(format!("{e}"))
         })?;
         let socket = Rc::new(socket);
@@ -194,7 +189,7 @@ impl RpcServer {
                 Box::pin(async move {
                     server.check_reachability().await;
                 })
-            })
+            }),
         );
 
         let Ok(timer_id) = result else {
@@ -219,8 +214,8 @@ impl RpcServer {
 
         self.pending_calls.borrow_mut().clear();
 
-        *self.tx_socket.borrow_mut()  = None;
-        *self.rx_socket.borrow_mut()  = None;
+        *self.tx_socket.borrow_mut() = None;
+        *self.rx_socket.borrow_mut() = None;
         *self.start_time.borrow_mut() = None;
         *self.is_running.borrow_mut() = false;
 
@@ -258,9 +253,10 @@ impl RpcServer {
         let call = Rc::new(RefCell::new(call));
         call.borrow_mut().set_cloned(Rc::downgrade(&call));
         call.borrow_mut().set_timeout_handler(handler);
-        call.borrow_mut().set_timer_client(self.timer_client.clone());
+        call.borrow_mut()
+            .set_timer_client(self.timer_client.clone());
 
-        let mut msg  = call.borrow_mut().take_transient();
+        let mut msg = call.borrow_mut().take_transient();
         msg.set_nodeid(self.identity.id().clone());
         msg.set_associated_call(call.clone());
 
@@ -278,7 +274,7 @@ impl RpcServer {
                     h.cb(&target_id);
                     *self.callsent_handler.borrow_mut() = Some(h);
                 }
-            },
+            }
             Err(e) => {
                 let _ = self.pending_calls.borrow_mut().remove(&txid);
                 call.borrow_mut().fail();
@@ -299,40 +295,55 @@ impl RpcServer {
         let mut buf = vec![0u8; cipher_len + Id::BYTES];
         buf[..Id::BYTES].copy_from_slice(msg.nodeid().as_bytes());
 
-        let rc = self.identity.encrypt(
-            msg.remote_id(), &data, &mut buf[Id::BYTES..]
-        );
+        let rc = self
+            .identity
+            .encrypt(msg.remote_id(), &data, &mut buf[Id::BYTES..]);
         let encrypted = match rc {
             Ok(len) => len,
-            Err(e) => return Err(CryptoError::new(format!("Failed to encrypt message: {e}")))
+            Err(e) => return Err(CryptoError::new(format!("Failed to encrypt message: {e}"))),
         };
         if encrypted != cipher_len {
-            return Err(CryptoError::new(format!("Error: encrypted length {} does not match expected {}",
-                encrypted, cipher_len)));
+            return Err(CryptoError::new(format!(
+                "Error: encrypted length {} does not match expected {}",
+                encrypted, cipher_len
+            )));
         }
 
         // Send message to remote node
         let socket = self.tx_socket.borrow().clone();
-        let tx = socket.as_ref().ok_or_else(|| -> Error {
-            NetworkError::new("RPC server socket not initialized")
-        })?;
-        let sent_len = tx.send_to(
-            &buf[..cipher_len + Id::BYTES], msg.remote_addr()
-        ).map_err(|e| -> Error {
-            NetworkError::new(format!("Failed to send message: {e}"))
-        })?;
+        let tx = socket
+            .as_ref()
+            .ok_or_else(|| -> Error { NetworkError::new("RPC server socket not initialized") })?;
+        let sent_len = tx
+            .send_to(&buf[..cipher_len + Id::BYTES], msg.remote_addr())
+            .map_err(|e| -> Error { NetworkError::new(format!("Failed to send message: {e}")) })?;
 
         if sent_len != buf.len() {
-            return Err(NetworkError::new(
-                format!("Error: sent length {} does not match expected {}", sent_len, buf.len())));
+            return Err(NetworkError::new(format!(
+                "Error: sent length {} does not match expected {}",
+                sent_len,
+                buf.len()
+            )));
         }
 
         if msg.method() == Method::Ping {
-            trace!("Message {}_{} to {}@{} was sent: {}",
-                msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
+            trace!(
+                "Message {}_{} to {}@{} was sent: {}",
+                msg.method(),
+                msg.kind(),
+                msg.remote_id(),
+                msg.remote_addr(),
+                msg
+            );
         } else {
-            debug!("Message {}_{} to {}@{} was sent: {}",
-                msg.method(), msg.kind(), msg.remote_id(), msg.remote_addr(), msg);
+            debug!(
+                "Message {}_{} to {}@{} was sent: {}",
+                msg.method(),
+                msg.kind(),
+                msg.remote_id(),
+                msg.remote_addr(),
+                msg
+            );
         }
 
         Ok(sent_len)
@@ -404,8 +415,14 @@ impl RpcServer {
         *recv_packets = recv_packets.wrapping_add(1);
         drop(recv_packets);
 
-        debug!("Received message {}_{} from {}@{}: {}",
-            msg.method(), msg.kind(), from_id, from, msg);
+        debug!(
+            "Received message {}_{} from {}@{}: {}",
+            msg.method(),
+            msg.kind(),
+            from_id,
+            from,
+            msg
+        );
 
         // Handle request message.
         let is_req = msg.is_req();
@@ -424,8 +441,11 @@ impl RpcServer {
         let Some(call) = call_opt else {
             server.observe_message(from, from_id);
 
-            warn!("Can not find RPC call for {} with txid {}, discard the message",
-                msg.method(), msg.txid());
+            warn!(
+                "Can not find RPC call for {} with txid {}, discard the message",
+                msg.method(),
+                msg.txid()
+            );
             return;
         };
         let msg = Rc::new({
@@ -456,8 +476,13 @@ impl RpcServer {
             // Checking message with same address but different method,
             // which is a strong signal of attack or misbehaving node.
             if msg.method() != req.method() {
-                warn!("Got response with wrong method {} from {}@{} for {}",
-                    msg.method(), from_id, from, req.method());
+                warn!(
+                    "Got response with wrong method {} from {}@{} for {}",
+                    msg.method(),
+                    from_id,
+                    from,
+                    req.method()
+                );
 
                 locked.respond_wrong_method();
                 server.malformed_message(from);

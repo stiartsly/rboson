@@ -1,28 +1,18 @@
+use serial_test::serial;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use serial_test::serial;
 
+use crate::dht::storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage};
 use crate::{
-    Identity,
-    CryptoIdentity,
-    random_bytes,
-    Id,
-    PeerInfo,
-    Value,
-    ImmutableBuilder as ValueBuilder,
-    SignedBuilder,
-    EncryptedBuilder,
-    signature::KeyPair,
-};
-use crate::dht::storage::{
-    data_storage::DataStorage,
-    sqlite_storage::SqliteStorage,
+    random_bytes, signature::KeyPair, CryptoIdentity, EncryptedBuilder, Id, Identity,
+    ImmutableBuilder as ValueBuilder, PeerInfo, SignedBuilder, Value,
 };
 
 fn open_storage(path: &str) -> SqliteStorage {
     let mut s = SqliteStorage::new();
-    s.open(path).unwrap_or_else(|e| panic!("Failed to open '{}': {}", path, e));
+    s.open(path)
+        .unwrap_or_else(|e| panic!("Failed to open '{}': {}", path, e));
     s
 }
 
@@ -36,9 +26,7 @@ fn remove_db(path: &str) {
 }
 
 fn make_value() -> Value {
-    let rc = ValueBuilder::new(&random_bytes(32))
-        .build()
-        ;
+    let rc = ValueBuilder::new(&random_bytes(32)).build();
     assert!(rc.is_ok());
     rc.unwrap()
 }
@@ -47,8 +35,7 @@ fn make_signed_value(kp: KeyPair, expected_seq: i32) -> Value {
     let rc = SignedBuilder::new(&random_bytes(32))
         .with_keypair(&kp)
         .with_sequence_number(expected_seq)
-        .build()
-        ;
+        .build();
     assert!(rc.is_ok());
     rc.unwrap()
 }
@@ -57,8 +44,7 @@ fn make_encrypted_value(recipient: KeyPair, expected_seq: i32) -> Value {
     let recipient = Id::from(recipient.public_key());
     let rc = EncryptedBuilder::new(&random_bytes(32), &recipient)
         .with_sequence_number(expected_seq)
-        .build()
-        ;
+        .build();
     assert!(rc.is_ok());
     rc.unwrap()
 }
@@ -76,8 +62,7 @@ fn assert_value_roundtrip(actual: &Value, expected: &Value) {
 fn make_peer(endpoint: &str, fingerprint: u64) -> PeerInfo {
     let rc = PeerInfo::builder(endpoint)
         .with_fingerprint(fingerprint)
-        .build()
-        ;
+        .build();
     assert!(rc.is_ok());
     rc.unwrap()
 }
@@ -87,8 +72,7 @@ fn make_peer_with_key(kp: KeyPair, endpoint: &str, fingerprint: u64, seq: i32) -
         .with_key(kp)
         .with_fingerprint(fingerprint)
         .with_sequence_number(seq)
-        .build()
-        ;
+        .build();
     assert!(rc.is_ok());
     rc.unwrap()
 }
@@ -99,8 +83,7 @@ fn make_authenticated_peer(endpoint: &str, fingerprint: u64) -> (PeerInfo, Id) {
     let rc = PeerInfo::builder(endpoint)
         .with_fingerprint(fingerprint)
         .with_node(node_identity)
-        .build()
-        ;
+        .build();
     assert!(rc.is_ok());
     let peer = rc.unwrap();
     (peer, node_id)
@@ -129,7 +112,9 @@ mod tests {
 
         let mut s = SqliteStorage::new();
         assert!(s.open(&path).is_ok());
-        assert!(s.initialize(Duration::from_secs(3600), Duration::from_secs(7200)).is_ok());
+        assert!(s
+            .initialize(Duration::from_secs(3600), Duration::from_secs(7200))
+            .is_ok());
 
         s.close();
         remove_db(&path);
@@ -270,15 +255,13 @@ mod tests {
         let rc = SignedBuilder::new(&random_bytes(16))
             .with_keypair(&keypair)
             .with_sequence_number(3)
-            .build()
-            ;
+            .build();
         assert!(rc.is_ok());
         let low_seq = rc.unwrap();
         let rc = SignedBuilder::new(&random_bytes(16))
             .with_keypair(&keypair)
             .with_sequence_number(11)
-            .build()
-            ;
+            .build();
         assert!(rc.is_ok());
         let high_seq = rc.unwrap();
 
@@ -346,7 +329,9 @@ mod tests {
         let peers = rc.unwrap();
         assert!(peers.is_empty());
 
-        assert!(s.update_peer_announced_time(peer.id(), peer.fingerprint()).is_ok());
+        assert!(s
+            .update_peer_announced_time(peer.id(), peer.fingerprint())
+            .is_ok());
         assert!(s.remove_peer(peer.id(), peer.fingerprint()).is_ok());
         let rc = s.get_peer(peer.id(), peer.fingerprint());
         assert!(rc.is_ok());
@@ -379,7 +364,9 @@ mod tests {
         let peers = rc.unwrap();
         assert_eq!(peers.len(), 2);
         for expected in [&p1, &p2] {
-            let actual = peers.iter().find(|peer| peer.fingerprint() == expected.fingerprint());
+            let actual = peers
+                .iter()
+                .find(|peer| peer.fingerprint() == expected.fingerprint());
             assert!(actual.is_some(), "missing peer {}", expected.fingerprint());
             assert_peer_roundtrip(actual.unwrap(), expected);
         }
@@ -412,7 +399,11 @@ mod tests {
         let low_seq = make_peer_with_key(keypair.clone(), "10.0.1.1:9200", 11, 3);
         let high_seq = make_peer_with_key(keypair, "10.0.1.2:9200", 22, 11);
 
-        assert_eq!(low_seq.id(), high_seq.id(), "same keypair must produce same peer id");
+        assert_eq!(
+            low_seq.id(),
+            high_seq.id(),
+            "same keypair must produce same peer id"
+        );
 
         let rc = s.put_peer(low_seq, false);
         assert!(rc.is_ok());
@@ -473,10 +464,7 @@ mod tests {
         assert!(rc.is_ok());
         let peer = rc.unwrap();
         assert!(peer.is_some());
-        assert_peer_roundtrip(
-            &peer.unwrap(),
-            &persistent_peer,
-        );
+        assert_peer_roundtrip(&peer.unwrap(), &persistent_peer);
 
         remove_db(&path);
     }

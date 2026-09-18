@@ -1,30 +1,22 @@
-use std::fmt;
-use serde::{Deserialize, Serialize};
 use crate::{
-    utils,
-    Id,
     dht::msg::lookup_req::{
-        LookupRequest,
-        Data as LookupData,
-        WANT4_MASK, WANT6_MASK, WANT_TOKEN_MASK,
-    }
+        Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK, WANT_TOKEN_MASK,
+    },
+    utils, Id,
 };
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeFindNodeRequest", from = "SerdeFindNodeRequest")]
 pub(crate) struct FindNodeRequest {
     data: LookupData,
 }
 
 impl FindNodeRequest {
-    pub(crate) fn new(target: Id,
-        want4: bool,
-        want6: bool,
-        want_token: bool
-    ) -> Self {
+    pub(crate) fn new(target: Id, want4: bool, want6: bool, want_token: bool) -> Self {
         Self {
-            data: LookupData::new(target, want4, want6, want_token)
+            data: LookupData::new(target, want4, want6, want_token),
         }
     }
 }
@@ -51,8 +43,8 @@ struct SerdeFindNodeRequest {
 impl Into<SerdeFindNodeRequest> for FindNodeRequest {
     fn into(self) -> SerdeFindNodeRequest {
         SerdeFindNodeRequest {
-            target  : self.target().clone(),
-            want    : self.want()
+            target: self.target().clone(),
+            want: self.want(),
         }
     }
 }
@@ -63,15 +55,14 @@ impl From<SerdeFindNodeRequest> for FindNodeRequest {
             s.target,
             s.want & WANT4_MASK != 0,
             s.want & WANT6_MASK != 0,
-            s.want & WANT_TOKEN_MASK != 0
+            s.want & WANT_TOKEN_MASK != 0,
         )
     }
 }
 
 impl fmt::Display for FindNodeRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

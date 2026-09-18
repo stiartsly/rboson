@@ -1,17 +1,12 @@
-use std::{
-    any::Any,
-    rc::Rc,
-    cell::RefCell,
-    collections::VecDeque,
-};
-use crate::EasyHandler;
 use crate::dht::{
     dht::DHT,
     msg::msg,
+    routing::{KBucket, KBucketEntry},
     rpc::RpcCall,
     task::{Task, TaskData},
-    routing::{KBucket, KBucketEntry}
 };
+use crate::EasyHandler;
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
 #[allow(unused)]
 pub(crate) struct PingRefreshTask {
@@ -20,10 +15,10 @@ pub(crate) struct PingRefreshTask {
     todo: Rc<RefCell<VecDeque<KBucketEntry>>>,
     // Whether to ping all nodes in the bucket, regardless of their ping status.
     check_all: bool,
-	// Whether to remove nodes from the routing table if their PING RPC times out.
+    // Whether to remove nodes from the routing table if their PING RPC times out.
     remove_on_timeout: bool,
 
-    dht: Rc<DHT>
+    dht: Rc<DHT>,
 }
 
 const MAX_TODO_ENTRIES: usize = KBucket::MAX_ENTRIES * 2;
@@ -34,9 +29,9 @@ impl PingRefreshTask {
             base_data: TaskData::new(),
             todo: Rc::new(RefCell::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
 
-            check_all           : false,
-            remove_on_timeout   : false,
-            dht                 : dht.clone()
+            check_all: false,
+            remove_on_timeout: false,
+            dht: dht.clone(),
         }
     }
 
@@ -52,7 +47,7 @@ impl PingRefreshTask {
 
     pub(crate) fn with_bucket(&mut self, bucket: Rc<RefCell<KBucket>>) -> &mut Self {
         let mut borrowed_bucket = bucket.borrow_mut();
-        let mut borrowed_todo   = self.todo.borrow_mut();
+        let mut borrowed_todo = self.todo.borrow_mut();
 
         borrowed_bucket.update_refresh_time();
         for item in borrowed_bucket.entries().iter() {
@@ -106,7 +101,8 @@ impl Task for PingRefreshTask {
         // CAUSION:
         // Should not use the original bucket object,
         // because the routing table is dynamic, maybe already changed.
-        log::debug!("{}#{} removing timeout entry {} from routing table",
+        log::debug!(
+            "{}#{} removing timeout entry {} from routing table",
             self.task_name(),
             self.task_id(),
             target_id
@@ -128,7 +124,7 @@ impl Task for PingRefreshTask {
                 continue;
             }
 
-            let msg  = msg::ping_request();
+            let msg = msg::ping_request();
             let todo = self.todo.clone();
             let cb = EasyHandler::new(move |_| {
                 todo.borrow_mut().pop_front();
@@ -139,7 +135,6 @@ impl Task for PingRefreshTask {
     }
 
     fn is_done(&self) -> bool {
-        self.todo.borrow().is_empty() &&
-            self.data().is_done()
+        self.todo.borrow().is_empty() && self.data().is_done()
     }
 }

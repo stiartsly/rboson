@@ -1,15 +1,14 @@
-use std::net::SocketAddr;
 use crate::{
-    Id, Network, NodeInfo,
-    Value, core::ImmutableBuilder as ValueBuilder,
-    dht::msg::{
-        find_value_rsp::FindValueResponse,
-        lookup_rsp::LookupResponse,
-    }
+    core::ImmutableBuilder as ValueBuilder,
+    dht::msg::{find_value_rsp::FindValueResponse, lookup_rsp::LookupResponse},
+    Id, Network, NodeInfo, Value,
 };
+use std::net::SocketAddr;
 
 fn make_node_info4() -> NodeInfo {
-    let addr = format!("127.0.0.1:{}", 39011).parse::<SocketAddr>().unwrap();
+    let addr = format!("127.0.0.1:{}", 39011)
+        .parse::<SocketAddr>()
+        .unwrap();
     NodeInfo::new(Id::random(), addr)
 }
 
@@ -34,10 +33,8 @@ mod tests {
         let node4 = make_node_info4();
         let node6 = make_node_info6();
 
-        let rsp = FindValueResponse::with_nodes(
-            Some(vec![node4.clone()]),
-            Some(vec![node6.clone()])
-        );
+        let rsp =
+            FindValueResponse::with_nodes(Some(vec![node4.clone()]), Some(vec![node6.clone()]));
 
         assert!(rsp.nodes4().is_some());
         assert!(rsp.nodes6().is_some());
@@ -71,10 +68,7 @@ mod tests {
     fn test_serde_with_nodes() {
         let ni4 = make_node_info4();
         let ni6 = make_node_info6();
-        let rsp = FindValueResponse::with_nodes(
-            Some(vec![ni4.clone()]),
-            Some(vec![ni6.clone()])
-        );
+        let rsp = FindValueResponse::with_nodes(Some(vec![ni4.clone()]), Some(vec![ni6.clone()]));
 
         assert!(rsp.nodes4().is_some());
         assert!(rsp.nodes6().is_some());
@@ -83,11 +77,10 @@ mod tests {
         assert_eq!(rsp.nodes4().unwrap().len(), 1);
         assert_eq!(rsp.nodes6().unwrap().len(), 1);
 
-        let encoded = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
-            .expect("Deserialization failed");
+        let decoded: FindValueResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 0);
         assert!(decoded.nodes4().is_some());
@@ -115,11 +108,10 @@ mod tests {
         assert_eq!(rsp.token(), 0);
         assert_eq!(rsp.value().unwrap(), &value);
 
-        let encoded = serde_cbor::to_vec(&rsp)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: FindValueResponse = serde_cbor::from_slice(encoded.as_slice())
-            .expect("Deserialization failed");
+        let decoded: FindValueResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
 
         assert!(decoded.nodes4().is_none());
         assert!(decoded.nodes6().is_none());

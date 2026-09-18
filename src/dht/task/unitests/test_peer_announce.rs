@@ -1,23 +1,15 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-};
-use crate::{
-    Id,
-    Network,
-    NodeInfo,
-    PeerInfo,
-};
+use super::test_utils::make_test_dht;
 use crate::dht::{
     dht::DHT,
     task::{
         candidate_node::CandidateNode,
         closest_set::ClosestSet,
         peer_announce::PeerAnnounceTask,
-        task::{Task, State},
+        task::{State, Task},
     },
 };
-use super::test_utils::make_test_dht;
+use crate::{Id, Network, NodeInfo, PeerInfo};
+use std::{cell::RefCell, rc::Rc};
 
 fn make_dht() -> Rc<DHT> {
     make_test_dht(Network::IPv4, "127.0.0.1")
@@ -38,10 +30,7 @@ fn make_peer() -> PeerInfo {
 
 fn make_closestset(token: i32) -> ClosestSet {
     let target = Id::random();
-    let candidate = NodeInfo::new(
-        Id::random(),
-        "1.1.1.1:39011".parse().unwrap(),
-    );
+    let candidate = NodeInfo::new(Id::random(), "1.1.1.1:39011".parse().unwrap());
     let mut cn: CandidateNode = candidate.into();
     cn.set_token(token);
 
@@ -57,7 +46,7 @@ mod tests {
     #[test]
     fn test_default() {
         let peer = make_peer();
-        let dht  = make_dht();
+        let dht = make_dht();
         // With no closest set the todo queue is empty — task reports nothing to do.
         let task = PeerAnnounceTask::new(dht.clone(), peer, 7);
         assert!(task.is_unstarted());
@@ -78,7 +67,7 @@ mod tests {
     #[test]
     fn test_cancel() {
         let peer = make_peer();
-        let dht  = make_dht();
+        let dht = make_dht();
         let mut task = PeerAnnounceTask::new(dht.clone(), peer, -1);
         assert!(task.is_unstarted());
         assert!(task.is_done());

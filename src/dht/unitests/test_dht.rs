@@ -1,26 +1,16 @@
+use crate::dht::{
+    connection_status_listener::ConnectionStatusListener,
+    dht::DHT,
+    dht_verticle::VerticleOptions,
+    storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage},
+    token_manager::TokenManager,
+};
+use crate::{CryptoIdentity, Identity, LocalBoxTimerClient, LocalBoxTimerCmd, Network, Promise};
 use std::{
     rc::Rc,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
-use crate::{
-    Network,
-    Identity,
-    CryptoIdentity,
-    LocalBoxTimerClient,
-    LocalBoxTimerCmd,
-    Promise,
-};
-use crate::dht::{
-    connection_status_listener::ConnectionStatusListener,
-    dht::DHT,
-    dht_verticle::VerticleOptions,
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    },
-    token_manager::TokenManager,
-};
 
 struct NoopConnectionStatusListener;
 impl ConnectionStatusListener for NoopConnectionStatusListener {}
@@ -65,7 +55,8 @@ mod tests {
                 increment.lock().unwrap().fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-        })).await;
+        }))
+        .await;
         let val = increment.lock().unwrap().load(Ordering::SeqCst);
         assert_eq!(val, 10);
     }
@@ -81,7 +72,6 @@ mod tests {
 
             let local = tokio::task::LocalSet::new();
             rt.block_on(local.run_until(async move {
-
                 let identity = Arc::new(CryptoIdentity::new());
                 let (dht, _timer_rx) = make_dht(identity.clone(), Network::IPv4, "127.0.0.1");
 

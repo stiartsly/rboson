@@ -13,7 +13,7 @@ const DEFAULT_OBSERVATION_PERIOD: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_BAN_DURATION: Duration = Duration::from_secs(30 * 60);
 
 #[allow(dead_code)]
-pub trait SuspiciousNodeDetector : Send + Sync {
+pub trait SuspiciousNodeDetector: Send + Sync {
     fn is_suspicious_with_expected(&self, addr: &SocketAddr, expected: Option<&Id>) -> bool;
 
     fn is_suspicious(&self, addr: &SocketAddr) -> bool {
@@ -108,12 +108,7 @@ impl DefaultSuspiciousNodeDetector {
         }
     }
 
-    fn observe_activity(
-        &mut self,
-        addr: SocketAddr,
-        id: Option<Id>,
-        activity: SuspiciousActivity,
-    ) {
+    fn observe_activity(&mut self, addr: SocketAddr, id: Option<Id>, activity: SuspiciousActivity) {
         if self.is_banned(&addr.ip()) {
             return;
         }
@@ -124,7 +119,12 @@ impl DefaultSuspiciousNodeDetector {
         let mut should_ban_host = false;
         match self.observed_nodes.entry(addr) {
             std::collections::hash_map::Entry::Vacant(entry) => {
-                trace!("New observation for {}: id={:?}, activity={:?}", addr, id, activity);
+                trace!(
+                    "New observation for {}: id={:?}, activity={:?}",
+                    addr,
+                    id,
+                    activity
+                );
                 entry.insert(ObservationRecord::new(id, activity, expires_at));
             }
             std::collections::hash_map::Entry::Occupied(mut entry) => {
@@ -178,9 +178,7 @@ impl DefaultSuspiciousNodeDetector {
                 if record.hits >= self.observation_hit_threshold {
                     info!(
                         "Host {} marked suspicious: activity={:?}, hits={}",
-                        host,
-                        activity,
-                        record.hits
+                        host, activity, record.hits
                     );
                     should_ban_host_from_host_record = true;
                 } else {
@@ -315,7 +313,10 @@ impl SuspiciousNodeDetector for DefaultSuspiciousNodeDetector {
 
 impl fmt::Display for DefaultSuspiciousNodeDetector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.observed_nodes.is_empty() && self.observed_hosts.is_empty() && self.banned_nodes.is_empty() {
+        if self.observed_nodes.is_empty()
+            && self.observed_hosts.is_empty()
+            && self.banned_nodes.is_empty()
+        {
             return f.write_str("Empty");
         }
 

@@ -2,18 +2,22 @@ use crate::{Network, NodeInfo};
 
 #[derive(Clone)]
 pub(crate) struct Data {
-    pub(crate) nodes4  : Option<Vec<NodeInfo>>,
-    pub(crate) nodes6  : Option<Vec<NodeInfo>>,
-    pub(crate) token   : i32,
+    pub(crate) nodes4: Option<Vec<NodeInfo>>,
+    pub(crate) nodes6: Option<Vec<NodeInfo>>,
+    pub(crate) token: i32,
 }
 
 impl Data {
     pub(crate) fn new(
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>,
-        token: i32
+        token: i32,
     ) -> Self {
-        Self { nodes4, nodes6, token }
+        Self {
+            nodes4,
+            nodes6,
+            token,
+        }
     }
 }
 

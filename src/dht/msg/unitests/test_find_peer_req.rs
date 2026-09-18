@@ -1,6 +1,6 @@
 use crate::{
+    dht::msg::{FindPeerRequest, LookupRequest},
     Id,
-    dht::msg::{LookupRequest, FindPeerRequest},
 };
 
 #[cfg(test)]
@@ -12,18 +12,11 @@ mod tests {
         let peerid = Id::random();
         let expected_seq = 5;
         let expected_count = 10;
-        let req = FindPeerRequest::new(
-            peerid,
-            true,
-            false,
-            expected_seq,
-            expected_count
-        );
+        let req = FindPeerRequest::new(peerid, true, false, expected_seq, expected_count);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
-        let decoded: FindPeerRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
+        let decoded: FindPeerRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.want4(), true);
         assert_eq!(decoded.want6(), false);
@@ -38,18 +31,11 @@ mod tests {
     fn test_serde_no_expected_seq() {
         let peerid = Id::random();
         let expected_count = 3;
-        let req = FindPeerRequest::new(
-            peerid,
-            false,
-            true,
-            -1,
-            expected_count,
-        );
+        let req = FindPeerRequest::new(peerid, false, true, -1, expected_count);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
-        let decoded: FindPeerRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
+        let decoded: FindPeerRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.target(), &peerid);
         assert_eq!(decoded.want4(), false);
@@ -69,13 +55,13 @@ mod tests {
         assert_eq!(json["t"], peerid.to_base58());
 
         let cbor = serde_cbor::to_vec(&request).expect("CBOR serialization failed");
-        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor)
-            .expect("CBOR decoding failed");
+        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor).expect("CBOR decoding failed");
         let entries = match value {
             serde_cbor::Value::Map(entries) => entries,
             _ => panic!("expected a CBOR map"),
         };
-        let target = entries.iter()
+        let target = entries
+            .iter()
             .find(|(key, _)| *key == &serde_cbor::Value::Text("t".to_string()))
             .map(|(_, value)| value)
             .expect("missing target field");

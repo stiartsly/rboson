@@ -1,24 +1,18 @@
-use std::{
-    fmt,
-    any::Any,
-    rc::{Rc, Weak},
-    cell::RefCell,
-    collections::HashSet,
-    sync::atomic::{AtomicI32, Ordering},
-};
-use log::{warn, debug};
-use crate::{
-    core::Network,
-    EasyHandler,
-};
 use crate::dht::{
     dht::DHT,
-    msg::{Message, msg::TxId},
+    msg::{msg::TxId, Message},
+    rpc::{listener::Listener, rpccall, RpcCall, Target},
     task::task_listener::TaskListener,
-    rpc::{
-        Target, RpcCall, rpccall,
-        listener::Listener
-    },
+};
+use crate::{core::Network, EasyHandler};
+use log::{debug, warn};
+use std::{
+    any::Any,
+    cell::RefCell,
+    collections::HashSet,
+    fmt,
+    rc::{Rc, Weak},
+    sync::atomic::{AtomicI32, Ordering},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,15 +25,8 @@ pub(crate) enum State {
     Canceled,
 }
 
-const UNSTARTED_STATES: [State; 2] = [
-    State::Initialized,
-    State::Queued
-];
-const INCOMPLETED_STATES: [State; 3] = [
-    State::Initialized,
-    State::Queued,
-    State::Running
-];
+const UNSTARTED_STATES: [State; 2] = [State::Initialized, State::Queued];
+const INCOMPLETED_STATES: [State; 3] = [State::Initialized, State::Queued, State::Running];
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -59,46 +46,50 @@ static NEXT_TASKID: AtomicI32 = AtomicI32::new(0);
 
 fn next_taskid_after(current: TaskId) -> TaskId {
     let next = current.wrapping_add(1);
-    if next == 0 { 1 } else { next }
+    if next == 0 {
+        1
+    } else {
+        next
+    }
 }
 
 fn next_taskid() -> TaskId {
-    let current = NEXT_TASKID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(next_taskid_after(current))
-    }).expect("task ID update must succeed");
+    let current = NEXT_TASKID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(next_taskid_after(current))
+        })
+        .expect("task ID update must succeed");
 
     next_taskid_after(current)
 }
 
 pub(crate) struct TaskData {
-    taskid      : TaskId,
-    task_name   : String,
-    state       : State,
+    taskid: TaskId,
+    task_name: String,
+    state: State,
 
     //created     : SystemTime,
     //started     : SystemTime,
     //ended       : SystemTime,
+    inflights: HashSet<TxId>,
+    listener: Option<TaskListener>,
+    end_handler: Option<EasyHandler<()>>,
 
-    inflights   : HashSet<TxId>,
-    listener    : Option<TaskListener>,
-    end_handler : Option<EasyHandler<()>>,
-
-    nested      : RefCell<Option<Box<dyn Task>>>,
-    cloned      : Option<Weak<RefCell<Box<dyn Task>>>>,
+    nested: RefCell<Option<Box<dyn Task>>>,
+    cloned: Option<Weak<RefCell<Box<dyn Task>>>>,
 }
 
 impl TaskData {
     pub(crate) fn new() -> Self {
         Self {
-            taskid      : next_taskid(),
-            task_name   : String::new(),
-            state       : State::Initialized,
-            inflights   : HashSet::new(),
-            listener    : None,
-            end_handler : None,
-            nested      : RefCell::new(None),
-            cloned      : None,
-
+            taskid: next_taskid(),
+            task_name: String::new(),
+            state: State::Initialized,
+            inflights: HashSet::new(),
+            listener: None,
+            end_handler: None,
+            nested: RefCell::new(None),
+            cloned: None,
         }
     }
 
@@ -136,7 +127,8 @@ pub(crate) trait Task {
 
     fn set_state_if(&mut self, expected: &State, new_state: State) -> bool {
         if expected != &self.task_state() {
-            warn!("{}#{} invalid state transition: expected {}, but was {}",
+            warn!(
+                "{}#{} invalid state transition: expected {}, but was {}",
                 self.task_name(),
                 self.task_id(),
                 expected,
@@ -146,7 +138,8 @@ pub(crate) trait Task {
         }
 
         if self.is_ended() {
-            warn!("{}#{} invalid state transition: task already ended: {}",
+            warn!(
+                "{}#{} invalid state transition: task already ended: {}",
                 self.task_name(),
                 self.task_id(),
                 self.task_state()
@@ -160,12 +153,14 @@ pub(crate) trait Task {
 
     fn set_state_if_stateset(&mut self, expected: &[State], new_state: State) -> bool {
         if !expected.contains(&self.task_state()) {
-            let str = expected.iter()
+            let str = expected
+                .iter()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            warn!("{}#{} invalid state transition: expected one of {}, but was {}",
+            warn!(
+                "{}#{} invalid state transition: expected one of {}, but was {}",
                 self.task_name(),
                 self.task_id(),
                 str,
@@ -202,9 +197,10 @@ pub(crate) trait Task {
             l.canceled(task);
             l.ended(task);
         } else if self.is_completed() {
-            l.completed(task    );
+            l.completed(task);
             l.ended(task);
-        } else {}
+        } else {
+        }
 
         self.data_mut().listener = Some(l);
     }
@@ -214,15 +210,15 @@ pub(crate) trait Task {
     }
 
     fn cloned(&self) -> Weak<RefCell<Box<dyn Task>>> {
-        self.data().cloned.clone().expect("Task instance is dropped")
+        self.data()
+            .cloned
+            .clone()
+            .expect("Task instance is dropped")
     }
 
     fn start(&mut self) {
         if self.set_state_if_stateset(&UNSTARTED_STATES, State::Running) {
-            debug!("{}#{} starting...",
-                self.task_name(),
-                self.task_id()
-            );
+            debug!("{}#{} starting...", self.task_name(), self.task_id());
             self.prepare();
 
             let listener = self.data_mut().listener.take();
@@ -245,7 +241,7 @@ pub(crate) trait Task {
             self.iterate();
 
             // Check again in case todo-queue has been drained by update()
-			if self.is_done() {
+            if self.is_done() {
                 self.complete();
             }
         }
@@ -264,10 +260,7 @@ pub(crate) trait Task {
             }
         }
 
-        debug!("Task {}#{} canceled",
-            self.task_name(),
-            self.task_id()
-        );
+        debug!("Task {}#{} canceled", self.task_name(), self.task_id());
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
@@ -283,14 +276,11 @@ pub(crate) trait Task {
     }
 
     fn complete(&mut self) {
-        if !self.set_state_if_stateset(&INCOMPLETED_STATES, State::Completed){
+        if !self.set_state_if_stateset(&INCOMPLETED_STATES, State::Completed) {
             return;
         }
 
-        debug!("Task {}#{} completed",
-            self.task_name(),
-            self.task_id()
-        );
+        debug!("Task {}#{} completed", self.task_name(), self.task_id());
 
         let handler = self.data_mut().end_handler.as_mut();
         if let Some(ended) = handler {
@@ -306,8 +296,7 @@ pub(crate) trait Task {
     }
 
     fn is_unstarted(&self) -> bool {
-        self.data().state == State::Initialized ||
-        self.data().state == State::Queued
+        self.data().state == State::Initialized || self.data().state == State::Queued
     }
 
     fn is_running(&self) -> bool {
@@ -331,8 +320,7 @@ pub(crate) trait Task {
     }
 
     fn can_dorequest(&self) -> bool {
-        self.is_running() &&
-            self.inflight_size() < 16
+        self.is_running() && self.inflight_size() < 16
     }
 
     fn prepare(&mut self) {}
@@ -351,10 +339,12 @@ pub(crate) trait Task {
         let task = self.cloned().upgrade().expect("Task instance is dropped");
         let listener = Listener::new(move |c, _, state| {
             if task.borrow().is_ended() {
-                debug!("{}#{} call to {} state changed ignored due to the task is terminated",
+                debug!(
+                    "{}#{} call to {} state changed ignored due to the task is terminated",
                     task.borrow().task_name(),
                     task.borrow().task_id(),
-                    c.target_id());
+                    c.target_id()
+                );
                 return;
             }
 
@@ -366,20 +356,20 @@ pub(crate) trait Task {
                     if !task.is_ended() && c.rsp().is_some() {
                         task.call_responded(c);
                     }
-                },
+                }
                 rpccall::State::Err => {
                     task.data_mut().inflights.remove(&c.txid());
                     if !task.is_ended() {
                         task.call_error(c);
                     }
-                },
+                }
                 rpccall::State::Timeout => {
                     task.data_mut().inflights.remove(&c.txid());
                     if !task.is_ended() {
                         task.call_timeout(c);
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
 
             if state >= rpccall::State::Stalled {
@@ -396,8 +386,7 @@ pub(crate) trait Task {
         let dht = self.dht();
         let _ = tokio::task::spawn_local(async move {
             let rs = dht.rs();
-            let _ = rs.send_call(call)
-                .map_err(|e| log::error!("{e}"));
+            let _ = rs.send_call(call).map_err(|e| log::error!("{e}"));
         });
     }
 
@@ -410,7 +399,8 @@ impl fmt::Display for dyn Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let network = self.network();
 
-        write!(f,
+        write!(
+            f,
             "#{}[{}] DHT:{}, state:{}",
             self.task_id(),
             self.task_name(),

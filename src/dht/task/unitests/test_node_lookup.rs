@@ -1,15 +1,11 @@
-use std::rc::Rc;
-use crate::{
-    Id,
-    Network,
-    NodeInfo,
-};
+use super::test_utils::make_test_dht;
 use crate::dht::{
     dht::DHT,
-    task::{NodeLookupTask, LookupTask},
     rpc::rpc_target::TargetInfo,
+    task::{LookupTask, NodeLookupTask},
 };
-use super::test_utils::make_test_dht;
+use crate::{Id, Network, NodeInfo};
+use std::rc::Rc;
 
 fn make_dht() -> Rc<DHT> {
     make_test_dht(Network::IPv4, "127.0.0.1")
@@ -57,10 +53,7 @@ mod tests {
         let dht = make_dht();
         let mut task = NodeLookupTask::new(dht.clone(), target, false);
 
-        let candidate = NodeInfo::new(
-            Id::random(),
-            "1.1.1.1:39011".parse().unwrap(),
-        );
+        let candidate = NodeInfo::new(Id::random(), "1.1.1.1:39011".parse().unwrap());
         task.with_inject_candidates(vec![candidate.clone()]);
         assert_eq!(task.candidate_size(), 1);
 

@@ -1,8 +1,12 @@
-use std::net::SocketAddr;
 use crate::{
+    dht::msg::{
+        msg,
+        msg::{Kind, Method},
+        Message,
+    },
     Id,
-    dht::msg::{msg, Message, msg::{Method, Kind}}
 };
+use std::net::SocketAddr;
 
 #[cfg(test)]
 mod tests {
@@ -37,11 +41,10 @@ mod tests {
         assert_eq!(msg.remote_id(), &remote_id);
         assert_eq!(msg.remote_addr(), &remote_addr);
 
-        let encoded = serde_cbor::to_vec(&msg)
-            .expect("message serialization failed");
+        let encoded = serde_cbor::to_vec(&msg).expect("message serialization failed");
         println!(">>>> encoded: {}", hex::encode(&encoded));
-        let decoded: Message = serde_cbor::from_slice(&encoded)
-            .expect("message cbor decoding failed");
+        let decoded: Message =
+            serde_cbor::from_slice(&encoded).expect("message cbor decoding failed");
 
         assert_eq!(msg.kind() as u8, decoded.kind() as u8);
         assert_eq!(msg.method() as u8, decoded.method() as u8);
@@ -66,13 +69,13 @@ mod tests {
         println!("JSON: {}", message);
 
         let cbor = serde_cbor::to_vec(&message).expect("CBOR serialization failed");
-        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor)
-            .expect("CBOR decoding failed");
+        let value: serde_cbor::Value = serde_cbor::from_slice(&cbor).expect("CBOR decoding failed");
         let message_entries = match value {
             serde_cbor::Value::Map(entries) => entries,
             _ => panic!("expected a CBOR message map"),
         };
-        let body = message_entries.iter()
+        let body = message_entries
+            .iter()
             .find(|(key, _)| *key == &serde_cbor::Value::Text("q".to_string()))
             .map(|(_, value)| value)
             .expect("missing request body");
@@ -80,11 +83,14 @@ mod tests {
             serde_cbor::Value::Map(entries) => entries,
             _ => panic!("expected a CBOR request map"),
         };
-        let encoded_target = body_entries.iter()
+        let encoded_target = body_entries
+            .iter()
             .find(|(key, _)| *key == &serde_cbor::Value::Text("t".to_string()))
             .map(|(_, value)| value)
             .expect("missing target field");
-        assert!(matches!(encoded_target, serde_cbor::Value::Bytes(bytes) if bytes.len() == Id::BYTES));
+        assert!(
+            matches!(encoded_target, serde_cbor::Value::Bytes(bytes) if bytes.len() == Id::BYTES)
+        );
     }
 
     #[test]

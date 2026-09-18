@@ -1,8 +1,5 @@
+use crate::dht::{rpc::TargetInfo, task::closest_candidates::ClosestCandidates};
 use crate::{Id, NodeInfo};
-use crate::dht::{
-    rpc::TargetInfo,
-    task::closest_candidates::ClosestCandidates
-};
 
 fn make_node(distance: usize, host: &str, port: u16) -> NodeInfo {
     NodeInfo::new(
@@ -27,9 +24,9 @@ mod tests {
 
         candidates.add(vec![
             node4.clone().into(),
-            node2.clone().into()    ,
+            node2.clone().into(),
             node1.clone().into(),
-            node3.clone().into()
+            node3.clone().into(),
         ]);
 
         assert_eq!(candidates.size(), 3);
@@ -49,10 +46,7 @@ mod tests {
         let first = make_node(3, "1.1.1.1", 39011);
         let second = make_node(1, "1.1.1.1", 39002);
 
-        candidates.add(vec![
-            first.clone().into(),
-            second.clone().into()
-        ]);
+        candidates.add(vec![first.clone().into(), second.clone().into()]);
 
         assert_eq!(candidates.size(), 1);
         assert_eq!(candidates.candidate_node(first.id()).is_some(), true);
@@ -68,8 +62,16 @@ mod tests {
         let third = make_node(3, "1.1.1.3", 39003);
 
         candidates.add(vec![first.clone().into(), second.clone().into()]);
-        candidates.candidate_node(first.id()).unwrap().borrow_mut().set_sent();
-        candidates.candidate_node(second.id()).unwrap().borrow_mut().set_sent();
+        candidates
+            .candidate_node(first.id())
+            .unwrap()
+            .borrow_mut()
+            .set_sent();
+        candidates
+            .candidate_node(second.id())
+            .unwrap()
+            .borrow_mut()
+            .set_sent();
 
         candidates.add(vec![third.clone().into()]);
 
@@ -101,10 +103,12 @@ mod tests {
         let remove_a = make_node(2, "1.1.1.2", 39002);
         let remove_b = make_node(3, "1.1.1.3", 39003);
 
-        candidates.add(vec![keep.clone().into(), remove_a.clone().into(), remove_b.clone().into()]);
-        candidates.remove_if(|cn| {
-            cn.borrow().addr().port() != 39011
-        });
+        candidates.add(vec![
+            keep.clone().into(),
+            remove_a.clone().into(),
+            remove_b.clone().into(),
+        ]);
+        candidates.remove_if(|cn| cn.borrow().addr().port() != 39011);
 
         assert_eq!(candidates.size(), 1);
         assert_eq!(candidates.candidate_node(keep.id()).is_some(), true);
@@ -124,7 +128,11 @@ mod tests {
         let second = make_node(2, "1.1.1.2", 39002);
         let third = make_node(3, "1.1.1.3", 39003);
 
-        candidates.add(vec![first.clone().into(), second.clone().into(), third.clone().into()]);
+        candidates.add(vec![
+            first.clone().into(),
+            second.clone().into(),
+            third.clone().into(),
+        ]);
         assert_eq!(candidates.candidate_node(third.id()).is_none(), true);
 
         let removed = candidates.remove(first.id());
@@ -148,7 +156,7 @@ mod tests {
         candidates.add(vec![
             farthest.clone().into(),
             closest.clone().into(),
-            middle.clone().into()
+            middle.clone().into(),
         ]);
 
         let closest_candidate = candidates.candidate_node(closest.id()).unwrap();

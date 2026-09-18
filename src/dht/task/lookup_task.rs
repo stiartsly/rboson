@@ -1,45 +1,33 @@
-use std::{
-    rc::Rc,
-    cell::RefCell
-};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::Id;
 use crate::dht::{
-    utils::{is_any_unicast, is_bogon},
-    rpc::{
-        Target, rpc_target::TargetInfo,
-        RpcCall
-    },
     msg::{Body, LookupResponse},
     routing::{KBucket, KBucketEntry, KClosestNodes},
-    task::{
-        ClosestSet,
-        ClosestCandidates,
-        CandidateNode,
-        Task,
-        TaskData,
-    }
+    rpc::{rpc_target::TargetInfo, RpcCall, Target},
+    task::{CandidateNode, ClosestCandidates, ClosestSet, Task, TaskData},
+    utils::{is_any_unicast, is_bogon},
 };
+use crate::Id;
 
 const MAX_ITERATIONS: usize = 3 * KBucket::MAX_ENTRIES;
 
 pub(crate) struct LookupTaskData {
-    target      : Id,
-    closest     : ClosestSet,
-    candidates  : ClosestCandidates,
+    target: Id,
+    closest: ClosestSet,
+    candidates: ClosestCandidates,
 
-    iteration_count : usize,
+    iteration_count: usize,
 
-    done_on_eligible_result : bool,
-    done_on_lookup          : bool,
+    done_on_eligible_result: bool,
+    done_on_lookup: bool,
 }
 
 impl LookupTaskData {
     pub(crate) fn new(target: Id, done_on_eligible_result: bool) -> Self {
         Self {
-            closest     : ClosestSet::new(target, KBucket::MAX_ENTRIES),
-            candidates  : ClosestCandidates::new(target, MAX_ITERATIONS),
-            iteration_count : 0,
+            closest: ClosestSet::new(target, KBucket::MAX_ENTRIES),
+            candidates: ClosestCandidates::new(target, MAX_ITERATIONS),
+            iteration_count: 0,
             target,
             done_on_eligible_result,
             done_on_lookup: false,
@@ -80,9 +68,11 @@ pub(crate) trait LookupTask: Task {
                 is_bogon(candidate.addr())
             };
 
-            if bogon ||self.lookup_data().closest.contains(candidate.id()) ||
-                ni.id() == candidate.id() ||
-                ni.address() == candidate.addr() {
+            if bogon
+                || self.lookup_data().closest.contains(candidate.id())
+                || ni.id() == candidate.id()
+                || ni.address() == candidate.addr()
+            {
                 continue;
             }
             todo.push(candidate);
@@ -96,11 +86,7 @@ pub(crate) trait LookupTask: Task {
     fn seed_candidates(&mut self, target: Id) {
         let entries: Vec<KBucketEntry> = {
             let rt = self.dht().rt();
-            let mut closest = KClosestNodes::new(
-                &rt,
-                target,
-                KBucket::MAX_ENTRIES * 3
-            );
+            let mut closest = KClosestNodes::new(&rt, target, KBucket::MAX_ENTRIES * 3);
             closest.set_filter(|entry| entry.eligible_for_local_lookup());
             closest.fill();
             closest.into()
@@ -116,13 +102,12 @@ pub(crate) trait LookupTask: Task {
         self.add(entries);
     }
 
-
     fn remove_candidate(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         self.lookup_data_mut().candidates.remove(id)
     }
 
     fn next_candidate(&mut self) -> Option<Rc<RefCell<CandidateNode>>> {
-       self.lookup_data_mut().candidates.next()
+        self.lookup_data_mut().candidates.next()
     }
 
     fn add_closest(&mut self, cn: Rc<RefCell<CandidateNode>>) {
@@ -151,14 +136,16 @@ pub(crate) trait LookupTask: Task {
         if data.candidates.size() == 0 {
             return true;
         }
-        data.closest.is_eligible() && data.target.three_way_compare(
-            &data.closest.tail(), &data.candidates.head()
-        ).is_le()
+        data.closest.is_eligible()
+            && data
+                .target
+                .three_way_compare(&data.closest.tail(), &data.candidates.head())
+                .is_le()
     }
 
     fn call_error(&mut self, call: &RpcCall) {
         let id = call.target().id();
-        let _  = self.remove_candidate(&id);
+        let _ = self.remove_candidate(&id);
     }
 
     fn call_timeout(&mut self, call: &RpcCall) {
@@ -173,7 +160,7 @@ pub(crate) trait LookupTask: Task {
                 } else {
                     cn.borrow_mut().clear_sent();
                 }
-            },
+            }
             _ => {
                 let _ = self.remove_candidate(&id);
             }
@@ -188,7 +175,7 @@ pub(crate) trait LookupTask: Task {
 
         cn.borrow_mut().set_replied();
 
-        let rsp  = call.rsp().expect("no response set.");
+        let rsp = call.rsp().expect("no response set.");
         let body = rsp.body().expect("no message body in response.");
         let token = match body {
             Body::FindNodeResponse(body) => body.token(),

@@ -1,46 +1,42 @@
-use std::cell::UnsafeCell;
-use std::time::{Duration, SystemTime};
 use diesel::prelude::*;
 use log::warn;
+use std::cell::UnsafeCell;
+use std::time::{Duration, SystemTime};
 
-use crate::{
-    as_ms,
-    Id,
-    Error,
-    PeerInfo,
-    Value,
-    Result,
-    errors::{StateError, ArgumentError},
-};
 use crate::core::cryptobox::Nonce;
 use crate::dht::storage::{
-    user_version,
-    drop_tbs,
     create_tbs,
-    put_value,
-    get_value,
-    get_values,
-    get_values_announced_before,
-    //get_values_paginated,
-    update_value_announced_time,
-    remove_value,
-    remove_expired_values,
-    put_peer,
+    data_storage::DataStorage,
+    drop_tbs,
     get_peer,
-    get_peers_by_id,
-    get_peers_with_expected_seq,
-    get_peers_authenticated_by,
-    get_peers_announced_before,
     //get_peers_paginated,
     //get_peers_paginated_and_announced_before,
     get_peers_all,
-    update_peer_announced_time,
-    remove_peer,
-    remove_peers_by_id,
+    get_peers_announced_before,
+    get_peers_authenticated_by,
+    get_peers_by_id,
+    get_peers_with_expected_seq,
+    get_value,
+    get_values,
+    get_values_announced_before,
+    models::{NewPeer, NewValore, Peer as DbPeer, Valore},
+    put_peer,
+    put_value,
     remove_expired_peers,
 
-    data_storage::DataStorage,
-    models::{Valore, NewValore, Peer as DbPeer, NewPeer}
+    remove_expired_values,
+    remove_peer,
+    remove_peers_by_id,
+    remove_value,
+    update_peer_announced_time,
+    //get_values_paginated,
+    update_value_announced_time,
+    user_version,
+};
+use crate::{
+    as_ms,
+    errors::{ArgumentError, StateError},
+    Error, Id, PeerInfo, Result, Value,
 };
 
 fn db_err(e: impl std::fmt::Display) -> Error {
@@ -58,7 +54,7 @@ impl SqliteStorage {
         Self {
             connection: UnsafeCell::new(None),
             value_expiry: Duration::MAX,
-            peer_expiry:  Duration::MAX,
+            peer_expiry: Duration::MAX,
         }
     }
 
@@ -78,9 +74,15 @@ unsafe impl Sync for SqliteStorage {}
 
 fn valore_to_value(v: Valore) -> Value {
     Value::packed(
-        v.publicKey.as_ref().map(|pk| Id::try_from(pk.as_slice()).unwrap()),
-        v.recipient.as_ref().map(|r|  Id::try_from(r.as_slice()).unwrap()),
-        v.nonce.as_ref().map(|n| Nonce::try_from(n.as_slice()).unwrap()),
+        v.publicKey
+            .as_ref()
+            .map(|pk| Id::try_from(pk.as_slice()).unwrap()),
+        v.recipient
+            .as_ref()
+            .map(|r| Id::try_from(r.as_slice()).unwrap()),
+        v.nonce
+            .as_ref()
+            .map(|n| Nonce::try_from(n.as_slice()).unwrap()),
         v.signature,
         v.data,
         v.sequenceNumber,
@@ -105,7 +107,9 @@ impl DataStorage for SqliteStorage {
         let conn = SqliteConnection::establish(path)
             .map_err(|e| StateError::new(format!("Failed to open SQLite at '{}': {}", path, e)))?;
 
-        unsafe { *self.connection.get() = Some(conn); }
+        unsafe {
+            *self.connection.get() = Some(conn);
+        }
 
         let ver = user_version(self.conn());
         if ver < 5 && !drop_tbs(self.conn()) {
@@ -117,23 +121,22 @@ impl DataStorage for SqliteStorage {
         Ok(())
     }
 
-    fn initialize(&mut self,
-        value_expiry: Duration,
-        peer_expiry: Duration
-    ) -> Result<()> {
+    fn initialize(&mut self, value_expiry: Duration, peer_expiry: Duration) -> Result<()> {
         self.value_expiry = value_expiry;
-        self.peer_expiry  = peer_expiry;
+        self.peer_expiry = peer_expiry;
         Ok(())
     }
 
     fn close(&mut self) {
-        unsafe { *self.connection.get() = None; }
+        unsafe {
+            *self.connection.get() = None;
+        }
     }
 
     fn purge(&mut self) {
-        let now          = as_ms!(SystemTime::now()) as i64;
+        let now = as_ms!(SystemTime::now()) as i64;
         let value_cutoff = now - self.value_expiry.as_millis() as i64;
-        let peer_cutoff  = now - self.peer_expiry.as_millis() as i64;
+        let peer_cutoff = now - self.peer_expiry.as_millis() as i64;
 
         let _ = remove_expired_values(self.conn(), value_cutoff)
             .map_err(|e| warn!("Purging expired values failed: {}", e));
@@ -147,20 +150,18 @@ impl DataStorage for SqliteStorage {
         let now = as_ms!(SystemTime::now()) as i64;
         let value_id = value.id();
         let v = NewValore {
-            id:             value_id.as_bytes(),
-            publicKey:      value.public_key().map(|pk| pk.as_bytes()),
-            privateKey:     value.private_key().map(|sk| sk.as_bytes()),
-            recipient:      value.recipient().map(|r| r.as_bytes()),
-            nonce:          value.nonce().map(|n| n.as_bytes()),
-            signature:      value.signature(),
-            data:           value.data(),
+            id: value_id.as_bytes(),
+            publicKey: value.public_key().map(|pk| pk.as_bytes()),
+            privateKey: value.private_key().map(|sk| sk.as_bytes()),
+            recipient: value.recipient().map(|r| r.as_bytes()),
+            nonce: value.nonce().map(|n| n.as_bytes()),
+            signature: value.signature(),
+            data: value.data(),
             sequenceNumber: value.sequence_number(),
             persistent,
-            updated:        now,
+            updated: now,
         };
-        put_value(self.conn(), v)
-            .map(|_| ())
-            .map_err(db_err)
+        put_value(self.conn(), v).map(|_| ()).map_err(db_err)
     }
 
     fn get_value(&self, id: &Id) -> Result<Option<Value>> {
@@ -178,18 +179,14 @@ impl DataStorage for SqliteStorage {
     fn get_values_announced_before(
         &self,
         persistent: bool,
-        announced_before: u64
+        announced_before: u64,
     ) -> Result<Vec<Value>> {
         get_values_announced_before(self.conn(), persistent, announced_before as i64)
             .map(|vs| vs.into_iter().map(valore_to_value).collect())
             .map_err(db_err)
     }
 
-    fn get_values_paginated(
-        &self,
-        _offset: usize,
-        _limit: usize
-    ) -> Result<Vec<Value>> {
+    fn get_values_paginated(&self, _offset: usize, _limit: usize) -> Result<Vec<Value>> {
         unimplemented!()
     }
 
@@ -213,21 +210,19 @@ impl DataStorage for SqliteStorage {
         }
         let now = as_ms!(SystemTime::now()) as i64;
         let p = NewPeer {
-            id:             peer.id().as_bytes(),
-            fingerprint:    peer.fingerprint() as i64,
-            privateKey:     peer.private_key().map(|sk| sk.as_bytes()),
+            id: peer.id().as_bytes(),
+            fingerprint: peer.fingerprint() as i64,
+            privateKey: peer.private_key().map(|sk| sk.as_bytes()),
             sequenceNumber: peer.sequence_number(),
-            nodeId:         peer.nodeid().map(|n| n.as_bytes()),
-            nodeSignature:  peer.node_signature(),
-            signature:      peer.signature(),
-            endpoint:       peer.endpoint(),
-            extra:          peer.extra_data(),
+            nodeId: peer.nodeid().map(|n| n.as_bytes()),
+            nodeSignature: peer.node_signature(),
+            signature: peer.signature(),
+            endpoint: peer.endpoint(),
+            extra: peer.extra_data(),
             persistent,
-            updated:        now,
+            updated: now,
         };
-        put_peer(self.conn(), p)
-            .map(|_| ())
-            .map_err(db_err)
+        put_peer(self.conn(), p).map(|_| ()).map_err(db_err)
     }
 
     fn put_peers(&mut self, peers_in: Vec<PeerInfo>) -> Result<()> {
@@ -249,7 +244,12 @@ impl DataStorage for SqliteStorage {
             .map_err(db_err)
     }
 
-    fn get_peers_with_expected_seq(&self, id: &Id, expected_seq: i32, limit: i32) -> Result<Vec<PeerInfo>> {
+    fn get_peers_with_expected_seq(
+        &self,
+        id: &Id,
+        expected_seq: i32,
+        limit: i32,
+    ) -> Result<Vec<PeerInfo>> {
         get_peers_with_expected_seq(self.conn(), id.as_bytes(), expected_seq, limit as i64)
             .map(|ps| ps.into_iter().map(db_peer_to_info).collect())
             .map_err(db_err)
@@ -261,27 +261,26 @@ impl DataStorage for SqliteStorage {
             .map_err(db_err)
     }
 
-    fn get_peers_announced_before(&self,
+    fn get_peers_announced_before(
+        &self,
         persistent: bool,
-        announced_before: u64
+        announced_before: u64,
     ) -> Result<Vec<PeerInfo>> {
         get_peers_announced_before(self.conn(), persistent, announced_before as i64)
             .map(|vs| vs.into_iter().map(db_peer_to_info).collect())
             .map_err(db_err)
     }
 
-    fn get_peers_paginated(&self,
-        _offset: usize,
-        _limit: usize
-    ) -> Result<Vec<PeerInfo>> {
+    fn get_peers_paginated(&self, _offset: usize, _limit: usize) -> Result<Vec<PeerInfo>> {
         unimplemented!()
     }
 
-    fn get_peers_paginated_and_announced_before(&self,
+    fn get_peers_paginated_and_announced_before(
+        &self,
         _offset: usize,
         _limit: usize,
         _persistent: bool,
-        _announced_before: u64
+        _announced_before: u64,
     ) -> Result<Vec<PeerInfo>> {
         unimplemented!()
     }

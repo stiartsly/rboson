@@ -1,18 +1,10 @@
-use std::{
-    any::Any,
-    rc::Rc,
-    cell::RefCell,
-    collections::VecDeque,
-};
-use crate::{
-    PeerInfo,
-    EasyHandler,
-};
 use crate::dht::{
     dht::DHT,
     msg::msg,
-    task::{ClosestSet, CandidateNode,Task, TaskData}
+    task::{CandidateNode, ClosestSet, Task, TaskData},
 };
+use crate::{EasyHandler, PeerInfo};
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
 pub(crate) struct PeerAnnounceTask {
     base_data: TaskData,
@@ -27,18 +19,13 @@ pub(crate) struct PeerAnnounceTask {
 const MAX_TODO_ENTRIES: usize = 24;
 
 impl PeerAnnounceTask {
-    pub(crate) fn new(
-        dht: Rc<DHT>,
-        peer: PeerInfo,
-        expected_seq: i32
-    ) -> Self {
+    pub(crate) fn new(dht: Rc<DHT>, peer: PeerInfo, expected_seq: i32) -> Self {
         Self {
             dht,
             base_data: TaskData::new(),
             peer,
-            todo: Rc::new(RefCell::new(
-                VecDeque::with_capacity(MAX_TODO_ENTRIES))),
-            expected_seq
+            todo: Rc::new(RefCell::new(VecDeque::with_capacity(MAX_TODO_ENTRIES))),
+            expected_seq,
         }
     }
 
@@ -93,7 +80,8 @@ impl Task for PeerAnnounceTask {
 
             let token = cn.borrow().token();
             if token == 0 {
-                log::warn!("{}#{} skip announcing to {} due to missing token",
+                log::warn!(
+                    "{}#{} skip announcing to {} due to missing token",
                     self.task_name(),
                     self.task_id(),
                     cn.borrow().id(),
@@ -102,9 +90,7 @@ impl Task for PeerAnnounceTask {
                 continue;
             }
 
-            let msg = msg::announce_peer_request(
-                self.peer.clone(), token, self.expected_seq,
-            );
+            let msg = msg::announce_peer_request(self.peer.clone(), token, self.expected_seq);
 
             let cloned_todo = self.todo.clone();
             let cb = EasyHandler::new(move |_| {
@@ -115,7 +101,6 @@ impl Task for PeerAnnounceTask {
     }
 
     fn is_done(&self) -> bool {
-        self.todo.borrow().is_empty() &&
-            self.data().is_done()
+        self.todo.borrow().is_empty() && self.data().is_done()
     }
 }

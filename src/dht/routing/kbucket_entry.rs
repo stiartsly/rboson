@@ -1,35 +1,29 @@
+use crate::{core::version, dht::rpc::TargetInfo, Id, NodeInfo};
+use serde::{Deserialize, Serialize};
 use std::{
+    cmp::{max, min},
     fmt,
-    cmp::{min, max},
     net::SocketAddr,
-    time::{Duration, SystemTime}
-};
-use serde::{Serialize, Deserialize};
-use crate::{
-    Id,
-    NodeInfo,
-    core::version,
-    dht::rpc::TargetInfo,
+    time::{Duration, SystemTime},
 };
 
 /**
  * Entry in a KBucket, it basically contains an IP address of a node,
  * the UDP port of the node and a node id.
  */
-#[derive(Clone, Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(into = "SerdeKbucketEntry", from = "SerdeKbucketEntry")]
 pub(crate) struct KBucketEntry {
-    ni          : NodeInfo,
+    ni: NodeInfo,
 
-    created     : SystemTime,
-    last_seen   : SystemTime,
-    last_sent   : SystemTime,
+    created: SystemTime,
+    last_seen: SystemTime,
+    last_sent: SystemTime,
 
-    reachable   : bool,
-    failed_reqs : i32,
+    reachable: bool,
+    failed_reqs: i32,
 
-    ver         : i32,
+    ver: i32,
 }
 
 impl KBucketEntry {
@@ -43,12 +37,12 @@ impl KBucketEntry {
         let now = SystemTime::now();
         Self {
             ni: NodeInfo::new(id, addr),
-            created     : now,
-            last_seen   : now,
-            last_sent   : SystemTime::UNIX_EPOCH,
-            reachable   : false,
-            failed_reqs : 0,
-            ver         : 0,
+            created: now,
+            last_seen: now,
+            last_sent: SystemTime::UNIX_EPOCH,
+            reachable: false,
+            failed_reqs: 0,
+            ver: 0,
         }
     }
 
@@ -72,7 +66,6 @@ impl KBucketEntry {
     pub(crate) fn created_time(&self) -> &SystemTime {
         &self.created
     }
-
 
     #[allow(unused)]
     pub(crate) fn last_seen(&self) -> &SystemTime {
@@ -104,14 +97,12 @@ impl KBucketEntry {
         // allow implicit initial ping during lookups
         // TO~DO: make this work now that we don't keep unverified entries
         // in the main bucket
-        (self.reachable && self.failed_reqs <= 3) ||
-            self.failed_reqs <= 0
+        (self.reachable && self.failed_reqs <= 3) || self.failed_reqs <= 0
     }
 
     fn backoff(&self) -> u64 {
         // Assertion in test case will guard the MAX_FAILURES not causing overflow
-        Self::PING_BACKOFF_BASE_INTERVAL
-            << min(Self::MAX_FAILURES, max(0, self.failed_reqs - 1))
+        Self::PING_BACKOFF_BASE_INTERVAL << min(Self::MAX_FAILURES, max(0, self.failed_reqs - 1))
     }
 
     #[allow(unused)]
@@ -144,8 +135,9 @@ impl KBucketEntry {
         // don't ping if recently seen to allow NAT entries to time out
         // see https://arxiv.org/pdf/1605.05606v1.pdf for numbers
         // and do exponential backoff after failures to reduce traffic
-        if crate::elapsed_ms!(self.last_seen) < 30 * 1000 ||
-            self.within_backoff_window_at(&self.last_seen) {
+        if crate::elapsed_ms!(self.last_seen) < 30 * 1000
+            || self.within_backoff_window_at(&self.last_seen)
+        {
             return false;
         }
 
@@ -159,34 +151,34 @@ impl KBucketEntry {
     }
 
     ///Determines if this entry can be removed from the routing table without needing replacement.
-	///
+    ///
     /// Entries with too many failed requests and which have not been seen since the last request
-	/// sent are considered removable.
-	///
-	/// `true` if removable without replacement; `false` otherwise.
+    /// sent are considered removable.
+    ///
+    /// `true` if removable without replacement; `false` otherwise.
     ///
     pub(crate) fn removable_without_replacement(&self) -> bool {
         // some non-reachable nodes may contact us repeatedly, bumping the last seen
-		// counter. they might be interesting to keep around so we can keep track of the
-		// backoff interval to not waste pings on them
-		// but things we haven't heard from in a while can be discarded
+        // counter. they might be interesting to keep around so we can keep track of the
+        // backoff interval to not waste pings on them
+        // but things we haven't heard from in a while can be discarded
         let seen_since_last_sent = self.last_seen > self.last_sent;
         self.failed_reqs > Self::MAX_FAILURES && !seen_since_last_sent
     }
 
     ///
-	/// Determines if this entry needs to be replaced in the routing table.
-	/// Replacement is needed:
+    /// Determines if this entry needs to be replaced in the routing table.
+    /// Replacement is needed:
     /// - if the node is unreachable with more than one failed request,
-	/// - if it exceeds maximum allowed timeouts, or
+    /// - if it exceeds maximum allowed timeouts, or
     /// - if it is old and stale.
-	///
-	/// `true` if replacement is needed; `false` otherwise.
+    ///
+    /// `true` if replacement is needed; `false` otherwise.
     ///
     pub(crate) fn needs_replacement(&self) -> bool {
-        (self.failed_reqs > 1 && !self.is_reachable()) ||
-            self.failed_reqs > Self::MAX_FAILURES ||
-            self.old_and_stale()
+        (self.failed_reqs > 1 && !self.is_reachable())
+            || self.failed_reqs > Self::MAX_FAILURES
+            || self.old_and_stale()
     }
 
     pub(crate) fn merge(&mut self, entry: Self) {
@@ -201,9 +193,9 @@ impl KBucketEntry {
             self.set_reachable(true);
         }
 
-        self.created    = self.created.min(entry.created);
-        self.last_seen  = self.last_seen.max(entry.last_seen);
-        self.last_sent  = self.last_sent.max(entry.last_sent);
+        self.created = self.created.min(entry.created);
+        self.last_seen = self.last_seen.max(entry.last_seen);
+        self.last_sent = self.last_sent.max(entry.last_sent);
     }
 
     pub(crate) fn on_request_sent(&mut self) {
@@ -271,17 +263,17 @@ impl TargetInfo for KBucketEntry {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeKbucketEntry {
-    #[serde(rename="nodeinfo")]
+    #[serde(rename = "nodeinfo")]
     ni: NodeInfo,
-    #[serde(rename="created")]
+    #[serde(rename = "created")]
     created: u64,
-    #[serde(rename="lastSeen")]
+    #[serde(rename = "lastSeen")]
     last_seen: u64,
-    #[serde(rename="lastSent")]
+    #[serde(rename = "lastSent")]
     last_sent: u64,
-    #[serde(rename="reachable")]
+    #[serde(rename = "reachable")]
     reachable: bool,
-    #[serde(rename="version")]
+    #[serde(rename = "version")]
     ver: i32,
 }
 
@@ -289,36 +281,35 @@ impl Into<SerdeKbucketEntry> for KBucketEntry {
     fn into(self) -> SerdeKbucketEntry {
         SerdeKbucketEntry {
             ni: self.ni,
-            created     : crate::as_ms!(self.created) as u64,
-            last_seen   : crate::as_ms!(self.last_seen) as u64,
-            last_sent   : crate::as_ms!(self.last_sent) as u64,
-            reachable   : self.reachable,
-            ver         : self.ver
+            created: crate::as_ms!(self.created) as u64,
+            last_seen: crate::as_ms!(self.last_seen) as u64,
+            last_sent: crate::as_ms!(self.last_sent) as u64,
+            reachable: self.reachable,
+            ver: self.ver,
         }
     }
 }
 
 impl From<SerdeKbucketEntry> for KBucketEntry {
     fn from(ser: SerdeKbucketEntry) -> Self {
-        let convert_cb = |ms | -> SystemTime {
-            SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
-        };
+        let convert_cb = |ms| -> SystemTime { SystemTime::UNIX_EPOCH + Duration::from_millis(ms) };
 
         Self {
-            ni          : ser.ni,
-            created     : convert_cb(ser.created),
-            last_seen   : convert_cb(ser.last_seen),
-            last_sent   : convert_cb(ser.last_sent),
-            reachable   : ser.reachable,
-            failed_reqs : 0,
-            ver         : ser.ver
+            ni: ser.ni,
+            created: convert_cb(ser.created),
+            last_seen: convert_cb(ser.last_seen),
+            last_sent: convert_cb(ser.last_sent),
+            reachable: ser.reachable,
+            failed_reqs: 0,
+            ver: ser.ver,
         }
     }
 }
 
 impl fmt::Display for KBucketEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
+        write!(
+            f,
             "{}@{};seen:{}; age:{}",
             self.ni.id(),
             self.ni.address(),
@@ -336,10 +327,7 @@ impl fmt::Display for KBucketEntry {
             write!(f, "; reachable")?;
         }
         if self.ver != 0 {
-            write!(f,
-                "; ver: {}",
-                version::format_version(self.ver)
-            )?;
+            write!(f, "; ver: {}", version::format_version(self.ver))?;
         }
         Ok(())
     }

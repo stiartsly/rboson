@@ -1,18 +1,18 @@
-use super::{
-    rpccall::{RpcCall, State},
-};
+use super::rpccall::{RpcCall, State};
 
 #[derive(Default)]
 pub(crate) struct Listener {
     state_change_fn: Option<Box<dyn Fn(&RpcCall, State, State)>>,
-    response_fn:     Option<Box<dyn Fn(&RpcCall)>>,
-    stall_fn:        Option<Box<dyn Fn(&RpcCall)>>,
-    timeout_fn:      Option<Box<dyn Fn(&RpcCall)>>,
+    response_fn: Option<Box<dyn Fn(&RpcCall)>>,
+    stall_fn: Option<Box<dyn Fn(&RpcCall)>>,
+    timeout_fn: Option<Box<dyn Fn(&RpcCall)>>,
 }
 
 impl Listener {
     pub(crate) fn new<F>(f: F) -> Self
-    where F: Fn(&RpcCall, State, State) + 'static {
+    where
+        F: Fn(&RpcCall, State, State) + 'static,
+    {
         Self {
             state_change_fn: Some(Box::new(f)),
             response_fn: None,
@@ -23,21 +23,27 @@ impl Listener {
 
     #[allow(unused)]
     pub(crate) fn response_fn<F>(&mut self, f: F) -> &mut Self
-    where F: Fn(&RpcCall) + 'static {
-        self.response_fn  = Some(Box::new(f));
+    where
+        F: Fn(&RpcCall) + 'static,
+    {
+        self.response_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
     pub(crate) fn stall_fn<F>(&mut self, f: F) -> &mut Self
-    where F: Fn(&RpcCall) + 'static {
+    where
+        F: Fn(&RpcCall) + 'static,
+    {
         self.stall_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
     pub(crate) fn timeout_fn<F>(&mut self, f: F) -> &mut Self
-    where F: Fn(&RpcCall) + 'static {
+    where
+        F: Fn(&RpcCall) + 'static,
+    {
         self.timeout_fn = Some(Box::new(f));
         self
     }

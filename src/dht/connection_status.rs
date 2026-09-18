@@ -12,7 +12,7 @@ impl fmt::Display for ConnectionStatus {
         f.write_str(match *self {
             ConnectionStatus::Disconnected => "Disconnected",
             ConnectionStatus::Connecting => "Connecting",
-            ConnectionStatus::Connected => "Connected"
+            ConnectionStatus::Connected => "Connected",
         })
     }
 }

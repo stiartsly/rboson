@@ -1,18 +1,15 @@
+use indexmap::map::IndexMap;
 use std::{
-    fmt,
-    rc::Rc,
     cell::RefCell,
     cmp::Ordering,
     collections::HashSet,
+    fmt,
     net::{IpAddr, SocketAddr},
+    rc::Rc,
 };
-use indexmap::map::IndexMap;
 
+use crate::dht::{rpc::TargetInfo, task::candidate_node::CandidateNode};
 use crate::Id;
-use crate::dht::{
-    rpc::TargetInfo,
-    task::candidate_node::CandidateNode,
-};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum DedupKey {
@@ -39,9 +36,9 @@ impl ClosestCandidates {
         Self {
             target,
             capacity,
-            dedups_ids      : HashSet::new(),
-            dedups_addrs    : HashSet::new(),
-            closest         : IndexMap::new(),
+            dedups_ids: HashSet::new(),
+            dedups_addrs: HashSet::new(),
+            closest: IndexMap::new(),
             developer_mode,
         }
     }
@@ -66,11 +63,14 @@ impl ClosestCandidates {
         }
     }
 
-    pub(crate) fn add(&mut self, entries: Vec<CandidateNode>)
-    {
+    pub(crate) fn add(&mut self, entries: Vec<CandidateNode>) {
         for item in entries {
-            if self.reached_capacity() &&
-                !self.closest.values().any(|candidate| !candidate.borrow().is_inflight()) {
+            if self.reached_capacity()
+                && !self
+                    .closest
+                    .values()
+                    .any(|candidate| !candidate.borrow().is_inflight())
+            {
                 break;
             }
 
@@ -96,12 +96,14 @@ impl ClosestCandidates {
         }
 
         // shrink to fit.
-        let mut filtered = self.closest.values().filter(|cn|
-            !cn.borrow().is_inflight()
-        ).cloned().collect::<Vec<_>>();
+        let mut filtered = self
+            .closest
+            .values()
+            .filter(|cn| !cn.borrow().is_inflight())
+            .cloned()
+            .collect::<Vec<_>>();
 
-        filtered.sort_by(|a, b|
-            Self::candidate_order(&self.target, a, b));
+        filtered.sort_by(|a, b| Self::candidate_order(&self.target, a, b));
 
         while self.closest.len() > self.capacity {
             let Some(cn) = filtered.pop() else {
@@ -117,7 +119,6 @@ impl ClosestCandidates {
                 let addr = borrowed.addr();
                 let key = self.dedup_key(addr);
                 self.dedups_addrs.remove(&key);
-
             }
         }
     }
@@ -125,15 +126,15 @@ impl ClosestCandidates {
     fn candidate_order(
         target: &Id,
         a: &Rc<RefCell<CandidateNode>>,
-        b: &Rc<RefCell<CandidateNode>>
+        b: &Rc<RefCell<CandidateNode>>,
     ) -> Ordering {
         let id_a = a.borrow().id().clone();
         let id_b = b.borrow().id().clone();
 
         match target.three_way_compare(&id_a, &id_b) {
-            Ordering::Less      => Ordering::Less,
-            Ordering::Greater   => Ordering::Greater,
-            Ordering::Equal     => {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => {
                 let pinged_a = a.borrow().pinged();
                 let pinged_b = b.borrow().pinged();
                 pinged_a.cmp(&pinged_b)
@@ -151,38 +152,41 @@ impl ClosestCandidates {
     }
 
     pub(crate) fn next(&self) -> Option<Rc<RefCell<CandidateNode>>> {
-        self.closest.values().filter(|cn|
-            cn.borrow().is_eligible()
-        ).min_by(|left, right|
-            Self::candidate_order(&self.target, left, right)
-        ).cloned()
+        self.closest
+            .values()
+            .filter(|cn| cn.borrow().is_eligible())
+            .min_by(|left, right| Self::candidate_order(&self.target, left, right))
+            .cloned()
     }
 
     pub(crate) fn tail(&self) -> Id {
         match self.closest.last() {
             Some((id, _)) => id.clone(),
-            _ => self.target.distance(&Id::MAX_ID)
+            _ => self.target.distance(&Id::MAX_ID),
         }
     }
 
     pub(crate) fn head(&self) -> Id {
         match self.closest.first() {
             Some((id, _)) => id.clone(),
-            _ => self.target.distance(&Id::MAX_ID)
+            _ => self.target.distance(&Id::MAX_ID),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn remove_if<F>(&mut self,  _filter: F)
-    where F: Fn(&Rc<RefCell<CandidateNode>>) -> bool
+    pub(crate) fn remove_if<F>(&mut self, _filter: F)
+    where
+        F: Fn(&Rc<RefCell<CandidateNode>>) -> bool,
     {
         if self.is_empty() {
             return;
         }
 
-        let ids = self.closest.iter().filter_map(|(id, cn)|
-            _filter(cn).then_some(id.clone())
-        ).collect::<Vec<_>>();
+        let ids = self
+            .closest
+            .iter()
+            .filter_map(|(id, cn)| _filter(cn).then_some(id.clone()))
+            .collect::<Vec<_>>();
 
         for id in ids {
             _ = self.closest.shift_remove(&id);

@@ -1,14 +1,7 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-    net::SocketAddr
-};
+use std::{cell::RefCell, net::SocketAddr, rc::Rc};
 
+use crate::dht::{routing::KBucketEntry, task::CandidateNode};
 use crate::{Id, NodeInfo};
-use crate::dht::{
-    routing::KBucketEntry,
-    task::CandidateNode,
-};
 
 impl Into<Target> for NodeInfo {
     fn into(self) -> Target {
@@ -29,8 +22,12 @@ impl Into<Target> for Rc<RefCell<CandidateNode>> {
 }
 
 pub(crate) trait TargetInfo {
-    fn is_reachable(&self) -> bool { false }
-    fn is_unreachable(&self) -> bool { false }
+    fn is_reachable(&self) -> bool {
+        false
+    }
+    fn is_unreachable(&self) -> bool {
+        false
+    }
     fn set_reachable(&mut self, _: bool) {}
 
     fn ni(&self) -> NodeInfo;
@@ -59,7 +56,7 @@ impl Target {
         match self {
             Target::Candidate(v) => *v.borrow().id(),
             Target::KBucketEntry(v) => *v.id(),
-            Target::NodeInfo(v) => *v.id()
+            Target::NodeInfo(v) => *v.id(),
         }
     }
 
@@ -68,7 +65,7 @@ impl Target {
         match self {
             Target::Candidate(v) => *v.borrow().addr(),
             Target::KBucketEntry(v) => *v.addr(),
-            Target::NodeInfo(v) => *v.address()
+            Target::NodeInfo(v) => *v.address(),
         }
     }
 }
@@ -110,8 +107,9 @@ impl TargetInfo for Target {
         match self {
             Target::Candidate(_v) => {
                 panic!("N/A");
-                #[allow(unused)]_v.borrow().addr()
-            },
+                #[allow(unused)]
+                _v.borrow().addr()
+            }
             Target::KBucketEntry(v) => v.addr(),
             Target::NodeInfo(v) => v.address(),
         }

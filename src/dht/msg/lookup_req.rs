@@ -6,20 +6,20 @@ pub(crate) const WANT_TOKEN_MASK: i32 = 0x04;
 
 #[derive(Clone)]
 pub(crate) struct Data {
-    target  : Id,
-    want4   : bool,
-    want6   : bool,
+    target: Id,
+    want4: bool,
+    want6: bool,
     want_token: bool,
 }
 
 impl Data {
-    pub(crate) fn new(
-        target: Id,
-        want4: bool,
-        want6: bool,
-        want_token: bool
-    ) -> Self {
-        Self {target, want4, want6, want_token}
+    pub(crate) fn new(target: Id, want4: bool, want6: bool, want_token: bool) -> Self {
+        Self {
+            target,
+            want4,
+            want6,
+            want_token,
+        }
     }
 }
 
@@ -43,8 +43,8 @@ pub(crate) trait LookupRequest {
     }
 
     fn want(&self) -> i32 {
-        (if self.want4() { 0x01 } else { 0x00 }) |
-        (if self.want6() { 0x02 } else { 0x00 }) |
-        (if self.want_token() { 0x04 } else { 0x00 })
+        (if self.want4() { 0x01 } else { 0x00 })
+            | (if self.want6() { 0x02 } else { 0x00 })
+            | (if self.want_token() { 0x04 } else { 0x00 })
     }
 }

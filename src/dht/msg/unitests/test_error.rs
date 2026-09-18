@@ -10,11 +10,9 @@ mod tests {
         assert_eq!(err.code(), 500);
         assert_eq!(err.description(), "example error");
 
-        let encoded = serde_cbor::to_vec(&err)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&err).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded = serde_cbor::from_slice::<Error>(&encoded)
-            .expect("Deserialization failed");
+        let decoded = serde_cbor::from_slice::<Error>(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 500);
         assert_eq!(decoded.description(), "example error");
@@ -26,11 +24,9 @@ mod tests {
         assert_eq!(err.code(), 404);
         assert_eq!(err.description(), "");
 
-        let encoded = serde_cbor::to_vec(&err)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&err).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded = serde_cbor::from_slice::<Error>(&encoded)
-            .expect("Deserialization failed");
+        let decoded = serde_cbor::from_slice::<Error>(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.code(), 404);
         assert_eq!(decoded.description(), "");

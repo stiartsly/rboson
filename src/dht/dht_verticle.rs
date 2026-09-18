@@ -1,41 +1,31 @@
-use std::{
-    rc::Rc,
-    pin::Pin,
-    path::PathBuf,
-    result::Result as StdResult,
-    sync::{mpsc as std_mpsc, Arc, Mutex},
-    thread::JoinHandle,
-    future::Future,
-};
 use futures::{
-    stream::{FuturesUnordered, StreamExt },
+    stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
 use log::{error, info};
+use std::{
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    rc::Rc,
+    result::Result as StdResult,
+    sync::{mpsc as std_mpsc, Arc, Mutex},
+    thread::JoinHandle,
+};
 use tokio::{
-    task,
     runtime,
-    sync::{mpsc,oneshot},
+    sync::{mpsc, oneshot},
+    task,
 };
 
-use crate::{
-    CryptoIdentity,
-    Id, Network, NodeInfo,
-    PeerInfo, Value,
-    Result,
-    errors::StateError,
-    LocalBoxTimerClient as TimerClient,
-    LocalBoxTimerCmd as TimerCmd,
-    LocalBoxTimerManager as TimerManager,
-    Promise
-};
 use crate::dht::{
-    ConnectionStatusListener,
-    dht::DHT,
-    lookup_option::LookupOption,
-    storage::data_storage::DataStorage,
-    token_manager::TokenManager,
-    rpc::rpc_server::RpcServer,
+    dht::DHT, lookup_option::LookupOption, rpc::rpc_server::RpcServer,
+    storage::data_storage::DataStorage, token_manager::TokenManager, ConnectionStatusListener,
+};
+use crate::{
+    errors::StateError, CryptoIdentity, Id, LocalBoxTimerClient as TimerClient,
+    LocalBoxTimerCmd as TimerCmd, LocalBoxTimerManager as TimerManager, Network, NodeInfo,
+    PeerInfo, Promise, Result, Value,
 };
 
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
@@ -83,9 +73,9 @@ enum CallEvent {
 }
 
 pub(crate) struct VerticleClient {
-    ni          : NodeInfo,
-    event_tx    : mpsc::UnboundedSender<CallEvent>,
-    handle      : Mutex<Option<JoinHandle<()>>>,
+    ni: NodeInfo,
+    event_tx: mpsc::UnboundedSender<CallEvent>,
+    handle: Mutex<Option<JoinHandle<()>>>,
 }
 type CmdResult<T> = StdResult<T, String>;
 
@@ -94,10 +84,7 @@ impl VerticleClient {
         self.ni.clone()
     }
 
-    async fn rx_result<T>(
-        &self,
-        rx: oneshot::Receiver<CmdResult<T>>,
-    ) -> Result<T> {
+    async fn rx_result<T>(&self, rx: oneshot::Receiver<CmdResult<T>>) -> Result<T> {
         match rx.await {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(msg)) => Err(StateError::new(msg)),
@@ -105,14 +92,16 @@ impl VerticleClient {
         }
     }
 
-    pub(crate) async fn bootstrap(
-        &self,
-        nodes: Vec<NodeInfo>
-    ) -> Result<()> {
+    pub(crate) async fn bootstrap(&self, nodes: Vec<NodeInfo>) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(
-            CallEvent::Bootstrap { nodes, complete: tx }
-        ).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::Bootstrap {
+                nodes,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -121,14 +110,18 @@ impl VerticleClient {
     pub(crate) async fn find_node(
         &self,
         target: Id,
-        option: LookupOption
+        option: LookupOption,
     ) -> Result<Option<NodeInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::FindNode {
-            target,
-            option,
-            complete: tx
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::FindNode {
+                target,
+                option,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -138,31 +131,35 @@ impl VerticleClient {
         &self,
         target: Id,
         expected_seq: i32,
-        option: LookupOption
+        option: LookupOption,
     ) -> Result<Option<Value>> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::FindValue {
-            target,
-            expected_seq,
-            option,
-            complete: tx,
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::FindValue {
+                target,
+                expected_seq,
+                option,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
     }
 
-    pub(crate) async fn store_value(
-        &self,
-        value: Value,
-        expected_seq: i32
-    ) -> Result<()> {
+    pub(crate) async fn store_value(&self, value: Value, expected_seq: i32) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::StoreValue {
-            value,
-            expected_seq,
-            complete: tx
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::StoreValue {
+                value,
+                expected_seq,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -173,32 +170,36 @@ impl VerticleClient {
         target: Id,
         expected_seq: i32,
         expected_count: usize,
-        option: LookupOption
+        option: LookupOption,
     ) -> Result<Vec<PeerInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::FindPeer {
-            target,
-            expected_seq,
-            expected_count,
-            option,
-            complete: tx,
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::FindPeer {
+                target,
+                expected_seq,
+                expected_count,
+                option,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
     }
 
-    pub(crate) async fn announce_peer(
-        &self,
-        peer: PeerInfo,
-        expected_seq: i32,
-    ) -> Result<()> {
+    pub(crate) async fn announce_peer(&self, peer: PeerInfo, expected_seq: i32) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::AnnouncePeer {
-            peer,
-            expected_seq,
-            complete: tx
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::AnnouncePeer {
+                peer,
+                expected_seq,
+                complete: tx,
+            })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -206,9 +207,11 @@ impl VerticleClient {
 
     async fn start(&mut self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::Start {
-            complete: tx
-        }).is_err() {
+        if self
+            .event_tx
+            .send(CallEvent::Start { complete: tx })
+            .is_err()
+        {
             return Err(StateError::new(CHANNEL_REQ_CLOSED));
         }
         self.rx_result(rx).await
@@ -217,9 +220,11 @@ impl VerticleClient {
     pub(crate) async fn stop(&self) {
         info!("Stopping DHT verticle");
         let (tx, rx) = oneshot::channel();
-        if self.event_tx.send(CallEvent::StopAll {
-            complete: tx
-        }).is_ok() {
+        if self
+            .event_tx
+            .send(CallEvent::StopAll { complete: tx })
+            .is_ok()
+        {
             let _ = rx.await;
         }
 
@@ -232,20 +237,20 @@ impl VerticleClient {
 
 #[derive(Clone)]
 pub(crate) struct VerticleOptions {
-    pub(crate) identity     : Arc<CryptoIdentity>,
-    pub(crate) storage      : Arc<Mutex<dyn DataStorage>>,
-    pub(crate) token_man    : Arc<TokenManager>,
-    pub(crate) listener     : Arc<dyn ConnectionStatusListener>,
-    pub(crate) bootstrap_nodes  : Vec<NodeInfo>,
+    pub(crate) identity: Arc<CryptoIdentity>,
+    pub(crate) storage: Arc<Mutex<dyn DataStorage>>,
+    pub(crate) token_man: Arc<TokenManager>,
+    pub(crate) listener: Arc<dyn ConnectionStatusListener>,
+    pub(crate) bootstrap_nodes: Vec<NodeInfo>,
 }
 
 pub(crate) struct Verticle {
-    dht         : Rc<DHT>,
-    timerman    : TimerManager,
+    dht: Rc<DHT>,
+    timerman: TimerManager,
 
-    event_rx    : mpsc::UnboundedReceiver<CallEvent>,
-    cmd_rx      : mpsc::UnboundedReceiver<TimerCmd>,
-    quit        : bool,
+    event_rx: mpsc::UnboundedReceiver<CallEvent>,
+    cmd_rx: mpsc::UnboundedReceiver<TimerCmd>,
+    quit: bool,
 }
 
 impl Verticle {
@@ -255,7 +260,7 @@ impl Verticle {
         network: Network,
         host: String,
         port: u16,
-        event_rx: mpsc::UnboundedReceiver<CallEvent>
+        event_rx: mpsc::UnboundedReceiver<CallEvent>,
     ) -> Result<Verticle> {
         let data_dir = PathBuf::from(data_dir);
         let persist_file = Some(data_dir.join(match network {
@@ -265,12 +270,7 @@ impl Verticle {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<TimerCmd>();
         let timer_client = Rc::new(TimerClient::new(cmd_tx));
-        let dht = DHT::new(
-            options,
-            network, host, port,
-            persist_file,
-            timer_client
-        );
+        let dht = DHT::new(options, network, host, port, persist_file, timer_client);
 
         let timerman = TimerManager::new();
         Ok(Self {
@@ -293,21 +293,19 @@ impl Verticle {
     fn handle_events(
         &mut self,
         event: CallEvent,
-        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output=()>>>>
+        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
     ) {
         match event {
-            CallEvent::Bootstrap {
-                nodes,
-                complete
-            } => {
+            CallEvent::Bootstrap { nodes, complete } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<()>::pair();
-                    dht.bootstrap(nodes, promise).await;
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<()>::pair();
+                        dht.bootstrap(nodes, promise).await;
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::FindNode {
                 target,
@@ -315,13 +313,14 @@ impl Verticle {
                 complete,
             } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<Option<NodeInfo>>::pair();
-                    dht.find_node(target, option, promise);
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<Option<NodeInfo>>::pair();
+                        dht.find_node(target, option, promise);
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::FindValue {
                 target,
@@ -330,13 +329,14 @@ impl Verticle {
                 complete,
             } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<Option<Value>>::pair();
-                    dht.find_value(target, expected_seq, option, promise);
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<Option<Value>>::pair();
+                        dht.find_value(target, expected_seq, option, promise);
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::StoreValue {
                 value,
@@ -344,13 +344,14 @@ impl Verticle {
                 complete,
             } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<()>::pair();
-                    dht.store_value(value, expected_seq, promise);
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<()>::pair();
+                        dht.store_value(value, expected_seq, promise);
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::FindPeer {
                 target,
@@ -360,13 +361,14 @@ impl Verticle {
                 complete,
             } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
-                    dht.find_peer(target, expected_seq, expected_count, option, promise);
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<Vec<PeerInfo>>::pair();
+                        dht.find_peer(target, expected_seq, expected_count, option, promise);
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::AnnouncePeer {
                 peer,
@@ -374,23 +376,25 @@ impl Verticle {
                 complete,
             } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<()>::pair();
-                    dht.announce_peer(peer, expected_seq, promise);
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<()>::pair();
+                        dht.announce_peer(peer, expected_seq, promise);
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::Start { complete } => {
                 let dht = self.dht.clone();
-                pending.push(async move {
-                    let (promise, future) = Promise::<()>::pair();
-                    let _ = dht.start(promise).await;
-                    let _ = complete.send(
-                        future.await.map_err(|e| format!("{e}"))
-                    );
-                }.boxed_local());
+                pending.push(
+                    async move {
+                        let (promise, future) = Promise::<()>::pair();
+                        let _ = dht.start(promise).await;
+                        let _ = complete.send(future.await.map_err(|e| format!("{e}")));
+                    }
+                    .boxed_local(),
+                );
             }
             CallEvent::StopAll { complete } => {
                 self.quit = true;
@@ -402,11 +406,14 @@ impl Verticle {
 
     fn handle_commands(&mut self, cmd: TimerCmd) {
         match cmd {
-            TimerCmd::Add { timer_id, delay, interval, cb } =>
-                self.timerman.add_timer(timer_id, delay, interval, cb),
+            TimerCmd::Add {
+                timer_id,
+                delay,
+                interval,
+                cb,
+            } => self.timerman.add_timer(timer_id, delay, interval, cb),
 
-            TimerCmd::Cancel { timer_id } =>
-                self.timerman.cancel_timer(timer_id),
+            TimerCmd::Cancel { timer_id } => self.timerman.cancel_timer(timer_id),
 
             TimerCmd::Stop { complete } => {
                 self.timerman.stop_all();
@@ -417,7 +424,7 @@ impl Verticle {
 
     async fn run_loop(mut self) {
         let mut buf = vec![0u8; 2048];
-        let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output=()>>>>::new();
+        let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output = ()>>>>::new();
 
         let cloned_server = self.dht.rs();
         let socket = match cloned_server.rx_tokio_socket() {

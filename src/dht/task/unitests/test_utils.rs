@@ -1,24 +1,16 @@
-use std::{
-    rc::Rc,
-    sync::{Arc, Mutex}
-};
-use tokio::sync::mpsc;
-use crate::{
-    CryptoIdentity,
-    Network,
-    LocalBoxTimerCmd,
-    LocalBoxTimerClient
-};
 use crate::dht::{
+    connection_status_listener::ConnectionStatusListener,
     dht::DHT,
     dht_verticle::VerticleOptions,
+    storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage},
     token_manager::TokenManager,
-    connection_status_listener::ConnectionStatusListener,
-    storage::{
-        data_storage::DataStorage,
-        sqlite_storage::SqliteStorage,
-    },
 };
+use crate::{CryptoIdentity, LocalBoxTimerClient, LocalBoxTimerCmd, Network};
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::mpsc;
 
 struct NoopConnectionStatusListener;
 impl ConnectionStatusListener for NoopConnectionStatusListener {}
@@ -27,7 +19,7 @@ impl ConnectionStatusListener for NoopConnectionStatusListener {}
 /// `host:0` (OS-assigned port), uses an in-memory SQLite store, and
 /// has no bootstrap nodes.
 pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<DHT> {
-    let identity  = Arc::new(CryptoIdentity::new());
+    let identity = Arc::new(CryptoIdentity::new());
     let storage: Arc<Mutex<dyn DataStorage>> = Arc::new(Mutex::new(SqliteStorage::new()));
     let token_man = Arc::new(TokenManager::new());
     let listener: Arc<dyn ConnectionStatusListener> = Arc::new(NoopConnectionStatusListener);

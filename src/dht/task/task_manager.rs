@@ -1,30 +1,31 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-    collections::{HashMap, VecDeque},
-};
 use log::{debug, error};
-
-use crate::EasyHandler;
-use crate::dht::{
-    task::{Task, task::{State, TaskId}}
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+    sync::atomic::{AtomicBool, Ordering},
 };
+
+use crate::dht::task::{
+    task::{State, TaskId},
+    Task,
+};
+use crate::EasyHandler;
 
 const MAX_ACTIVE_TASKS: usize = 8;
 
 pub(crate) struct TaskManager {
-    queued      : RefCell<VecDeque<Rc<RefCell<Box<dyn Task>>>>>,
-    running     : Rc<RefCell<HashMap<TaskId, Rc<RefCell<Box<dyn Task>>>>>>,
-    canceling   : AtomicBool,
+    queued: RefCell<VecDeque<Rc<RefCell<Box<dyn Task>>>>>,
+    running: Rc<RefCell<HashMap<TaskId, Rc<RefCell<Box<dyn Task>>>>>>,
+    canceling: AtomicBool,
 }
 
 impl TaskManager {
     pub(crate) fn new() -> Self {
         Self {
-            queued      : RefCell::new(VecDeque::new()),
-            running     : Rc::new(RefCell::new(HashMap::new())),
-            canceling   : AtomicBool::new(false),
+            queued: RefCell::new(VecDeque::new()),
+            running: Rc::new(RefCell::new(HashMap::new())),
+            canceling: AtomicBool::new(false),
         }
     }
 
@@ -42,22 +43,20 @@ impl TaskManager {
 
         let taskid = task.task_id();
         let manager = Rc::downgrade(self);
-        task.with_ended_handler(
-            EasyHandler ::new(move |_| {
-                let Some(manager) = manager.upgrade() else {
-                    return;
-                };
+        task.with_ended_handler(EasyHandler::new(move |_| {
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
 
-                let _ = manager.running.borrow_mut().remove(&taskid);
-                manager.dequeue();
-            })
-        );
+            let _ = manager.running.borrow_mut().remove(&taskid);
+            manager.dequeue();
+        }));
 
         assert!(task.is_unstarted());
         if !task.set_state_if(&State::Initialized, State::Queued) {
             error!("!Panic: task is not in Initialized state: {}", task);
-			//TODO: call ended handler to avoid task leak
-			return;
+            //TODO: call ended handler to avoid task leak
+            return;
         }
 
         self.enqueue(task, priori);
@@ -66,8 +65,7 @@ impl TaskManager {
 
     #[inline(always)]
     fn is_ready(&self) -> bool {
-        !self.canceling.load(Ordering::SeqCst) &&
-            self.running.borrow().len() < MAX_ACTIVE_TASKS
+        !self.canceling.load(Ordering::SeqCst) && self.running.borrow().len() < MAX_ACTIVE_TASKS
     }
 
     fn enqueue(&self, task: Box<dyn Task>, priori: bool) {
@@ -82,7 +80,7 @@ impl TaskManager {
 
     pub(crate) fn dequeue(&self) {
         while self.is_ready() {
-           let Some(task) = self.queued.borrow_mut().pop_front() else {
+            let Some(task) = self.queued.borrow_mut().pop_front() else {
                 debug!("Queue drained.");
                 break;
             };
@@ -100,7 +98,10 @@ impl TaskManager {
     pub(crate) fn stop(&self) {
         self.canceling.store(true, Ordering::SeqCst);
 
-        let running = self.running.borrow_mut().drain()
+        let running = self
+            .running
+            .borrow_mut()
+            .drain()
             .map(|(_, task)| task)
             .collect::<Vec<_>>();
         let queued = self.queued.borrow_mut().drain(..).collect::<Vec<_>>();

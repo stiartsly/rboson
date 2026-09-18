@@ -1,36 +1,24 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-    cmp::Ordering
-};
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
-use crate::{Id, NodeInfo};
 use crate::dht::{
-    routing::{
-        KBucket,
-        KBucketEntry,
-        RoutingTable
-    },
+    routing::{KBucket, KBucketEntry, RoutingTable},
     rpc::TargetInfo,
 };
+use crate::{Id, NodeInfo};
 
 pub(crate) struct KClosestNodes {
     local_id: Id,
-    buckets : Vec<Rc<RefCell<KBucket>>>,
-    target  : Id,
+    buckets: Vec<Rc<RefCell<KBucket>>>,
+    target: Id,
     capacity: usize,
-    entries : Vec<KBucketEntry>,
-    filter  : Box<dyn Fn(&KBucketEntry) -> bool>
+    entries: Vec<KBucketEntry>,
+    filter: Box<dyn Fn(&KBucketEntry) -> bool>,
 }
 
 impl KClosestNodes {
-    pub(crate) fn new(
-        rt: &Rc<RoutingTable>,
-        target: Id,
-        capacity: usize
-    ) -> Self {
+    pub(crate) fn new(rt: &Rc<RoutingTable>, target: Id, capacity: usize) -> Self {
         let local_id = rt.nodeid().clone();
-        let buckets  = rt.buckets();
+        let buckets = rt.buckets();
         Self {
             filter: Self::default_filter(local_id.clone()),
             local_id,
@@ -68,12 +56,11 @@ impl KClosestNodes {
     }
 
     pub(crate) fn set_filter<F>(&mut self, cb: F)
-    where F: Fn(&KBucketEntry) -> bool + 'static
+    where
+        F: Fn(&KBucketEntry) -> bool + 'static,
     {
         let local_id = self.local_id.clone();
-        self.filter = Box::new(move |entry: &KBucketEntry| {
-            cb(entry) && entry.id() != &local_id
-        });
+        self.filter = Box::new(move |entry: &KBucketEntry| cb(entry) && entry.id() != &local_id);
     }
 
     pub(crate) fn fill(&mut self) {
@@ -86,7 +73,7 @@ impl KClosestNodes {
         let bucket = buckets[idx].clone();
         self.add_entries(&bucket);
 
-        let mut low  = idx;
+        let mut low = idx;
         let mut high = idx;
         let len = buckets.len();
 
@@ -113,24 +100,23 @@ impl KClosestNodes {
                 low -= 1;
                 self.add_entries(low_bucket.as_ref().unwrap());
             } else {
-                let low_bucket  = low_bucket.unwrap();
+                let low_bucket = low_bucket.unwrap();
                 let high_bucket = high_bucket.unwrap();
-                let low_prefix  = low_bucket.borrow().prefix().clone();
+                let low_prefix = low_bucket.borrow().prefix().clone();
                 let high_prefix = high_bucket.borrow().prefix().clone();
 
-                let ordering = self.target.three_way_compare(
-                    &low_prefix.last(),
-                    &high_prefix.first()
-                );
+                let ordering = self
+                    .target
+                    .three_way_compare(&low_prefix.last(), &high_prefix.first());
                 match ordering {
                     Ordering::Less => {
                         low -= 1;
                         self.add_entries(&low_bucket);
-                    },
+                    }
                     Ordering::Greater => {
                         high += 1;
                         self.add_entries(&high_bucket);
-                    },
+                    }
                     Ordering::Equal => {
                         low -= 1;
                         high += 1;
@@ -144,19 +130,18 @@ impl KClosestNodes {
     }
 
     fn add_entries(&mut self, bucket: &Rc<RefCell<KBucket>>) {
-        let bucket  = bucket.borrow();
+        let bucket = bucket.borrow();
         let entries = bucket.entries();
         for item in entries {
             if (self.filter)(&item) {
                 self.entries.push(item)
             }
-        };
+        }
     }
 
     fn shave(&mut self) {
-        self.entries.sort_by(|e1, e2|
-            self.target.three_way_compare(e1.id(), e2.id())
-        );
+        self.entries
+            .sort_by(|e1, e2| self.target.three_way_compare(e1.id(), e2.id()));
 
         if self.entries.len() <= self.capacity {
             return;
@@ -175,8 +160,6 @@ impl Into<Vec<KBucketEntry>> for KClosestNodes {
 
 impl Into<Vec<NodeInfo>> for KClosestNodes {
     fn into(self) -> Vec<NodeInfo> {
-        self.entries.into_iter()
-            .map(|v| v.ni())
-            .collect()
+        self.entries.into_iter().map(|v| v.ni()).collect()
     }
 }

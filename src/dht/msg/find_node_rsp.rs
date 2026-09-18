@@ -1,16 +1,9 @@
-use std::fmt;
+use crate::dht::msg::lookup_rsp::{Data as LookupData, LookupResponse};
+use crate::{utils, NodeInfo};
 use serde::{Deserialize, Serialize};
-use crate::{
-    utils,
-    NodeInfo
-};
-use crate::dht::msg::lookup_rsp::{
-    LookupResponse,
-    Data as LookupData
-};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeFindNodeResponse", try_from = "SerdeFindNodeResponse")]
 pub(crate) struct FindNodeResponse {
     data: LookupData,
@@ -20,10 +13,10 @@ impl FindNodeResponse {
     pub(crate) fn new(
         nodes4: Option<Vec<NodeInfo>>,
         nodes6: Option<Vec<NodeInfo>>,
-        token: i32
+        token: i32,
     ) -> Self {
         Self {
-            data: LookupData::new(nodes4, nodes6, token)
+            data: LookupData::new(nodes4, nodes6, token),
         }
     }
 }
@@ -37,23 +30,13 @@ impl LookupResponse for FindNodeResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindNodeResponse {
-    #[serde(
-        rename = "n4",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
     nodes4: Option<Vec<NodeInfo>>,
 
-    #[serde(
-        rename = "n6",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(
-        rename = "tok",
-        default,
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "tok", default, skip_serializing_if = "utils::is_default")]
     token: i32,
 }
 
@@ -69,18 +52,13 @@ impl Into<SerdeFindNodeResponse> for FindNodeResponse {
 
 impl From<SerdeFindNodeResponse> for FindNodeResponse {
     fn from(s: SerdeFindNodeResponse) -> Self {
-        Self::new(
-            s.nodes4,
-            s.nodes6,
-            s.token
-        )
+        Self::new(s.nodes4, s.nodes6, s.token)
     }
 }
 
 impl fmt::Display for FindNodeResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

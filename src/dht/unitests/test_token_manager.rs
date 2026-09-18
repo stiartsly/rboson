@@ -1,13 +1,6 @@
-use std::{
-    thread,
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{net::SocketAddr, thread, time::Duration};
 
-use crate::{
-    Id,
-    dht::token_manager::TokenManager,
-};
+use crate::{dht::token_manager::TokenManager, Id};
 
 #[cfg(test)]
 mod tests {

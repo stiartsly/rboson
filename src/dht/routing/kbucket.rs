@@ -1,16 +1,13 @@
-use std::{
-    fmt,
-    time::SystemTime
-};
 use libsodium_sys::randombytes_uniform;
-use rbtree::RBTree;
 use log::info;
+use rbtree::RBTree;
+use std::{fmt, time::SystemTime};
 
-use crate::{Id,EasyHandler};
 use crate::dht::{
+    routing::{KBucketEntry, Prefix},
     rpc::TargetInfo,
-    routing::{Prefix, KBucketEntry},
 };
+use crate::{EasyHandler, Id};
 
 /**
  * A KBucket is just a list of KBucketEntry objects.
@@ -29,22 +26,22 @@ use crate::dht::{
  */
 
 pub(crate) struct KBucket {
-    prefix          : Prefix,
-    home_bucket     : bool,
-    entries         : RBTree<SystemTime, KBucketEntry>,
-    last_refreshed  : Option<SystemTime>,
+    prefix: Prefix,
+    home_bucket: bool,
+    entries: RBTree<SystemTime, KBucketEntry>,
+    last_refreshed: Option<SystemTime>,
 }
 
 impl KBucket {
     pub(crate) const MAX_ENTRIES: usize = 8;
-    pub(crate) const REFRESH_INTERVAL: u128 = 15 * 60 * 1000;   // 15 minutes in milliseconds
+    pub(crate) const REFRESH_INTERVAL: u128 = 15 * 60 * 1000; // 15 minutes in milliseconds
 
     pub(crate) fn new(prefix: Prefix, home_bucket: bool) -> Self {
         Self {
             prefix,
             home_bucket,
-            entries         : RBTree::new(),
-            last_refreshed  : None,
+            entries: RBTree::new(),
+            last_refreshed: None,
         }
     }
 
@@ -90,14 +87,14 @@ impl KBucket {
         }
 
         if let Some(id) = id {
-            return self.entries.iter()
+            return self
+                .entries
+                .iter()
                 .find(|(_, entry)| entry.id() == id)
                 .map(|(_, v)| v.clone());
         }
 
-        let pos = unsafe {
-            randombytes_uniform(self.entries.len() as u32)
-        } as usize;
+        let pos = unsafe { randombytes_uniform(self.entries.len() as u32) } as usize;
         self.entries.values().nth(pos).cloned()
     }
 
@@ -106,15 +103,17 @@ impl KBucket {
     }
 
     pub(crate) fn needs_refreshing(&self) -> bool {
-        let needs_ping = self.entries.iter().any(|(_,v)|v.needs_ping());
-        let needs_refresh = self.last_refreshed.map_or(true, |v| {
-            crate::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL
-        });
+        let needs_ping = self.entries.iter().any(|(_, v)| v.needs_ping());
+        let needs_refresh = self
+            .last_refreshed
+            .map_or(true, |v| crate::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL);
         needs_refresh && needs_ping
     }
 
     // General DHT node does not support replacement
-    pub(crate) fn needs_replacement_ping(&self) -> bool { false }
+    pub(crate) fn needs_replacement_ping(&self) -> bool {
+        false
+    }
 
     #[allow(unused)]
     pub(crate) fn needs_replacement(&self) -> bool {
@@ -144,11 +143,11 @@ impl KBucket {
             self._replace_bad_entry(new);
 
             // When bucket full and new reachable entry arrives, Kademlia(original paper) pings the
-			// oldest/least-recent when full; if unresponsive, replace from cache, else cache the new one.
-			// now we reset the last refresh timestamp
-			// This will force a refresh to run PingRefreshTask with probe replacement on the current bucket
-			// Assumes PingRefreshTask pings least-recent-seen entries for LRS eviction.
-			self.last_refreshed = None;
+            // oldest/least-recent when full; if unresponsive, replace from cache, else cache the new one.
+            // now we reset the last refresh timestamp
+            // This will force a refresh to run PingRefreshTask with probe replacement on the current bucket
+            // Assumes PingRefreshTask pings least-recent-seen entries for LRS eviction.
+            self.last_refreshed = None;
         }
     }
 
@@ -158,9 +157,11 @@ impl KBucket {
     }
 
     fn _replace_bad_entry(&mut self, entry: KBucketEntry) {
-        let key = self.entries.iter()
-            .find(|(_,v)| v.needs_replacement())
-            .map(|(k,_)| k.clone());
+        let key = self
+            .entries
+            .iter()
+            .find(|(_, v)| v.needs_replacement())
+            .map(|(k, _)| k.clone());
 
         if let Some(ref key) = key {
             self.entries.remove(key);
@@ -192,14 +193,17 @@ impl KBucket {
         }
     }
 
-    pub(crate) fn _remove_bad_entry(&mut self, entry: KBucketEntry, force: bool
+    pub(crate) fn _remove_bad_entry(
+        &mut self,
+        entry: KBucketEntry,
+        force: bool,
     ) -> Option<KBucketEntry> {
-        let test_cb = |v: &KBucketEntry| {
-            v.equals(&entry) && (force || v.needs_replacement())
-        };
-        let key = self.entries.iter()
-                    .find(|(_, v)|test_cb(v))
-                    .map(|(k, _)| k.clone());
+        let test_cb = |v: &KBucketEntry| v.equals(&entry) && (force || v.needs_replacement());
+        let key = self
+            .entries
+            .iter()
+            .find(|(_, v)| test_cb(v))
+            .map(|(k, _)| k.clone());
 
         key.map(|ref k| self.entries.remove(k)).flatten()
     }
@@ -212,10 +216,12 @@ impl KBucket {
     }
     */
 
-    pub(crate) fn cleanup(&mut self,
+    pub(crate) fn cleanup(
+        &mut self,
         _local_id: &Id,
         _bootstrap_ids: &[Id],
-        _dropped_handler: EasyHandler<KBucketEntry>) {
+        _dropped_handler: EasyHandler<KBucketEntry>,
+    ) {
         //unimplemented!()
     }
 }

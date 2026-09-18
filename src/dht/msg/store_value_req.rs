@@ -1,15 +1,12 @@
-use std::fmt;
-use serde::{Serialize, Deserialize};
 use crate::{
-    utils,
-    Id,
-    Value,
     cryptobox::Nonce,
-    errors::{Error, Result, ProtocolError},
+    errors::{Error, ProtocolError, Result},
+    utils, Id, Value,
 };
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeStoreValueRequest", try_from = "SerdeStoreValueRequest")]
 pub(crate) struct StoreValueRequest {
     token: i32,
@@ -18,10 +15,12 @@ pub(crate) struct StoreValueRequest {
 }
 
 impl StoreValueRequest {
-    pub(crate) fn new(
-        value: Value, token: i32, expected_seq: i32
-    ) -> Self {
-        Self { token, expected_seq, value }
+    pub(crate) fn new(value: Value, token: i32, expected_seq: i32) -> Self {
+        Self {
+            token,
+            expected_seq,
+            value,
+        }
     }
 
     pub(crate) fn token(&self) -> i32 {
@@ -107,14 +106,14 @@ impl Into<SerdeStoreValueRequest> for StoreValueRequest {
     fn into(self) -> SerdeStoreValueRequest {
         let value = self.value;
         SerdeStoreValueRequest {
-            token       : self.token,
+            token: self.token,
             expected_seq: self.expected_seq,
-            seq         : value.sequence_number(),
-            public_key  : value.public_key().cloned(),
-            recipient   : value.recipient().cloned(),
-            nonce       : value.nonce().map(|n| n.as_bytes().to_vec()),
-            signature   : value.signature().map(|v| v.to_vec()),
-            data        : value.data().to_vec(),
+            seq: value.sequence_number(),
+            public_key: value.public_key().cloned(),
+            recipient: value.recipient().cloned(),
+            nonce: value.nonce().map(|n| n.as_bytes().to_vec()),
+            signature: value.signature().map(|v| v.to_vec()),
+            data: value.data().to_vec(),
         }
     }
 }
@@ -127,36 +126,27 @@ impl TryFrom<SerdeStoreValueRequest> for StoreValueRequest {
             return Err(ProtocolError::new("data field \"v\" cannot be empty"));
         }
 
-        let nonce = s.nonce.map(|v| {
-            Nonce::try_from(v.as_slice())
-                .map_err(|_| ProtocolError::new("invalid nonce length"))
-        }).transpose()?;
+        let nonce = s
+            .nonce
+            .map(|v| {
+                Nonce::try_from(v.as_slice())
+                    .map_err(|_| ProtocolError::new("invalid nonce length"))
+            })
+            .transpose()?;
 
-        let value = Value::packed(
-            s.public_key,
-            s.recipient,
-            nonce,
-            s.signature,
-            s.data,
-            s.seq
-        );
+        let value = Value::packed(s.public_key, s.recipient, nonce, s.signature, s.data, s.seq);
 
         if !value.is_valid() {
-             return Err(ProtocolError::new("The value is invalid"));
+            return Err(ProtocolError::new("The value is invalid"));
         }
 
-        Ok(StoreValueRequest::new(
-            value,
-            s.token,
-            s.expected_seq
-        ))
+        Ok(StoreValueRequest::new(value, s.token, s.expected_seq))
     }
 }
 
 impl fmt::Display for StoreValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

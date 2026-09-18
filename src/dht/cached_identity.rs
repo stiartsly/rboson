@@ -1,22 +1,17 @@
-use std::sync::{Arc, Mutex};
 use moka::sync::Cache;
+use std::sync::{Arc, Mutex};
 
 use crate::{
-    Id,
-    Identity,
-    core::{
-        Result,
-        CryptoIdentity,
-        CryptoContext,
-    }
+    core::{CryptoContext, CryptoIdentity, Result},
+    Id, Identity,
 };
 
 const CONTEXT_CACHE_CAPACITY: u64 = 10;
 
 pub(crate) struct CachedIdentity {
-    id      : Id,
+    id: Id,
     identity: Arc<CryptoIdentity>,
-    cache   : Cache<Id, Arc<Mutex<CryptoContext>>>,
+    cache: Cache<Id, Arc<Mutex<CryptoContext>>>,
 }
 
 impl CachedIdentity {

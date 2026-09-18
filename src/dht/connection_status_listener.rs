@@ -1,5 +1,5 @@
-use crate::Network;
 use crate::dht::ConnectionStatus;
+use crate::Network;
 
 /// A listener for connection status changes in the DHT network.
 ///
@@ -11,11 +11,13 @@ pub trait ConnectionStatusListener: Send + Sync {
     /// @param newStatus the new connection status.
     /// @param oldStatus the old connection status.
     ///
-    fn status_changed(&self,
+    fn status_changed(
+        &self,
         _network: Network,
         _new_status: ConnectionStatus,
         _old_status: ConnectionStatus,
-    ) {}
+    ) {
+    }
 
     ///
     /// Called when the Boson node is connecting to the Boson network.

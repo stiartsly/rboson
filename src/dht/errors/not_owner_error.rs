@@ -14,5 +14,5 @@ impl Error for NotOwnerError {}
 impl fmt::Display for NotOwnerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Not owner of the peer")
-     }
+    }
 }

@@ -1,10 +1,5 @@
+use crate::{core::CryptoIdentity, dht::cached_identity::CachedIdentity, Identity};
 use std::sync::Arc;
-use crate::{
-    Identity,
-    core::CryptoIdentity,
-    dht::cached_identity::CachedIdentity,
-};
-
 
 #[cfg(test)]
 mod tests {
@@ -86,8 +81,8 @@ mod tests {
     #[test]
     fn test_sign_wrong_identity() {
         let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob   = CachedIdentity::new(CryptoIdentity::new());
-        let data  = b"Hello, Boson!";
+        let bob = CachedIdentity::new(CryptoIdentity::new());
+        let data = b"Hello, Boson!";
 
         let sig = alice.sign_into(data).unwrap();
         // Bob's verify checks against Bob's own public key — should reject Alice's signature.
@@ -98,7 +93,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob   = CachedIdentity::new(CryptoIdentity::new());
+        let bob = CachedIdentity::new(CryptoIdentity::new());
         let plain = b"Hello, Boson!";
 
         let cipher = alice.encrypt_into(bob.id(), plain).unwrap();
@@ -110,7 +105,7 @@ mod tests {
     #[test]
     fn test_encrypt_multiple_messages() {
         let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob   = CachedIdentity::new(CryptoIdentity::new());
+        let bob = CachedIdentity::new(CryptoIdentity::new());
 
         for i in 0u8..5 {
             let plain = vec![i; 32];

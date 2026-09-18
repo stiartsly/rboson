@@ -1,21 +1,11 @@
-use std::{
-    fs,
-    net::SocketAddr,
-    path::PathBuf,
-    rc::Rc,
-    time::SystemTime,
-};
+use std::{fs, net::SocketAddr, path::PathBuf, rc::Rc, time::SystemTime};
 
 use crate::{
-    Id,
     dht::{
-    rpc::TargetInfo,
-    routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-        routing_table::RoutingTable,
+        routing::{kbucket::KBucket, kbucket_entry::KBucketEntry, routing_table::RoutingTable},
+        rpc::TargetInfo,
     },
-    }
+    Id,
 };
 
 fn make_id(first_byte: u8, last_byte: u8) -> Id {
@@ -26,10 +16,7 @@ fn make_id(first_byte: u8, last_byte: u8) -> Id {
 }
 
 fn make_reachable_entry(id: Id, addr: &str) -> KBucketEntry {
-    let mut entry = KBucketEntry::new(
-        id,
-        addr.parse::<SocketAddr>().unwrap()
-    );
+    let mut entry = KBucketEntry::new(id, addr.parse::<SocketAddr>().unwrap());
     entry.on_responded(20);
     entry
 }
@@ -115,8 +102,14 @@ mod tests {
 
         assert_eq!(low_idx, 0);
         assert_eq!(high_idx, 1);
-        assert_eq!(buckets[low_idx].borrow().prefix().is_prefix_of(&low_id), true);
-        assert_eq!(buckets[high_idx].borrow().prefix().is_prefix_of(&high_id), true);
+        assert_eq!(
+            buckets[low_idx].borrow().prefix().is_prefix_of(&low_id),
+            true
+        );
+        assert_eq!(
+            buckets[high_idx].borrow().prefix().is_prefix_of(&high_id),
+            true
+        );
     }
 
     #[test]
@@ -147,7 +140,8 @@ mod tests {
         fs::write(&path, []).expect("Failed to create empty cache");
 
         let rt = RoutingTable::new(Id::random());
-        rt.load(&path).expect("Empty cache should load successfully");
+        rt.load(&path)
+            .expect("Empty cache should load successfully");
 
         assert_eq!(rt.number_of_entries(), 0);
         fs::remove_file(path).expect("Failed to remove empty cache");
@@ -159,7 +153,8 @@ mod tests {
         let id = make_id(0x00, 1);
         let rt = RoutingTable::new(Id::random());
         rt.put(make_reachable_entry(id, "127.0.0.1:32000"));
-        rt.save(&path).expect("Failed to save populated routing table");
+        rt.save(&path)
+            .expect("Failed to save populated routing table");
         assert!(path.exists());
 
         rt.remove(&id);

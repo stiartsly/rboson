@@ -1,20 +1,13 @@
-use std::{fmt, result::Result as StdResult};
+use crate::dht::msg::lookup_req::{Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK};
+use crate::{
+    errors::{Error, Result},
+    utils, Id,
+};
 use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
-use crate::{
-    utils,
-    Id,
-    errors::{Error, Result},
-};
-use crate::dht::msg::lookup_req::{
-    LookupRequest,
-    Data as LookupData,
-    WANT4_MASK,
-    WANT6_MASK,
-};
+use std::{fmt, result::Result as StdResult};
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeFindPeerRequest", try_from = "SerdeFindPeerRequest")]
 pub(crate) struct FindPeerRequest {
     data: LookupData,
@@ -24,7 +17,9 @@ pub(crate) struct FindPeerRequest {
 
 impl FindPeerRequest {
     pub(crate) fn new(
-        target: Id, want4: bool,  want6: bool,
+        target: Id,
+        want4: bool,
+        want6: bool,
         expected_seq: i32,
         expected_count: i32,
     ) -> Self {
@@ -80,7 +75,8 @@ struct SerdeFindPeerRequest {
 }
 
 fn deserialize_count<'de, D>(de: D) -> StdResult<i32, D::Error>
-where  D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     let count = i32::deserialize(de)?;
     if count < 0 {
@@ -108,15 +104,14 @@ impl TryFrom<SerdeFindPeerRequest> for FindPeerRequest {
             s.want & WANT4_MASK != 0,
             s.want & WANT6_MASK != 0,
             s.expected_seq,
-            s.expected_count
+            s.expected_count,
         ))
     }
 }
 
 impl fmt::Display for FindPeerRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

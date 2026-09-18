@@ -1,22 +1,12 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-};
 use crate::{
-    Id,
-    NodeInfo,
-    dht::task::{
-        candidate_node::CandidateNode,
-        closest_set::ClosestSet,
-    }
+    dht::task::{candidate_node::CandidateNode, closest_set::ClosestSet},
+    Id, NodeInfo,
 };
+use std::{cell::RefCell, rc::Rc};
 
 fn make_candidate(distance: usize) -> Rc<RefCell<CandidateNode>> {
     let id = Id::try_from_bit_at(Id::BITS - distance).unwrap();
-    let node = NodeInfo::new(
-        id,
-        format!("1.1.1.{}:39011", distance).parse().unwrap(),
-    );
+    let node = NodeInfo::new(id, format!("1.1.1.{}:39011", distance).parse().unwrap());
     Rc::new(RefCell::new(node.into()))
 }
 
@@ -75,7 +65,6 @@ mod tests {
         assert!(removed.is_some());
         assert!(closest.entry(&id).is_none());
         assert!(!closest.contains(&id));
-
     }
 
     #[test]

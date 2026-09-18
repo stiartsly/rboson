@@ -1,111 +1,92 @@
-use std::{
-    rc::Rc,
-    cell::RefCell,
-    net::SocketAddr,
-    time::SystemTime,
-    path::PathBuf,
-    future::Future,
-    collections::{HashMap, HashSet},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    }
-};
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::task;
-use log::{trace, debug, info, warn, error};
-
-use crate::{
-    Id, Network,
-    NodeInfo, PeerInfo, Value,
-    identity::{Identity, CryptoIdentity},
-    errors::Result,
-    EasyHandler,
-    LocalBoxHandler,
-    LocalBoxTimerClient as TimerClient,
-    Promise
+use log::{debug, error, info, trace, warn};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    future::Future,
+    net::SocketAddr,
+    path::PathBuf,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::SystemTime,
 };
+use tokio::task;
+
 use crate::dht::{
-    utils::{is_any_unicast, is_bogon},
-    ConnectionStatus,
-    ConnectionStatusListener,
-    token_manager::TokenManager,
-    lookup_option::LookupOption,
     dht_verticle::VerticleOptions,
+    lookup_option::LookupOption,
+    msg::{
+        msg::{self, Body, Kind, Method},
+        LookupRequest, LookupResponse, Message,
+    },
+    routing::{routing_table::RoutingTable, KBucket, KBucketEntry, KClosestNodes, Prefix},
+    rpc::{
+        listener::Listener as CallListener, rpc_server::RpcServer, rpccall::State as CallState,
+        RpcCall, TargetInfo,
+    },
     storage::data_storage::DataStorage,
     suspicious_node_detector::SuspiciousNodeDetector,
-    rpc::{
-        TargetInfo,
-        RpcCall, rpccall::State as CallState,
-        rpc_server::RpcServer,
-        listener::Listener as CallListener
-    },
-    msg::{
-        Message,
-        LookupRequest, LookupResponse,
-        msg::{self, Kind, Method, Body},
-    },
-    routing::{
-        routing_table::RoutingTable,
-        KClosestNodes,
-        KBucketEntry,
-        KBucket,
-        Prefix,
-    },
     task::{
         task::{State, Task},
-        task_manager::TaskManager,
         task_listener::TaskListener,
-        LookupTask,
-        NodeLookupTask,
-        PeerLookupTask,
-        ValueLookupTask,
-        PeerAnnounceTask,
-        ValueAnnounceTask,
-        PingRefreshTask
-    }
+        task_manager::TaskManager,
+        LookupTask, NodeLookupTask, PeerAnnounceTask, PeerLookupTask, PingRefreshTask,
+        ValueAnnounceTask, ValueLookupTask,
+    },
+    token_manager::TokenManager,
+    utils::{is_any_unicast, is_bogon},
+    ConnectionStatus, ConnectionStatusListener,
+};
+use crate::{
+    errors::Result,
+    identity::{CryptoIdentity, Identity},
+    EasyHandler, Id, LocalBoxHandler, LocalBoxTimerClient as TimerClient, Network, NodeInfo,
+    PeerInfo, Promise, Value,
 };
 
 pub(crate) struct DHT {
-    identity            : Arc<CryptoIdentity>,
-    network             : Network,
-    host                : String,
-    port                : u16,
+    identity: Arc<CryptoIdentity>,
+    network: Network,
+    host: String,
+    port: u16,
 
-    is_running          : RefCell<bool>,
-    status              : RefCell<ConnectionStatus>,
-    listener            : Arc<dyn ConnectionStatusListener>,
+    is_running: RefCell<bool>,
+    status: RefCell<ConnectionStatus>,
+    listener: Arc<dyn ConnectionStatusListener>,
 
-    storage             : Arc<Mutex<dyn DataStorage>>,
-    tokenman            : Arc<TokenManager>,
+    storage: Arc<Mutex<dyn DataStorage>>,
+    tokenman: Arc<TokenManager>,
 
-    task_man            : Rc<TaskManager>,
+    task_man: Rc<TaskManager>,
 
-    persist_file        : RefCell<Option<PathBuf>>,
-    rt                  : RefCell<Option<Rc<RoutingTable>>>,
+    persist_file: RefCell<Option<PathBuf>>,
+    rt: RefCell<Option<Rc<RoutingTable>>>,
 
-    bootstrap_nodes     : RefCell<Vec<NodeInfo>>,
-    bootstrap_ids       : RefCell<Vec<Id>>,
-    last_bootstrap      : RefCell<SystemTime>,
-    bootstrapping       : AtomicBool,
+    bootstrap_nodes: RefCell<Vec<NodeInfo>>,
+    bootstrap_ids: RefCell<Vec<Id>>,
+    last_bootstrap: RefCell<SystemTime>,
+    bootstrapping: AtomicBool,
 
-    last_maintenance    : RefCell<SystemTime>,
-    maintenance_tasks   : Rc<RefCell<HashSet<Prefix>>>,
+    last_maintenance: RefCell<SystemTime>,
+    maintenance_tasks: Rc<RefCell<HashSet<Prefix>>>,
 
-    timer_client        : Rc<TimerClient>,
+    timer_client: Rc<TimerClient>,
 
-    rpc_server          : RefCell<Option<Rc<RpcServer>>>,
+    rpc_server: RefCell<Option<Rc<RpcServer>>>,
 
-    suspicious_detector : RefCell<Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>>,
+    suspicious_detector: RefCell<Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>>,
 }
 
 impl DHT {
-    const BOOTSTRAP_MIN_INTERVAL: u64 = 4 * 60 * 1000;              // 4 minutes
-    const SELF_LOOKUP_INTERVAL: u128 = 30 * 60 * 1000;              // 30 minutes
-    const ROUTING_TABLE_PERSIST_INTERVAL: u64 = 10 * 60 * 1000;     // 10 minutes
+    const BOOTSTRAP_MIN_INTERVAL: u64 = 4 * 60 * 1000; // 4 minutes
+    const SELF_LOOKUP_INTERVAL: u128 = 30 * 60 * 1000; // 30 minutes
+    const ROUTING_TABLE_PERSIST_INTERVAL: u64 = 10 * 60 * 1000; // 10 minutes
     const ROUTING_TABLE_MAINTENANCE_INTERVAL: u128 = 4 * 60 * 1000; // 4 minutes
-    const RANDOM_LOOKUP_INTERVAL: u64 = 10 * 60 * 1000;             // 10 minutes
-    const RANDOM_PING_INTERVAL  : u64 = 10 * 1000;                  // 10 seconds
+    const RANDOM_LOOKUP_INTERVAL: u64 = 10 * 60 * 1000; // 10 minutes
+    const RANDOM_PING_INTERVAL: u64 = 10 * 1000; // 10 seconds
 
     const BOOTSTRAP_IF_LESS_THAN_X_ENTRIES: usize = 30;
     const USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES: usize = 8;
@@ -116,33 +97,32 @@ impl DHT {
         host: String,
         port: u16,
         persist_file: Option<PathBuf>,
-        timer_client: Rc<TimerClient>
-    ) -> Rc<Self>
-    {
+        timer_client: Rc<TimerClient>,
+    ) -> Rc<Self> {
         Rc::new(Self {
-            identity            : options.identity,
+            identity: options.identity,
             network,
             host,
             port,
-            is_running          : RefCell::new(false),
-            status              : RefCell::new(ConnectionStatus::Disconnected),
-            listener            : options.listener,
-            storage             : options.storage,
-            tokenman            : options.token_man,
-            task_man            : Rc::new(TaskManager::new()),
+            is_running: RefCell::new(false),
+            status: RefCell::new(ConnectionStatus::Disconnected),
+            listener: options.listener,
+            storage: options.storage,
+            tokenman: options.token_man,
+            task_man: Rc::new(TaskManager::new()),
 
-            rt                  : RefCell::new(None),
-            persist_file        : RefCell::new(persist_file),
+            rt: RefCell::new(None),
+            persist_file: RefCell::new(persist_file),
 
-            bootstrap_nodes     : RefCell::new(options.bootstrap_nodes),
-            bootstrap_ids       : RefCell::new(Vec::new()),
-            last_bootstrap      : RefCell::new(SystemTime::UNIX_EPOCH),
-            last_maintenance    : RefCell::new(SystemTime::UNIX_EPOCH),
-            maintenance_tasks   : Rc::new(RefCell::new(HashSet::new())),
-            bootstrapping       : AtomicBool::new(false),
+            bootstrap_nodes: RefCell::new(options.bootstrap_nodes),
+            bootstrap_ids: RefCell::new(Vec::new()),
+            last_bootstrap: RefCell::new(SystemTime::UNIX_EPOCH),
+            last_maintenance: RefCell::new(SystemTime::UNIX_EPOCH),
+            maintenance_tasks: Rc::new(RefCell::new(HashSet::new())),
+            bootstrapping: AtomicBool::new(false),
             timer_client,
-            suspicious_detector : RefCell::new(None),
-            rpc_server          : RefCell::new(None)
+            suspicious_detector: RefCell::new(None),
+            rpc_server: RefCell::new(None),
         })
     }
 
@@ -157,11 +137,19 @@ impl DHT {
     }
 
     pub(crate) fn rs(&self) -> Rc<RpcServer> {
-        self.rpc_server.borrow().as_ref().expect("RS not initialized").clone()
+        self.rpc_server
+            .borrow()
+            .as_ref()
+            .expect("RS not initialized")
+            .clone()
     }
 
     pub(crate) fn rt(&self) -> Rc<RoutingTable> {
-        self.rt.borrow().as_ref().expect("RT not initialized").clone()
+        self.rt
+            .borrow()
+            .as_ref()
+            .expect("RT not initialized")
+            .clone()
     }
 
     pub(crate) fn id(&self) -> &Id {
@@ -169,42 +157,43 @@ impl DHT {
     }
 
     pub(crate) fn send_msg(&self, msg: Message) {
-        let _ = self.rs()
-                    .send_msg(&msg)
-                    .map_err(|e| {error!("{e}"); e})
-                    .map(|_|());
+        let _ = self
+            .rs()
+            .send_msg(&msg)
+            .map_err(|e| {
+                error!("{e}");
+                e
+            })
+            .map(|_| ());
     }
 
     pub(crate) fn send_call(&self, call: RpcCall) {
-        let _ = self.rs()
-                    .send_call(call)
-                    .map_err(|e| {error!("{e}"); e})
-                    .map(|_|());
+        let _ = self
+            .rs()
+            .send_call(call)
+            .map_err(|e| {
+                error!("{e}");
+                e
+            })
+            .map(|_| ());
     }
 
-    fn fill_home_bucket(self: &Rc<Self>, nodes: Vec<NodeInfo>, promise: Promise<()>){
-        let mut task = Box::new(NodeLookupTask::new(
-            self.clone(),
-            self.id().clone(),
-            false,
-        ));
+    fn fill_home_bucket(self: &Rc<Self>, nodes: Vec<NodeInfo>, promise: Promise<()>) {
+        let mut task = Box::new(NodeLookupTask::new(self.clone(), self.id().clone(), false));
         task.with_name("Bootstrap: filling home bucket".into());
         task.with_bootstrap(true);
         task.with_inject_candidates(nodes);
-        task.with_listener(TaskListener::default().ended_fn(
-            move |_| promise.complete(Ok(()))
-        ));
+        task.with_listener(TaskListener::default().ended_fn(move |_| promise.complete(Ok(()))));
         self.task_man.add(task);
     }
 
     fn fill_buckets(self: &Rc<Self>, promise: Promise<()>) {
         let entry_sz = self.rt().number_of_entries();
-        let buckets  = self.rt().buckets();
+        let buckets = self.rt().buckets();
 
         let unordered = FuturesUnordered::new();
         for bucket in buckets {
-            if bucket.borrow().is_full() &&
-                entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES {
+            if bucket.borrow().is_full() && entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES {
                 continue;
             }
 
@@ -212,14 +201,10 @@ impl DHT {
             let prefix = bucket.borrow().prefix().clone();
             let target = prefix.random_id();
 
-            let (promise,future) = Promise::<()>::pair();
-            let mut task = Box::new(NodeLookupTask::new(
-                self.clone(), target, false
-            ));
+            let (promise, future) = Promise::<()>::pair();
+            let mut task = Box::new(NodeLookupTask::new(self.clone(), target, false));
             task.with_name(format!("Bootstrap: filling Bucket - {}", prefix));
-            task.with_listener(TaskListener::default().ended_fn(
-                move |_| promise.complete(Ok(()))
-            ));
+            task.with_listener(TaskListener::default().ended_fn(move |_| promise.complete(Ok(()))));
             self.task_man.add(task);
             unordered.push(future);
         }
@@ -236,7 +221,7 @@ impl DHT {
         check_all: bool,
         remove_on_timeout: bool,
         _probe_replacement: bool,
-        name: String
+        name: String,
     ) {
         if !dht.rs().is_reachable() {
             return;
@@ -247,7 +232,7 @@ impl DHT {
             (
                 borrowed.prefix().clone(),
                 borrowed.needs_refreshing(),
-                borrowed.needs_replacement()
+                borrowed.needs_replacement(),
             )
         };
 
@@ -256,7 +241,7 @@ impl DHT {
             return;
         }
 
-        if need_refresh || need_replacement  {
+        if need_refresh || need_replacement {
             let mut task = Box::new(PingRefreshTask::new(dht.clone()));
             task.with_name(name);
             task.with_check_all(check_all);
@@ -266,9 +251,8 @@ impl DHT {
             if maintenance_tasks.borrow_mut().insert(prefix) {
                 let dht = dht.clone();
                 let prefix_to_remove = prefix;
-                task.with_listener(
-                    TaskListener::default().ended_fn(move |_| {
-                        maintenance_tasks.borrow_mut().remove(&prefix_to_remove);
+                task.with_listener(TaskListener::default().ended_fn(move |_| {
+                    maintenance_tasks.borrow_mut().remove(&prefix_to_remove);
                 }));
                 dht.task_man.add(task);
             }
@@ -281,9 +265,7 @@ impl DHT {
             return;
         }
 
-        let mut task = Box::new(NodeLookupTask::new(
-            self.clone(), Id::random(), false,
-        ));
+        let mut task = Box::new(NodeLookupTask::new(self.clone(), Id::random(), false));
         task.with_name("Periodic: random node lookup".into());
         self.task_man.add(task);
     }
@@ -306,8 +288,9 @@ impl DHT {
     }
 
     fn routing_table_maintenance(self: &Rc<Self>) {
-        if crate::elapsed_ms!(*self.last_maintenance.borrow()) <
-                Self::ROUTING_TABLE_MAINTENANCE_INTERVAL {
+        if crate::elapsed_ms!(*self.last_maintenance.borrow())
+            < Self::ROUTING_TABLE_MAINTENANCE_INTERVAL
+        {
             return;
         }
 
@@ -320,10 +303,15 @@ impl DHT {
             ids.as_slice(),
             EasyHandler::new(move |bucket: &Rc<RefCell<KBucket>>| {
                 let prefix = bucket.borrow().prefix().clone();
-                Self::try_ping_maintenance(dht.clone(), bucket.clone(), false, false, false,
-                        format!("Routing table maintenance: refreshing bucket {}", prefix)
-                    );
-            })
+                Self::try_ping_maintenance(
+                    dht.clone(),
+                    bucket.clone(),
+                    false,
+                    false,
+                    false,
+                    format!("Routing table maintenance: refreshing bucket {}", prefix),
+                );
+            }),
         );
     }
 
@@ -335,8 +323,9 @@ impl DHT {
 
             let rt = self.rt();
             let entry_sz = rt.number_of_entries();
-            if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES &&
-                crate::elapsed_ms!(*self.last_bootstrap.borrow()) <= Self::SELF_LOOKUP_INTERVAL {
+            if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES
+                && crate::elapsed_ms!(*self.last_bootstrap.borrow()) <= Self::SELF_LOOKUP_INTERVAL
+            {
                 return;
             }
 
@@ -363,17 +352,20 @@ impl DHT {
         let old = *self.status.borrow();
         *self.status.borrow_mut() = status;
 
-        info!("DHT/{}:{} connection status changed: {} => {}",
+        info!(
+            "DHT/{}:{} connection status changed: {} => {}",
             self.network,
-            self.identity.id(), old, status
+            self.identity.id(),
+            old,
+            status
         );
 
         let l = &self.listener;
         l.status_changed(self.network, status, old);
         match status {
-            ConnectionStatus::Connecting    => l.connecting(self.network),
-            ConnectionStatus::Connected     => l.connected(self.network),
-            ConnectionStatus::Disconnected  => l.disconnected(self.network)
+            ConnectionStatus::Connecting => l.connecting(self.network),
+            ConnectionStatus::Connected => l.connected(self.network),
+            ConnectionStatus::Disconnected => l.disconnected(self.network),
         }
     }
 
@@ -382,7 +374,8 @@ impl DHT {
             return Ok(());
         }
 
-        info!("Starting DHT/{}:{} on {}:{} ...",
+        info!(
+            "Starting DHT/{}:{} on {}:{} ...",
             self.network,
             self.id(),
             self.host,
@@ -393,12 +386,10 @@ impl DHT {
         if let Some(ref path) = *self.persist_file.borrow() {
             let file = path.display();
             let suc_cb = |_| debug!("Loaded routing table from {}.", file);
-            let err_cb = |e| warn! ("Loading routing table from {} error: {e}", file);
+            let err_cb = |e| warn!("Loading routing table from {} error: {e}", file);
 
             debug!("Loading routing table from {}.", file);
-            let _ = rt.load(&path)
-                .map(suc_cb)
-                .map_err(err_cb);
+            let _ = rt.load(&path).map(suc_cb).map_err(err_cb);
         };
         *self.rt.borrow_mut() = Some(rt);
 
@@ -407,7 +398,7 @@ impl DHT {
             self.ni(),
             self.identity.clone(),
             self.timer_client.clone(),
-            self.suspicious_detector.borrow().clone()
+            self.suspicious_detector.borrow().clone(),
         );
 
         let dht = self.clone();
@@ -421,7 +412,7 @@ impl DHT {
         let rt = self.rt();
         rs.callsent_handler(EasyHandler::new({
             let rt = rt.clone();
-            move |nodeid: &Id|{
+            move |nodeid: &Id| {
                 rt.on_request_sent(&nodeid);
             }
         }));
@@ -450,7 +441,7 @@ impl DHT {
         self.set_status(ConnectionStatus::Connecting);
 
         let dht = self.clone();
-        let handler = LocalBoxHandler::new(move |reachable: bool|{
+        let handler = LocalBoxHandler::new(move |reachable: bool| {
             let dht = dht.clone();
             Box::pin(async move {
                 if reachable {
@@ -462,20 +453,16 @@ impl DHT {
             })
         });
 
-        let rs  = self.rs();
+        let rs = self.rs();
         rs.reachable_handler(handler);
 
-        let rt  = self.rt();
-        let buckets = if rt.is_empty() {
-            rt.buckets()
-        } else {
-            vec![]
-        };
+        let rt = self.rt();
+        let buckets = if rt.is_empty() { rt.buckets() } else { vec![] };
 
         let task_man = self.task_man.clone();
-        let network  = self.network;
-        let id       = self.id().clone();
-        let dht      = self.clone();
+        let network = self.network;
+        let id = self.id().clone();
+        let dht = self.clone();
 
         let unordered = FuturesUnordered::new();
         for bucket in buckets {
@@ -508,7 +495,7 @@ impl DHT {
             info!("DHT/{}:{} startup bootstrap finished", network, id);
 
             if rt.number_of_entries() > 0 {
-               dht.set_status(ConnectionStatus::Connected);
+                dht.set_status(ConnectionStatus::Connected);
             } else {
                 dht.set_status(ConnectionStatus::Disconnected);
             }
@@ -519,8 +506,10 @@ impl DHT {
             }
 
             *dht.is_running.borrow_mut() = true;
-            info!("Started DHT/{}:{} on {}:{}",
-                network, id, dht.host, dht.port);
+            info!(
+                "Started DHT/{}:{} on {}:{}",
+                network, id, dht.host, dht.port
+            );
 
             promise.complete(Ok(()));
         });
@@ -531,8 +520,13 @@ impl DHT {
             return;
         }
 
-        info!("Stopping DHT/{}:{} on {}:{}......",
-            self.network, self.id(), self.host, self.port);
+        info!(
+            "Stopping DHT/{}:{} on {}:{}......",
+            self.network,
+            self.id(),
+            self.host,
+            self.port
+        );
 
         *self.is_running.borrow_mut() = false;
         self.bootstrapping.store(false, Ordering::SeqCst);
@@ -550,7 +544,7 @@ impl DHT {
         }
 
         let path = self.persist_file.borrow_mut().take();
-        let rt   = self.rt.borrow_mut().take();
+        let rt = self.rt.borrow_mut().take();
         if let (Some(path), Some(rt)) = (path, rt) {
             let _ = rt.save(&path);
         }
@@ -560,19 +554,26 @@ impl DHT {
             sd.borrow_mut().purge();
         }
 
-        info!("Stopped DHT/{}:{} on {}:{}.",
-            self.network, self.id(), self.host, self.port);
+        info!(
+            "Stopped DHT/{}:{} on {}:{}.",
+            self.network,
+            self.id(),
+            self.host,
+            self.port
+        );
     }
 
     async fn setup_periodic_tasks(self: &Rc<Self>) -> Result<()> {
         let dht = self.clone();
-        let _ = self.timer_client.add_timer(30*1000, Some(30*1000),
+        let _ = self.timer_client.add_timer(
+            30 * 1000,
+            Some(30 * 1000),
             LocalBoxHandler::new(move |_| {
                 let dht = dht.clone();
                 Box::pin(async move {
                     dht.update().await;
                 })
-            })
+            }),
         )?;
 
         let dht = self.clone();
@@ -584,7 +585,7 @@ impl DHT {
                 Box::pin(async move {
                     dht.random_lookup();
                 })
-            })
+            }),
         )?;
 
         let dht = self.clone();
@@ -596,25 +597,28 @@ impl DHT {
                 Box::pin(async move {
                     dht.random_ping();
                 })
-            })
+            }),
         )?;
 
         let detector_opt = self.suspicious_detector.borrow().clone();
         if let Some(detector) = detector_opt {
-            let _ = self.timer_client.add_timer(60, Some(30),
+            let _ = self.timer_client.add_timer(
+                60,
+                Some(30),
                 LocalBoxHandler::new(move |_| {
                     let detector = detector.clone();
                     Box::pin(async move {
                         info!("Periodic: purging suspicious nodes ...");
                         detector.borrow_mut().purge();
                     })
-                }))?;
+                }),
+            )?;
         }
 
         let path_opt = self.persist_file.borrow().clone();
         if let Some(path) = path_opt {
             let rt = self.rt();
-            let _  = self.timer_client.add_timer(
+            let _ = self.timer_client.add_timer(
                 120,
                 Some(Self::ROUTING_TABLE_PERSIST_INTERVAL),
                 LocalBoxHandler::new(move |_| {
@@ -623,7 +627,7 @@ impl DHT {
                     Box::pin(async move {
                         let _ = rt.save(&path);
                     })
-                })
+                }),
             )?;
         }
         Ok(())
@@ -636,9 +640,10 @@ impl DHT {
     }
 
     fn suspicious_last_known_id(&self, addr: SocketAddr) -> Option<Id> {
-        self.suspicious_detector.borrow().as_ref().and_then(|detector| {
-            detector.borrow_mut().last_known_id(&addr).cloned()
-        })
+        self.suspicious_detector
+            .borrow()
+            .as_ref()
+            .and_then(|detector| detector.borrow_mut().last_known_id(&addr).cloned())
     }
 
     fn suspicious_observe(&self, addr: SocketAddr, id: Id) {
@@ -653,15 +658,18 @@ impl DHT {
             false => !is_bogon(msg.remote_addr()),
         };
         if !allowed {
-            info!("Received a message from spoofed address {}, ignored the potential
-                  routing table operation", msg.remote_addr());
+            info!(
+                "Received a message from spoofed address {}, ignored the potential
+                  routing table operation",
+                msg.remote_addr()
+            );
             return;
         }
 
         let (remote_id, remote_addr, remote_port) = (
             msg.remote_id().clone(),
             msg.remote_addr().clone(),
-            msg.remote_addr().port()
+            msg.remote_addr().port(),
         );
 
         let call_opt = msg.associated_call();
@@ -686,7 +694,7 @@ impl DHT {
                     remote_id, remote_addr, known_id);
 
                 let removed = self.rt().remove(&known_id).is_some();
-                if  removed {
+                if removed {
                     // Might be a pollution attack, check other entries in the same bucket too.
                     // In case the random pings can't keep up with scrubbing.
                     let bucket = self.rt().bucket(&known_id);
@@ -705,13 +713,19 @@ impl DHT {
 
                     info!("Checking bucket {} after ID change was detected", prefix);
 
-                    Self::try_ping_maintenance(self.clone(), bucket.clone(), true, false, false,
-                        format!("Checking bucket {} after ID change was detected", prefix));
+                    Self::try_ping_maintenance(
+                        self.clone(),
+                        bucket.clone(),
+                        true,
+                        false,
+                        false,
+                        format!("Checking bucket {} after ID change was detected", prefix),
+                    );
                 }
 
                 let msgid = msg.nodeid();
                 let removed = self.rt().remove(msgid).is_some();
-                if  removed {
+                if removed {
                     // Might be a pollution attack, check other entries in the same bucket too.
                     // In case the random pings can't keep up with scrubbing.
                     let bucket = self.rt().bucket(msgid);
@@ -729,8 +743,14 @@ impl DHT {
                     };
 
                     info!("Checking bucket {} after ID change was detected", prefix);
-                    Self::try_ping_maintenance(self.clone(), bucket.clone(), true, false, false,
-                        format!("Checking bucket {} after ID change was detected", prefix));
+                    Self::try_ping_maintenance(
+                        self.clone(),
+                        bucket.clone(),
+                        true,
+                        false,
+                        false,
+                        format!("Checking bucket {} after ID change was detected", prefix),
+                    );
                 }
 
                 warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
@@ -742,8 +762,9 @@ impl DHT {
 
         let existing_opt = self.rt().bucket_entry(&remote_id);
         if let Some(existing) = existing_opt.as_ref() {
-            if  existing.socket_addr() != &remote_addr ||
-                existing.socket_addr().port() != remote_port {
+            if existing.socket_addr() != &remote_addr
+                || existing.socket_addr().port() != remote_port
+            {
                 warn!("Received a message from inconsistent node {}@{}, ignored the potential routing table update",
                     remote_id, remote_addr);
                 self.suspicious_inconsistent(remote_addr, remote_id);
@@ -764,11 +785,11 @@ impl DHT {
         self.rt().put(new_entry.clone());
 
         // Optimize: not the standard Kademlia behavior
-		// incoming request && the new entry is unreachable && the target bucket not full,
-		// then try to do a ping request to the new entry check its availability.
-        if existing_opt.is_none() && !new_entry.is_reachable(){
+        // incoming request && the new entry is unreachable && the target bucket not full,
+        // then try to do a ping request to the new entry check its availability.
+        if existing_opt.is_none() && !new_entry.is_reachable() {
             // Verify the node, speed up the bootstrap process or make the bucket more reliable.
-			// only if the new entry is unreachable and the bucket is not full yet
+            // only if the new entry is unreachable and the bucket is not full yet
             let call = RpcCall::new(new_entry, msg::ping_request());
             let _ = self.send_call(call);
         }
@@ -791,7 +812,8 @@ impl DHT {
         }
 
         if msg.method() == Method::Ping {
-            trace!("Received a {}_{} message from {}@{}, txid {}",
+            trace!(
+                "Received a {}_{} message from {}@{}, txid {}",
                 msg.method(),
                 msg.kind(),
                 msg.remote_id(),
@@ -799,7 +821,8 @@ impl DHT {
                 msg.txid()
             )
         } else {
-            debug!("Received a {}_{} message from {}@{}, txid {}",
+            debug!(
+                "Received a {}_{} message from {}@{}, txid {}",
                 msg.method(),
                 msg.kind(),
                 msg.remote_id(),
@@ -809,8 +832,8 @@ impl DHT {
         }
 
         match msg.kind() {
-            Kind::Error    => self.on_error(&msg),
-            Kind::Request  => self.on_request(&msg),
+            Kind::Error => self.on_error(&msg),
+            Kind::Request => self.on_request(&msg),
             Kind::Response => self.on_response(&msg),
         };
 
@@ -820,13 +843,13 @@ impl DHT {
     fn on_request(&self, msg: &Message) {
         let method = msg.method();
         match method {
-            Method::Ping        => self.on_ping(msg),
-            Method::FindNode    => self.on_find_node(msg),
-            Method::FindValue   => self.on_find_value(msg),
-            Method::FindPeer    => self.on_find_peer(msg),
-            Method::StoreValue  => self.on_store_value(msg),
-            Method::AnnouncePeer=> self.on_announce_peer(msg),
-            _                   => self.on_unknown_req(msg),
+            Method::Ping => self.on_ping(msg),
+            Method::FindNode => self.on_find_node(msg),
+            Method::FindValue => self.on_find_value(msg),
+            Method::FindPeer => self.on_find_peer(msg),
+            Method::StoreValue => self.on_store_value(msg),
+            Method::AnnouncePeer => self.on_announce_peer(msg),
+            _ => self.on_unknown_req(msg),
         }
     }
 
@@ -837,7 +860,8 @@ impl DHT {
             return;
         };
 
-        warn!("Received an error message from {}@{} - {}:{}, txid {}",
+        warn!(
+            "Received an error message from {}@{} - {}:{}, txid {}",
             msg.remote_id(),
             msg.remote_addr(),
             err.code(),
@@ -847,7 +871,8 @@ impl DHT {
     }
 
     fn on_unknown_req(&self, msg: &Message) {
-        warn!("Received unknown request {} from {}@{}, txid {}, ignoring it",
+        warn!(
+            "Received unknown request {} from {}@{}, txid {}, ignoring it",
             msg.method(),
             msg.remote_id(),
             msg.remote_addr(),
@@ -857,8 +882,11 @@ impl DHT {
 
     fn on_ping(&self, req: &Message) {
         if req.body().is_some() {
-            warn!("Ignoring ping request with unexpected body from {}@{}",
-                req.remote_id(), req.remote_addr());
+            warn!(
+                "Ignoring ping request with unexpected body from {}@{}",
+                req.remote_id(),
+                req.remote_addr()
+            );
             return;
         }
 
@@ -872,11 +900,7 @@ impl DHT {
     }
 
     fn fill_closest_nodes(&self, target: Id) -> Vec<NodeInfo> {
-        let mut kns = KClosestNodes::new(
-            &self.rt(),
-            target,
-            KBucket::MAX_ENTRIES
-        );
+        let mut kns = KClosestNodes::new(&self.rt(), target, KBucket::MAX_ENTRIES);
         kns.fill();
         kns.into()
     }
@@ -886,20 +910,21 @@ impl DHT {
             return;
         };
 
-        let network= self.network();
+        let network = self.network();
         let target = body.target().clone();
         let nodes4 = match body.want4() && network.is_ipv4() {
-            true  => Some(self.fill_closest_nodes(target)),
-            false => None
+            true => Some(self.fill_closest_nodes(target)),
+            false => None,
         };
         let nodes6 = match body.want6() && network.is_ipv6() {
-            true  => Some(self.fill_closest_nodes(target)),
-            false => None
+            true => Some(self.fill_closest_nodes(target)),
+            false => None,
         };
-        let token  = match body.want_token() {
-            true  => self.tokenman.generate_token(
-                        req.nodeid(), req.remote_addr(), &target),
-            false => 0
+        let token = match body.want_token() {
+            true => self
+                .tokenman
+                .generate_token(req.nodeid(), req.remote_addr(), &target),
+            false => 0,
         };
 
         let rsp = {
@@ -928,8 +953,10 @@ impl DHT {
 
         let mut value = None;
         if let Some(v) = existing {
-            if v.is_mutable() || body.expected_seq() < 0 ||
-                v.sequence_number() >= body.expected_seq() {
+            if v.is_mutable()
+                || body.expected_seq() < 0
+                || v.sequence_number() >= body.expected_seq()
+            {
                 value = Some(v);
             }
         }
@@ -941,12 +968,12 @@ impl DHT {
             let network = self.network();
             let target = body.target().clone();
             let nodes4 = match body.want4() && network.is_ipv4() {
-                true  => Some(self.fill_closest_nodes(target)),
-                false => None
+                true => Some(self.fill_closest_nodes(target)),
+                false => None,
             };
             let nodes6 = match body.want6() && network.is_ipv6() {
-                true  => Some(self.fill_closest_nodes(target)),
-                false => None
+                true => Some(self.fill_closest_nodes(target)),
+                false => None,
             };
             msg::find_value_response_with_nodes(txid, nodes4, nodes6)
         };
@@ -966,9 +993,9 @@ impl DHT {
         let value_id = value.id();
         let remote_addr = req.remote_addr().clone();
 
-        let is_valid = self.tokenman.verify_token(
-            body.token(), req.nodeid(), &remote_addr, &value_id
-        );
+        let is_valid =
+            self.tokenman
+                .verify_token(body.token(), req.nodeid(), &remote_addr, &value_id);
 
         if !is_valid {
             warn!("Invalid token for store value request from {}", remote_addr);
@@ -990,27 +1017,52 @@ impl DHT {
 
         if let Some(existing) = local_value {
             if existing.is_mutable() != value.is_mutable() {
-                warn!("Rejecting value {}: cannot replace mismatched mutable/immutable", value_id);
-                self.send_err(Method::StoreValue, 300,
-                    "Cannot replace mismatched mutable/immutable value");
+                warn!(
+                    "Rejecting value {}: cannot replace mismatched mutable/immutable",
+                    value_id
+                );
+                self.send_err(
+                    Method::StoreValue,
+                    300,
+                    "Cannot replace mismatched mutable/immutable value",
+                );
                 return;
             }
             if value.sequence_number() < existing.sequence_number() {
-                warn!("Rejecting value {}: sequence number {} is less than existing {}", value_id, value.sequence_number(), existing.sequence_number());
-                self.send_err(Method::StoreValue, 300,
-                    "Sequence number is less than existing value");
+                warn!(
+                    "Rejecting value {}: sequence number {} is less than existing {}",
+                    value_id,
+                    value.sequence_number(),
+                    existing.sequence_number()
+                );
+                self.send_err(
+                    Method::StoreValue,
+                    300,
+                    "Sequence number is less than existing value",
+                );
                 return;
             }
             if body.expected_seq() >= 0 && existing.sequence_number() > body.expected_seq() {
-                warn!("Rejecting value {}: existing sequence number {} is greater than expected {}", value_id, existing.sequence_number(), body.expected_seq());
-                self.send_err(Method::StoreValue, 300,
-                    "Existing sequence number is greater than expected");
+                warn!(
+                    "Rejecting value {}: existing sequence number {} is greater than expected {}",
+                    value_id,
+                    existing.sequence_number(),
+                    body.expected_seq()
+                );
+                self.send_err(
+                    Method::StoreValue,
+                    300,
+                    "Existing sequence number is greater than expected",
+                );
                 return;
             }
             if existing.has_private_key() && !value.has_private_key() {
                 // Skip update if the existing value is owned by this node and the new value is not.
-				// Should not throw NotOwnerException, just silently ignore to avoid disrupting valid operations.
-                warn!("Rejecting value {}: cannot replace existing value owned by this node.", value_id);
+                // Should not throw NotOwnerException, just silently ignore to avoid disrupting valid operations.
+                warn!(
+                    "Rejecting value {}: cannot replace existing value owned by this node.",
+                    value_id
+                );
                 return;
             }
         }
@@ -1033,7 +1085,9 @@ impl DHT {
         };
 
         let result = self.storage.lock().unwrap().get_peers_with_expected_seq(
-            body.target(), body.expected_seq(), body.expected_count()
+            body.target(),
+            body.expected_seq(),
+            body.expected_count(),
         );
         let peers = match result {
             Ok(v) => v,
@@ -1045,15 +1099,15 @@ impl DHT {
 
         let txid = req.txid();
         let mut rsp = if peers.is_empty() {
-            let network= self.network();
+            let network = self.network();
             let target = body.target().clone();
             let nodes4 = match body.want4() && network.is_ipv4() {
-                true  => Some(self.fill_closest_nodes(target)),
-                false => None
+                true => Some(self.fill_closest_nodes(target)),
+                false => None,
             };
             let nodes6 = match body.want6() && network.is_ipv6() {
-                true  => Some(self.fill_closest_nodes(target)),
-                false => None
+                true => Some(self.fill_closest_nodes(target)),
+                false => None,
             };
             msg::find_peer_response_with_nodes(txid, nodes4, nodes6)
         } else {
@@ -1073,22 +1127,30 @@ impl DHT {
 
         let peer = body.peer();
         let remote_addr = req.remote_addr().clone();
-        let is_valid = self.tokenman.verify_token(
-            body.token(), req.nodeid(), &remote_addr, peer.id()
-        );
+        let is_valid =
+            self.tokenman
+                .verify_token(body.token(), req.nodeid(), &remote_addr, peer.id());
 
         if !is_valid {
-            warn!("Invalid token for announce peer request from {}", remote_addr);
+            warn!(
+                "Invalid token for announce peer request from {}",
+                remote_addr
+            );
             return;
         }
         if !peer.is_valid() {
-            warn!("Invalid peer for announce peer request from {}", remote_addr);
+            warn!(
+                "Invalid peer for announce peer request from {}",
+                remote_addr
+            );
             return;
         }
 
-        let result = self.storage.lock().unwrap().get_peer(
-            peer.id(), peer.fingerprint()
-        );
+        let result = self
+            .storage
+            .lock()
+            .unwrap()
+            .get_peer(peer.id(), peer.fingerprint());
         let local_peers = match result {
             Ok(v) => v,
             Err(e) => {
@@ -1099,23 +1161,42 @@ impl DHT {
 
         if let Some(existing) = local_peers {
             if peer.sequence_number() < existing.sequence_number() {
-                warn!("Rejecting peer {}: sequence number {} is less than existing {}", peer.id(), peer.sequence_number(), existing.sequence_number());
-                self.send_err(Method::AnnouncePeer, 300,
-                    "Sequence number is less than existing value");
+                warn!(
+                    "Rejecting peer {}: sequence number {} is less than existing {}",
+                    peer.id(),
+                    peer.sequence_number(),
+                    existing.sequence_number()
+                );
+                self.send_err(
+                    Method::AnnouncePeer,
+                    300,
+                    "Sequence number is less than existing value",
+                );
                 return;
             }
 
             if body.expected_seq() >= 0 && existing.sequence_number() > body.expected_seq() {
-                warn!("Rejecting peer {}: existing sequence number {} is greater than expected {}", peer.id(), existing.sequence_number(), body.expected_seq());
-                self.send_err(Method::AnnouncePeer, 300,
-                    "Existing sequence number is greater than expected");
+                warn!(
+                    "Rejecting peer {}: existing sequence number {} is greater than expected {}",
+                    peer.id(),
+                    existing.sequence_number(),
+                    body.expected_seq()
+                );
+                self.send_err(
+                    Method::AnnouncePeer,
+                    300,
+                    "Existing sequence number is greater than expected",
+                );
                 return;
             }
 
             if existing.has_private_key() && !peer.has_private_key() {
                 // Skip update if the existing peer is owned by this node and the new peer is not.
-				// Should not throw NotOwnerException, just silently ignore to avoid disrupting valid operations.
-                warn!("Rejecting peer {}: cannot replace existing peer owned by this node.", peer.id());
+                // Should not throw NotOwnerException, just silently ignore to avoid disrupting valid operations.
+                warn!(
+                    "Rejecting peer {}: cannot replace existing peer owned by this node.",
+                    peer.id()
+                );
                 return;
             }
         }
@@ -1132,11 +1213,7 @@ impl DHT {
         self.send_msg(rsp);
     }
 
-    pub(crate) async fn bootstrap(
-        self: &Rc<Self>,
-        nodes: Vec<NodeInfo>,
-        promise: Promise<()>
-    ) {
+    pub(crate) async fn bootstrap(self: &Rc<Self>, nodes: Vec<NodeInfo>, promise: Promise<()>) {
         if !*self.is_running.borrow() {
             warn!("DHT/{} instance is not running.", self.network);
             promise.complete(Ok(()));
@@ -1158,8 +1235,10 @@ impl DHT {
         });
     }
 
-    fn find_closest_nodes(&self, nodes: Vec<NodeInfo>)
-    -> FuturesUnordered<impl Future<Output=Result<Vec<NodeInfo>>>> {
+    fn find_closest_nodes(
+        &self,
+        nodes: Vec<NodeInfo>,
+    ) -> FuturesUnordered<impl Future<Output = Result<Vec<NodeInfo>>>> {
         let unordered = FuturesUnordered::new();
 
         let network = self.network();
@@ -1168,12 +1247,8 @@ impl DHT {
             if item.id() == self.id() {
                 continue;
             }
-            let msg = msg::find_node_request(
-                Id::random(),
-                network.is_ipv4(),
-                network.is_ipv6(),
-                false
-            );
+            let msg =
+                msg::find_node_request(Id::random(), network.is_ipv4(), network.is_ipv6(), false);
 
             let mut call = RpcCall::new(item, msg);
             let (promise, future) = Promise::<Vec<NodeInfo>>::pair();
@@ -1198,9 +1273,7 @@ impl DHT {
                         nodes = body.nodes(network).map(|v| v.to_vec());
                     }
 
-                    promise.complete(Ok(
-                        nodes.unwrap_or_else(|| vec![])
-                    ));
+                    promise.complete(Ok(nodes.unwrap_or_else(|| vec![])));
                 }
             });
             call.set_listener(listener);
@@ -1209,13 +1282,12 @@ impl DHT {
                 Ok(_) => unordered.push(future),
                 Err(e) => warn!("{e}"),
             }
-        };
+        }
         unordered
     }
 
     async fn do_bootstrap(dht: Rc<Self>, nodes: Vec<NodeInfo>) {
-        if crate::elapsed_ms!(*dht.last_bootstrap.borrow()) <
-                Self::BOOTSTRAP_MIN_INTERVAL as u128 {
+        if crate::elapsed_ms!(*dht.last_bootstrap.borrow()) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
             return;
         }
 
@@ -1300,13 +1372,14 @@ impl DHT {
         }
 
         *self.bootstrap_nodes.borrow_mut() = dedup.values().cloned().collect();
-        *self.bootstrap_ids.borrow_mut()   = dedup.keys().cloned().collect();
+        *self.bootstrap_ids.borrow_mut() = dedup.keys().cloned().collect();
     }
 
-    pub(crate) fn find_node(self: &Rc<Self>,
+    pub(crate) fn find_node(
+        self: &Rc<Self>,
         target: Id,
         option: LookupOption,
-        promise: Promise<Option<NodeInfo>>
+        promise: Promise<Option<NodeInfo>>,
     ) {
         let node: Option<NodeInfo> = self.rt().bucket_entry(&target).map(|v| v.into());
         if option == LookupOption::Local {
@@ -1321,18 +1394,14 @@ impl DHT {
         let mut task = Box::new(NodeLookupTask::new(
             self.clone(),
             target.clone(),
-            option != LookupOption::Conservative
+            option != LookupOption::Conservative,
         ));
         task.with_name(format!("Lookup node: {target}"));
         task.with_want_target(true);
-        task.with_listener(
-            TaskListener::default().ended_fn(
-                move |t: &dyn Task| {
-                    let task = t.as_any()
-                        .downcast_ref::<NodeLookupTask>().unwrap();
-                    promise.complete(Ok(task.result()));
-            })
-        );
+        task.with_listener(TaskListener::default().ended_fn(move |t: &dyn Task| {
+            let task = t.as_any().downcast_ref::<NodeLookupTask>().unwrap();
+            promise.complete(Ok(task.result()));
+        }));
         self.task_man.add(task);
     }
 
@@ -1341,23 +1410,19 @@ impl DHT {
         value_id: Id,
         expected_seq: i32,
         option: LookupOption,
-        promise: Promise<Option<Value>>
+        promise: Promise<Option<Value>>,
     ) {
         let mut task = Box::new(ValueLookupTask::new(
             self.clone(),
             value_id,
             expected_seq,
-            option != LookupOption::Conservative
+            option != LookupOption::Conservative,
         ));
         task.with_name(format!("Lookup value: {value_id}"));
-        task.with_listener(
-            TaskListener::default().ended_fn(
-                move |t: &dyn Task| {
-                    let task = t.as_any()
-                        .downcast_ref::<ValueLookupTask>().unwrap();
-                    promise.complete(Ok(task.result()));
-            })
-        );
+        task.with_listener(TaskListener::default().ended_fn(move |t: &dyn Task| {
+            let task = t.as_any().downcast_ref::<ValueLookupTask>().unwrap();
+            promise.complete(Ok(task.result()));
+        }));
 
         self.task_man.add(task);
     }
@@ -1366,25 +1431,21 @@ impl DHT {
         self: &Rc<Self>,
         value: Value,
         expected_seq: i32,
-        promise: Promise::<()>
+        promise: Promise<()>,
     ) {
         let valueid = value.id();
         let mut nested = Box::new(ValueAnnounceTask::new(
-            self.clone(), value.clone(), expected_seq
+            self.clone(),
+            value.clone(),
+            expected_seq,
         ));
         nested.with_name(format!("Store value:{valueid}"));
-        nested.with_listener(
-            TaskListener::default().ended_fn(
-                move |_| promise.complete(Ok(()))
-            )
-        );
+        nested.with_listener(TaskListener::default().ended_fn(move |_| promise.complete(Ok(()))));
 
         let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the valueid, and
         // then nested announce task to announce the value to those nodes.
-        let mut task = Box::new(NodeLookupTask::new(
-            self.clone(), valueid, false
-        ));
+        let mut task = Box::new(NodeLookupTask::new(self.clone(), valueid, false));
         task.with_name(format!("Store value: lookup closest node to {valueid}"));
         task.with_want_token(true);
         task.with_nested(nested);
@@ -1427,22 +1488,20 @@ impl DHT {
         expected_seq: i32,
         expected_count: usize,
         option: LookupOption,
-        promise: Promise::<Vec<PeerInfo>>
+        promise: Promise<Vec<PeerInfo>>,
     ) {
         let mut task = Box::new(PeerLookupTask::new(
             self.clone(),
             peerid,
             expected_seq,
             expected_count,
-            option != LookupOption::Conservative
+            option != LookupOption::Conservative,
         ));
         task.with_name(format!("Lookup peer: {}", peerid));
         task.with_listener({
-            TaskListener::default().ended_fn(
-                move |t: &dyn Task| {
-                    let task = t.as_any()
-                        .downcast_ref::<PeerLookupTask>().unwrap();
-                    promise.complete(Ok(task.result()));
+            TaskListener::default().ended_fn(move |t: &dyn Task| {
+                let task = t.as_any().downcast_ref::<PeerLookupTask>().unwrap();
+                promise.complete(Ok(task.result()));
             })
         });
 
@@ -1453,26 +1512,25 @@ impl DHT {
         self: &Rc<Self>,
         peer: PeerInfo,
         expected_seq: i32,
-        promise: Promise::<()>
+        promise: Promise<()>,
     ) {
         // Announce task to announce the peer to the closest nodes found
         // by the lookup task.
         let mut nested = Box::new(PeerAnnounceTask::new(
-            self.clone(), peer.clone(), expected_seq,
+            self.clone(),
+            peer.clone(),
+            expected_seq,
         ));
         nested.with_name(format!("Announce peer: {}", peer.id()));
-        nested.with_listener(
-            TaskListener::default().ended_fn(
-                move |_| promise.complete(Ok(()))
-            )
-        );
+        nested.with_listener(TaskListener::default().ended_fn(move |_| promise.complete(Ok(()))));
 
         let task_man = self.task_man.clone();
         // Lookup task to find the closest nodes to the targetid.
-        let mut task = Box::new(NodeLookupTask::new(
-            self.clone(), peer.id().clone(), false
+        let mut task = Box::new(NodeLookupTask::new(self.clone(), peer.id().clone(), false));
+        task.with_name(format!(
+            "Announce peer: lookup closest node to {}",
+            peer.id()
         ));
-        task.with_name(format!("Announce peer: lookup closest node to {}", peer.id()));
         task.with_want_token(true);
         task.with_nested(nested);
         task.with_listener({

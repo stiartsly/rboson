@@ -1,26 +1,23 @@
-use std::fmt;
-use serde::{Serialize, Deserialize};
 use crate::{
-    utils,
-    Id, PeerInfo,
     errors::{Error, Result},
+    utils, Id, PeerInfo,
 };
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
-#[serde(into = "SerdeAnnouncePeerRequest", try_from = "SerdeAnnouncePeerRequest")]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(
+    into = "SerdeAnnouncePeerRequest",
+    try_from = "SerdeAnnouncePeerRequest"
+)]
 pub(crate) struct AnnouncePeerRequest {
-    token:  i32,
-    peer:   PeerInfo,
+    token: i32,
+    peer: PeerInfo,
     expected_seq: i32, // None means unset
 }
 
 impl AnnouncePeerRequest {
-    pub(crate) fn new(
-        peer: PeerInfo,
-        token: i32,
-        expected_seq: Option<i32>
-    ) -> Self {
+    pub(crate) fn new(peer: PeerInfo, token: i32, expected_seq: Option<i32>) -> Self {
         Self {
             token,
             peer,
@@ -74,7 +71,7 @@ struct SerdeAnnouncePeerRequest {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     node_id: Option<Id>,
 
@@ -114,11 +111,11 @@ impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
     fn into(self) -> SerdeAnnouncePeerRequest {
         let peer = self.peer;
         SerdeAnnouncePeerRequest {
-            token   : self.token,
+            token: self.token,
             expected_seq: self.expected_seq,
-            id      : peer.id().clone(),
-            seq     : peer.sequence_number(),
-            node_id : if peer.is_authenticated() {
+            id: peer.id().clone(),
+            seq: peer.sequence_number(),
+            node_id: if peer.is_authenticated() {
                 peer.nodeid().cloned()
             } else {
                 None
@@ -128,10 +125,10 @@ impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
             } else {
                 None
             },
-            sig     : peer.signature().to_vec(),
+            sig: peer.signature().to_vec(),
             fingerprint: peer.fingerprint(),
             endpoint: peer.endpoint().to_string(),
-            extra   : peer.extra_data().map(|v| v.to_vec()),
+            extra: peer.extra_data().map(|v| v.to_vec()),
         }
     }
 }
@@ -147,7 +144,7 @@ impl TryFrom<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
             s.sig,
             s.fingerprint,
             s.endpoint,
-            s.extra
+            s.extra,
         );
         Ok(AnnouncePeerRequest {
             token: s.token,
@@ -159,8 +156,7 @@ impl TryFrom<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
 
 impl fmt::Display for AnnouncePeerRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

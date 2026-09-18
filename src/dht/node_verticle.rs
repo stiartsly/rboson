@@ -1,18 +1,12 @@
-use std::{
-    sync::Mutex,
-    thread::JoinHandle
-};
-use tokio::{
-    task,
-    runtime,
-    sync::mpsc::{self, UnboundedSender}
-};
 use crate::{
-    errors::Result,
-    BoxHandler,
-    BoxTimerCmd as TimerCmd,
-    BoxTimerClient as TimerClient,
-    BoxTimerManager as TimerManager
+    errors::Result, BoxHandler, BoxTimerClient as TimerClient, BoxTimerCmd as TimerCmd,
+    BoxTimerManager as TimerManager,
+};
+use std::{sync::Mutex, thread::JoinHandle};
+use tokio::{
+    runtime,
+    sync::mpsc::{self, UnboundedSender},
+    task,
 };
 
 pub(crate) type TimerId = u64;
@@ -23,20 +17,18 @@ pub(crate) struct VerticleClient {
 }
 
 impl VerticleClient {
-    pub(crate) fn new(
-        sender: UnboundedSender<TimerCmd>,
-        handle: JoinHandle<()>
-    ) -> Self {
+    pub(crate) fn new(sender: UnboundedSender<TimerCmd>, handle: JoinHandle<()>) -> Self {
         Self {
             timerc: TimerClient::new(sender),
             handle: Mutex::new(Some(handle)),
         }
     }
 
-    pub(crate) fn add_timer(&self,
+    pub(crate) fn add_timer(
+        &self,
         delay: u64,
         interval: Option<u64>,
-        cb: BoxHandler<()>
+        cb: BoxHandler<()>,
     ) -> Result<TimerId> {
         self.timerc.add_timer(delay, interval, cb)
     }
@@ -55,13 +47,10 @@ impl VerticleClient {
 pub(crate) struct Verticle {
     timerman: TimerManager,
     receiver: mpsc::UnboundedReceiver<TimerCmd>,
-
 }
 
 impl Verticle {
-    pub(crate) fn new(
-        receiver: mpsc::UnboundedReceiver<TimerCmd>
-    ) -> Self {
+    pub(crate) fn new(receiver: mpsc::UnboundedReceiver<TimerCmd>) -> Self {
         Self {
             timerman: TimerManager::new(),
             receiver,
@@ -70,7 +59,12 @@ impl Verticle {
 
     fn handle_commands(&mut self, cmd: TimerCmd) -> bool {
         match cmd {
-            TimerCmd::Add { timer_id, delay, interval, cb } => {
+            TimerCmd::Add {
+                timer_id,
+                delay,
+                interval,
+                cb,
+            } => {
                 self.timerman.add_timer(timer_id, delay, interval, cb);
             }
             TimerCmd::Cancel { timer_id } => {

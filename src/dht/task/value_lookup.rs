@@ -1,25 +1,19 @@
-use std::{
-    any::Any,
-    rc::Rc,
-};
-use crate::{Id, Value, EasyHandler};
 use crate::dht::{
     dht::DHT,
     eligible_value::EligibleValue,
+    msg::{msg, Body, LookupResponse},
     rpc::RpcCall,
-    msg::{msg, LookupResponse, Body},
-    task::{
-        LookupTask, LookupTaskData,
-        Task, TaskData,
-    }
+    task::{LookupTask, LookupTaskData, Task, TaskData},
 };
+use crate::{EasyHandler, Id, Value};
+use std::{any::Any, rc::Rc};
 
 pub(crate) struct ValueLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
 
-    result  : EligibleValue,
-    dht     : Rc<DHT>,
+    result: EligibleValue,
+    dht: Rc<DHT>,
 }
 
 impl ValueLookupTask {
@@ -27,13 +21,13 @@ impl ValueLookupTask {
         dht: Rc<DHT>,
         target: Id,
         expected_seq: i32,
-        done_on_eligible_result: bool
+        done_on_eligible_result: bool,
     ) -> Self {
         Self {
-            base_data   : TaskData::new(),
-            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
-            result      : EligibleValue::new(target, expected_seq),
-            dht         : dht.clone(),
+            base_data: TaskData::new(),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            result: EligibleValue::new(target, expected_seq),
+            dht: dht.clone(),
         }
     }
 
@@ -99,9 +93,7 @@ impl Task for ValueLookupTask {
                 self.result.expected_seq(),
             );
 
-            let handler = EasyHandler::new(move |_|
-                next.borrow_mut().set_sent()
-            );
+            let handler = EasyHandler::new(move |_| next.borrow_mut().set_sent());
             self.send_call(target, msg, Some(handler));
         }
     }
@@ -112,7 +104,7 @@ impl Task for ValueLookupTask {
         if call.nodeid_mismatched() {
             return;
         }
-        let rsp  = call.rsp().expect("no response set.");
+        let rsp = call.rsp().expect("no response set.");
         let body = rsp.body().expect("no message body in the response.");
 
         let Body::FindValueResponse(body) = body else {
@@ -138,7 +130,8 @@ impl Task for ValueLookupTask {
 
             self.add(nodes.to_vec());
 
-            log::debug!("{}#{} added {} additional candidates from response by target {}",
+            log::debug!(
+                "{}#{} added {} additional candidates from response by target {}",
                 self.task_name(),
                 self.task_id(),
                 nodes.len(),

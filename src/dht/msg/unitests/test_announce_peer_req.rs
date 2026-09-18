@@ -1,8 +1,4 @@
-use crate::{
-    Id,
-    PeerInfo,
-    dht::msg::announce_peer_req::AnnouncePeerRequest,
-};
+use crate::{dht::msg::announce_peer_req::AnnouncePeerRequest, Id, PeerInfo};
 
 fn make_peer() -> PeerInfo {
     PeerInfo::packed(
@@ -29,11 +25,10 @@ mod tests {
         assert_eq!(req.expected_seq(), 8);
         assert_eq!(req.peer(), &peer);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let decoded: AnnouncePeerRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
         assert_eq!(decoded.expected_seq(), 8);
@@ -49,11 +44,10 @@ mod tests {
         assert_eq!(req.expected_seq(), -1);
         assert_eq!(req.peer(), &peer);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
         // println!("encoded: {}", hex::encode(&encoded));
-        let decoded: AnnouncePeerRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let decoded: AnnouncePeerRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
         assert_eq!(decoded.expected_seq(), -1);

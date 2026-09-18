@@ -1,12 +1,6 @@
-use std::{
-    time::SystemTime,
-    net::SocketAddr
-};
+use crate::dht::{routing::KBucketEntry, rpc::TargetInfo};
 use crate::{Id, NodeInfo};
-use crate::dht::{
-    rpc::TargetInfo,
-    routing::KBucketEntry
-};
+use std::{net::SocketAddr, time::SystemTime};
 
 const MAX_PINGS: i32 = 3;
 
@@ -14,7 +8,7 @@ const MAX_PINGS: i32 = 3;
 pub(crate) struct CandidateNode {
     ni: NodeInfo,
 
-    last_sent   : Option<SystemTime>,
+    last_sent: Option<SystemTime>,
     last_replied: Option<SystemTime>,
 
     acked: bool,

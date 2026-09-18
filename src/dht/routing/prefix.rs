@@ -1,8 +1,5 @@
-use std::{
-    fmt,
-    cmp::Ordering
-};
 use crate::core::Id;
+use std::{cmp::Ordering, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Prefix {
@@ -14,17 +11,17 @@ impl Prefix {
     pub(crate) fn new() -> Self {
         Self {
             id: Id::default(),
-            depth: -1
+            depth: -1,
         }
     }
 
     pub(crate) fn from(src: &Id, depth: i32) -> Self {
-       assert!(depth < Id::BITS as i32);
+        assert!(depth < Id::BITS as i32);
 
         let mut id = Id::default();
         Id::bits_copy(src, &mut id, depth);
 
-        Self {id, depth }
+        Self { id, depth }
     }
 
     pub(crate) const fn id(&self) -> &Id {
@@ -88,8 +85,7 @@ impl Prefix {
 
     #[allow(unused)]
     pub(crate) fn is_sibling_of(&self, other: &Prefix) -> bool {
-        self.depth == other.depth &&
-            Id::bits_equal(&self.id, &other.id, self.depth - 1)
+        self.depth == other.depth && Id::bits_equal(&self.id, &other.id, self.depth - 1)
     }
 
     pub(crate) fn random_id(&self) -> Id {
@@ -100,9 +96,8 @@ impl Prefix {
 
     fn set_tail(&mut self, bit: i32) {
         let index = bit >> 3;
-        self.id.update(|bytes: &mut[u8]| {
-            bytes[index as usize] &= !(0x80 >> (bit & 0x07))
-        });
+        self.id
+            .update(|bytes: &mut [u8]| bytes[index as usize] &= !(0x80 >> (bit & 0x07)));
     }
 }
 

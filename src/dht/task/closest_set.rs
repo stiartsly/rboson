@@ -1,14 +1,9 @@
-use std::{
-    fmt,
-    cmp::Ordering,
-    rc::Rc,
-    cell::RefCell,
-};
 use indexmap::map::IndexMap;
 use log::debug;
+use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 
-use crate::Id;
 use crate::dht::task::candidate_node::CandidateNode;
+use crate::Id;
 
 #[derive(Clone)]
 pub(crate) struct ClosestSet {
@@ -61,11 +56,15 @@ impl ClosestSet {
 
     pub(crate) fn add(&mut self, cn: Rc<RefCell<CandidateNode>>) {
         let id = cn.borrow().id().clone();
-        self.closest.insert_sorted_by(id, cn, |_, left, _, right|
+        self.closest.insert_sorted_by(id, cn, |_, left, _, right| {
             Self::candidate_order(&self.target, left, right)
-        );
+        });
 
-        debug!("Added candidate {} to ClosestSet, size now {}", id, self.closest.len());
+        debug!(
+            "Added candidate {} to ClosestSet, size now {}",
+            id,
+            self.closest.len()
+        );
 
         if self.closest.len() > self.capacity {
             let last_id = self.closest.last().unwrap().0.clone();
@@ -77,7 +76,8 @@ impl ClosestSet {
                 self.insert_attempt_since_tail_modification = 0;
             }
 
-            debug!("Removed farthest candidate {}, tail modification count: {}",
+            debug!(
+                "Removed farthest candidate {}, tail modification count: {}",
                 last_id, self.insert_attempt_since_tail_modification
             );
         }
@@ -110,8 +110,7 @@ impl ClosestSet {
     }
 
     pub(crate) fn is_eligible(&self) -> bool {
-        self.reached_capacity() &&
-            self.insert_attempt_since_tail_modification > self.capacity
+        self.reached_capacity() && self.insert_attempt_since_tail_modification > self.capacity
     }
 
     #[cfg(test)]
@@ -137,7 +136,7 @@ impl ClosestSet {
     #[cfg(test)]
     pub(crate) fn remove(&mut self, id: &Id) -> Option<Rc<RefCell<CandidateNode>>> {
         if self.is_empty() {
-            return None
+            return None;
         }
         self.closest.shift_remove(id)
     }

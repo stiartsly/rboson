@@ -1,18 +1,12 @@
-use std::{
-    net::SocketAddr,
-    rc::Rc,
-};
+use std::{net::SocketAddr, rc::Rc};
 
 use crate::{
-    Id,
-    NodeInfo,
-    dht::rpc::TargetInfo,
     dht::routing::{
-        kbucket::KBucket,
-        kbucket_entry::KBucketEntry,
-        kclosest_nodes::KClosestNodes,
+        kbucket::KBucket, kbucket_entry::KBucketEntry, kclosest_nodes::KClosestNodes,
         routing_table::RoutingTable,
     },
+    dht::rpc::TargetInfo,
+    Id, NodeInfo,
 };
 
 fn make_id(first_byte: u8, last_byte: u8) -> Id {
@@ -98,14 +92,18 @@ mod tests {
         closest.fill();
 
         let local_id = rt.nodeid().clone();
-        assert!(!closest.entries()
+        assert!(!closest
+            .entries()
             .iter()
             .any(|entry| entry.id() == &local_id));
 
         let mut previous = None;
         for entry in closest.entries() {
             if let Some(prev) = previous {
-                assert_ne!(target.three_way_compare(prev, entry.id()), std::cmp::Ordering::Greater);
+                assert_ne!(
+                    target.three_way_compare(prev, entry.id()),
+                    std::cmp::Ordering::Greater
+                );
             }
             previous = Some(entry.id());
         }
@@ -122,9 +120,10 @@ mod tests {
 
         assert!(!closest.is_full());
 
-        assert!(closest.entries().iter().all(
-            |entry| entry.socket_addr().port() % 2 == 0
-        ));
+        assert!(closest
+            .entries()
+            .iter()
+            .all(|entry| entry.socket_addr().port() % 2 == 0));
 
         let rt = make_split_rt();
         let target = make_id(0x80, 1);
@@ -133,7 +132,10 @@ mod tests {
         closest.set_filter(|entry| entry.id().as_bytes()[0] == 0x80);
         closest.fill();
 
-        assert!(closest.entries().iter().all(|entry| entry.id().as_bytes()[0] == 0x80));
+        assert!(closest
+            .entries()
+            .iter()
+            .all(|entry| entry.id().as_bytes()[0] == 0x80));
         assert!(closest.size() >= 1);
     }
 
@@ -146,12 +148,18 @@ mod tests {
         closest.set_filter(|_| true);
         closest.fill();
 
-        assert!(!closest.entries().iter().any(|entry| entry.id() == &local_id));
-        assert!(closest.entries().iter().all(|entry| entry.id() != &local_id));
+        assert!(!closest
+            .entries()
+            .iter()
+            .any(|entry| entry.id() == &local_id));
+        assert!(closest
+            .entries()
+            .iter()
+            .all(|entry| entry.id() != &local_id));
     }
 
     #[test]
-    fn test_fill_with_empty_rt(){
+    fn test_fill_with_empty_rt() {
         let rt = make_rt(Id::zero());
         let mut closest = make_closest(&rt, make_id(0x40, 1), 4);
         closest.fill();
@@ -200,7 +208,10 @@ mod tests {
 
         assert_eq!(entries.len(), 3);
         assert_eq!(
-            entries.iter().map(|entry| entry.id().clone()).collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.id().clone())
+                .collect::<Vec<_>>(),
             expected_ids
         );
         assert!(entries.iter().all(|entry| entry.id() != rt.nodeid()));
@@ -213,11 +224,7 @@ mod tests {
 
         closest.fill();
 
-        let expected: Vec<NodeInfo> = closest
-            .entries()
-            .iter()
-            .map(|entry| entry.ni())
-            .collect();
+        let expected: Vec<NodeInfo> = closest.entries().iter().map(|entry| entry.ni()).collect();
         let nodes: Vec<NodeInfo> = closest.into();
 
         assert_eq!(nodes, expected);

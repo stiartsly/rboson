@@ -2,37 +2,45 @@ use super::task::Task;
 
 #[derive(Default)]
 pub(crate) struct TaskListener {
-    started_fn:    Option<Box<dyn Fn(&dyn Task)>>,
-    completed_fn:  Option<Box<dyn Fn(&dyn Task)>>,
-    canceled_fn:   Option<Box<dyn Fn(&dyn Task)>>,
-    ended_fn:      Option<Box<dyn Fn(&dyn Task)>>,
+    started_fn: Option<Box<dyn Fn(&dyn Task)>>,
+    completed_fn: Option<Box<dyn Fn(&dyn Task)>>,
+    canceled_fn: Option<Box<dyn Fn(&dyn Task)>>,
+    ended_fn: Option<Box<dyn Fn(&dyn Task)>>,
 }
 
 impl TaskListener {
     #[allow(unused)]
     pub(crate) fn started_fn<F>(mut self, f: F) -> Self
-    where F: Fn(&dyn Task) + 'static {
+    where
+        F: Fn(&dyn Task) + 'static,
+    {
         self.started_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
     pub(crate) fn completed_fn<F>(mut self, f: F) -> Self
-    where F: Fn(&dyn Task) + 'static {
-        self.completed_fn  = Some(Box::new(f));
+    where
+        F: Fn(&dyn Task) + 'static,
+    {
+        self.completed_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
     pub(crate) fn canceled_fn<F>(mut self, f: F) -> Self
-    where F: Fn(&dyn Task) + 'static {
+    where
+        F: Fn(&dyn Task) + 'static,
+    {
         self.canceled_fn = Some(Box::new(f));
         self
     }
 
     #[allow(unused)]
     pub(crate) fn ended_fn<F>(mut self, f: F) -> Self
-    where F: Fn(&dyn Task) + 'static {
+    where
+        F: Fn(&dyn Task) + 'static,
+    {
         self.ended_fn = Some(Box::new(f));
         self
     }

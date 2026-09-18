@@ -1,62 +1,59 @@
-use std::{fmt, env, fs, net::SocketAddr};
-use std::path::{Path, PathBuf};
+use crate::{
+    errors::{ArgumentError, Error, IOError, Result},
+    signature::{KeyPair, PrivateKey},
+    NodeInfo,
+};
 use log::LevelFilter;
 use serde::Deserialize;
-use crate::{
-    NodeInfo,
-    signature::{KeyPair, PrivateKey},
-    errors::{Error, Result, ArgumentError, IOError},
-};
+use std::path::{Path, PathBuf};
+use std::{env, fmt, fs, net::SocketAddr};
 
 pub const DEFAULT_DHT_PORT: u16 = 39001;
 
 const DEFAULT_DATA_DIR: &str = ".";
 const DEFAULT_DATABASE_URI: &str = "jdbc:sqlite:node.db";
 
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(try_from = "SerdeNodeOptions")]
 pub struct NodeOptions {
-    host4           : Option<String>,
-    host6           : Option<String>,
-    port            : u16,
+    host4: Option<String>,
+    host6: Option<String>,
+    port: u16,
 
-    keypair         : KeyPair,
+    keypair: KeyPair,
 
-    data_dir        : PathBuf,
-    database_uri    : String,
-    bootstrap_nodes : Vec<NodeInfo>,
+    data_dir: PathBuf,
+    database_uri: String,
+    bootstrap_nodes: Vec<NodeInfo>,
 
-    log_level       : LevelFilter,
-    log_file        : Option<String>,
-    log_console     : bool,
+    log_level: LevelFilter,
+    log_file: Option<String>,
+    log_console: bool,
 
-    developer_mode  : bool,
+    developer_mode: bool,
 }
 
 impl NodeOptions {
     pub fn new(sk: PrivateKey) -> Self {
         Self {
-            host4           : None,
-            host6           : None,
-            port            : DEFAULT_DHT_PORT,
-            keypair         : KeyPair::from(sk),
-            data_dir        : DEFAULT_DATA_DIR.into(),
-            database_uri    : DEFAULT_DATABASE_URI.into(),
-            bootstrap_nodes : Vec::new(),
-            log_level       : LevelFilter::Info,
-            log_file        : None,
-            log_console     : true,
-            developer_mode  : false,
+            host4: None,
+            host6: None,
+            port: DEFAULT_DHT_PORT,
+            keypair: KeyPair::from(sk),
+            data_dir: DEFAULT_DATA_DIR.into(),
+            database_uri: DEFAULT_DATABASE_URI.into(),
+            bootstrap_nodes: Vec::new(),
+            log_level: LevelFilter::Info,
+            log_file: None,
+            log_console: true,
+            developer_mode: false,
         }
     }
 
     pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
         let expanded_yaml = expand_environ_vars(yaml.as_ref())?;
         serde_yaml::from_str::<SerdeNodeOptions>(&expanded_yaml)
-            .map_err(|e|
-                ArgumentError::new(format!("invalid YAML format: {e}"))
-            )?
+            .map_err(|e| ArgumentError::new(format!("invalid YAML format: {e}")))?
             .try_into()
     }
 
@@ -65,10 +62,12 @@ impl NodeOptions {
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let yaml = fs::read_to_string(path.as_ref())
-            .map_err(|e|
-                IOError::new(format!("Reading config {} failed: {e}", path.as_ref().display()))
-            )?;
+        let yaml = fs::read_to_string(path.as_ref()).map_err(|e| {
+            IOError::new(format!(
+                "Reading config {} failed: {e}",
+                path.as_ref().display()
+            ))
+        })?;
         Self::parse(&yaml)
     }
 
@@ -78,7 +77,7 @@ impl NodeOptions {
     }
 
     pub fn enable_host4(self) -> Result<Self> {
-        let host = crate::local_addr(true).map(|v|v.to_string())?;
+        let host = crate::local_addr(true).map(|v| v.to_string())?;
         Ok(self.with_host4(host))
     }
 
@@ -88,7 +87,7 @@ impl NodeOptions {
     }
 
     pub fn enable_host6(self) -> Result<Self> {
-        let host = crate::local_addr(false).map(|v|v.to_string())?;
+        let host = crate::local_addr(false).map(|v| v.to_string())?;
         Ok(self.with_host6(host))
     }
 
@@ -267,11 +266,8 @@ impl TryFrom<SerdeNodeOptions> for NodeOptions {
         }
         opts = opts.with_port(sopts.port);
 
-        let data_dir = expand_relative_path(
-            &sopts
-                .data_dir
-                .unwrap_or(DEFAULT_DATA_DIR.to_string())
-        )?;
+        let data_dir =
+            expand_relative_path(&sopts.data_dir.unwrap_or(DEFAULT_DATA_DIR.to_string()))?;
         opts = opts.with_data_dir(data_dir);
 
         let log_level = sopts
@@ -305,9 +301,11 @@ impl TryFrom<SerdeNodeEntry> for NodeInfo {
 
     fn try_from(value: SerdeNodeEntry) -> Result<Self> {
         let SerdeNodeEntry(id, host, port) = value;
-        let address = format!("{host}:{port}").parse::<SocketAddr>().map_err(|e| {
-            ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
-        })?;
+        let address = format!("{host}:{port}")
+            .parse::<SocketAddr>()
+            .map_err(|e| {
+                ArgumentError::new(format!("Invalid bootstrap node address {host}:{port}: {e}"))
+            })?;
         Ok(NodeInfo::new(id, address))
     }
 }
@@ -324,18 +322,15 @@ fn expand_environ_vars(input: &str) -> Result<String> {
         let (prefix, after) = remaining.split_at(start);
         expanded.push_str(prefix);
 
-        let end = after.find('}').ok_or_else(|| {
-            ArgumentError::new("unterminated environment variable reference")
-        })?;
+        let end = after
+            .find('}')
+            .ok_or_else(|| ArgumentError::new("unterminated environment variable reference"))?;
         let name = &after[2..end];
         if name.is_empty() {
             return Err(ArgumentError::new("empty environment variable name"));
         }
-        let value = env::var(name).map_err(|_| {
-            ArgumentError::new(format!(
-                "environment variable `{name}` is not set"
-            ))
-        })?;
+        let value = env::var(name)
+            .map_err(|_| ArgumentError::new(format!("environment variable `{name}` is not set")))?;
         expanded.push_str(&value);
         remaining = &after[end + 1..];
     }
@@ -358,12 +353,14 @@ fn expand_relative_path(input: &str) -> Result<PathBuf> {
 
     match relative {
         Some(relative) => {
-            let home_dir = home_dir.ok_or_else(|| ArgumentError::new(format!(
+            let home_dir = home_dir.ok_or_else(|| {
+                ArgumentError::new(format!(
                 "Data path {data_dir} can not be expanded because the home directory is unavailable"
-            )))?;
+            ))
+            })?;
             let path = home_dir.join(relative);
             Ok(path)
-        },
+        }
         _ => Ok(PathBuf::from(data_dir)),
     }
 }

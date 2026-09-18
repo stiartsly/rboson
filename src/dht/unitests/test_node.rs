@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    signature::KeyPair,
     dht::{Node, NodeOptions},
+    signature::KeyPair,
 };
 
 #[cfg(test)]
@@ -39,10 +39,8 @@ mod tests {
 
     #[test]
     fn node_info_requires_running_node() {
-        let data_dir = std::env::temp_dir().join(format!(
-            "boson-node-info-{}",
-            std::process::id(),
-        ));
+        let data_dir =
+            std::env::temp_dir().join(format!("boson-node-info-{}", std::process::id(),));
         let sk = KeyPair::random().to_private_key();
         let options = NodeOptions::new(sk)
             .with_host4("127.0.0.1")

@@ -1,17 +1,11 @@
-use std::{
-    any::Any,
-    rc::Rc,
-};
-use crate::{Id, NodeInfo, EasyHandler};
 use crate::dht::{
     dht::DHT,
-    rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
-    task::{
-        Task, TaskData,
-        LookupTask, LookupTaskData
-    },
+    rpc::RpcCall,
+    task::{LookupTask, LookupTaskData, Task, TaskData},
 };
+use crate::{EasyHandler, Id, NodeInfo};
+use std::{any::Any, rc::Rc};
 
 pub(crate) struct NodeLookupTask {
     base_data: TaskData,
@@ -20,29 +14,25 @@ pub(crate) struct NodeLookupTask {
     // Whether this is a bootstrap lookup, starting from nodes farthest
     // from the local node.
     bootstrap: bool,
-	// Whether to request tokens in FIND_NODE RPCs for subsequent operations.
+    // Whether to request tokens in FIND_NODE RPCs for subsequent operations.
     want_token: bool,
     // Whether the task should filter the target node during the lookup process.
     want_target: bool,
 
-    result  : Option<NodeInfo>,
-    dht     : Rc<DHT>,
+    result: Option<NodeInfo>,
+    dht: Rc<DHT>,
 }
 
 impl NodeLookupTask {
-    pub(crate) fn new(
-        dht: Rc<DHT>,
-        target: Id,
-        done_on_eligible_result: bool
-    ) -> Self {
+    pub(crate) fn new(dht: Rc<DHT>, target: Id, done_on_eligible_result: bool) -> Self {
         Self {
-            base_data   : TaskData::new(),
-            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
-            bootstrap   : false,
-            want_token  : false,
-            want_target : false,
-            result      : None,
-            dht         : dht.clone(),
+            base_data: TaskData::new(),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            bootstrap: false,
+            want_token: false,
+            want_target: false,
+            result: None,
+            dht: dht.clone(),
         }
     }
 
@@ -132,8 +122,11 @@ impl Task for NodeLookupTask {
             let next = match LookupTask::next_candidate(self) {
                 Some(next) => next,
                 _ => {
-                    log::debug!("{}#{} no eligible candidates in non-empty queue",
-                        self.task_name(), self.task_id());
+                    log::debug!(
+                        "{}#{} no eligible candidates in non-empty queue",
+                        self.task_name(),
+                        self.task_id()
+                    );
                     break;
                 }
             };
@@ -143,7 +136,7 @@ impl Task for NodeLookupTask {
                 self.target().clone(),
                 network.is_ipv4(),
                 network.is_ipv6(),
-                self.want_token
+                self.want_token,
             );
 
             let cb = EasyHandler::new(move |_| {
@@ -162,7 +155,7 @@ impl Task for NodeLookupTask {
             return;
         }
 
-        let rsp  = call.rsp().expect("no response set.");
+        let rsp = call.rsp().expect("no response set.");
         let body = rsp.body().expect("no message body in response.");
         let Body::FindNodeResponse(body) = body else {
             return;
@@ -176,7 +169,8 @@ impl Task for NodeLookupTask {
 
         self.add(nodes.to_vec());
 
-        log::debug!("{}#{} adding {} candidates from response by target {}",
+        log::debug!(
+            "{}#{} adding {} candidates from response by target {}",
             self.task_name(),
             self.task_id(),
             nodes.len(),

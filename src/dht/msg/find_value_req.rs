@@ -1,18 +1,12 @@
-use std::fmt;
-use serde::{Deserialize, Serialize};
+use super::lookup_req::{Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK};
 use crate::{
-    utils,
-    Id,
     errors::{Error, Result},
+    utils, Id,
 };
-use super::lookup_req::{
-    LookupRequest,
-    Data as LookupData,
-    WANT4_MASK, WANT6_MASK,
-};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeFindValueRequest", try_from = "SerdeFindValueRequest")]
 pub(crate) struct FindValueRequest {
     data: LookupData,
@@ -20,11 +14,7 @@ pub(crate) struct FindValueRequest {
 }
 
 impl FindValueRequest {
-    pub(crate) fn new(
-        target: Id,
-        want4: bool, want6: bool,
-        expected_seq: i32,
-    ) -> Self {
+    pub(crate) fn new(target: Id, want4: bool, want6: bool, expected_seq: i32) -> Self {
         Self {
             data: LookupData::new(target, want4, want6, false),
             expected_seq,
@@ -61,7 +51,7 @@ struct SerdeFindValueRequest {
         deserialize_with = "utils::deserialize_expected_seq",
         skip_serializing_if = "utils::is_default_expected_seq"
     )]
-    expected_seq: i32
+    expected_seq: i32,
 }
 
 impl Into<SerdeFindValueRequest> for FindValueRequest {
@@ -88,8 +78,7 @@ impl TryFrom<SerdeFindValueRequest> for FindValueRequest {
 
 impl fmt::Display for FindValueRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

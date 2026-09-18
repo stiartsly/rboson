@@ -1,39 +1,20 @@
-use std::{
-    cell::RefCell,
-    net::SocketAddr,
-    rc::Rc,
-};
+use std::{cell::RefCell, net::SocketAddr, rc::Rc};
 use tokio::sync::mpsc;
 
-use crate::{
-    Id,
-    NodeInfo,
-    LocalBoxTimerClient,
-    LocalBoxTimerCmd
-};
 use crate::dht::{
     msg::{msg, msg::Method},
     routing::KBucketEntry,
-    rpc::{
-        RpcCall, rpccall::State,
-        TargetInfo,
-        Listener
-    }
+    rpc::{rpccall::State, Listener, RpcCall, TargetInfo},
 };
+use crate::{Id, LocalBoxTimerClient, LocalBoxTimerCmd, NodeInfo};
 
 fn make_nodeinfo(addr: &str) -> NodeInfo {
-    NodeInfo::new(
-        Id::random(),
-        addr.parse::<SocketAddr>().unwrap()
-    )
+    NodeInfo::new(Id::random(), addr.parse::<SocketAddr>().unwrap())
 }
 
 fn make_entry(addr: &str) -> KBucketEntry {
     let target = make_nodeinfo(addr);
-    let mut entry = KBucketEntry::new(
-        target.id().clone(),
-        *target.address()
-    );
+    let mut entry = KBucketEntry::new(target.id().clone(), *target.address());
     entry.set_reachable(true);
     entry
 }
@@ -109,7 +90,8 @@ mod tests {
             let state_changes_cb = state_changes.clone();
             move |_, _, cur| {
                 *state_changes_cb.borrow_mut() = cur;
-        }});
+            }
+        });
 
         listener.response_fn({
             let state_changes_cb = state_changes.clone();
@@ -117,17 +99,20 @@ mod tests {
             move |_| {
                 *state_changes_cb.borrow_mut() = State::Responded;
                 *responded_cb.borrow_mut() += 1;
-        }});
+            }
+        });
         listener.stall_fn({
             let state_changes_cb = state_changes.clone();
-            move|_| {
+            move |_| {
                 *state_changes_cb.borrow_mut() = State::Stalled;
-        }});
+            }
+        });
         listener.timeout_fn({
             let state_changes_cb = state_changes.clone();
             move |_| {
                 *state_changes_cb.borrow_mut() = State::Timeout;
-        }});
+            }
+        });
         call.borrow_mut().set_listener(listener);
         call.borrow_mut().set_timer_client(timer_client.clone());
 
@@ -177,11 +162,15 @@ mod tests {
         let mut listener = Listener::new(|_, _, _| {});
         listener.stall_fn({
             let stalled_cb = stalled.clone();
-            move |_| { *stalled_cb.borrow_mut() += 1; }
+            move |_| {
+                *stalled_cb.borrow_mut() += 1;
+            }
         });
         listener.timeout_fn({
             let timed_out_cb = timed_out.clone();
-            move |_| { *timed_out_cb.borrow_mut() += 1; }
+            move |_| {
+                *timed_out_cb.borrow_mut() += 1;
+            }
         });
         call.borrow_mut().set_listener(listener);
         call.borrow_mut().set_timer_client(timer_client.clone());

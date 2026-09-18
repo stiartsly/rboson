@@ -1,20 +1,13 @@
-use std::fmt;
-use serde::{Deserialize, Serialize};
+use super::lookup_rsp::{Data, LookupResponse};
 use crate::{
-    utils,
-    Id,
-    Value,
-    NodeInfo,
     cryptobox::Nonce,
-    errors::{Error, Result, ProtocolError}
+    errors::{Error, ProtocolError, Result},
+    utils, Id, NodeInfo, Value,
 };
-use super::lookup_rsp::{
-    LookupResponse,
-    Data
-};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(into = "SerdeFindValueResponse", try_from = "SerdeFindValueResponse")]
 pub(crate) struct FindValueResponse {
     data: Data,
@@ -22,10 +15,7 @@ pub(crate) struct FindValueResponse {
 }
 
 impl FindValueResponse {
-    pub(crate) fn with_nodes(
-        nodes4: Option<Vec<NodeInfo>>,
-        nodes6: Option<Vec<NodeInfo>>
-    ) -> Self {
+    pub(crate) fn with_nodes(nodes4: Option<Vec<NodeInfo>>, nodes6: Option<Vec<NodeInfo>>) -> Self {
         Self {
             data: Data::new(nodes4, nodes6, 0),
             value: None,
@@ -53,23 +43,13 @@ impl LookupResponse for FindValueResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerdeFindValueResponse {
-    #[serde(
-        rename = "n4",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
     nodes4: Option<Vec<NodeInfo>>,
 
-    #[serde(
-        rename = "n6",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(
-        rename = "tok",
-        default,
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "tok", default, skip_serializing_if = "utils::is_default")]
     token: i32,
 
     #[serde(
@@ -77,7 +57,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     pk: Option<Id>,
 
@@ -86,7 +66,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_id_opt",
         deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     rec: Option<Id>,
 
@@ -95,15 +75,11 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_bytes_opt",
         deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     nonce: Option<Vec<u8>>,
 
-    #[serde(
-        rename = "seq",
-        default,
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "seq", default, skip_serializing_if = "utils::is_default")]
     seq: i32,
 
     #[serde(
@@ -111,7 +87,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_bytes_opt",
         deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     sig: Option<Vec<u8>>,
 
@@ -120,7 +96,7 @@ struct SerdeFindValueResponse {
         default,
         serialize_with = "utils::serialize_bytes_opt",
         deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default",
+        skip_serializing_if = "utils::is_default"
     )]
     value: Option<Vec<u8>>,
 }
@@ -128,15 +104,25 @@ struct SerdeFindValueResponse {
 impl Into<SerdeFindValueResponse> for FindValueResponse {
     fn into(self) -> SerdeFindValueResponse {
         SerdeFindValueResponse {
-            nodes4  : self.nodes4().map(|v| v.to_vec()),
-            nodes6  : self.nodes6().map(|v| v.to_vec()),
-            token   : self.token(),
-            pk      : self.value.as_ref().and_then(|v| v.public_key().cloned()),
-            rec     : self.value.as_ref().and_then(|v| v.recipient().cloned()),
-            nonce   : self.value.as_ref().and_then(|v| v.nonce().map(|n| n.as_ref().to_vec())),
-            seq     : self.value.as_ref().map(|v| v.sequence_number()).unwrap_or(-1),
-            sig     : self.value.as_ref().and_then(|v| v.signature().map(|s| s.to_vec())),
-            value   : self.value.as_ref().map(|v| v.data().to_vec()),
+            nodes4: self.nodes4().map(|v| v.to_vec()),
+            nodes6: self.nodes6().map(|v| v.to_vec()),
+            token: self.token(),
+            pk: self.value.as_ref().and_then(|v| v.public_key().cloned()),
+            rec: self.value.as_ref().and_then(|v| v.recipient().cloned()),
+            nonce: self
+                .value
+                .as_ref()
+                .and_then(|v| v.nonce().map(|n| n.as_ref().to_vec())),
+            seq: self
+                .value
+                .as_ref()
+                .map(|v| v.sequence_number())
+                .unwrap_or(-1),
+            sig: self
+                .value
+                .as_ref()
+                .and_then(|v| v.signature().map(|s| s.to_vec())),
+            value: self.value.as_ref().map(|v| v.data().to_vec()),
         }
     }
 }
@@ -146,13 +132,13 @@ impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
     fn try_from(s: SerdeFindValueResponse) -> Result<Self> {
         if s.value.is_none() && s.nodes4.is_none() && s.nodes6.is_none() {
             return Err(ProtocolError::new(
-                "either \"n4\", \"n6\" or \"v\" must be present"
+                "either \"n4\", \"n6\" or \"v\" must be present",
             ));
         }
 
-        if  (s.nodes4.is_some() || s.nodes6.is_some()) && s.value.is_some(){
+        if (s.nodes4.is_some() || s.nodes6.is_some()) && s.value.is_some() {
             return Err(ProtocolError::new(
-                "\"v\" cannot be combined with \"n4\" or \"n6\""
+                "\"v\" cannot be combined with \"n4\" or \"n6\"",
             ));
         }
 
@@ -162,12 +148,17 @@ impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
             }
             let expected_seq = s.seq;
             if expected_seq < -1 {
-                return Err(ProtocolError::new("sequence number must be larger than or equal to -1"));
+                return Err(ProtocolError::new(
+                    "sequence number must be larger than or equal to -1",
+                ));
             }
-            let nonce = s.nonce.map(|v| {
-                Nonce::try_from(v.as_slice())
-                    .map_err(|_| ProtocolError::new("invalid nonce length"))
-            }).transpose()?;
+            let nonce = s
+                .nonce
+                .map(|v| {
+                    Nonce::try_from(v.as_slice())
+                        .map_err(|_| ProtocolError::new("invalid nonce length"))
+                })
+                .transpose()?;
 
             let value = Value::packed(s.pk, s.rec, nonce, s.sig, data, expected_seq);
             if !value.is_valid() {
@@ -183,8 +174,7 @@ impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
 
 impl fmt::Display for FindValueResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_value(&self)
-            .map_err(|_| fmt::Error)?;
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
         write!(f, "{}", json)
     }
 }

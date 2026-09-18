@@ -1,11 +1,8 @@
+use crate::dht::{routing::kbucket_entry::KBucketEntry, rpc::TargetInfo};
+use crate::Id;
 use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},
-};
-use crate::Id;
-use crate::dht::{
-    rpc::TargetInfo,
-    routing::kbucket_entry::KBucketEntry,
 };
 
 fn make_entry() -> KBucketEntry {
@@ -77,12 +74,11 @@ mod tests {
 
         println!("id: {}", entry.id());
 
-        let encoded = serde_cbor::to_vec(&entry)
-            .expect("Failed to serialize KBucketEntry");
+        let encoded = serde_cbor::to_vec(&entry).expect("Failed to serialize KBucketEntry");
 
         println!("encoded: {:?}", encoded);
-        let decoded: KBucketEntry = serde_cbor::from_slice(&encoded)
-            .expect("Failed to deserialize KBucketEntry");
+        let decoded: KBucketEntry =
+            serde_cbor::from_slice(&encoded).expect("Failed to deserialize KBucketEntry");
 
         assert_eq!(decoded.id(), entry.id());
         assert_eq!(decoded.socket_addr(), entry.socket_addr());

@@ -1,11 +1,10 @@
-
 use crate::{Id, Value};
 
 pub(crate) struct EligibleValue {
-    target  : Id,
+    target: Id,
     expected_seq: i32,
-    value   : Option<Value>,
-    latest  : bool,
+    value: Option<Value>,
+    latest: bool,
 }
 
 impl EligibleValue {
@@ -13,8 +12,8 @@ impl EligibleValue {
         Self {
             target,
             expected_seq,
-            value   : None,
-            latest  : false
+            value: None,
+            latest: false,
         }
     }
 
@@ -34,7 +33,11 @@ impl EligibleValue {
             return false;
         }
 
-        if self.value.as_ref().map_or(true, |v| value.sequence_number() > v.sequence_number()) {
+        if self
+            .value
+            .as_ref()
+            .map_or(true, |v| value.sequence_number() > v.sequence_number())
+        {
             self.value = Some(value);
             self.latest = latest;
         }

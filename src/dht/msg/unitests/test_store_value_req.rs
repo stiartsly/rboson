@@ -1,9 +1,4 @@
-use crate::{
-    Id,
-    Value,
-    cryptobox::Nonce,
-    dht::msg::store_value_req::StoreValueRequest,
-};
+use crate::{cryptobox::Nonce, dht::msg::store_value_req::StoreValueRequest, Id, Value};
 
 fn make_value() -> Value {
     Value::packed(
@@ -28,11 +23,10 @@ mod tests {
         assert_eq!(req.expected_seq(), 11);
         assert_eq!(req.value(), &value);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
         println!("encoded: {}", hex::encode(&encoded));
-        let decoded: StoreValueRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let decoded: StoreValueRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
         assert_eq!(decoded.expected_seq(), 11);
@@ -48,11 +42,10 @@ mod tests {
         assert_eq!(req.expected_seq(), -1);
         assert_eq!(req.value(), &value);
 
-        let encoded = serde_cbor::to_vec(&req)
-            .expect("Serialization failed");
+        let encoded = serde_cbor::to_vec(&req).expect("Serialization failed");
         println!("encoded: {}", hex::encode(&encoded));
-        let decoded: StoreValueRequest = serde_cbor::from_slice(&encoded)
-            .expect("Deserialization failed");
+        let decoded: StoreValueRequest =
+            serde_cbor::from_slice(&encoded).expect("Deserialization failed");
 
         assert_eq!(decoded.token(), 42);
         assert_eq!(decoded.expected_seq(), -1);

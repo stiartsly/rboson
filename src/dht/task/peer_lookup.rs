@@ -1,25 +1,19 @@
-use std::{
-    any::Any,
-    rc::Rc,
-};
-use crate::{Id, PeerInfo, EasyHandler};
 use crate::dht::{
     dht::DHT,
     eligible_peers::EligiblePeers,
-    rpc::RpcCall,
     msg::{msg, Body, LookupResponse},
-    task::{
-        Task, TaskData,
-        LookupTask, LookupTaskData,
-    },
+    rpc::RpcCall,
+    task::{LookupTask, LookupTaskData, Task, TaskData},
 };
+use crate::{EasyHandler, Id, PeerInfo};
+use std::{any::Any, rc::Rc};
 
 pub(crate) struct PeerLookupTask {
     base_data: TaskData,
     lookup_data: LookupTaskData,
 
     result: EligiblePeers,
-    dht: Rc<DHT>
+    dht: Rc<DHT>,
 }
 
 impl PeerLookupTask {
@@ -28,13 +22,13 @@ impl PeerLookupTask {
         target: Id,
         expected_seq: i32,
         expected_count: usize,
-        done_on_eligible_result: bool
+        done_on_eligible_result: bool,
     ) -> Self {
         Self {
-            base_data   : TaskData::new(),
-            lookup_data : LookupTaskData::new(target, done_on_eligible_result),
-            result      : EligiblePeers::new(target, expected_seq, expected_count),
-            dht         : dht.clone()
+            base_data: TaskData::new(),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            result: EligiblePeers::new(target, expected_seq, expected_count),
+            dht: dht.clone(),
         }
     }
 
@@ -115,7 +109,7 @@ impl Task for PeerLookupTask {
             return;
         }
 
-        let rsp  = call.rsp().expect("no response set.");
+        let rsp = call.rsp().expect("no response set.");
         let body = rsp.body().expect("no message body in response.");
         let Body::FindPeerResponse(body) = body else {
             return;
@@ -123,7 +117,8 @@ impl Task for PeerLookupTask {
 
         if let Some(peers) = body.peers() {
             if peers.is_empty() {
-                log::warn!("{}#{} received empty peers from {}, ignoring",
+                log::warn!(
+                    "{}#{} received empty peers from {}, ignoring",
                     self.task_name(),
                     self.task_id(),
                     call.target_id()
@@ -141,7 +136,8 @@ impl Task for PeerLookupTask {
                 return;
             }
 
-            log::debug!("{}#{} received {} peers from response by {}",
+            log::debug!(
+                "{}#{} received {} peers from response by {}",
                 self.task_name(),
                 self.task_id(),
                 peers.len(),
@@ -157,7 +153,8 @@ impl Task for PeerLookupTask {
         } else {
             let nodes = body.nodes(self.network());
             let Some(nodes) = nodes.filter(|v| !v.is_empty()) else {
-                log::warn!("{}#{} received empty nodes list from {}, ignoring",
+                log::warn!(
+                    "{}#{} received empty nodes list from {}, ignoring",
                     self.task_name(),
                     self.task_id(),
                     call.target_id()
@@ -167,7 +164,8 @@ impl Task for PeerLookupTask {
 
             self.add(nodes.to_vec());
 
-            log::debug!("{}#{} added {} candidates from response by {}",
+            log::debug!(
+                "{}#{} added {} candidates from response by {}",
                 self.task_name(),
                 self.task_id(),
                 nodes.len(),

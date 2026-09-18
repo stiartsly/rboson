@@ -16,8 +16,8 @@ mod dht {
 
 #[cfg(test)]
 mod activeproxy {
-    mod options;
     mod client;
+    mod options;
 }
 
 #[cfg(test)]

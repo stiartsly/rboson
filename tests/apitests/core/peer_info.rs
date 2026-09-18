@@ -1,12 +1,5 @@
+use boson::{signature, CryptoIdentity, Id, Identity, PeerBuilder, PeerInfo};
 use std::sync::{Arc, Mutex};
-use boson::{
-    Id,
-    PeerInfo,
-    PeerBuilder,
-    CryptoIdentity,
-    Identity,
-    signature,
-};
 
 #[cfg(test)]
 mod tests {
@@ -15,8 +8,7 @@ mod tests {
     #[test] //case1
     fn test_new() {
         let endpoint = "http://localhost:8080";
-        let rc = PeerBuilder::new(endpoint)
-            .build();
+        let rc = PeerBuilder::new(endpoint).build();
         assert!(rc.is_ok());
 
         let peer = rc.unwrap();
@@ -124,14 +116,10 @@ mod tests {
         let kp = signature::KeyPair::random();
         let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
         rand::fill(&mut nonce);
-        let rc1 = PeerBuilder::new(endpoint)
-            .with_key(kp.clone())
-            .build();
+        let rc1 = PeerBuilder::new(endpoint).with_key(kp.clone()).build();
         let peer1 = rc1.unwrap();
 
-        let rc2 = PeerBuilder::new(endpoint)
-            .with_key(kp)
-            .build();
+        let rc2 = PeerBuilder::new(endpoint).with_key(kp).build();
         let peer2 = rc2.unwrap();
 
         assert_eq!(peer1.id(), peer2.id());
@@ -208,8 +196,8 @@ mod tests {
             .expect("Failed to build peer info");
 
         let serialized = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
-        let deserialized: PeerInfo = serde_cbor::from_slice(&serialized)
-            .expect("Failed to deserialize PeerInfo");
+        let deserialized: PeerInfo =
+            serde_cbor::from_slice(&serialized).expect("Failed to deserialize PeerInfo");
 
         assert_eq!(peer.id(), deserialized.id());
         assert_eq!(peer.endpoint(), deserialized.endpoint());
@@ -239,8 +227,8 @@ mod tests {
             .expect("Failed to build peer info");
 
         let serialized = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
-        let deserialized: PeerInfo = serde_cbor::from_slice(&serialized)
-            .expect("Failed to deserialize PeerInfo");
+        let deserialized: PeerInfo =
+            serde_cbor::from_slice(&serialized).expect("Failed to deserialize PeerInfo");
 
         assert_eq!(peer.id(), deserialized.id());
         assert_eq!(peer.nodeid(), deserialized.nodeid());
@@ -265,8 +253,8 @@ mod tests {
             .expect("Failed to build peer info");
 
         let json = serde_json::to_string(&peer).expect("Failed to serialize PeerInfo to JSON");
-        let deserialized: PeerInfo = serde_json::from_str(&json)
-            .expect("Failed to deserialize PeerInfo from JSON");
+        let deserialized: PeerInfo =
+            serde_json::from_str(&json).expect("Failed to deserialize PeerInfo from JSON");
 
         assert_eq!(peer.id(), deserialized.id());
         assert_eq!(peer.endpoint(), deserialized.endpoint());
@@ -291,6 +279,9 @@ mod tests {
         serialized[last] = serialized[last].wrapping_add(1);
 
         let result: Result<PeerInfo, _> = serde_cbor::from_slice(&serialized);
-        assert!(result.is_err(), "Deserializing a tampered PeerInfo should fail");
+        assert!(
+            result.is_err(),
+            "Deserializing a tampered PeerInfo should fail"
+        );
     }
 }

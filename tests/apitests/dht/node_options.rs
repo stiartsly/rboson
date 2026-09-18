@@ -1,4 +1,3 @@
-use std::{env, fmt, fs, path::{Path, PathBuf}};
 use boson::{
     dht::{self, NodeOptions},
     signature::KeyPair,
@@ -6,6 +5,10 @@ use boson::{
 };
 use log::LevelFilter;
 use serial_test::serial;
+use std::{
+    env, fmt, fs,
+    path::{Path, PathBuf},
+};
 
 struct ConfigFile(PathBuf);
 
@@ -140,14 +143,8 @@ mod tests {
     fn test_load_then_overridden() {
         let loaded_key = KeyPair::random().to_private_key();
         let replacement_key = KeyPair::random().to_private_key();
-        let config = ConfigFile::new(&yaml(
-            &loaded_key,
-            "loaded-data",
-            "loaded.db",
-            "loaded.log",
-        ));
-        let replacement_bootstrap =
-            NodeInfo::new(Id::random(), "127.0.0.1:39015".parse().unwrap());
+        let config = ConfigFile::new(&yaml(&loaded_key, "loaded-data", "loaded.db", "loaded.log"));
+        let replacement_bootstrap = NodeInfo::new(Id::random(), "127.0.0.1:39015".parse().unwrap());
 
         let options = NodeOptions::load(config.path())
             .unwrap()

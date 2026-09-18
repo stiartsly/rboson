@@ -1,29 +1,21 @@
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-    SocketAddr
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-use boson::{
-    Id,
-    NodeInfo
-};
+use boson::{Id, NodeInfo};
 
 /*
- * APIs for testcase
- - NodeInfo::new()
- - ip()
- - port()
- - socket_addr(),
- - id()
- - version()
- - set_version()
- - is_ipv4()
- - is_ipv6()
- - test_matches()
- - Eq
- */
+* APIs for testcase
+- NodeInfo::new()
+- ip()
+- port()
+- socket_addr(),
+- id()
+- version()
+- set_version()
+- is_ipv4()
+- is_ipv6()
+- test_matches()
+- Eq
+*/
 
 #[cfg(test)]
 mod tests {
@@ -45,10 +37,7 @@ mod tests {
     #[test]
     fn test_new_with_ipv6() {
         let id = Id::random();
-        let addr = SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
-            12345
-        );
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 12345);
         let node = NodeInfo::new(id.clone(), addr.clone());
         assert_eq!(node.id(), &id);
         assert_eq!(node.ip(), IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));

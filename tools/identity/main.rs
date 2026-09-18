@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use boson::{Identity, CryptoIdentity};
+use boson::{CryptoIdentity, Identity};
 
 #[derive(Parser, Debug)]
 #[command(name = "identity")]

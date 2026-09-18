@@ -1,18 +1,11 @@
+use boson::{dht::NodeOptions, signature, Id, Node, NodeInfo};
+use get_if_addrs::get_if_addrs;
 use std::{
-    env,
-    fs,
+    env, fs,
     net::{IpAddr, SocketAddr},
-    path::Path
+    path::Path,
 };
 use tokio::time::{sleep, Duration};
-use get_if_addrs::get_if_addrs;
-use boson::{
-    Id,
-    Node,
-    NodeInfo,
-    signature,
-    dht::NodeOptions,
-};
 
 fn get_storage_path(input: &str) -> String {
     let path = env::current_dir().unwrap().join(input);
@@ -28,7 +21,7 @@ fn get_storage_path(input: &str) -> String {
     path.display().to_string()
 }
 
-fn get_current_ip_address() -> Option<IpAddr>{
+fn get_current_ip_address() -> Option<IpAddr> {
     match get_if_addrs() {
         Ok(if_addrs) => {
             for iface in if_addrs {
@@ -41,7 +34,7 @@ fn get_current_ip_address() -> Option<IpAddr>{
         }
         Err(e) => {
             panic!("Failed to fetch local IP address: {}", e);
-        },
+        }
     }
 }
 
@@ -60,16 +53,14 @@ fn load_or_generate_key(path: &str) -> signature::PrivateKey {
 }
 
 fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
-    let (id, address) = value.split_once('@').ok_or_else(|| format!(
-        "Invalid bootstrap '{value}': expected NODEID@IP:PORT"
-    ))?;
+    let (id, address) = value
+        .split_once('@')
+        .ok_or_else(|| format!("Invalid bootstrap '{value}': expected NODEID@IP:PORT"))?;
 
-    let id = Id::try_from(id).map_err(|e| format!(
-        "Invalid bootstrap node ID '{id}': {e}"
-    ))?;
-    let address = address.parse::<SocketAddr>().map_err(|e| format!(
-        "Invalid bootstrap address '{address}': {e}"
-    ))?;
+    let id = Id::try_from(id).map_err(|e| format!("Invalid bootstrap node ID '{id}': {e}"))?;
+    let address = address
+        .parse::<SocketAddr>()
+        .map_err(|e| format!("Invalid bootstrap address '{address}': {e}"))?;
 
     Ok(NodeInfo::new(id, address))
 }
@@ -83,7 +74,8 @@ async fn main() {
     let host = match get_current_ip_address() {
         Some(addr) => addr,
         _ => return,
-    }.to_string();
+    }
+    .to_string();
 
     let args: Vec<String> = env::args().collect();
 
@@ -95,7 +87,7 @@ async fn main() {
                     path = arg.clone();
                 }
             }
-            "--port" =>  {
+            "--port" => {
                 if let Some(arg) = iter.next() {
                     if let Ok(val) = arg.parse::<u16>() {
                         port = val;
@@ -127,9 +119,9 @@ async fn main() {
             _ => {
                 eprintln!("Unknown argument: {}", argv);
                 return;
-            },
+            }
         }
-    };
+    }
 
     let private_key = load_or_generate_key(&path);
     let options = NodeOptions::new(private_key)
@@ -144,6 +136,6 @@ async fn main() {
     let _ = node.start().await;
 
     println!("The sample node is running on {}:{}", host, port);
-    sleep(Duration::from_secs(60*10)).await;
+    sleep(Duration::from_secs(60 * 10)).await;
     let _ = node.stop().await;
 }

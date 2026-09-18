@@ -1,12 +1,9 @@
-use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
 use boson::{
-    Id,
-    signature,
-    CryptoIdentity,
-    Identity,
     did::{Card, Credential},
+    signature, CryptoIdentity, Id, Identity,
 };
+use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 
 #[cfg(test)]
 mod tests {
@@ -151,7 +148,8 @@ mod tests {
         assert_eq!(card.services_by_id("bcr").len(), 1);
 
         assert_eq!(card.credentials().len(), 3);
-        let mut ids = card.credentials()
+        let mut ids = card
+            .credentials()
             .iter()
             .map(|c| c.id())
             .collect::<Vec<_>>();
@@ -162,10 +160,7 @@ mod tests {
         assert_eq!(ids[2], "profile");
 
         assert_eq!(card.services().len(), 3);
-        let mut ids = card.services()
-            .iter()
-            .map(|s| s.id())
-            .collect::<Vec<_>>();
+        let mut ids = card.services().iter().map(|s| s.id()).collect::<Vec<_>>();
         ids.sort();
         assert_eq!(ids[0], "bcr");
         assert_eq!(ids[1], "homeNode");
@@ -235,13 +230,26 @@ mod tests {
     fn test_card_preserves_entry_order() {
         let identity = CryptoIdentity::new();
         let card = Card::builder(identity)
-            .with_credential_by_claims("first", "First", HashMap::from([("value", "one")])).unwrap()
-            .with_credential_by_claims("second", "Second", HashMap::from([("value", "two")])).unwrap()
-            .with_service("firstService", "FirstType", "https://first.example",
-                HashMap::from([("token", "one")])).unwrap()
-            .with_service::<&str>("secondService", "SecondType", "https://second.example",
-                HashMap::<&str, &str>::new()).unwrap()
-            .build().unwrap();
+            .with_credential_by_claims("first", "First", HashMap::from([("value", "one")]))
+            .unwrap()
+            .with_credential_by_claims("second", "Second", HashMap::from([("value", "two")]))
+            .unwrap()
+            .with_service(
+                "firstService",
+                "FirstType",
+                "https://first.example",
+                HashMap::from([("token", "one")]),
+            )
+            .unwrap()
+            .with_service::<&str>(
+                "secondService",
+                "SecondType",
+                "https://second.example",
+                HashMap::<&str, &str>::new(),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
 
         let json: serde_json::Value = serde_json::from_str(&card.to_string()).unwrap();
         let object = json.as_object().unwrap();
@@ -256,8 +264,14 @@ mod tests {
     #[test]
     fn test_card_rejects_reserved_service_properties() {
         let mut builder = Card::builder(CryptoIdentity::new());
-        assert!(builder.with_service("service", "type", "endpoint",
-            HashMap::from([("id", "invalid")])).is_err());
+        assert!(builder
+            .with_service(
+                "service",
+                "type",
+                "endpoint",
+                HashMap::from([("id", "invalid")])
+            )
+            .is_err());
     }
 
     #[test]

@@ -1,26 +1,18 @@
 use std::{error::Error, fmt};
 
 #[derive(Debug)]
-pub struct MalformedError {
-    message: String,
-}
+pub struct MalformedError(String);
 
 impl MalformedError {
     pub fn new(message: impl Into<String>) -> Box<Self> {
-        Box::new(Self {
-            message: message.into(),
-        })
+        Box::new(Self(message.into()))
     }
 }
 
-impl Error for MalformedError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
+impl Error for MalformedError {}
 
 impl fmt::Display for MalformedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MalformedError: {}", self.message)
+        write!(f, "{}", self.0)
     }
 }

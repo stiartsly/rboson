@@ -17,18 +17,9 @@ pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub use {
-    argument_error::ArgumentError,
-    before_valid_period::BeforeValidPeriodError,
-    crypto_error::CryptoError,
-    db_error::DBError,
-    expired_error::ExpiredError,
-    io_error::IOError,
-    malformed::MalformedError,
-    network_error::NetworkError,
-    not_implemented::NotImplementedError,
-    operation_error::OperationError,
-    permission_error::PermissionError,
-    protocol_error::ProtocolError,
-    signature_error::SignatureError,
-    state_error::StateError,
+    argument_error::ArgumentError, before_valid_period::BeforeValidPeriodError,
+    crypto_error::CryptoError, db_error::DBError, expired_error::ExpiredError, io_error::IOError,
+    malformed::MalformedError, network_error::NetworkError, not_implemented::NotImplementedError,
+    operation_error::OperationError, permission_error::PermissionError,
+    protocol_error::ProtocolError, signature_error::SignatureError, state_error::StateError,
 };

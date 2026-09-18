@@ -1,27 +1,18 @@
-use std::error::Error;
-use std::fmt;
+use std::{error::Error, fmt};
 
 #[derive(Debug)]
-pub struct NotImplementedError {
-    message: String,
-}
+pub struct NotImplementedError(String);
 
 impl NotImplementedError {
     pub fn new(message: impl Into<String>) -> Box<Self> {
-        Box::new(Self {
-            message: message.into(),
-        })
+        Box::new(Self(message.into()))
     }
 }
 
-impl Error for NotImplementedError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
+impl Error for NotImplementedError {}
 
 impl fmt::Display for NotImplementedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "NotImplementedError: {}", self.message)
+        write!(f, "{}", self.0)
     }
 }

@@ -1,38 +1,30 @@
 use std::{error::Error, fmt};
 
 #[derive(Debug)]
-pub struct DBError {
-    message: String,
-}
+pub struct DBError(String);
 
 impl DBError {
     pub fn new(message: impl Into<String>) -> Box<Self> {
-        Box::new(Self {
-            message: message.into(),
-        })
+        Box::new(Self(message.into()))
     }
 }
 
-impl Error for DBError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
+impl Error for DBError {}
 
 impl From<diesel::result::Error> for Box<DBError> {
     fn from(err: diesel::result::Error) -> Box<DBError> {
-        DBError::new(format!("SQlite excutation error: {}", err))
+        DBError::new(format!("{}", err))
     }
 }
 
 impl From<diesel::ConnectionError> for Box<DBError> {
     fn from(err: diesel::ConnectionError) -> Box<DBError> {
-        DBError::new(format!("SQLite connection error: {}", err))
+        DBError::new(format!("{}", err))
     }
 }
 
 impl fmt::Display for DBError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DBError: {}", self.message)
+        write!(f, "{}", self.0)
     }
 }

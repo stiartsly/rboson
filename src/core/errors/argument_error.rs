@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt};
+use std::{error::Error, fmt};
 
 #[derive(Debug)]
 pub struct ArgumentError(String);
@@ -9,11 +9,11 @@ impl ArgumentError {
     }
 }
 
-impl StdError for ArgumentError {}
+impl Error for ArgumentError {}
 
 impl fmt::Display for ArgumentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Argument error: {}", self.0)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -25,6 +25,6 @@ mod tests {
     fn test_argument_error() {
         let message = "Invalid argument";
         let err = ArgumentError::new(message);
-        assert_eq!(format!("{}", err), format!("Argument error: {}", message));
+        assert_eq!(format!("{}", err), format!("{}", message));
     }
 }

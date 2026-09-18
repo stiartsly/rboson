@@ -1,26 +1,18 @@
-use std::{error::Error as StdError, fmt};
+use std::{error::Error, fmt};
 
 #[derive(Debug)]
-pub struct StateError {
-    message: String,
-}
+pub struct StateError(String);
 
 impl StateError {
-    pub fn new(message: impl Into<String>) -> Box<dyn StdError> {
-        Box::new(Self {
-            message: message.into(),
-        })
+    pub fn new(message: impl Into<String>) -> Box<Self> {
+        Box::new(Self(message.into()))
     }
 }
 
-impl StdError for StateError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
+impl Error for StateError {}
 
 impl fmt::Display for StateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "StateError: {}", self.message)
+        write!(f, "{}", self.0)
     }
 }

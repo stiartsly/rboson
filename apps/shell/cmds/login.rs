@@ -1,10 +1,10 @@
 use boson::{
-    director::{Client, NotFoundError, Options, Profile, UnauthorizedError, UserRegistration},
-    signature::PrivateKey,
+    director::{Client, NotFoundError, Profile, UnauthorizedError},
     Result,
 };
-use serde::Deserialize;
-use std::{fs, path::Path};
+use clap::Command;
+
+use crate::config::ShellConfig;
 
 pub(crate) struct Session {
     client: Client,
@@ -12,10 +12,9 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub(crate) fn load_from(path: impl AsRef<Path>) -> Result<Self> {
-        let options = load_options(path)?;
+    pub(crate) fn new(config: &ShellConfig) -> Result<Self> {
         Ok(Self {
-            client: Client::new(options)?,
+            client: Client::new(config.director_options()?)?,
             logged_in: false,
         })
     }
@@ -69,6 +68,15 @@ impl Session {
     }
 }
 
+pub(crate) fn command() -> Command {
+    Command::new("login")
+        .about("Log in to the super node, registering the configured account if necessary")
+}
+
+pub(crate) async fn run(session: &mut Session) {
+    session.login().await;
+}
+
 fn print_profile(profile: &Profile) {
     println!("Current user profile:");
     println!("  User ID              : {}", profile.id());
@@ -96,81 +104,4 @@ fn print_profile(profile: &Profile) {
     );
     println!("  Created              : {:?}", profile.created_at());
     println!("  Updated              : {:?}", profile.updated_at());
-}
-
-#[derive(Deserialize)]
-struct DirectorConfig {
-    director: DirectorSection,
-    user: UserSection,
-    device: DeviceSection,
-}
-
-#[derive(Deserialize)]
-struct DirectorSection {
-    url: String,
-    #[serde(rename = "nodeId")]
-    node_id: String,
-    insecure: bool,
-}
-
-#[derive(Deserialize)]
-struct UserSection {
-    id: String,
-    #[serde(rename = "privateKey")]
-    private_key: String,
-    name: String,
-    email: String,
-    bio: String,
-    passphrase: String,
-}
-
-#[derive(Deserialize)]
-struct DeviceSection {
-    #[serde(rename = "privateKey")]
-    private_key: String,
-    name: String,
-    app: String,
-}
-
-fn load_options(path: impl AsRef<Path>) -> Result<Options> {
-    let content = fs::read_to_string(path)?;
-    let config: DirectorConfig = serde_yaml::from_str(&content)?;
-    let user_id = config.user.id.parse()?;
-    let user_private_key = PrivateKey::try_from(config.user.private_key.as_str())?;
-    let device_private_key = PrivateKey::try_from(config.device.private_key.as_str())?;
-    let registration = UserRegistration::new()
-        .with_name(config.user.name)
-        .with_email(config.user.email)
-        .with_bio(config.user.bio)
-        .with_passphrase(config.user.passphrase)
-        .with_initial_device(config.device.name, config.device.app);
-
-    Ok(Options::new(config.director.url)?
-        .with_node_id(config.director.node_id.parse()?)
-        .with_user_id(user_id)
-        .with_user_private_key(user_private_key)
-        .with_device_private_key(device_private_key)
-        .with_registration(registration)
-        .with_insecure(config.director.insecure))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_loads_director_config() {
-        let session = Session::load_from("apps/shell/director.yaml").unwrap();
-
-        assert_eq!(session.client.options().director_url().scheme(), "https");
-        assert!(session.client.options().is_insecure());
-        assert!(session.client.options().user_private_key().is_some());
-        assert!(session.client.options().device_private_key().is_some());
-        assert!(!session.logged_in);
-    }
-
-    #[test]
-    fn session_reports_missing_director_config() {
-        assert!(Session::load_from("apps/shell/missing-director.yaml").is_err());
-    }
 }

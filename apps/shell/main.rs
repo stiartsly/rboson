@@ -1,4 +1,4 @@
-use clap::{arg, value_parser, ArgMatches, Command, Parser};
+use clap::{ArgMatches, Command, Parser};
 use reedline::{ExternalPrinter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
 use std::{
     borrow::Cow,
@@ -12,14 +12,13 @@ use std::{
 use boson::{
     core::logger,
     dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
-    signature::{KeyPair, PrivateKey},
-    Id, Network,
+    signature::PrivateKey,
+    Network,
 };
 use log::{debug, info, warn};
 
-mod announce_peer;
-mod announce_value;
-mod login;
+mod cmds;
+mod config;
 
 struct ConnectionReadiness {
     connected_networks: AtomicU8,
@@ -79,13 +78,16 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
     ) {
         debug!("Connection status changed for network {network}: {old_status}->{new_status}");
     }
+
     fn connecting(&self, network: Network) {
         info!("Connecting to network {network}...");
     }
+
     fn connected(&self, network: Network) {
         info!("Connected to network {network}.");
         self.readiness.set_network_connected(network, true);
     }
+
     fn disconnected(&self, network: Network) {
         warn!("Disconnected from network {network}.");
         self.readiness.set_network_connected(network, false);
@@ -93,19 +95,24 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
 }
 
 struct ShellPrompt;
+
 impl Prompt for ShellPrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
         "boson> ".into()
     }
+
     fn render_prompt_right(&self) -> Cow<'_, str> {
         "".into()
     }
+
     fn render_prompt_indicator(&self, _: PromptEditMode) -> Cow<'_, str> {
         "".into()
     }
+
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
         "... ".into()
     }
+
     fn render_prompt_history_search_indicator(&self, _: PromptHistorySearch) -> Cow<'_, str> {
         "".into()
     }
@@ -114,123 +121,59 @@ impl Prompt for ShellPrompt {
 #[derive(Parser, Debug)]
 #[command(about = "Boson Shell", long_about = None)]
 struct Options {
-    /// The configuration file
-    #[arg(short, long, value_name = "FILE")]
+    /// The node configuration file
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        default_value = "apps/shell/node.yaml"
+    )]
     config: Option<String>,
 
-    /// The Director configuration file
-    #[arg(long, value_name = "FILE", default_value = "apps/shell/director.yaml")]
-    director_config: String,
-
-    /// The data directory
-    #[arg(short, long, value_name = "PATH")]
+    /// Override the node data directory
+    #[arg(long, value_name = "DIR")]
     datadir: Option<String>,
 
-    /// The private key
-    #[arg(short = 'k', long, value_name = "STRING")]
+    /// Override the node private key
+    #[arg(long, value_name = "PRIVATE_KEY")]
     privatekey: Option<String>,
 
-    /// The port to listen on
-    #[arg(short = 'p', long, value_name = "PORT")]
+    /// Override the node listen port
+    #[arg(long, value_name = "PORT")]
     port: Option<u16>,
+
+    /// Director URL; defaults to BOSON_DIRECTOR_URL or the built-in default
+    #[arg(long, value_name = "URL")]
+    director_url: Option<String>,
+
+    /// User private key; defaults to BOSON_USER_KEY or the built-in default
+    #[arg(long, value_name = "PRIVATE_KEY")]
+    userkey: Option<String>,
+
+    /// Accept invalid Director TLS certificates
+    #[arg(long)]
+    insecure: bool,
 
     /// Enable log output on the console
     #[arg(long)]
     log: bool,
 }
 
-/// Builds the interactive shell's subcommand tree.
-///
-/// Sub commands:
-///   - `announcepeer [ENDPOINT] [-k/--key <PRIVATE_KEY>]`
-///   - `announcevalue <VALUE>`
-///   - `findnode <ID>`
-///   - `findpeer <ID> [-c/--count <COUNT>]`
-///   - `findvalue <ID>`
-///   - `keygen`
-///   - `login`
-///   - `me`
-///   - `log [on|off]`
-///   - `status`
 fn build_cli() -> Command {
     Command::new("boson")
         .no_binary_name(true)
         .subcommand_required(false)
         .arg_required_else_help(false)
-        .subcommand(
-            Command::new("announcepeer")
-                .visible_alias("announce_peer")
-                .about("Announce a peer to the Boson network")
-                .arg(arg!([ENDPOINT] "Endpoint value for the announced peer")
-                    .default_value(announce_peer::DEFAULT_ENDPOINT))
-                .arg(arg!(-k --key <PRIVATE_KEY> "Private key (hex or base58) for the peer identity; \
-                    defaults to this node's own key")
-                    .required(false))
-        )
-        .subcommand(
-            Command::new("announcevalue")
-                .visible_alias("announce_value")
-                .about("Announce an immutable value to the Boson network")
-                .arg(arg!(<VALUE> "Value data (string) to announce"))
-        )
-        .subcommand(
-            Command::new("findnode")
-                .visible_alias("find_node")
-                .about("Look up a node by id")
-                .arg(arg!(<ID> "Target node id (base58)"))
-        )
-        .subcommand(
-            Command::new("findpeer")
-                .visible_alias("find_peer")
-                .about("Look up peers announced under an id")
-                .arg(arg!(<ID> "Target peer id (base58)"))
-                .arg(arg!(-c --count <COUNT> "Expected number of peers")
-                    .default_value("8")
-                    .value_parser(value_parser!(usize)))
-        )
-        .subcommand(
-            Command::new("findvalue")
-                .visible_alias("find_value")
-                .about("Look up a value by id")
-                .arg(arg!(<ID> "Target value id (base58)"))
-        )
-        .subcommand(
-            Command::new("keygen")
-                .about("Generate a random key identity")
-        )
-        .subcommand(
-            Command::new("login")
-                .about("Log in to the super node, registering the built-in account if necessary")
-        )
-        .subcommand(
-            Command::new("me")
-                .about("Show the super node and current user profile")
-        )
-        .subcommand(
-            Command::new("log")
-                .about("Enable or disable console log output; logs are always written to the file")
-                .arg(
-                    arg!([STATE] "Console logging state: on or off")
-                        .default_value("on")
-                        .value_parser(["on", "off"])
-                )
-        )
-        .subcommand(
-            Command::new("status")
-                .about("Show this node's status")
-        )
-}
-
-/// Parses `<ID>` argument text into an [`Id`], reporting a friendly error
-/// instead of panicking on malformed input.
-fn parse_id(text: &str) -> Option<Id> {
-    match Id::try_from(text) {
-        Ok(id) => Some(id),
-        Err(e) => {
-            println!("\x1b[31mInvalid id '{text}': {e}\x1b[0m");
-            None
-        }
-    }
+        .subcommand(cmds::announce_peer::command())
+        .subcommand(cmds::store_value::command())
+        .subcommand(cmds::find_node::command())
+        .subcommand(cmds::find_peer::command())
+        .subcommand(cmds::find_value::command())
+        .subcommand(cmds::identity::command())
+        .subcommand(cmds::login::command())
+        .subcommand(cmds::me::command())
+        .subcommand(cmds::log::command())
+        .subcommand(cmds::status::command())
 }
 
 fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
@@ -243,115 +186,37 @@ fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
 async fn execute_command(
     matches: ArgMatches,
     node: &Node,
-    private_key: &PrivateKey,
+    node_private_key: &PrivateKey,
+    shell_config: &config::ShellConfig,
     readiness: &ConnectionReadiness,
     external_printer: &ExternalPrinter<String>,
-    login_session: &mut login::Session,
+    login_session: &mut cmds::login::Session,
 ) {
-    // Reedline only renders its external output while it is reading input.
-    // Send logs directly to the terminal until this command has finished.
     logger::set_console_output_handler(|line| println!("{line}"));
 
     match matches.subcommand() {
         Some(("announcepeer", m)) => {
-            let endpoint = m
-                .get_one::<String>("ENDPOINT")
-                .map(String::as_str)
-                .unwrap_or(announce_peer::DEFAULT_ENDPOINT);
-            let key = m.get_one::<String>("key").map(String::as_str);
-            announce_peer::announce(node, endpoint, key, private_key).await;
+            cmds::announce_peer::run(m, node, node_private_key).await;
         }
         Some(("announcevalue", m)) => {
-            let value = m.get_one::<String>("VALUE").unwrap();
-            announce_value::announce(node, value).await;
+            cmds::store_value::run(m, node).await;
         }
         Some(("findnode", m)) => {
-            let Some(target) = parse_id(m.get_one::<String>("ID").unwrap()) else {
-                return;
-            };
-            println!("Attempting to find node with id: {target} ...");
-            match node.find_node(&target, None).await {
-                Ok(Some(found)) => println!("\x1b[32mFound node: {}\x1b[0m", found),
-                Ok(_) => println!("\x1b[32mFound no nodes !!!!\x1b[0m"),
-                Err(e) => println!("\x1b[31merror:{}\x1b[0m", e),
-            }
+            cmds::find_node::run(m, node).await;
         }
         Some(("findpeer", m)) => {
-            let Some(peerid) = parse_id(m.get_one::<String>("ID").unwrap()) else {
-                return;
-            };
-            let count = *m.get_one::<usize>("count").unwrap();
-            println!("Attempting to find peers with id: {peerid} ...");
-            match node.find_peer(&peerid, -1, count, None).await {
-                Ok(val) => {
-                    if val.is_empty() {
-                        println!("\x1b[32mFound no peers !!!\x1b[0m");
-                    } else {
-                        println!("\x1b[32mFound {} peers, listed below: \x1b[0m", val.len());
-                        for (i, item) in val.iter().enumerate() {
-                            println!("\x1b[32mpeer [{}]: {}\x1b[0m", i, item);
-                        }
-                    }
-                }
-                Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
-            }
+            cmds::find_peer::run(m, node).await;
         }
         Some(("findvalue", m)) => {
-            let Some(valueid) = parse_id(m.get_one::<String>("ID").unwrap()) else {
-                return;
-            };
-            println!("Attempting to find value with id: {valueid} ...");
-            match node.find_value(&valueid, -1, None).await {
-                Ok(Some(val)) => println!("\x1b[32mFound value: {}\x1b[0m", val),
-                Ok(_) => println!("\x1b[32mFound no values !!!!\x1b[0m"),
-                Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
-            }
+            cmds::find_value::run(m, node).await;
         }
-        Some(("keygen", _)) => {
-            let keypair = KeyPair::random();
-            let id = Id::from(keypair.public_key());
-            println!("  User ID     : {}", id.to_base58());
-            println!("  DID         : {}", id.to_did_string());
-            println!("  Public Key  : {}", keypair.public_key());
-            println!(
-                "  Private Key : {} (base58)",
-                keypair.private_key().to_base58()
-            );
-            println!(
-                "              : {} (hex)",
-                keypair.private_key().to_hexstr()
-            );
-            println!("\nKeep the private key secret. It controls this identity.")
+        Some(("identity", m)) => {
+            cmds::identity::run(m, shell_config.user_private_key());
         }
-        Some(("login", _)) => login_session.login().await,
-        Some(("me", _)) => login_session.show_me().await,
-        Some(("log", m)) => match m.get_one::<String>("STATE").map(String::as_str) {
-            Some("off") => {
-                logger::disable_console_output();
-                println!("Console log output disabled. Logs continue in the configured log file.");
-            }
-            Some("on") => {
-                logger::enable_console_output();
-                println!("Console log output enabled. Logs continue in the configured log file.");
-            }
-            _ => unreachable!("clap restricts log state to 'on' or 'off'"),
-        },
-        Some(("status", _)) => {
-            println!("Node id: {}", node.id());
-            println!("Node running: {}", node.is_running());
-            println!(
-                "DHT connection: {}",
-                if readiness.is_connected() {
-                    "connected"
-                } else {
-                    "disconnected"
-                }
-            );
-            match node.node_info() {
-                Ok(node_info) => println!("Node info: {node_info}"),
-                Err(e) => println!("\x1b[31mUnable to read node information: {e}\x1b[0m"),
-            }
-        }
+        Some(("login", _)) => cmds::login::run(login_session).await,
+        Some(("me", _)) => cmds::me::run(login_session).await,
+        Some(("log", m)) => cmds::log::run(m),
+        Some(("status", _)) => cmds::status::run(node, readiness.is_connected()),
         _ => {}
     }
 
@@ -361,16 +226,26 @@ async fn execute_command(
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
-    let mut login_session = match login::Session::load_from(&opts.director_config) {
-        Ok(session) => session,
+
+    let shell_config = match config::ShellConfig::new(
+        opts.director_url.as_deref(),
+        opts.userkey.as_deref(),
+        opts.insecure,
+    ) {
+        Ok(config) => config,
         Err(e) => {
-            println!(
-                "Loading Director configuration '{}' failed: {e}",
-                opts.director_config
-            );
+            println!("Creating shell configuration failed: {e}");
             return;
         }
     };
+    let mut login_session = match cmds::login::Session::new(&shell_config) {
+        Ok(session) => session,
+        Err(e) => {
+            println!("Creating Director client failed: {e}");
+            return;
+        }
+    };
+
     let config = opts
         .config
         .as_deref()
@@ -406,7 +281,7 @@ async fn main() {
         node_options = node_options.with_log_console(true);
     }
 
-    let private_key = node_options.private_key().clone();
+    let node_private_key = node_options.private_key().clone();
     let readiness = Arc::new(ConnectionReadiness::new());
 
     let node = match Node::new(node_options) {
@@ -450,7 +325,6 @@ async fn main() {
 
     loop {
         let Ok(sig) = rl.read_line(&prompt) else {
-            println!("\nFatal error reading input.");
             continue;
         };
         match sig {
@@ -470,7 +344,8 @@ async fn main() {
                         execute_command(
                             matches,
                             &node,
-                            &private_key,
+                            &node_private_key,
+                            &shell_config,
                             &readiness,
                             &log_printer,
                             &mut login_session,
@@ -496,6 +371,9 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{BOSON_DIRECTOR_URL, BOSON_USER_KEY};
+    use boson::{signature::KeyPair, Id};
+    use serial_test::serial;
 
     #[test]
     fn director_commands_are_available() {
@@ -516,12 +394,76 @@ mod tests {
     }
 
     #[test]
-    fn director_config_argument_defaults_and_accepts_override() {
-        let defaults = Options::try_parse_from(["shell"]).unwrap();
-        assert_eq!(defaults.director_config, "apps/shell/director.yaml");
+    fn identity_command_replaces_keygen() {
+        assert_eq!(
+            build_cli()
+                .try_get_matches_from(["identity"])
+                .unwrap()
+                .subcommand_name(),
+            Some("identity")
+        );
+        assert!(build_cli().try_get_matches_from(["identity", "-g"]).is_ok());
+        assert!(build_cli().try_get_matches_from(["keygen"]).is_err());
+    }
 
-        let overridden =
-            Options::try_parse_from(["shell", "--director-config", "custom.yaml"]).unwrap();
-        assert_eq!(overridden.director_config, "custom.yaml");
+    #[test]
+    fn director_url_and_userkey_are_optional_arguments() {
+        let defaults = Options::try_parse_from(["shell"]).unwrap();
+        assert_eq!(defaults.director_url, None);
+        assert_eq!(defaults.userkey, None);
+
+        let overridden = Options::try_parse_from([
+            "shell",
+            "--director-url",
+            "https://director.example",
+            "--userkey",
+            "0x00",
+        ])
+        .unwrap();
+        assert_eq!(
+            overridden.director_url.as_deref(),
+            Some("https://director.example")
+        );
+        assert_eq!(overridden.userkey.as_deref(), Some("0x00"));
+    }
+
+    #[test]
+    #[serial]
+    fn shell_config_reads_director_url_from_environment() {
+        unsafe {
+            env::set_var(BOSON_DIRECTOR_URL, "https://env-director.example");
+            env::remove_var(BOSON_USER_KEY);
+        }
+
+        let shell_config = config::ShellConfig::new(None, None, false).unwrap();
+        assert_eq!(
+            shell_config
+                .director_options()
+                .unwrap()
+                .director_url()
+                .as_str(),
+            "https://env-director.example/"
+        );
+
+        unsafe {
+            env::remove_var(BOSON_DIRECTOR_URL);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn shell_config_reads_userkey_from_environment() {
+        let user_key = KeyPair::random();
+        unsafe {
+            env::remove_var(BOSON_DIRECTOR_URL);
+            env::set_var(BOSON_USER_KEY, user_key.private_key().to_string());
+        }
+
+        let shell_config = config::ShellConfig::new(None, None, false).unwrap();
+        assert_eq!(shell_config.user_id(), Id::from(user_key.public_key()));
+
+        unsafe {
+            env::remove_var(BOSON_USER_KEY);
+        }
     }
 }

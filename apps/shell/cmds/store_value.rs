@@ -1,4 +1,17 @@
 use boson::{dht::Node, ImmutableBuilder};
+use clap::{arg, ArgMatches, Command};
+
+pub(crate) fn command() -> Command {
+    Command::new("announcevalue")
+        .visible_alias("announce_value")
+        .about("Announce an immutable value to the Boson network")
+        .arg(arg!(<VALUE> "Value data (string) to announce"))
+}
+
+pub(crate) async fn run(matches: &ArgMatches, node: &Node) {
+    let value = matches.get_one::<String>("VALUE").unwrap();
+    announce(node, value).await;
+}
 
 /// Builds an immutable value from `data` and announces (stores) it to the
 /// network through `node`.

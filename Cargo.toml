@@ -35,6 +35,10 @@ path = "apps/chat/mod.rs"
 name = "identity"
 path = "tools/identity/main.rs"
 
+[[bin]]
+name = "director"
+path = "tools/director/main.rs"
+
 [features]
 devp        = ["inspect"]
 inspect     = ["devp"]

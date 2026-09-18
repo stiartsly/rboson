@@ -1,11 +1,7 @@
 use crate::{
+    did::{VerificationMethod, VerificationMethodType},
     Id,
-    did::{
-        VerificationMethod,
-        VerificationMethodType
-    }
 };
-
 
 #[cfg(test)]
 mod tests {
@@ -19,12 +15,15 @@ mod tests {
             id.as_str(),
             VerificationMethodType::Ed25519VerificationKey2020,
             &controller,
-            controller.to_base58()
+            controller.to_base58(),
         );
 
         assert_eq!(vm.is_reference(), false);
         assert_eq!(vm.id(), &id);
-        assert_eq!(vm.method_type(), Some(VerificationMethodType::Ed25519VerificationKey2020));
+        assert_eq!(
+            vm.method_type(),
+            Some(VerificationMethodType::Ed25519VerificationKey2020)
+        );
         assert_eq!(vm.controller(), Some(&controller));
 
         let json = serde_json::to_string(&vm).unwrap();
@@ -76,13 +75,19 @@ mod tests {
             &id,
             VerificationMethodType::Ed25519VerificationKey2020,
             &controller,
-            controller.to_base58()
+            controller.to_base58(),
         );
         assert_eq!(vm.is_reference(), false);
         assert_eq!(vm.id(), &id);
-        assert_eq!(vm.method_type(), Some(VerificationMethodType::Ed25519VerificationKey2020));
+        assert_eq!(
+            vm.method_type(),
+            Some(VerificationMethodType::Ed25519VerificationKey2020)
+        );
         assert_eq!(vm.controller(), Some(&controller));
-        assert_eq!(vm.public_key_multibase(), Some(controller.to_base58().as_str()));
+        assert_eq!(
+            vm.public_key_multibase(),
+            Some(controller.to_base58().as_str())
+        );
 
         let mut vmr = VerificationMethod::reference(&id);
         assert_eq!(vmr.is_reference(), true);

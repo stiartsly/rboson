@@ -99,10 +99,9 @@ impl TryFrom<&str> for PrivateKey {
         let mut bytes = vec![0u8; Self::BYTES];
         if input.starts_with("0x") {
             hex::decode_to_slice(&input[2..], &mut bytes[..]).map_err(|e| match e {
-                FromHexError::InvalidHexCharacter { c, index } => ArgumentError::new(format!(
-                    "Invalid hex character {} at position {}",
-                    c, index
-                )),
+                FromHexError::InvalidHexCharacter { c, index } => {
+                    ArgumentError::new(format!("Invalid hex character {} at position {}", c, index))
+                }
                 FromHexError::OddLength => {
                     ArgumentError::new(format!("Odd hex string length {}", input.len()))
                 }
@@ -110,7 +109,7 @@ impl TryFrom<&str> for PrivateKey {
                     ArgumentError::new(format!("Invalid hex string length"))
                 }
             })?;
-            return Ok(PrivateKey(bytes.try_into().unwrap()))
+            return Ok(PrivateKey(bytes.try_into().unwrap()));
         }
 
         // Decode as base58 if it doesn't start with "0x"

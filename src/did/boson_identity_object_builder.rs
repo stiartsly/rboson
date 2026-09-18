@@ -1,12 +1,8 @@
+use serde_json::{Map, Value};
 use std::time::{Duration, SystemTime};
 use unicode_normalization::UnicodeNormalization;
-use serde_json::{Map, Value};
 
-use crate::{
-    as_secs,
-    core::Result,
-    CryptoIdentity
-};
+use crate::{as_secs, core::Result, CryptoIdentity};
 
 pub(crate) trait BosonIdentityObjectBuilder {
     type BosonIdentityObject;
@@ -23,19 +19,24 @@ pub(crate) trait BosonIdentityObjectBuilder {
         match object {
             Value::String(s) => Value::String(s.nfc().collect()),
             Value::Array(arr) => {
-                let normalized = arr.into_iter()
-                    .map(Self::normalize)
-                    .collect::<Vec<Value>>();
+                let normalized = arr.into_iter().map(Self::normalize).collect::<Vec<Value>>();
                 Value::Array(normalized)
-            },
+            }
             Value::Object(obj) => {
-                let normalized = obj.into_iter()
-                    .map(|(k, v)| (
-                        Self::normalize(Value::String(k)).as_str().unwrap().to_string(),
-                        Self::normalize(v)
-                    )).collect::<Map<String, Value>>();
+                let normalized = obj
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            Self::normalize(Value::String(k))
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                            Self::normalize(v),
+                        )
+                    })
+                    .collect::<Map<String, Value>>();
                 Value::Object(normalized)
-            },
+            }
             _ => object,
         }
     }

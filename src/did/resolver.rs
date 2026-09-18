@@ -1,11 +1,5 @@
-use std::{
-    future::Future,
-    time::SystemTime
-};
-use serde::{
-    Deserialize,
-    Serialize
-};
+use serde::{Deserialize, Serialize};
+use std::{future::Future, time::SystemTime};
 
 use super::{w3c::DIDDocument, Card};
 use crate::{Id, Result};

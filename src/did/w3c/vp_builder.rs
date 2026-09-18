@@ -1,57 +1,46 @@
-
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
-    Result,
-    errors::ArgumentError,
-    Identity,
-    CryptoIdentity,
-};
+use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
 
 use crate::did::{
     did_constants as constants,
-    BosonIdentityObjectBuilder,
-    DIDUrl,
-    VerificationMethod,
-    proof::{Proof, ProofType, ProofPurpose},
-    w3c::{
-        VerifiableCredential,
-        VerifiablePresentation as VP,
-    }
+    proof::{Proof, ProofPurpose, ProofType},
+    w3c::{VerifiableCredential, VerifiablePresentation as VP},
+    BosonIdentityObjectBuilder, DIDUrl, VerificationMethod,
 };
 
 pub struct VerifiablePresentationBuilder {
-    holder      : CryptoIdentity,
+    holder: CryptoIdentity,
 
-    contexts    : Vec<String>,
-    id          : Option<String>,
-    types       : Vec<String>,
-    credentials : HashMap<String, VerifiableCredential>,
+    contexts: Vec<String>,
+    id: Option<String>,
+    types: Vec<String>,
+    credentials: HashMap<String, VerifiableCredential>,
 }
 
 impl VerifiablePresentationBuilder {
     pub(crate) fn new(holder: CryptoIdentity) -> Self {
-        let types = vec![
-            constants::DEFAULT_VP_TYPE
-        ].iter().map(|s|
-            s.nfc().collect::<String>()
-        ).collect();
+        let types = vec![constants::DEFAULT_VP_TYPE]
+            .iter()
+            .map(|s| s.nfc().collect::<String>())
+            .collect();
 
         let contexts = vec![
             constants::W3C_VC_CONTEXT,
             constants::BOSON_VC_CONTEXT,
-            constants::W3C_ED25519_CONTEXT
-        ].iter().map(|s|
-            s.nfc().collect::<String>()
-        ).collect();
+            constants::W3C_ED25519_CONTEXT,
+        ]
+        .iter()
+        .map(|s| s.nfc().collect::<String>())
+        .collect();
 
         Self {
             holder,
             contexts,
-            id          : None,
+            id: None,
             types,
-            credentials : HashMap::new(),
+            credentials: HashMap::new(),
         }
     }
 
@@ -69,23 +58,14 @@ impl VerifiablePresentationBuilder {
             }
             url
         } else {
-            DIDUrl::new(
-                self.holder.id(),
-                None,
-                None,
-                Some(id)
-            )
+            DIDUrl::new(self.holder.id(), None, None, Some(id))
         };
 
         self.id = Some(did_url.to_string());
         Ok(self)
     }
 
-    pub fn with_types(
-        &mut self,
-        credential_type: &str,
-        contexts: Vec<&str>
-    ) -> Result<&mut Self> {
+    pub fn with_types(&mut self, credential_type: &str, contexts: Vec<&str>) -> Result<&mut Self> {
         if credential_type.is_empty() {
             return Err(ArgumentError::new("Credential type cannot be empty"));
         }
@@ -112,10 +92,7 @@ impl VerifiablePresentationBuilder {
         self
     }
 
-    pub fn with_credentials(
-        &mut self,
-        vcs: HashMap<&str, VerifiableCredential>
-    ) -> &mut Self {
+    pub fn with_credentials(&mut self, vcs: HashMap<&str, VerifiableCredential>) -> &mut Self {
         for (k, vc) in vcs {
             self.credentials.insert(k.to_string(), vc);
         }
@@ -127,7 +104,7 @@ impl VerifiablePresentationBuilder {
         id: &str,
         credential_type: &str,
         contexts: Vec<&str>,
-        claims: HashMap<&str, T>
+        claims: HashMap<&str, T>,
     ) -> Result<&mut Self>
     where
         T: serde::Serialize,
@@ -181,12 +158,9 @@ impl BosonIdentityObjectBuilder for VerifiablePresentationBuilder {
             Self::now(),
             VerificationMethod::default_reference(self.identity().id()),
             ProofPurpose::AssertionMethod,
-            signature
+            signature,
         );
 
-        Ok(VP::signed(
-            unsigned,
-            Some(proof)
-        ))
+        Ok(VP::signed(unsigned, Some(proof)))
     }
 }

@@ -1,27 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use std::time::{SystemTime, Duration};
-use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime};
 
 use crate::{
     as_secs,
-    Id,
-    signature,
-    CryptoIdentity,
-    errors::{
-        Error,
-        Result,
-        ArgumentError,
-        SignatureError
-    },
-    utils,
+    errors::{ArgumentError, Error, Result, SignatureError},
+    signature, utils, CryptoIdentity, Id,
 };
 
-use crate::did::{
-    Credential,
-    VouchBuilder,
-    w3c::VerifiablePresentation as VP,
-};
+use crate::did::{w3c::VerifiablePresentation as VP, Credential, VouchBuilder};
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
@@ -57,7 +45,7 @@ impl Vouch {
         types: Option<Vec<String>>,
         holder: Id,
         credentials: Vec<Credential>,
-        vp: Option<VP>
+        vp: Option<VP>,
     ) -> Self {
         Self {
             id,
@@ -73,9 +61,9 @@ impl Vouch {
     pub(crate) fn signed(
         mut unsigned: Self,
         signed_at: Option<SystemTime>,
-        signature: Option<Vec<u8>>
-    )-> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
+        signature: Option<Vec<u8>>,
+    ) -> Self {
+        unsigned.signed_at = signed_at.map(|v| as_secs!(v));
         unsigned.signature = signature.unwrap_or_else(|| vec![]);
         unsigned
     }
@@ -85,9 +73,10 @@ impl Vouch {
     }
 
     pub fn types(&self) -> Vec<&str> {
-        self.types.as_ref().map(|t|
-            t.iter().map(|v| v.as_str()).collect()
-        ).unwrap_or_default()
+        self.types
+            .as_ref()
+            .map(|t| t.iter().map(|v| v.as_str()).collect())
+            .unwrap_or_default()
     }
 
     pub fn holder(&self) -> &Id {
@@ -99,21 +88,19 @@ impl Vouch {
     }
 
     pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&Credential> {
-        self.credentials.iter()
+        self.credentials
+            .iter()
             .filter(|c| c.types().contains(&credential_type))
             .collect()
     }
 
     pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
-        self.credentials.iter()
-            .filter(|c| c.id() == id)
-            .collect()
+        self.credentials.iter().filter(|c| c.id() == id).collect()
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
-        self.signed_at.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.signed_at
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -128,8 +115,9 @@ impl Vouch {
         signature::verify(
             &self.to_sign_data(),
             &self.signature[..],
-            &self.holder.to_signature_key()
-        ).is_ok()
+            &self.holder.to_signature_key(),
+        )
+        .is_ok()
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -162,12 +150,12 @@ impl Vouch {
 
 impl PartialEq<Vouch> for Vouch {
     fn eq(&self, other: &Vouch) -> bool {
-        self.id == other.id &&
-        self.types == other.types &&
-        self.holder == other.holder &&
-        self.credentials == other.credentials &&
-        self.signed_at == other.signed_at &&
-        self.signature == other.signature
+        self.id == other.id
+            && self.types == other.types
+            && self.holder == other.holder
+            && self.credentials == other.credentials
+            && self.signed_at == other.signed_at
+            && self.signature == other.signature
     }
 }
 

@@ -1,32 +1,23 @@
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
-    Result,
-    errors::ArgumentError,
-    Identity,
-    CryptoIdentity,
-};
-use crate::did::{
-    BosonIdentityObjectBuilder,
-    Credential,
-    Vouch,
-};
+use crate::did::{BosonIdentityObjectBuilder, Credential, Vouch};
+use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
 
 pub struct VouchBuilder {
-    identity    : CryptoIdentity,
-    id          : Option<String>,
-    types       : Vec<String>,
-    credentials : HashMap<String, Credential>,
+    identity: CryptoIdentity,
+    id: Option<String>,
+    types: Vec<String>,
+    credentials: HashMap<String, Credential>,
 }
 
 impl VouchBuilder {
     pub(crate) fn new(holder: CryptoIdentity) -> Self {
         Self {
-            identity    : holder,
-            id          : None,
-            types       : Vec::new(),
-            credentials : HashMap::new(),
+            identity: holder,
+            id: None,
+            types: Vec::new(),
+            credentials: HashMap::new(),
         }
     }
 
@@ -61,13 +52,15 @@ impl VouchBuilder {
         self
     }
 
-    pub fn with_credential_by_claims<T>(&mut self,
+    pub fn with_credential_by_claims<T>(
+        &mut self,
         id: &str,
         credential_type: &str,
-        claims: HashMap<&str, T>
+        claims: HashMap<&str, T>,
     ) -> Result<&mut Self>
-    where T: serde::Serialize {
-
+    where
+        T: serde::Serialize,
+    {
         if claims.is_empty() {
             return Err(ArgumentError::new("Claims cannot be empty"));
         }
@@ -78,7 +71,7 @@ impl VouchBuilder {
                 .with_id(id)
                 .with_type(credential_type)
                 .with_claims(claims)
-                .build()?
+                .build()?,
         );
         Ok(self)
     }
@@ -125,10 +118,6 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
         );
 
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
-        Ok(Vouch::signed(
-            unsigned,
-            Some(Self::now()),
-            Some(signature)
-        ))
+        Ok(Vouch::signed(unsigned, Some(Self::now()), Some(signature)))
     }
 }

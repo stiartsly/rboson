@@ -3,65 +3,57 @@ use std::str::FromStr;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    Id,
-    Error,
-    Result,
-    errors::{
-        StateError,
-        MalformedError,
-    }
+    errors::{MalformedError, StateError},
+    Error, Id, Result,
 };
 
-use crate::did::{
-    DID_SCHEME,
-    DID_METHOD
-};
+use crate::did::{DID_METHOD, DID_SCHEME};
 
 #[derive(Debug, Clone, Eq, Hash)]
 pub struct DIDUrl {
-    scheme      : Option<String>,
-    method      : Option<String>,
-    id          : Option<Id>,
-    path        : Option<String>,
-    query       : Option<String>,
-    fragment    : Option<String>
+    scheme: Option<String>,
+    method: Option<String>,
+    id: Option<Id>,
+    path: Option<String>,
+    query: Option<String>,
+    fragment: Option<String>,
 }
 
 impl DIDUrl {
-    pub fn new(id: &Id,
-        path: Option<&str>,
-        query: Option<&str>,
-        fragment: Option<&str>
-    ) -> Self {
-        let query = query.map(|v| {
-            let q = match v.starts_with("?") {
-                true => &v[1..],
-                false => v,
-            };
-            match q.is_empty() {
-                true => None,
-                false => Some(q),
-            }
-        }).flatten();
+    pub fn new(id: &Id, path: Option<&str>, query: Option<&str>, fragment: Option<&str>) -> Self {
+        let query = query
+            .map(|v| {
+                let q = match v.starts_with("?") {
+                    true => &v[1..],
+                    false => v,
+                };
+                match q.is_empty() {
+                    true => None,
+                    false => Some(q),
+                }
+            })
+            .flatten();
 
-        let fragment = fragment.map(|v| {
-            let f = match v.starts_with("#") {
-                true => &v[1..],
-                false => v,
-            };
-            match f.is_empty() {
-                true => None,
-                false => Some(f),
-            }
-        }).unwrap_or_default();
+        let fragment = fragment
+            .map(|v| {
+                let f = match v.starts_with("#") {
+                    true => &v[1..],
+                    false => v,
+                };
+                match f.is_empty() {
+                    true => None,
+                    false => Some(f),
+                }
+            })
+            .unwrap_or_default();
 
         Self {
-            scheme  : Some(DID_SCHEME.to_string()),
-            method  : Some(DID_METHOD.to_string()),
-            id      : Some(id.clone()),
-            path    : path.map(|v| v.nfc().collect::<String>()),
-            query   : query.map(|v| v.nfc().collect::<String>()),
-            fragment: fragment.map(|v| v.nfc().collect::<String>())
+            scheme: Some(DID_SCHEME.to_string()),
+            method: Some(DID_METHOD.to_string()),
+            id: Some(id.clone()),
+            path: path.map(|v| v.nfc().collect::<String>()),
+            query: query.map(|v| v.nfc().collect::<String>()),
+            fragment: fragment.map(|v| v.nfc().collect::<String>()),
         }
     }
 
@@ -70,7 +62,7 @@ impl DIDUrl {
     }
 
     // did:<method>:<method-specific-id><path>?<query>#<fragment>
-    pub fn parse(did_url: &str) -> Result<Self>{
+    pub fn parse(did_url: &str) -> Result<Self> {
         let trimmed: &str = did_url.trim();
         if trimmed.is_empty() {
             return Err(StateError::new("DIDUrl cannot be empty"));
@@ -83,8 +75,10 @@ impl DIDUrl {
 
         let scheme = if parts.len() == 3 {
             if parts[0] != DID_SCHEME {
-                return Err(MalformedError::new(format!("Invalid DIDUrl scheme: {}", parts[0])));
-
+                return Err(MalformedError::new(format!(
+                    "Invalid DIDUrl scheme: {}",
+                    parts[0]
+                )));
             }
             Some(DID_SCHEME)
         } else {
@@ -92,7 +86,11 @@ impl DIDUrl {
         };
         let method = if parts.len() == 3 {
             if parts[1] != DID_METHOD {
-                return Err(MalformedError::new(format!("Unsupported DIDUrl method: {}", parts[1])).into());
+                return Err(MalformedError::new(format!(
+                    "Unsupported DIDUrl method: {}",
+                    parts[1]
+                ))
+                .into());
             }
             Some(DID_METHOD)
         } else {
@@ -118,7 +116,7 @@ impl DIDUrl {
                 remainder = &remainder[..idx];
                 query.nfc().collect::<String>()
             }),
-            None => None
+            None => None,
         };
 
         let path = match remainder.find('/') {
@@ -130,9 +128,9 @@ impl DIDUrl {
             None => None,
         };
 
-        let id = remainder.parse::<Id>().map_err(|_|
+        let id = remainder.parse::<Id>().map_err(|_| {
             MalformedError::new(format!("Invalid DIDUrl method specific id: {}", remainder))
-        )?;
+        })?;
 
         Ok(Self {
             scheme: scheme.map(|s| s.to_string()),
@@ -140,7 +138,7 @@ impl DIDUrl {
             id: Some(id),
             path,
             query,
-            fragment
+            fragment,
         })
     }
 
@@ -203,12 +201,14 @@ impl From<&Id> for DIDUrl {
 
 impl PartialEq for DIDUrl {
     fn eq(&self, other: &Self) -> bool {
-        self.scheme.as_deref().unwrap_or(DID_SCHEME) == other.scheme.as_deref().unwrap_or(DID_SCHEME) &&
-        self.method.as_deref().unwrap_or(DID_METHOD) == other.method.as_deref().unwrap_or(DID_METHOD) &&
-        self.id == other.id &&
-        self.path == other.path &&
-        self.query == other.query &&
-        self.fragment == other.fragment
+        self.scheme.as_deref().unwrap_or(DID_SCHEME)
+            == other.scheme.as_deref().unwrap_or(DID_SCHEME)
+            && self.method.as_deref().unwrap_or(DID_METHOD)
+                == other.method.as_deref().unwrap_or(DID_METHOD)
+            && self.id == other.id
+            && self.path == other.path
+            && self.query == other.query
+            && self.fragment == other.fragment
     }
 }
 

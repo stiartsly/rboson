@@ -4,8 +4,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{Id, Result};
 use super::{Card, ResolutionCache, ResolutionResult};
+use crate::{Id, Result};
 pub struct FileSystemResolutionCache {
     dir: PathBuf,
     expiration: Duration,

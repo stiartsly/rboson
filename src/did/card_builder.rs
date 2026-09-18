@@ -1,43 +1,36 @@
+use indexmap::IndexMap;
+use serde_json::Map;
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
-use serde_json::Map;
-use indexmap::IndexMap;
 
-use crate::{
-    Result,
-    errors::ArgumentError,
-    Identity,
-    CryptoIdentity,
-};
+use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
 
-use crate::did::{
-    Card,
-    card::Service,
-    Credential,
-    BosonIdentityObjectBuilder
-};
+use crate::did::{card::Service, BosonIdentityObjectBuilder, Card, Credential};
 
 pub struct CardBuilder {
-    identity    : CryptoIdentity,
-    credentials : IndexMap<String, Credential>,
-    services    : IndexMap<String, Service>,
+    identity: CryptoIdentity,
+    credentials: IndexMap<String, Credential>,
+    services: IndexMap<String, Service>,
 }
 
 impl CardBuilder {
     pub(crate) fn new(identity: CryptoIdentity) -> Self {
         Self {
             identity,
-            credentials : IndexMap::new(),
-            services    : IndexMap::new(),
+            credentials: IndexMap::new(),
+            services: IndexMap::new(),
         }
     }
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            Err(ArgumentError::new("Credential subject does not match identity"))?;
+            Err(ArgumentError::new(
+                "Credential subject does not match identity",
+            ))?;
         }
 
-        self.credentials.insert(credential.id().to_string(), credential);
+        self.credentials
+            .insert(credential.id().to_string(), credential);
         Ok(self)
     }
 
@@ -47,22 +40,27 @@ impl CardBuilder {
         }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                Err(ArgumentError::new("The subject of one Credential does not match identity"))?;
+                Err(ArgumentError::new(
+                    "The subject of one Credential does not match identity",
+                ))?;
             }
         }
 
         for credential in credentials {
-            self.credentials.insert(credential.id().to_string(), credential);
+            self.credentials
+                .insert(credential.id().to_string(), credential);
         }
         Ok(self)
     }
 
-    pub fn with_credential_by_claims<T>(&mut self,
+    pub fn with_credential_by_claims<T>(
+        &mut self,
         id: &str,
         credential_type: &str,
-        claims: HashMap<&str, T>
+        claims: HashMap<&str, T>,
     ) -> Result<&mut Self>
-    where T: serde::Serialize
+    where
+        T: serde::Serialize,
     {
         if claims.is_empty() {
             Err(ArgumentError::new("Claims cannot be empty"))?;
@@ -72,30 +70,39 @@ impl CardBuilder {
                 .with_id(id)
                 .with_type(credential_type)
                 .with_claims(claims)
-                .build()?
+                .build()?,
         )
     }
 
-    pub fn with_service<T>(&mut self,
+    pub fn with_service<T>(
+        &mut self,
         id: &str,
         service_type: &str,
         endpoint: &str,
-        properties: HashMap<&str, T>
+        properties: HashMap<&str, T>,
     ) -> Result<&mut Self>
-        where T: serde::Serialize
+    where
+        T: serde::Serialize,
     {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
-            Err(ArgumentError::new("Service id, type and endpoint cannot be empty"))?;
+            Err(ArgumentError::new(
+                "Service id, type and endpoint cannot be empty",
+            ))?;
         }
-        if properties.keys().any(|key| matches!(*key, "id" | "t" | "e")) {
-            Err(ArgumentError::new("Service properties must not contain reserved keys: id, t, e"))?;
+        if properties
+            .keys()
+            .any(|key| matches!(*key, "id" | "t" | "e"))
+        {
+            Err(ArgumentError::new(
+                "Service properties must not contain reserved keys: id, t, e",
+            ))?;
         }
 
         let mut map = Map::new();
         for (k, v) in properties {
             map.insert(
                 k.nfc().collect::<String>(),
-                Self::normalize(serde_json::to_value(v).unwrap())
+                Self::normalize(serde_json::to_value(v).unwrap()),
             );
         }
 
@@ -105,8 +112,8 @@ impl CardBuilder {
                 id.nfc().collect(),
                 service_type.nfc().collect(),
                 endpoint.nfc().collect(),
-                map
-            )
+                map,
+            ),
         );
         Ok(self)
     }
@@ -133,20 +140,11 @@ impl BosonIdentityObjectBuilder for CardBuilder {
             false => Some(self.services.values().cloned().collect()),
         };
 
-        let unsigned = Card::unsigned(
-            self.identity.id().clone(),
-            creds,
-            services,
-            None,
-        );
+        let unsigned = Card::unsigned(self.identity.id().clone(), creds, services, None);
 
         let signed_at = Some(Self::now());
         let unsigned = Card::signed(unsigned, signed_at, None);
         let signature = self.identity.sign_into(&unsigned.to_sign_data())?;
-        Ok(Card::signed(
-            unsigned,
-            signed_at,
-            Some(signature)
-        ))
+        Ok(Card::signed(unsigned, signed_at, Some(signature)))
     }
 }

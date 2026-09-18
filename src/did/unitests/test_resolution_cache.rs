@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use crate::{
-    did::filesystem_resolution_cache::FileSystemResolutionCache,
-    Id
-};
+use crate::{did::filesystem_resolution_cache::FileSystemResolutionCache, Id};
 
 #[test]
 fn file_name_is_derived_from_identifier() {

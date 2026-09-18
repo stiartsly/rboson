@@ -1,14 +1,12 @@
-use std::time::{Duration, SystemTime};
 use crate::{
     as_secs,
-    signature,
     did::{
-        Proof,
-        proof::{ProofType, ProofPurpose},
-        VerificationMethod,
-    }
+        proof::{ProofPurpose, ProofType},
+        Proof, VerificationMethod,
+    },
+    signature,
 };
-
+use std::time::{Duration, SystemTime};
 
 #[cfg(test)]
 mod tests {
@@ -22,7 +20,7 @@ mod tests {
             created,
             VerificationMethod::reference("did:boson:1234567890".into()),
             ProofPurpose::AssertionMethod,
-            vec![0u8; signature::Signature::BYTES]
+            vec![0u8; signature::Signature::BYTES],
         );
         assert_eq!(proof.types(), ProofType::Ed25519Signature2020);
         assert_eq!(proof.created(), created);

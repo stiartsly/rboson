@@ -1,10 +1,6 @@
 use crate::{
+    did::{DIDUrl, DID_METHOD, DID_SCHEME},
     Id,
-    did::{
-        DIDUrl,
-        DID_SCHEME,
-        DID_METHOD,
-    }
 };
 
 #[cfg(test)]

@@ -1,22 +1,13 @@
-use std::fmt;
-use std::time::{Duration, SystemTime};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::time::{Duration, SystemTime};
 
-use crate::{
-    as_secs,
-    utils,
-    Id,
-    signature,
-};
+use crate::{as_secs, signature, utils, Id};
 
-use crate::did::{
-    VerificationMethod,
-    DIDUrl
-};
+use crate::did::{DIDUrl, VerificationMethod};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProofType {
     Ed25519Signature2020,
 }
@@ -29,8 +20,7 @@ impl fmt::Display for ProofType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProofPurpose {
     AssertionMethod,
     Authentication,
@@ -41,10 +31,10 @@ pub enum ProofPurpose {
 impl fmt::Display for ProofPurpose {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match *self {
-            ProofPurpose::AssertionMethod       => "AssertionMethod",
-            ProofPurpose::Authentication        => "Authentication",
-            ProofPurpose::CapabilityInvocation  => "CapabilityInvocation",
-            ProofPurpose::CapabilityDelegation  => "CapabilityDelegation",
+            ProofPurpose::AssertionMethod => "AssertionMethod",
+            ProofPurpose::Authentication => "Authentication",
+            ProofPurpose::CapabilityInvocation => "CapabilityInvocation",
+            ProofPurpose::CapabilityDelegation => "CapabilityDelegation",
         })
     }
 }
@@ -68,7 +58,7 @@ pub struct Proof {
         serialize_with = "utils::serialize_bytes",
         deserialize_with = "utils::deserialize_bytes"
     )]
-    proof_value: Vec<u8>
+    proof_value: Vec<u8>,
 }
 
 impl Proof {
@@ -110,13 +100,13 @@ impl Proof {
 
     pub(crate) fn verify(&self, subject: &Id, data: &[u8]) -> bool {
         if self.proof_value.len() != signature::Signature::BYTES {
-            return false ;
+            return false;
         }
 
         match self.proof_purpose {
-            ProofPurpose::AssertionMethod   => {},
-            ProofPurpose::Authentication    => {},
-            _ => return false
+            ProofPurpose::AssertionMethod => {}
+            ProofPurpose::Authentication => {}
+            _ => return false,
         }
 
         let Ok(url) = DIDUrl::try_from(self.verification_method.id()) else {
@@ -126,33 +116,32 @@ impl Proof {
             return false;
         }
 
-        signature::verify(
-            data,
-            &self.proof_value,
-            &subject.to_signature_key()
-        ).is_ok()
+        signature::verify(data, &self.proof_value, &subject.to_signature_key()).is_ok()
     }
 }
 
 impl PartialEq<Self> for Proof {
     fn eq(&self, other: &Self) -> bool {
-        self.proof_type == other.proof_type &&
-        self.created == other.created &&
-        self.verification_method == other.verification_method &&
-        self.proof_purpose == other.proof_purpose &&
-        self.proof_value == other.proof_value
+        self.proof_type == other.proof_type
+            && self.created == other.created
+            && self.verification_method == other.verification_method
+            && self.proof_purpose == other.proof_purpose
+            && self.proof_value == other.proof_value
     }
 }
 
 impl fmt::Display for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
+        write!(
+            f,
             "proof{{type={},created={},verificationMethod:{},proofPurpose={},proofValue={}}}",
             self.proof_type,
             self.created,
             self.verification_method,
             self.proof_purpose,
-            general_purpose::URL_SAFE_NO_PAD.encode(self.proof_value.as_slice()).as_str()
+            general_purpose::URL_SAFE_NO_PAD
+                .encode(self.proof_value.as_slice())
+                .as_str()
         )
     }
 }

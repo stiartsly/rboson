@@ -1,19 +1,7 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 
-use super::{
-    Card,
-    CachedResolver,
-    DHTResolver,
-    Registry,
-    ResolutionCache
-};
-use crate::{
-    dht::Node,
-    CryptoIdentity,
-    Identity,
-    Result,
-    SignedBuilder
-};
+use super::{CachedResolver, Card, DHTResolver, Registry, ResolutionCache};
+use crate::{dht::Node, CryptoIdentity, Identity, Result, SignedBuilder};
 
 pub struct DHTRegistry {
     node: Arc<Node>,

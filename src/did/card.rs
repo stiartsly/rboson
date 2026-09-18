@@ -1,32 +1,23 @@
-use std::fmt;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, SystemTime};
-use serde::{Serialize, Deserialize};
-use serde::de::DeserializeOwned;
-use serde_json::{Map, Value};
 
 use crate::{
     as_secs,
-    utils,
-    Id,
-    Error,
-    Result,
     errors::{ArgumentError, SignatureError},
-    signature,
-    CryptoIdentity,
+    signature, utils, CryptoIdentity, Error, Id, Result,
 };
 
-use super::{
-    Credential,
-    CardBuilder,
-    w3c::DIDDocument
-};
+use super::{w3c::DIDDocument, CardBuilder, Credential};
 
-const DEFAULT_PROFILE_CREDENTIAL_ID     : &str = "profile";
-const DEFAULT_PROFILE_CREDENTIAL_TYPE   : &str = "BosonProfile";
-const DEFAULT_HOME_NODE_SERVICE_ID      : &str = "homeNode";
-const DEFAULT_HOME_NODE_SERVICE_TYPE    : &str = "BosonHomeNode";
+const DEFAULT_PROFILE_CREDENTIAL_ID: &str = "profile";
+const DEFAULT_PROFILE_CREDENTIAL_TYPE: &str = "BosonProfile";
+const DEFAULT_HOME_NODE_SERVICE_ID: &str = "homeNode";
+const DEFAULT_HOME_NODE_SERVICE_TYPE: &str = "BosonHomeNode";
 
 fn is_none<T>(value: &&Option<T>) -> bool {
     value.is_none()
@@ -61,7 +52,7 @@ pub struct Card {
     #[serde(
         rename = "sig",
         serialize_with = "crate::utils::serialize_bytes",
-        deserialize_with = "crate::utils::deserialize_bytes",
+        deserialize_with = "crate::utils::deserialize_bytes"
     )]
     signature: Vec<u8>,
 
@@ -74,14 +65,14 @@ impl Card {
         id: Id,
         credentials: Option<Vec<Credential>>,
         services: Option<Vec<Service>>,
-        doc: Option<DIDDocument>
+        doc: Option<DIDDocument>,
     ) -> Self {
         Self {
             id,
             credentials,
             services,
             signed_at: None,
-            signature: vec![0u8;0],
+            signature: vec![0u8; 0],
             doc,
         }
     }
@@ -89,9 +80,9 @@ impl Card {
     pub(crate) fn signed(
         mut unsigned: Self,
         signed_at: Option<SystemTime>,
-        signature: Option<Vec<u8>>
+        signature: Option<Vec<u8>>,
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v|as_secs!(v));
+        unsigned.signed_at = signed_at.map(|v| as_secs!(v));
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
         unsigned
     }
@@ -101,63 +92,82 @@ impl Card {
     }
 
     pub fn credentials(&self) -> Vec<&Credential> {
-        self.credentials.as_ref().map(|v|
-            v.iter().collect()
-        ).unwrap_or_default()
+        self.credentials
+            .as_ref()
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
     }
 
     pub fn credentials_by_type(&self, credential_type: &str) -> Vec<&Credential> {
-        self.credentials.as_ref().map(|v|
-            v.iter().filter(|c| c.types().contains(&credential_type)).collect()
-        ).unwrap_or_default()
+        self.credentials
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .filter(|c| c.types().contains(&credential_type))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
-        self.credentials.as_ref().map(|v|
-            v.iter().filter(|c| c.id() == id).collect()
-        ).unwrap_or_default()
+        self.credentials
+            .as_ref()
+            .map(|v| v.iter().filter(|c| c.id() == id).collect())
+            .unwrap_or_default()
     }
 
     pub fn profile_credential(&self) -> Option<&Credential> {
-        self.credentials.as_ref().map(|v| {
-            v.iter().find(|c|
-                c.id() == DEFAULT_PROFILE_CREDENTIAL_ID &&
-                c.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
-            )
-        }).flatten()
+        self.credentials
+            .as_ref()
+            .map(|v| {
+                v.iter().find(|c| {
+                    c.id() == DEFAULT_PROFILE_CREDENTIAL_ID
+                        && c.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
+                })
+            })
+            .flatten()
     }
 
     pub fn services(&self) -> Vec<&Service> {
-        self.services.as_ref().map(|v|
-            v.iter().collect()
-        ).unwrap_or_default()
+        self.services
+            .as_ref()
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
     }
 
     pub fn services_by_type(&self, service_type: &str) -> Vec<&Service> {
-        self.services.as_ref().map(|v|
-            v.iter().filter(|s| s.service_type() == service_type).collect()
-        ).unwrap_or_default()
+        self.services
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .filter(|s| s.service_type() == service_type)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn services_by_id(&self, id: &str) -> Vec<&Service> {
-        self.services.as_ref().map(|v|
-            v.iter().filter(|s| s.id() == id).collect()
-        ).unwrap_or_default()
+        self.services
+            .as_ref()
+            .map(|v| v.iter().filter(|s| s.id() == id).collect())
+            .unwrap_or_default()
     }
 
-    pub fn  homenode_service(&self) -> Option<&Service> {
-        self.services.as_ref().map(|v| {
-            v.iter().find(|s|
-                s.id() == DEFAULT_HOME_NODE_SERVICE_ID &&
-                s.service_type() == DEFAULT_HOME_NODE_SERVICE_TYPE
-            )
-        }).flatten()
+    pub fn homenode_service(&self) -> Option<&Service> {
+        self.services
+            .as_ref()
+            .map(|v| {
+                v.iter().find(|s| {
+                    s.id() == DEFAULT_HOME_NODE_SERVICE_ID
+                        && s.service_type() == DEFAULT_HOME_NODE_SERVICE_TYPE
+                })
+            })
+            .flatten()
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
-        self.signed_at.map(|s| {
-            SystemTime::UNIX_EPOCH + Duration::from_secs(s)
-        })
+        self.signed_at
+            .map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s))
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -172,8 +182,9 @@ impl Card {
         signature::verify(
             &self.to_sign_data(),
             &self.signature,
-            &self.id.to_signature_key()
-        ).unwrap_or(false)
+            &self.id.to_signature_key(),
+        )
+        .unwrap_or(false)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -193,7 +204,8 @@ impl Card {
             credentials: &self.credentials,
             services: &self.services,
             signed_at: &self.signed_at,
-        }).unwrap()
+        })
+        .unwrap()
     }
 
     pub fn did_doc(&self) -> Option<&DIDDocument> {
@@ -207,19 +219,17 @@ impl Card {
 
 impl PartialEq<Self> for Card {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id &&
-        self.credentials == other.credentials &&
-        self.services == other.services &&
-        self.signed_at == other.signed_at &&
-        self.signature == other.signature
+        self.id == other.id
+            && self.credentials == other.credentials
+            && self.services == other.services
+            && self.signed_at == other.signed_at
+            && self.signature == other.signature
     }
 }
 
 impl fmt::Display for Card {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        serde_json::to_string(self)
-            .map_err(|_| fmt::Error)?
-            .fmt(f)
+        serde_json::to_string(self).map_err(|_| fmt::Error)?.fmt(f)
     }
 }
 
@@ -265,10 +275,11 @@ pub struct Service {
 }
 
 impl Service {
-    pub(crate) fn new(id: String,
+    pub(crate) fn new(
+        id: String,
         service_type: String,
         endpoint: String,
-        properties: Map<String, Value >
+        properties: Map<String, Value>,
     ) -> Self {
         Self {
             id,
@@ -295,29 +306,35 @@ impl Service {
     }
 
     pub fn properties<T>(&self) -> HashMap<&str, T>
-    where T: Serialize + DeserializeOwned
+    where
+        T: Serialize + DeserializeOwned,
     {
-        self.properties.iter().filter_map(|(k, v)| {
+        self.properties
+            .iter()
+            .filter_map(|(k, v)| {
                 serde_json::from_value(v.clone())
                     .ok()
                     .map(|value| (k.as_str(), value))
-            }).collect()
+            })
+            .collect()
     }
 
     pub fn property<T>(&self, key: &str) -> Option<T>
-    where T: Serialize + DeserializeOwned
+    where
+        T: Serialize + DeserializeOwned,
     {
-        self.properties.get(key)
+        self.properties
+            .get(key)
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }
 
 impl PartialEq<Self> for Service {
     fn eq(&self, other: &Service) -> bool {
-        self.id == other.id &&
-        self.service_type == other.service_type &&
-        self.endpoint == other.endpoint &&
-        self.properties == other.properties
+        self.id == other.id
+            && self.service_type == other.service_type
+            && self.endpoint == other.endpoint
+            && self.properties == other.properties
     }
 }
 
@@ -326,7 +343,9 @@ impl Hash for Service {
         self.id.hash(state);
         self.service_type.hash(state);
         self.endpoint.hash(state);
-        let mut properties = self.properties.iter()
+        let mut properties = self
+            .properties
+            .iter()
             .map(|(key, value)| (key, serde_json::to_string(value).unwrap()))
             .collect::<Vec<_>>();
         properties.sort_by(|(left, _), (right, _)| left.cmp(right));

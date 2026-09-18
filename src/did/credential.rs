@@ -1,24 +1,18 @@
-use std::fmt;
-use std::error::Error;
-use std::collections::HashMap;
-use std::time::{Duration,SystemTime};
-use std::hash::Hash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
+use std::hash::Hash;
+use std::time::{Duration, SystemTime};
 
 use crate::{
     as_secs,
-    utils,
-    Id,
-    errors::{Result, ArgumentError, BeforeValidPeriodError, ExpiredError, SignatureError},
-    signature,
-    CryptoIdentity,
+    errors::{ArgumentError, BeforeValidPeriodError, ExpiredError, Result, SignatureError},
+    signature, utils, CryptoIdentity, Id,
 };
 
-use crate::did::{
-    CredentialBuilder,
-    w3c::VerifiableCredential as VC,
-};
+use crate::did::{w3c::VerifiableCredential as VC, CredentialBuilder};
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Credential {
@@ -46,10 +40,7 @@ pub struct Credential {
     #[serde(rename = "s")]
     subject: Subject,
 
-    #[serde(
-        rename = "sat",
-        skip_serializing_if = "utils::is_default"
-    )]
+    #[serde(rename = "sat", skip_serializing_if = "utils::is_default")]
     signed_at: Option<u64>,
 
     #[serde(
@@ -81,12 +72,12 @@ impl Credential {
             types,
             name,
             description,
-            issuer      : issuer.unwrap_or_else(|| subject.clone()),
+            issuer: issuer.unwrap_or_else(|| subject.clone()),
             valid_from,
             valid_until,
-            subject     : Subject::new(subject, claims),
-            signed_at   : None,
-            signature   : vec![],
+            subject: Subject::new(subject, claims),
+            signed_at: None,
+            signature: vec![],
             vc,
         }
     }
@@ -94,7 +85,7 @@ impl Credential {
     pub(crate) fn signed(
         mut unsigned: Credential,
         signed_at: Option<u64>,
-        signature: Option<Vec<u8>>
+        signature: Option<Vec<u8>>,
     ) -> Self {
         unsigned.signed_at = signed_at;
         unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
@@ -106,9 +97,10 @@ impl Credential {
     }
 
     pub fn types(&self) -> Vec<&str> {
-        self.types.as_ref().map(|t|
-            t.iter().map(|v| v.as_str()).collect()
-        ).unwrap_or_default()
+        self.types
+            .as_ref()
+            .map(|t| t.iter().map(|v| v.as_str()).collect())
+            .unwrap_or_default()
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -124,15 +116,13 @@ impl Credential {
     }
 
     pub fn valid_from(&self) -> Option<SystemTime> {
-        self.valid_from.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.valid_from
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn valid_until(&self) -> Option<SystemTime> {
-        self.valid_until.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.valid_until
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn subject(&self) -> &Subject {
@@ -140,9 +130,8 @@ impl Credential {
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
-        self.signed_at.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.signed_at
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -177,7 +166,8 @@ impl Credential {
             &self.to_sign_data(),
             &self.signature,
             &self.issuer().to_signature_key(),
-        ).is_ok()
+        )
+        .is_ok()
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -197,8 +187,8 @@ impl Credential {
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
         match self.signature.is_empty() {
-            true    => Vec::from(self),
-            false   => Vec::from(&Self::signed(self.clone(), None, None))
+            true => Vec::from(self),
+            false => Vec::from(&Self::signed(self.clone(), None, None)),
         }
     }
 
@@ -213,23 +203,21 @@ impl Credential {
 
 impl PartialEq<Self> for Credential {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id &&
-        self.types == other.types &&
-        self.name == other.name &&
-        self.description == other.description &&
-        self.issuer == other.issuer &&
-        self.valid_from == other.valid_from &&
-        self.valid_until == other.valid_until &&
-        self.subject == other.subject &&
-        self.signature == other.signature
+        self.id == other.id
+            && self.types == other.types
+            && self.name == other.name
+            && self.description == other.description
+            && self.issuer == other.issuer
+            && self.valid_from == other.valid_from
+            && self.valid_until == other.valid_until
+            && self.subject == other.subject
+            && self.signature == other.signature
     }
 }
 
 impl fmt::Display for Credential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        serde_json::to_string(self)
-            .map_err(|_| fmt::Error)?
-            .fmt(f)
+        serde_json::to_string(self).map_err(|_| fmt::Error)?.fmt(f)
     }
 }
 
@@ -237,9 +225,9 @@ impl TryFrom<&str> for Credential {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &str) -> Result<Self> {
-        serde_json::from_str(data).map_err(|e|
+        serde_json::from_str(data).map_err(|e| {
             ArgumentError::new(format!("Failed to parse Credential from string: {}", e)).into()
-        )
+        })
     }
 }
 
@@ -247,9 +235,9 @@ impl TryFrom<&[u8]> for Credential {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).map_err(|e|
+        serde_json::from_slice(data).map_err(|e| {
             ArgumentError::new(format!("Failed to parse Credential from bytes: {}", e)).into()
-        )
+        })
     }
 }
 
@@ -303,11 +291,9 @@ impl Subject {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.claims.iter().find_map(|(k, v)| {
-            match k == key {
-                true => serde_json::from_value(v.clone()).ok(),
-                false => None,
-            }
+        self.claims.iter().find_map(|(k, v)| match k == key {
+            true => serde_json::from_value(v.clone()).ok(),
+            false => None,
         })
     }
 }
@@ -324,7 +310,6 @@ impl std::hash::Hash for Subject {
 
 impl PartialEq<Self> for Subject {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id &&
-        self.claims == other.claims
+        self.id == other.id && self.claims == other.claims
     }
 }

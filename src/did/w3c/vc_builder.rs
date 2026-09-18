@@ -1,66 +1,60 @@
-
-use std::time::SystemTime;
-use std::collections::HashMap;
-use unicode_normalization::UnicodeNormalization;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::time::SystemTime;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    Id,
-    errors::{Result, ArgumentError},
-    Identity,
-    CryptoIdentity,
+    errors::{ArgumentError, Result},
+    CryptoIdentity, Id, Identity,
 };
 
 use crate::did::{
     constants,
-    DIDUrl,
-    Proof,
-    proof::{ProofType, ProofPurpose},
-    VerificationMethod,
-    BosonIdentityObjectBuilder,
+    proof::{ProofPurpose, ProofType},
     w3c::VerifiableCredential,
+    BosonIdentityObjectBuilder, DIDUrl, Proof, VerificationMethod,
 };
 
 pub struct VerifiableCredentialBuilder {
-    issuer      : CryptoIdentity,
-    contexts    : Vec<String>,
-    id          : Option<String>,
-    types       : Vec<String>,
-    name        : Option<String>,
-    description : Option<String>,
-    valid_from  : Option<SystemTime>,
-    valid_until : Option<SystemTime>,
-    subject     : Option<Id>,
-    claims      : Map<String, Value>,
+    issuer: CryptoIdentity,
+    contexts: Vec<String>,
+    id: Option<String>,
+    types: Vec<String>,
+    name: Option<String>,
+    description: Option<String>,
+    valid_from: Option<SystemTime>,
+    valid_until: Option<SystemTime>,
+    subject: Option<Id>,
+    claims: Map<String, Value>,
 }
 
 impl VerifiableCredentialBuilder {
     pub(crate) fn new(issuer: CryptoIdentity) -> Self {
-        let types: Vec<String> = vec![
-            constants::DEFAULT_VC_TYPE
-        ].iter().map(|s|
-            s.nfc().collect::<String>()
-        ).collect();
+        let types: Vec<String> = vec![constants::DEFAULT_VC_TYPE]
+            .iter()
+            .map(|s| s.nfc().collect::<String>())
+            .collect();
 
         let contexts: Vec<String> = vec![
             constants::W3C_VC_CONTEXT,
             constants::BOSON_VC_CONTEXT,
-            constants::W3C_ED25519_CONTEXT
-        ].iter().map(|s|
-            s.nfc().collect::<String>()
-        ).collect();
+            constants::W3C_ED25519_CONTEXT,
+        ]
+        .iter()
+        .map(|s| s.nfc().collect::<String>())
+        .collect();
 
         Self {
             issuer,
             contexts,
-            id          : None,
+            id: None,
             types,
-            name        : None,
-            description : None,
-            valid_from  : None,
-            valid_until : None,
-            subject     : None,
-            claims      : Map::new(),
+            name: None,
+            description: None,
+            valid_from: None,
+            valid_until: None,
+            subject: None,
+            claims: Map::new(),
         }
     }
 
@@ -91,11 +85,7 @@ impl VerifiableCredentialBuilder {
         Ok(self)
     }
 
-    pub fn with_type(
-        &mut self,
-        credential_type: &str,
-        context: &str
-    ) -> Result<&mut Self> {
+    pub fn with_type(&mut self, credential_type: &str, context: &str) -> Result<&mut Self> {
         if credential_type.is_empty() {
             Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
@@ -117,11 +107,7 @@ impl VerifiableCredentialBuilder {
         Ok(self)
     }
 
-    pub fn with_types(
-        &mut self,
-        credential_type: &str,
-        contexts: Vec<&str>
-    ) -> Result<&mut Self> {
+    pub fn with_types(&mut self, credential_type: &str, contexts: Vec<&str>) -> Result<&mut Self> {
         if credential_type.is_empty() {
             Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
@@ -149,9 +135,7 @@ impl VerifiableCredentialBuilder {
             return self;
         }
 
-        self.name = Some(
-            name.nfc().collect::<String>()
-        );
+        self.name = Some(name.nfc().collect::<String>());
         self
     }
 
@@ -160,9 +144,7 @@ impl VerifiableCredentialBuilder {
             return self;
         }
 
-        self.description = Some(
-            description.nfc().collect::<String>()
-        );
+        self.description = Some(description.nfc().collect::<String>());
         self
     }
 
@@ -182,7 +164,8 @@ impl VerifiableCredentialBuilder {
     }
 
     pub fn with_claim<T>(&mut self, name: &str, value: T) -> &mut Self
-    where T: serde::Serialize
+    where
+        T: serde::Serialize,
     {
         if name.is_empty() {
             return self;
@@ -190,16 +173,15 @@ impl VerifiableCredentialBuilder {
 
         let key = name.nfc().collect::<String>();
         if !self.claims.contains_key(&key) {
-            self.claims.insert(
-                key,
-                Self::normalize(serde_json::to_value(value).unwrap())
-            );
+            self.claims
+                .insert(key, Self::normalize(serde_json::to_value(value).unwrap()));
         }
         self
     }
 
     pub fn with_claims<T>(&mut self, claims: HashMap<&str, T>) -> &mut Self
-    where T: serde::Serialize
+    where
+        T: serde::Serialize,
     {
         if claims.is_empty() {
             return self;
@@ -208,10 +190,8 @@ impl VerifiableCredentialBuilder {
         for (k, v) in claims {
             let key = k.nfc().collect::<String>();
             if !self.claims.contains_key(&key) {
-                self.claims.insert(
-                    key,
-                    Self::normalize(serde_json::to_value(v).unwrap())
-                );
+                self.claims
+                    .insert(key, Self::normalize(serde_json::to_value(v).unwrap()));
             }
         }
         self
@@ -251,7 +231,7 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
                 self.subject.as_ref().unwrap_or(self.issuer.id()),
                 None,
                 None,
-                Some(id)
+                Some(id),
             )
         };
 
@@ -274,12 +254,9 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
             VerifiableCredentialBuilder::now(),
             VerificationMethod::default_reference(self.identity().id()),
             ProofPurpose::AssertionMethod,
-            signature
+            signature,
         );
 
-        Ok(Self::BosonIdentityObject::signed(
-            unsigned,
-            proof,
-        ))
+        Ok(Self::BosonIdentityObject::signed(unsigned, proof))
     }
 }

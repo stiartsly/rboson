@@ -1,28 +1,22 @@
-use std::fmt;
-use std::str::FromStr;
-use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
-use std::hash::{Hash, Hasher};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
 use crate::{
     as_secs,
-    utils,
-    Id,
-    Error,
-    Result,
-    errors::{SignatureError, ExpiredError, BeforeValidPeriodError, ArgumentError},
-    CryptoIdentity,
+    errors::{ArgumentError, BeforeValidPeriodError, ExpiredError, SignatureError},
+    utils, CryptoIdentity, Error, Id, Result,
 };
 
 use crate::did::{
     did_constants as constants,
-    proof::{Proof, ProofType, ProofPurpose},
-    Credential,
-    VerificationMethod,
-    DIDUrl,
-    w3c::VerifiableCredentialBuilder
+    proof::{Proof, ProofPurpose, ProofType},
+    w3c::VerifiableCredentialBuilder,
+    Credential, DIDUrl, VerificationMethod,
 };
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -61,21 +55,21 @@ pub struct VerifiableCredential {
     subject: CredentialSubject,
 
     #[serde(rename = "proof")]
-    proof: Option<Proof>
+    proof: Option<Proof>,
 }
 
 impl VerifiableCredential {
     pub(crate) fn unsigned(
-        contexts    : Vec<String>,
-        id          : String,
-        types       : Vec<String>,
-        name        : Option<String>,
-        description : Option<String>,
-        issuer      : Id,
-        valid_from  : Option<SystemTime>,
-        valid_until : Option<SystemTime>,
-        subject     : Option<Id>,
-        claims      : Map<String, Value>
+        contexts: Vec<String>,
+        id: String,
+        types: Vec<String>,
+        name: Option<String>,
+        description: Option<String>,
+        issuer: Id,
+        valid_from: Option<SystemTime>,
+        valid_until: Option<SystemTime>,
+        subject: Option<Id>,
+        claims: Map<String, Value>,
     ) -> Self {
         let contexts = match contexts.is_empty() {
             true => None,
@@ -85,10 +79,7 @@ impl VerifiableCredential {
             true => None,
             false => Some(types),
         };
-        let subject = CredentialSubject::new(
-            subject.unwrap_or(issuer.clone()),
-            claims,
-        );
+        let subject = CredentialSubject::new(subject.unwrap_or(issuer.clone()), claims);
         Self {
             contexts,
             id,
@@ -97,16 +88,13 @@ impl VerifiableCredential {
             description,
             issuer,
             subject,
-            valid_from  : valid_from.map(|v| as_secs!(v)),
-            valid_until : valid_until.map(|v| as_secs!(v)),
-            proof       : None
+            valid_from: valid_from.map(|v| as_secs!(v)),
+            valid_until: valid_until.map(|v| as_secs!(v)),
+            proof: None,
         }
     }
 
-    pub(crate) fn signed(
-        mut vc: VerifiableCredential,
-        proof: Proof
-    ) -> Self {
+    pub(crate) fn signed(mut vc: VerifiableCredential, proof: Proof) -> Self {
         vc.proof = Some(proof);
         vc
     }
@@ -117,19 +105,17 @@ impl VerifiableCredential {
 
     pub(crate) fn from_cred_with_type_contexts(
         credential: &Credential,
-        type_contexts: Option<HashMap<&str, Vec<&str>>>
+        type_contexts: Option<HashMap<&str, Vec<&str>>>,
     ) -> Self {
         if let Some(vc) = credential.vc() {
             return vc.clone(); // If already a VC in credential, return it
         }
 
-        let mut types: Vec<&str> = vec![
-            constants::DEFAULT_VC_TYPE
-        ];
+        let mut types: Vec<&str> = vec![constants::DEFAULT_VC_TYPE];
         let mut contexts: Vec<&str> = vec![
             constants::W3C_VC_CONTEXT,
             constants::BOSON_VC_CONTEXT,
-            constants::W3C_ED25519_CONTEXT
+            constants::W3C_ED25519_CONTEXT,
         ];
 
         for t in credential.types() {
@@ -151,16 +137,11 @@ impl VerifiableCredential {
             }
         }
 
-        let did_url = DIDUrl::new(
-            credential.subject().id(),
-            None,
-            None,
-            Some(credential.id()),
-        );
+        let did_url = DIDUrl::new(credential.subject().id(), None, None, Some(credential.id()));
 
         let subject = CredentialSubject::new(
             credential.subject().id().clone(),
-            credential.subject().claims_map().clone()
+            credential.subject().claims_map().clone(),
         );
 
         let proof = Proof::new(
@@ -168,37 +149,39 @@ impl VerifiableCredential {
             credential.signed_at().unwrap_or(SystemTime::now()),
             VerificationMethod::default_reference(credential.issuer()),
             ProofPurpose::AssertionMethod,
-            credential.signature().to_vec()
+            credential.signature().to_vec(),
         );
 
         Self {
-            contexts    : Some(contexts.iter().map(|s| s.to_string()).collect()),
-            id          : did_url.to_string(),
-            types       : Some(types.iter().map(|s| s.to_string()).collect()),
-            name        : credential.name().map(|v| v.to_string()),
-            description : credential.description().map(|v| v.to_string()),
-            issuer      : credential.issuer().clone(),
-            valid_from  : credential.valid_from().map(|v| as_secs!(v)),
-            valid_until : credential.valid_until().map(|v| as_secs!(v)),
+            contexts: Some(contexts.iter().map(|s| s.to_string()).collect()),
+            id: did_url.to_string(),
+            types: Some(types.iter().map(|s| s.to_string()).collect()),
+            name: credential.name().map(|v| v.to_string()),
+            description: credential.description().map(|v| v.to_string()),
+            issuer: credential.issuer().clone(),
+            valid_from: credential.valid_from().map(|v| as_secs!(v)),
+            valid_until: credential.valid_until().map(|v| as_secs!(v)),
             subject,
-            proof       : Some(proof)
+            proof: Some(proof),
         }
     }
 
     pub fn contexts(&self) -> Vec<&str> {
-        self.contexts.as_ref().map(|v|
-            v.iter().map(|s| s.as_str()).collect()
-        ).unwrap_or_default()
+        self.contexts
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
     }
 
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    pub fn types(&self) -> Vec<&str>{
-        self.types.as_ref().map(|v|
-            v.iter().map(|s| s.as_str()).collect()
-        ).unwrap_or_default()
+    pub fn types(&self) -> Vec<&str> {
+        self.types
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -214,15 +197,13 @@ impl VerifiableCredential {
     }
 
     pub fn valid_from(&self) -> Option<SystemTime> {
-        self.valid_from.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.valid_from
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn valid_until(&self) -> Option<SystemTime> {
-        self.valid_until.map(|v|
-            SystemTime::UNIX_EPOCH + Duration::from_secs(v)
-        )
+        self.valid_until
+            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn subject(&self) -> &CredentialSubject {
@@ -253,9 +234,10 @@ impl VerifiableCredential {
     }
 
     pub fn is_genuine(&self) -> bool {
-        self.proof.as_ref().map(|v|
-            v.verify(&self.issuer,&self.to_sign_data())
-        ).unwrap_or(false)
+        self.proof
+            .as_ref()
+            .map(|v| v.verify(&self.issuer, &self.to_sign_data()))
+            .unwrap_or(false)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -278,7 +260,13 @@ impl VerifiableCredential {
     }
 
     fn to_unsigned_boson_credential(&self) -> Credential {
-        let id = self.id.parse::<DIDUrl>().unwrap().fragment().unwrap().to_string();
+        let id = self
+            .id
+            .parse::<DIDUrl>()
+            .unwrap()
+            .fragment()
+            .unwrap()
+            .to_string();
         let types = if let Some(ref t) = self.types {
             match t.is_empty() {
                 true => None,
@@ -306,7 +294,7 @@ impl VerifiableCredential {
         Credential::signed(
             self.to_unsigned_boson_credential(),
             self.proof.as_ref().map(|p| as_secs!(p.created())),
-            self.proof.as_ref().map(|p| p.proof_value().to_vec())
+            self.proof.as_ref().map(|p| p.proof_value().to_vec()),
         )
     }
 
@@ -319,9 +307,9 @@ impl TryFrom<&str> for VerifiableCredential {
     type Error = Error;
 
     fn try_from(data: &str) -> Result<Self> {
-        serde_json::from_str(data).map_err(|e|
+        serde_json::from_str(data).map_err(|e| {
             ArgumentError::new(format!("Failed to parse VC from string: {}", e)).into()
-        )
+        })
     }
 }
 
@@ -329,9 +317,9 @@ impl FromStr for VerifiableCredential {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        serde_json::from_str(s).map_err(|e|
+        serde_json::from_str(s).map_err(|e| {
             ArgumentError::new(format!("Failed to parse VC from string: {}", e)).into()
-        )
+        })
     }
 }
 
@@ -339,9 +327,8 @@ impl TryFrom<&[u8]> for VerifiableCredential {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_cbor::from_slice(data).map_err(|e|
-            ArgumentError::new(format!("Failed to parse VC from bytes: {}", e)).into()
-        )
+        serde_cbor::from_slice(data)
+            .map_err(|e| ArgumentError::new(format!("Failed to parse VC from bytes: {}", e)).into())
     }
 }
 
@@ -365,9 +352,7 @@ impl From<&Credential> for VerifiableCredential {
 
 impl fmt::Display for VerifiableCredential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        serde_json::to_string(self)
-            .map_err(|_| fmt::Error)?
-            .fmt(f)
+        serde_json::to_string(self).map_err(|_| fmt::Error)?.fmt(f)
     }
 }
 
@@ -395,25 +380,25 @@ impl Hash for VerifiableCredential {
 
 impl PartialEq for VerifiableCredential {
     fn eq(&self, other: &Self) -> bool {
-        self.contexts == other.contexts &&
-        self.id == other.id &&
-        self.types == other.types &&
-        self.name == other.name &&
-        self.description == other.description &&
-        self.issuer == other.issuer &&
-        self.valid_from == other.valid_from &&
-        self.valid_until == other.valid_until &&
-        self.subject == other.subject &&
-        self.proof == other.proof
+        self.contexts == other.contexts
+            && self.id == other.id
+            && self.types == other.types
+            && self.name == other.name
+            && self.description == other.description
+            && self.issuer == other.issuer
+            && self.valid_from == other.valid_from
+            && self.valid_until == other.valid_until
+            && self.subject == other.subject
+            && self.proof == other.proof
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CredentialSubject {
-    #[serde(rename="id")]
+    #[serde(rename = "id")]
     id: Id,
 
-    claims: Map<String, Value>
+    claims: Map<String, Value>,
 }
 
 impl CredentialSubject {
@@ -440,13 +425,11 @@ impl CredentialSubject {
 
     pub fn claim<T>(&self, key: &str) -> Option<T>
     where
-        T:  serde::de::DeserializeOwned,
+        T: serde::de::DeserializeOwned,
     {
-        self.claims.iter().find_map(|(k, v)| {
-            match k == key {
-                true => serde_json::from_value(v.clone()).ok(),
-                false => None,
-            }
+        self.claims.iter().find_map(|(k, v)| match k == key {
+            true => serde_json::from_value(v.clone()).ok(),
+            false => None,
         })
     }
 }

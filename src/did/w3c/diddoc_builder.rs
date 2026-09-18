@@ -1,39 +1,26 @@
+use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
-use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{
-    unwrap,
-    Result,
-    errors::ArgumentError,
-    Identity,
-    CryptoIdentity,
-};
+use crate::{errors::ArgumentError, unwrap, CryptoIdentity, Identity, Result};
 
 use crate::did::{
     did_constants as constants,
-    Card,
-    BosonIdentityObjectBuilder,
-    VerificationMethod as VM,
-    proof::{Proof, ProofType, ProofPurpose},
-    DIDUrl,
-    w3c::{
-        DIDDocument,
-        VerifiableCredential as VC,
-        diddoc::Service,
-    }
+    proof::{Proof, ProofPurpose, ProofType},
+    w3c::{diddoc::Service, DIDDocument, VerifiableCredential as VC},
+    BosonIdentityObjectBuilder, Card, DIDUrl, VerificationMethod as VM,
 };
 
 pub struct DIDDocumentBuilder {
-    identity            : CryptoIdentity,
-    contexts            : Vec<String>,
+    identity: CryptoIdentity,
+    contexts: Vec<String>,
     verification_methods: HashMap<String, VM>,
-    authentications     : Vec<VM>,
-    assertions          : Vec<VM>,
-    credentials         : Vec<VC>,
-    services            : HashMap<String, Service>,
+    authentications: Vec<VM>,
+    assertions: Vec<VM>,
+    credentials: Vec<VC>,
+    services: HashMap<String, Service>,
 
-    def_method_ref      : Option<VM>
+    def_method_ref: Option<VM>,
 }
 
 impl DIDDocumentBuilder {
@@ -41,25 +28,28 @@ impl DIDDocumentBuilder {
         let contexts: Vec<String> = vec![
             constants::W3C_DID_CONTEXT,
             constants::BOSON_DID_CONTEXT,
-            constants::W3C_ED25519_CONTEXT
-        ].iter().map(|s| s.to_string()).collect();
+            constants::W3C_ED25519_CONTEXT,
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
         let mut builder = Self {
             identity,
             contexts,
             verification_methods: HashMap::new(),
-            authentications     : Vec::new(),
-            assertions          : Vec::new(),
-            credentials         : Vec::new(),
-            services            : HashMap::new(),
-            def_method_ref      : None,
+            authentications: Vec::new(),
+            assertions: Vec::new(),
+            credentials: Vec::new(),
+            services: HashMap::new(),
+            def_method_ref: None,
         };
 
         let def_method = VM::default_entity(builder.identity().id());
         let def_method_ref = def_method.to_reference();
 
-
-        builder.with_verification_method(def_method)
+        builder
+            .with_verification_method(def_method)
             .with_authentication(def_method_ref.clone())
             .with_assertion(def_method_ref.clone());
 
@@ -138,43 +128,51 @@ impl DIDDocumentBuilder {
     pub fn with_credentials(&mut self, vcs: Vec<VC>) -> Result<&mut Self> {
         for vc in &vcs {
             if vc.subject().id() != self.identity.id() {
-                Err(ArgumentError::new("The subject of one VC does not match identity"))?;
+                Err(ArgumentError::new(
+                    "The subject of one VC does not match identity",
+                ))?;
             }
             self.credentials.push(vc.clone());
         }
         Ok(self)
     }
 
-    pub fn with_credential_by_claims<T>(&mut self,
+    pub fn with_credential_by_claims<T>(
+        &mut self,
         id: &str,
         credential_type: &str,
         contexts: Vec<&str>,
-        claims: HashMap<&str, T>
+        claims: HashMap<&str, T>,
     ) -> Result<&mut Self>
-        where T: Serialize {
-
+    where
+        T: Serialize,
+    {
         if credential_type.is_empty() {
             Err(ArgumentError::new("Credential type cannot be empty"))?;
         }
 
-        self.with_credential(VC::builder(self.identity.clone())
-            .with_id(id)?
-            .with_types(credential_type, contexts)?
-            .with_claims(claims)
-            .build()?
+        self.with_credential(
+            VC::builder(self.identity.clone())
+                .with_id(id)?
+                .with_types(credential_type, contexts)?
+                .with_claims(claims)
+                .build()?,
         )
     }
 
-    pub fn with_service<T>(&mut self,
+    pub fn with_service<T>(
+        &mut self,
         id: &str,
         service_type: &str,
         endpoint: &str,
-        properties: HashMap<&str, T>
+        properties: HashMap<&str, T>,
     ) -> Result<&mut Self>
-        where T: Serialize + DeserializeOwned {
-
+    where
+        T: Serialize + DeserializeOwned,
+    {
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            let url = id.parse::<DIDUrl>()
+            let url = id
+                .parse::<DIDUrl>()
                 .map_err(|_| ArgumentError::new("Invalid DID URL format"))?;
             if url.id() != Some(self.identity.id()) {
                 Err(ArgumentError::new("DID URL id does not match subject id"))?;
@@ -194,24 +192,30 @@ impl DIDDocumentBuilder {
             Err(ArgumentError::new("Service endpoint cannot be empty"))?;
         }
 
-        if properties.contains_key("id") ||
-           properties.contains_key("type") ||
-           properties.contains_key("serviceEndpoint") {
-            Err(ArgumentError::new("Service properties cannot contain 'id', 'type' or 'serviceEndpoint'"))?;
+        if properties.contains_key("id")
+            || properties.contains_key("type")
+            || properties.contains_key("serviceEndpoint")
+        {
+            Err(ArgumentError::new(
+                "Service properties cannot contain 'id', 'type' or 'serviceEndpoint'",
+            ))?;
         }
 
-        let properties = properties.iter().filter_map(|(k, v)| {
+        let properties = properties
+            .iter()
+            .filter_map(|(k, v)| {
                 serde_json::to_value(v)
                     .ok()
                     .map(|value| (k.to_string(), value))
-            }).collect::<serde_json::Map<String, serde_json::Value>>();
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>();
 
         let canonical_id = did_url.to_string();
         let service = Service::new(
             canonical_id.clone(),
             service_type.to_string(),
             endpoint.to_string(),
-            properties
+            properties,
         );
 
         self.services.insert(canonical_id, service);
@@ -243,22 +247,15 @@ impl BosonIdentityObjectBuilder for DIDDocumentBuilder {
 
         let signed_at = Self::now();
         let signature = self.identity.sign_into(
-            &Card::signed(
-                unsigned.to_unsigned_boson_card(),
-                Some(signed_at),
-                None,
-            ).to_sign_data()
+            &Card::signed(unsigned.to_unsigned_boson_card(), Some(signed_at), None).to_sign_data(),
         )?;
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
             signed_at,
             unwrap!(self.def_method_ref).clone(),
             ProofPurpose::AssertionMethod,
-            signature
+            signature,
         );
-        Ok(DIDDocument::signed(
-            unsigned,
-            Some(proof)
-        ))
+        Ok(DIDDocument::signed(unsigned, Some(proof)))
     }
 }

@@ -3,13 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::{
-    Card,
-    ResolutionCache,
-    ResolutionOptions,
-    ResolutionResult,
-    Resolver
-};
+use super::{Card, ResolutionCache, ResolutionOptions, ResolutionResult, Resolver};
 use crate::{Id, Result};
 
 pub struct CachedResolver<R> {
@@ -33,8 +27,7 @@ impl<R: Resolver> Resolver for CachedResolver<R> {
         &'a self,
         id: &'a Id,
         options: Option<ResolutionOptions>,
-    ) -> Result<ResolutionResult<Card>>
-    {
+    ) -> Result<ResolutionResult<Card>> {
         let opts = options.unwrap_or_default();
         if opts.use_cache {
             if let Some(v) = self.cache.lock().unwrap().get(id).cloned() {

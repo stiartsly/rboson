@@ -1,45 +1,40 @@
-use std::time::SystemTime;
-use std::collections::HashMap;
-use unicode_normalization::UnicodeNormalization;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::time::SystemTime;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     as_secs,
-    Id,
-    errors::{Result, ArgumentError},
-    Identity,
-    CryptoIdentity,
+    errors::{ArgumentError, Result},
+    CryptoIdentity, Id, Identity,
 };
 
-use crate::did::{
-    Credential,
-    BosonIdentityObjectBuilder
-};
+use crate::did::{BosonIdentityObjectBuilder, Credential};
 
 pub struct CredentialBuilder {
-    identity    : CryptoIdentity,
-    id          : Option<String>,
-    types       : Vec<String>,
-    name        : Option<String>,
-    description : Option<String>,
-    valid_from  : Option<SystemTime>,
-    valid_until : Option<SystemTime>,
-    subject     : Option<Id>,
-    claims      : Map<String, Value>,
+    identity: CryptoIdentity,
+    id: Option<String>,
+    types: Vec<String>,
+    name: Option<String>,
+    description: Option<String>,
+    valid_from: Option<SystemTime>,
+    valid_until: Option<SystemTime>,
+    subject: Option<Id>,
+    claims: Map<String, Value>,
 }
 
 impl CredentialBuilder {
     pub(crate) fn new(issuer: CryptoIdentity) -> Self {
         Self {
-            identity    : issuer,
-            id          : None,
-            types       : Vec::new(),
-            name        : None,
-            description : None,
-            valid_from  : None,
-            valid_until : None,
-            subject     : None,
-            claims      : Map::new(),
+            identity: issuer,
+            id: None,
+            types: Vec::new(),
+            name: None,
+            description: None,
+            valid_from: None,
+            valid_until: None,
+            subject: None,
+            claims: Map::new(),
         }
     }
 
@@ -90,9 +85,7 @@ impl CredentialBuilder {
             return self;
         }
 
-        self.description = Some(
-            description.nfc().collect::<String>()
-        );
+        self.description = Some(description.nfc().collect::<String>());
         self
     }
 
@@ -112,7 +105,9 @@ impl CredentialBuilder {
     }
 
     pub fn with_claim<T>(&mut self, name: &str, value: T) -> &mut Self
-        where T: serde::Serialize {
+    where
+        T: serde::Serialize,
+    {
         let key = name.nfc().collect::<String>();
         if !self.claims.contains_key(&key) {
             let val = Self::normalize(serde_json::to_value(value).unwrap());
@@ -122,7 +117,8 @@ impl CredentialBuilder {
     }
 
     pub fn with_claims<T>(&mut self, claims: HashMap<&str, T>) -> &mut Self
-    where T: serde::Serialize
+    where
+        T: serde::Serialize,
     {
         if claims.is_empty() {
             return self;
@@ -180,7 +176,7 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
         Ok(Credential::signed(
             unsigned,
             Some(as_secs!(Self::now())),
-            Some(signature)
+            Some(signature),
         ))
     }
 }

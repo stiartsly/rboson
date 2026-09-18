@@ -1,22 +1,12 @@
-
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use serde::{Deserialize, Serialize};
 
-use crate::{
-    utils,
-    Id,
-    Result,
-    errors::ArgumentError,
-};
+use crate::{errors::ArgumentError, utils, Id, Result};
 
-use crate::did::{
-    did_constants,
-    DIDUrl
-};
+use crate::did::{did_constants, DIDUrl};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerificationMethodType {
     Ed25519VerificationKey2020,
 }
@@ -24,36 +14,38 @@ pub enum VerificationMethodType {
 impl fmt::Display for VerificationMethodType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            VerificationMethodType::Ed25519VerificationKey2020 => write!(f, "Ed25519VerificationKey2020"),
+            VerificationMethodType::Ed25519VerificationKey2020 => {
+                write!(f, "Ed25519VerificationKey2020")
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub enum VerificationMethod {
     Reference(Reference),
     Entity(Entity),
 }
 
 impl VerificationMethod {
-    pub fn entity(id: &str,
-        method_type : VerificationMethodType,
-        controller  : &Id,
-        public_key_multibase: String
+    pub fn entity(
+        id: &str,
+        method_type: VerificationMethodType,
+        controller: &Id,
+        public_key_multibase: String,
     ) -> Self {
         Self::Entity(Entity {
-            id          : id.into(),
-            method_type : Some(method_type),
-            controller  : Some(controller.clone()),
+            id: id.into(),
+            method_type: Some(method_type),
+            controller: Some(controller.clone()),
             public_key_multibase: Some(public_key_multibase),
         })
     }
 
     pub(crate) fn reference(id: &str) -> Self {
         Self::Reference(Reference {
-            id      : id.into(),
-            entity  : None,
+            id: id.into(),
+            entity: None,
         })
     }
 
@@ -75,8 +67,9 @@ impl VerificationMethod {
             id,
             None,
             None,
-            Some(did_constants::DEFAULT_VERIFICATION_METHOD_FRAGMENT)
-        ).to_string()
+            Some(did_constants::DEFAULT_VERIFICATION_METHOD_FRAGMENT),
+        )
+        .to_string()
     }
 
     pub fn id(&self) -> &str {
@@ -117,9 +110,9 @@ impl VerificationMethod {
     pub fn to_reference(&self) -> VerificationMethod {
         match self {
             VerificationMethod::Reference(_) => self.clone(),
-            VerificationMethod::Entity(v) => VerificationMethod::Reference(
-                Reference::from_entity(v.clone())
-            )
+            VerificationMethod::Entity(v) => {
+                VerificationMethod::Reference(Reference::from_entity(v.clone()))
+            }
         }
     }
 
@@ -127,7 +120,9 @@ impl VerificationMethod {
     pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()> {
         match self {
             VerificationMethod::Reference(ref mut r) => r.update_reference(entity),
-            VerificationMethod::Entity(_) => Err(ArgumentError::new("Cannot update Entity with Reference").into()),
+            VerificationMethod::Entity(_) => {
+                Err(ArgumentError::new("Cannot update Entity with Reference").into())
+            }
         }
     }
 }
@@ -155,7 +150,9 @@ impl fmt::Display for VerificationMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "VerificationMethod{{id:{}\'", self.id())?;
         if !self.is_reference() {
-            write!(f, "type={},controller:{},publicKeyMultibase:{}}}",
+            write!(
+                f,
+                "type={},controller:{},publicKeyMultibase:{}}}",
                 self.method_type().unwrap(),
                 self.controller().unwrap().to_did_string(),
                 self.public_key_multibase().unwrap()
@@ -165,8 +162,7 @@ impl fmt::Display for VerificationMethod {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entity {
     #[serde(rename = "id")]
     id: String,
@@ -186,7 +182,7 @@ pub struct Entity {
         rename = "publicKeyMultibase",
         skip_serializing_if = "utils::is_default"
     )]
-    public_key_multibase: Option<String>
+    public_key_multibase: Option<String>,
 }
 
 impl Entity {
@@ -226,8 +222,8 @@ impl Hash for Entity {
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct Reference {
-    id      : String,
-    entity  : Option<Entity>,
+    id: String,
+    entity: Option<Entity>,
 }
 
 impl Reference {
@@ -251,16 +247,20 @@ impl Reference {
     }
 
     pub(crate) fn public_key_multibase(&self) -> Option<&str> {
-        self.entity.as_ref().and_then(|v| v.public_key_multibase.as_deref())
+        self.entity
+            .as_ref()
+            .and_then(|v| v.public_key_multibase.as_deref())
     }
 
     pub(crate) fn is_reference(&self) -> bool {
         true
     }
 
-    pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()>{
+    pub(crate) fn update_reference(&mut self, entity: Entity) -> Result<()> {
         if entity.is_reference() {
-            return Err(ArgumentError::new("Cannot update Reference with another Reference"));
+            return Err(ArgumentError::new(
+                "Cannot update Reference with another Reference",
+            ));
         }
 
         if entity.id != self.id {

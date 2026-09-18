@@ -1,18 +1,9 @@
-use std::{
-    sync::Arc,
-    time::SystemTime
-};
+use std::{sync::Arc, time::SystemTime};
 
+use super::{Card, ResolutionMetadata, ResolutionOptions, ResolutionResult, Resolver};
 use crate::{
     dht::{LookupOption, Node},
     Id, Result,
-};
-use super::{
-    Card,
-    ResolutionMetadata,
-    ResolutionOptions,
-    ResolutionResult,
-    Resolver
 };
 
 pub struct DHTResolver {
@@ -61,9 +52,6 @@ impl Resolver for DHTResolver {
             deactivated: false,
             version: value.sequence_number(),
         };
-        Ok(ResolutionResult::success(
-            card.clone(),
-            Some(metadata),
-        ))
+        Ok(ResolutionResult::success(card.clone(), Some(metadata)))
     }
 }

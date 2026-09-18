@@ -1,30 +1,20 @@
-use std::{
-    collections::HashMap,
-    time::Duration
-};
-use tokio_util::time::{
-    delay_queue::Key,
-    DelayQueue,
-};
 use futures::StreamExt;
+use std::{collections::HashMap, time::Duration};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 
-use super::handler::{
-    BoxHandler,
-    LocalBoxHandler,
-    Callable
-};
+use super::handler::{BoxHandler, Callable, LocalBoxHandler};
 
 pub(crate) type TimerId = u64;
 
 struct TimerEntry<H> {
-    interval    : Option<Duration>,
-    handler     : H,
-    key         : Key,
+    interval: Option<Duration>,
+    handler: H,
+    key: Key,
 }
 
 pub struct TimerManager<H> {
-    delay_queue : DelayQueue<TimerId>,
-    timers      : HashMap<TimerId, TimerEntry<H>>,
+    delay_queue: DelayQueue<TimerId>,
+    timers: HashMap<TimerId, TimerEntry<H>>,
 }
 
 impl<H: Callable<()>> TimerManager<H> {
@@ -35,27 +25,21 @@ impl<H: Callable<()>> TimerManager<H> {
         }
     }
 
-    fn _add_timer(&mut self,
-        id      : TimerId,
-        delay   : Duration,
-        interval: Option<Duration>,
-        handler : H
-    ) {
+    fn _add_timer(&mut self, id: TimerId, delay: Duration, interval: Option<Duration>, handler: H) {
         if let Some(existing) = self.timers.remove(&id) {
             let _ = self.delay_queue.remove(&existing.key);
         }
 
         let key = self.delay_queue.insert(id, delay);
-        let entry = TimerEntry { handler, interval, key };
+        let entry = TimerEntry {
+            handler,
+            interval,
+            key,
+        };
         self.timers.insert(id, entry);
     }
 
-    pub(crate) fn add_timer(&mut self,
-        id      : TimerId,
-        delay   : u64,
-        interval: Option<u64>,
-        cb      : H
-    ) {
+    pub(crate) fn add_timer(&mut self, id: TimerId, delay: u64, interval: Option<u64>, cb: H) {
         let delay = Duration::from_millis(delay);
         let interval = interval.map(Duration::from_millis);
         self._add_timer(id, delay, interval, cb);

@@ -7,11 +7,9 @@ pub(crate) struct EasyHandler<T> {
 impl<T: 'static> EasyHandler<T> {
     pub(crate) fn new<F>(cb: F) -> Self
     where
-        F: Fn(&T) + 'static
+        F: Fn(&T) + 'static,
     {
-        Self {
-            cb: Box::new(cb),
-        }
+        Self { cb: Box::new(cb) }
     }
 
     pub(crate) fn cb(&self, value: &T) {
@@ -21,15 +19,17 @@ impl<T: 'static> EasyHandler<T> {
 
 pub(crate) type BoxFuture = future::BoxFuture<'static, ()>;
 pub(crate) struct BoxHandler<T> {
-    cb: Box<dyn Fn(T) -> BoxFuture + Send + 'static >
+    cb: Box<dyn Fn(T) -> BoxFuture + Send + 'static>,
 }
 
 impl<T: 'static> BoxHandler<T> {
     pub(crate) fn new<F>(handler: F) -> Self
     where
-        F: Fn(T) -> BoxFuture + Send + 'static
+        F: Fn(T) -> BoxFuture + Send + 'static,
     {
-        Self {cb: Box::new(handler) }
+        Self {
+            cb: Box::new(handler),
+        }
     }
 
     #[allow(unused)]
@@ -40,15 +40,17 @@ impl<T: 'static> BoxHandler<T> {
 
 type LocalBoxFuture = future::LocalBoxFuture<'static, ()>;
 pub(crate) struct LocalBoxHandler<T> {
-    cb: Box<dyn Fn(T) -> LocalBoxFuture + 'static >
+    cb: Box<dyn Fn(T) -> LocalBoxFuture + 'static>,
 }
 
 impl<T: 'static> LocalBoxHandler<T> {
     pub(crate) fn new<F>(handler: F) -> Self
     where
-        F: Fn(T) -> LocalBoxFuture + 'static
+        F: Fn(T) -> LocalBoxFuture + 'static,
     {
-        Self {cb: Box::new(handler) }
+        Self {
+            cb: Box::new(handler),
+        }
     }
 
     pub(crate) async fn cb(&self, value: T) {

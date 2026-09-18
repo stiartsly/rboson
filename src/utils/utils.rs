@@ -1,14 +1,10 @@
-use std::result::Result as StdResult;
+use crate::{core::cryptobox::Nonce, core::version, Id};
 use serde::{
     de::{self, Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt;
-use crate::{
-    core::version,
-    Id,
-    core::cryptobox::Nonce
-};
+use std::result::Result as StdResult;
 
 pub(crate) fn serialize_id<S>(id: &Id, se: S) -> StdResult<S::Ok, S::Error>
 where
@@ -220,23 +216,29 @@ where
 }
 
 pub(crate) fn deserialize_expected_seq<'de, D>(de: D) -> StdResult<i32, D::Error>
-where  D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     let seq = Option::<i32>::deserialize(de)?.unwrap_or(-1);
     if seq < -1 {
-        return Err(Error::custom("expected_seq must be larger than or equal to -1"));
+        return Err(Error::custom(
+            "expected_seq must be larger than or equal to -1",
+        ));
     }
     Ok(seq)
 }
 
-pub(crate) const fn default_expected_seq() -> i32 { -1 }
+pub(crate) const fn default_expected_seq() -> i32 {
+    -1
+}
 
 pub(crate) fn is_default_expected_seq(seq: &i32) -> bool {
     *seq == -1
 }
 
 pub(crate) fn serialize_ver<S>(ver: &i32, se: S) -> StdResult<S::Ok, S::Error>
-where S: Serializer,
+where
+    S: Serializer,
 {
     if se.is_human_readable() {
         se.serialize_str(&format!("{}", version::format_version(*ver)))

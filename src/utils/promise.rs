@@ -1,23 +1,23 @@
 use std::{
+    future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
-    future::Future
 };
 
 use crate::core::errors::Result;
 
 pub(crate) struct Data<T> {
     result: Option<Result<T>>,
-    waker : Option<Waker>,
-    completed: bool
+    waker: Option<Waker>,
+    completed: bool,
 }
 
 impl<T> Data<T> {
     fn new() -> Self {
         Self {
             result: None,
-            waker : None,
+            waker: None,
             completed: false,
         }
     }
@@ -90,7 +90,7 @@ impl<T> Promise<T> {
 
     pub(crate) fn pair() -> (Self, PromiseFuture<T>) {
         let promise = Self::new();
-        let future  = promise.future();
+        let future = promise.future();
         (promise, future)
     }
 

@@ -4,15 +4,14 @@
 *.log
 *_data
 
-# Visual Code
-.vscode
-
-.boson_sample
 .boson_shell
 .boson_launcher
-.DS_Store
 
+.sample_node
+
+.DS_Store
 .github
+.vscode
 
 Java
 *.ai

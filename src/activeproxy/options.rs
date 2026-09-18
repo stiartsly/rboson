@@ -1,11 +1,12 @@
-use core::convert::TryFrom;
-use std::{env, fs, path::Path, sync::Arc};
-use serde::Deserialize;
 use crate::{
-    errors::{Error, Result, ArgumentError, IOError},
-    signature::{KeyPair, PrivateKey}, Id, PeerInfo,
     dht::Node,
+    errors::{ArgumentError, Error, IOError, Result},
+    signature::{KeyPair, PrivateKey},
+    Id, PeerInfo,
 };
+use core::convert::TryFrom;
+use serde::Deserialize;
+use std::{env, fs, path::Path, sync::Arc};
 
 pub const DEFAULT_SCHEME: &'static str = "tcp://";
 pub const DEFAULT_PORT: u16 = 9090;
@@ -257,11 +258,13 @@ impl TryFrom<SerdeOptions> for Options {
     fn try_from(sopts: SerdeOptions) -> Result<Self> {
         let mut opts = Options::new(sopts.service.peer_id);
 
-        let user_key = sopts.client.user_private_key.as_deref().map(
-            PrivateKey::try_from
-        )
-        .transpose()?
-        .map(KeyPair::from);
+        let user_key = sopts
+            .client
+            .user_private_key
+            .as_deref()
+            .map(PrivateKey::try_from)
+            .transpose()?
+            .map(KeyPair::from);
 
         if let Some(key) = user_key {
             if sopts.client.user_id != Id::from(key.public_key()) {
@@ -270,11 +273,13 @@ impl TryFrom<SerdeOptions> for Options {
             opts = opts.with_user_keypair(key);
         }
 
-        let device_sk = sopts.client.device_private_key.as_deref().map(
-            PrivateKey::try_from
-        )
-        .transpose()?
-        .map(KeyPair::from);
+        let device_sk = sopts
+            .client
+            .device_private_key
+            .as_deref()
+            .map(PrivateKey::try_from)
+            .transpose()?
+            .map(KeyPair::from);
 
         if let Some(key) = device_sk {
             opts = opts.with_device_keypair(key);
@@ -282,15 +287,16 @@ impl TryFrom<SerdeOptions> for Options {
 
         if let Some(host) = sopts.service.host {
             opts = opts.with_service_host(host);
-            opts = opts.with_service_port(
-                sopts.service.port.unwrap_or(DEFAULT_PORT)
-            );
+            opts = opts.with_service_port(sopts.service.port.unwrap_or(DEFAULT_PORT));
         }
 
         opts = opts.with_upstream_host(sopts.upstream.host);
         opts = opts.with_upstream_port(sopts.upstream.port);
         opts = opts.with_upstream_scheme(
-            sopts.upstream.scheme.unwrap_or_else(|| DEFAULT_SCHEME.to_string())
+            sopts
+                .upstream
+                .scheme
+                .unwrap_or_else(|| DEFAULT_SCHEME.to_string()),
         );
         opts = opts.with_name_access(sopts.name_access);
         opts = opts.with_announce_peer(sopts.announce_peer);
@@ -333,18 +339,15 @@ fn expand_environ_vars(input: &str) -> Result<String> {
         let (prefix, after) = remaining.split_at(start);
         expanded.push_str(prefix);
 
-        let end = after.find('}').ok_or_else(|| {
-            ArgumentError::new("unterminated environment variable reference")
-        })?;
+        let end = after
+            .find('}')
+            .ok_or_else(|| ArgumentError::new("unterminated environment variable reference"))?;
         let name = &after[2..end];
         if name.is_empty() {
             return Err(ArgumentError::new("empty environment variable name"));
         }
-        let value = env::var(name).map_err(|_| {
-            ArgumentError::new(format!(
-                "environment variable `{name}` is not set"
-            ))
-        })?;
+        let value = env::var(name)
+            .map_err(|_| ArgumentError::new(format!("environment variable `{name}` is not set")))?;
         expanded.push_str(&value);
         remaining = &after[end + 1..];
     }

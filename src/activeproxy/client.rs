@@ -142,7 +142,7 @@ impl ActiveProxyClient {
         if self.service_endpoint().is_none() {
             let node = self.node().ok_or_else(|| {
                 ArgumentError::new(
-                    "ActiveProxy requires a DHT node to lookup service peer information"
+                    "ActiveProxy requires a DHT node to lookup service peer information",
                 )
             })?;
             let peer = node

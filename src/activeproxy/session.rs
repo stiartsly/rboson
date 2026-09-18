@@ -644,18 +644,15 @@ fn with_upstream_scheme(endpoint: &str, upstream_endpoint: &str) -> String {
         return endpoint.to_string();
     }
 
-    upstream_endpoint
-        .split_once("://")
-        .map_or_else(|| endpoint.to_string(), |(scheme, _)| {
-            format!("{scheme}://{endpoint}")
-        })
+    upstream_endpoint.split_once("://").map_or_else(
+        || endpoint.to_string(),
+        |(scheme, _)| format!("{scheme}://{endpoint}"),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        public_endpoint, reconnect_delay, with_upstream_scheme, MAX_RECONNECT_FAILURES,
-    };
+    use super::{public_endpoint, reconnect_delay, with_upstream_scheme, MAX_RECONNECT_FAILURES};
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,

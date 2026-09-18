@@ -1,0 +1,13 @@
+service:
+  peerId: 5MjQxzgK7awC4He1WX4b5d1cLbY14dm8hvHNkMBU8ELK
+  endpoint: mqtt://47.101.142.224:9083
+
+client:
+# userPrivateKey: 0xe3ab75c2ece7851bb34c44246a55113ee15fd1cc8b1b110d8f40aa8e32e770fb49cdbb566a831f2fd84dc37850f00ff4f2721598a384f0399921446f438d312b
+  devicePrivateKey: 0x9ae02ed473ad6bc2e2d0fadd5328d99432f86743d54c1cd6bf95c21d33aef03313dcf46bafccec62d60343ec25ac55fd7a1981e18dfe5e6e26921eceb9872b97
+
+dataDir: .dev2_data/messaging
+
+database:
+  uri: jdbc:sqlite:messaging.db
+  poolSize: 1

@@ -1,272 +1,491 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::thread;
+use std::{
+    collections::HashMap,
+    env,
+    fs::File,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+};
+
 use clap::Parser;
+use reedline::{ExternalPrinter, Reedline, Signal};
 
 use boson::{
-    configuration as cfg,
-    signature,
-    Id,
-    dht::Node,
-    appdata_store::AppDataStoreBuilder,
+    core::logger,
+    dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
+    messaging::{
+        Channel, ChannelListener, Configuration, ConnectionListener, Contact, ContactListener,
+        FriendRequestListener, Message, MessageListener, MessagingClientBuilder, SessionInfo,
+        SessionListener,
+    },
+    Id, Network,
 };
+use log::{debug, info, warn};
 
-use boson::messaging::{
-    UserProfile,
-    Message,
-    ClientBuilder,
-    Contact,
-    ConnectionListener,
-    MessageListener,
-    ContactListener,
-    ProfileListener,
-};
+mod cmds;
+mod prompt;
+use prompt::MyPrompt;
+
+const BOSON_PEER_ID: &str = "BOSON_PEER_ID";
+const BOSON_ENDPOINT: &str = "BOSON_ENDPOINT";
+const BOSON_USER_ID: &str = "BOSON_USER_ID";
+const BOSON_DEV_KEY: &str = "BOSON_DEV_KEY";
+const DEFAULT_NODE_CONFIG: &str = "apps/chat/node.yaml";
 
 #[derive(Parser, Debug)]
-#[command(name = "chat")]
-#[command(version = "1.0")]
-#[command(about = "Boson messaging chat", long_about = None)]
+#[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
 struct Options {
-    /// The configuration file
+    /// Optional deprecated YAML config file.
     #[arg(short, long, value_name = "FILE")]
-    config: String,
+    config: Option<String>,
 
-    /// Run this program in daemon mode
-    #[arg(short='D', long)]
-    daemonize: bool
+    /// Messaging service peer id.
+    #[arg(long, value_name = "PEERID")]
+    peerid: Option<String>,
+
+    /// Messaging service endpoint, for example mqtt://127.0.0.1:1883.
+    #[arg(long, value_name = "ENDPOINT")]
+    endpoint: Option<String>,
+
+    /// User private key. BOSON_USER_ID is used as the environment fallback.
+    #[arg(long, value_name = "USERID")]
+    userid: Option<String>,
+
+    /// Device private key.
+    #[arg(long = "dev-key", value_name = "PRIVATE_KEY")]
+    dev_key: Option<String>,
+
+    /// Node configuration file used to start the chat DHT node.
+    #[arg(long = "node-config", value_name = "FILE", default_value = DEFAULT_NODE_CONFIG)]
+    node_config: String,
+
+    /// Override the DHT node UDP port from the node configuration.
+    #[arg(long, value_name = "PORT")]
+    port: Option<u16>,
+
+    /// Override the DHT node data directory from the node configuration.
+    #[arg(long, value_name = "DIR")]
+    datadir: Option<String>,
+
+    #[arg(long)]
+    shadow: bool,
+
+    #[arg(short = 'D', long)]
+    daemonize: bool,
 }
 
 #[tokio::main]
 async fn main() {
-    let opts = Options::parse();
-    let cfg = cfg::Builder::new()
-        .load(&opts.config)
-        .map_err(|e| panic!("{e}"))
-        .unwrap()
-        .build()
-        .map_err(|e| panic!("{e}"))
-        .unwrap();
-
-    let Some(ucfg) = cfg.user() else {
-        eprintln!("User item is not found in config file");
-        return;
-    };
-
-    let Some(dcfg) = cfg.device() else {
-        eprintln!("Device item is not found in config file");
-        return;
-    };
-
-    let Some(mcfg) = cfg.messaging() else {
-        eprintln!("Messaging item not found in config file");
-        return;
-    };
-
-    let peerid = Id::try_from(mcfg.server_peerid())
-        .map_err(|e| panic!("{e}"))
-        .unwrap();
-
-    let result = Node::new(&cfg);
-    if let Err(e) = result {
-        eprintln!("Creating boson Node instance error: {e}");
-        return;
+    if let Err(error) = run().await {
+        eprintln!("chat: {error}");
+        std::process::exit(1);
     }
-
-    let node = Arc::new(Mutex::new(result.unwrap()));
-    node.lock().unwrap().start();
-
-    thread::sleep(Duration::from_secs(2));
-
-    let mut path = String::new();
-    path.push_str(cfg.data_dir());
-    path.push_str("/messaging");
-
-    let mut appdata_store = AppDataStoreBuilder::new("im")
-        .with_path(path.as_str())
-        .with_node(&node)
-        .with_peerid(&peerid)
-        .build()
-        .unwrap();
-
-    if let Err(e) = appdata_store.load().await {
-        eprintln!("Loading app data store error: {e}");
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    let Some(peer) = appdata_store.service_peer() else {
-        println!("Messaging peer is not found!!!, please run it later.");
-        node.lock().unwrap().stop();
-        return;
-    };
-
-    let Some(ni) = appdata_store.service_node() else {
-        eprintln!("Node hosting the peer not found!!!");
-        node.lock().unwrap().stop();
-        return;
-    };
-
-    println!("Messaging Peer: {}", peer);
-    println!("Messaging Node: {}", ni);
-
-    let usk: signature::PrivateKey = match ucfg.private_key().try_into() {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("Failed to convert private key from hex format");
-            node.lock().unwrap().stop();
-            return;
-        }
-    };
-
-    let dsk: signature::PrivateKey = match dcfg.private_key().try_into() {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("Failed to convert device private key from hex format");
-            node.lock().unwrap().stop();
-            return;
-        }
-    };
-
-    let user_key = signature::KeyPair::from(&usk);
-    let device_key = signature::KeyPair::from(&dsk);
-
-    let result = ClientBuilder::new()
-        .with_user_key(user_key)
-        .with_user_name(ucfg.name().unwrap_or("guest")).unwrap()
-        .with_device_key(device_key)
-        .with_device_name("test-device").unwrap()
-        .with_device_node(node.clone())
-        .with_app_name("test-im").unwrap()
-        .with_messaging_peer(peer.clone()).unwrap()
-        .with_messaging_repository("test-repo")
-       // .with_api_url(peer.alternative_url().as_ref().unwrap()).unwrap()
-        .with_user_registration(ucfg.password().map_or("secret", |v|v))
-        //.with_device_registration(dcfg.password().map_or("secret", |v|v))
-        .with_connection_listener(ConnectionListenerTest)
-        .with_message_listener(MessageListenerTest)
-        .with_contact_listener(ContactListenerTest)
-        .with_profile_listener(ProfileListenerTest)
-        .build_into()
-        .await;
-
-    let mut client = match result {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Creating messaging client instance error: {{{e}}}");
-            node.lock().unwrap().stop();
-            return;
-        }
-    };
-
-    let rc = client.start().await;
-    thread::sleep(Duration::from_secs(1));
-    if let Err(e) = rc {
-        eprintln!("Starting messaging client error: {{{e}}}");
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    let rc = client.connect().await;
-    if let Err(e) = rc {
-        eprintln!("Connecting to messaging service error: {{{e}}}");
-        _ = client.stop(true).await;
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    let rc = client.create_channel(None, "tang", Some("notice")).await;
-    if let Err(e) = rc {
-        eprintln!("Creating channel error: {{{e}}}");
-        _ = client.stop(true).await;
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    let channel = rc.unwrap();
-    println!("Channel created id: {}", channel.id());
-
-    let rc = client.remove_channel(channel.id()).await;
-    if let Err(e) = rc {
-        eprintln!("Removing channel error: {{{e}}}");
-        _ = client.stop(true).await;
-        node.lock().unwrap().stop();
-        return;
-    }
-
-    thread::sleep(Duration::from_secs(2));
-    _ = client.stop(false).await;
-    node.lock().unwrap().stop();
 }
 
-struct ConnectionListenerTest;
-impl ConnectionListener for ConnectionListenerTest {
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let options = Options::parse();
+    if options.shadow {
+        eprintln!("Note: --shadow is no longer needed by the updated messaging API");
+    }
+    if options.daemonize {
+        eprintln!("Note: --daemonize does not detach the interactive shell");
+    }
+
+    let config = load_chat_config(&options)?;
+    let node_options = load_node_options(&options)?;
+    let external_printer = ExternalPrinter::new(1_024);
+    let output = ConsoleOutput::new(external_printer.clone());
+
+    let node = Node::new(node_options)?;
+    use_reedline_log_output(&external_printer);
+    let readiness = Arc::new(ConnectionReadiness::new());
+    node.add_listener(DefaultConnectionStatusListener {
+        readiness: readiness.clone(),
+    });
+    node.start().await?;
+    println!("Boson DHT node {} is up and running.", node.id());
+
+    let client = MessagingClientBuilder::new()
+        .configuration(config)
+        .connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())))
+        .message_listener(Arc::new(ConsoleMessageListener::new(output.clone())))
+        .channel_listener(Arc::new(ConsoleChannelListener::new(output.clone())))
+        .contact_listener(Arc::new(ConsoleContactListener::new(output.clone())))
+        .session_listener(Arc::new(ConsoleSessionListener::new(output.clone())))
+        .friend_request_listener(Arc::new(ConsoleFriendRequestListener::new(output)))
+        .build()?;
+
+    client.start().await?;
+
+    let mut cli = cmds::build_cli();
+    let mut editor = Reedline::create().with_external_printer(external_printer);
+    let prompt = MyPrompt;
+    println!("Welcome to the messaging shell. Type 'help' or 'exit'.");
+
+    loop {
+        match editor.read_line(&prompt) {
+            Ok(Signal::Success(line)) => {
+                let args: Vec<String> = line.split_whitespace().map(ToString::to_string).collect();
+                if args.is_empty() {
+                    continue;
+                }
+                if matches!(args[0].as_str(), "exit" | "quit") {
+                    break;
+                }
+                if args[0] == "help" {
+                    if let Some(name) = args.get(1) {
+                        match cli.find_subcommand_mut(name) {
+                            Some(command) => command.print_long_help()?,
+                            None => cli.print_long_help()?,
+                        }
+                    } else {
+                        cli.print_long_help()?;
+                    }
+                    println!();
+                    continue;
+                }
+                match cli.clone().try_get_matches_from(args) {
+                    Ok(matches) => cmds::execute_command(matches, &client).await,
+                    Err(error) => println!("{error}"),
+                }
+            }
+            Ok(Signal::CtrlC | Signal::CtrlD) => break,
+            Ok(_) => continue,
+            Err(error) => {
+                println!("Input error: {error}");
+                break;
+            }
+        }
+    }
+
+    client.stop().await?;
+    node.stop().await?;
+    Ok(())
+}
+
+fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
+    let log_sender = external_printer.sender();
+    logger::set_console_output_handler(move |line| {
+        _ = log_sender.try_send(line);
+    });
+}
+
+fn load_node_options(options: &Options) -> Result<NodeOptions, Box<dyn std::error::Error>> {
+    let mut node_options = NodeOptions::load(&options.node_config)?;
+    if let Some(port) = options.port {
+        node_options = node_options.with_port(port);
+    }
+    if let Some(datadir) = options.datadir.as_deref() {
+        node_options = node_options.with_data_dir(datadir);
+    }
+    Ok(node_options)
+}
+
+fn load_chat_config(options: &Options) -> Result<Configuration, Box<dyn std::error::Error>> {
+    let mut values = match options.config.as_deref() {
+        Some(path) => {
+            let file = File::open(path)?;
+            serde_yaml::from_reader(file)?
+        }
+        None => HashMap::new(),
+    };
+
+    apply_argument_or_env(
+        &mut values,
+        "service",
+        "peerId",
+        options.peerid.as_deref(),
+        BOSON_PEER_ID,
+    )?;
+    apply_argument_or_env(
+        &mut values,
+        "service",
+        "endpoint",
+        options.endpoint.as_deref(),
+        BOSON_ENDPOINT,
+    )?;
+    apply_argument_or_env(
+        &mut values,
+        "client",
+        "userPrivateKey",
+        options.userid.as_deref(),
+        BOSON_USER_ID,
+    )?;
+    apply_argument_or_env(
+        &mut values,
+        "client",
+        "devicePrivateKey",
+        options.dev_key.as_deref(),
+        BOSON_DEV_KEY,
+    )?;
+    ensure_default_database(&mut values)?;
+
+    Ok(Configuration::from_map(&values)?)
+}
+
+fn apply_argument_or_env(
+    values: &mut HashMap<String, serde_json::Value>,
+    section: &str,
+    field: &str,
+    argument: Option<&str>,
+    env_var: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(value) = argument
+        .map(str::to_owned)
+        .or_else(|| env::var(env_var).ok())
+    else {
+        return Ok(());
+    };
+
+    let section = values
+        .entry(section.to_string())
+        .or_insert_with(|| serde_json::Value::Object(Default::default()))
+        .as_object_mut()
+        .ok_or_else(|| format!("{section} configuration must be a map"))?;
+    section.insert(field.to_string(), serde_json::Value::String(value));
+    Ok(())
+}
+
+fn ensure_default_database(
+    values: &mut HashMap<String, serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let database = values
+        .entry("client".to_string())
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    let _ = database;
+    let database = values
+        .entry("database".to_string())
+        .or_insert_with(|| serde_json::Value::Object(Default::default()))
+        .as_object_mut()
+        .ok_or("database configuration must be a map")?;
+    database
+        .entry("uri".to_string())
+        .or_insert_with(|| serde_json::Value::String("jdbc:sqlite:messaging.db".to_string()));
+    Ok(())
+}
+
+#[derive(Clone)]
+struct ConsoleOutput {
+    printer: ExternalPrinter<String>,
+}
+
+impl ConsoleOutput {
+    fn new(printer: ExternalPrinter<String>) -> Self {
+        Self { printer }
+    }
+
+    fn println(&self, line: impl Into<String>) {
+        _ = self.printer.sender().try_send(line.into());
+    }
+}
+
+struct ConsoleConnectionListener {
+    output: ConsoleOutput,
+}
+
+impl ConsoleConnectionListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
+    }
+}
+
+impl ConnectionListener for ConsoleConnectionListener {
     fn on_connecting(&self) {
-        println!("Connecting to messaging service...");
+        self.output.println("Connecting to messaging service...");
     }
 
     fn on_connected(&self) {
-        println!("Connected to messaging service");
+        self.output.println("Connected to messaging service");
+    }
+
+    fn on_ready(&self) {
+        self.output.println("Messaging service is ready");
     }
 
     fn on_disconnected(&self) {
-        println!("Disconnected from messaging service");
+        self.output.println("Disconnected from messaging service");
     }
 }
 
-struct MessageListenerTest;
-impl MessageListener for MessageListenerTest {
-    fn on_message(&self, message: &Message) {
-        println!("Received message: {:?}", message);
-    }
-    fn on_sending(&self, message: &Message) {
-        println!("Sending message: {:?}", message);
-    }
+struct ConsoleMessageListener {
+    output: ConsoleOutput,
+}
 
-    fn on_sent(&self, message: &Message) {
-        println!("Message sent: {:?}", message);
-    }
-
-    fn on_broadcast(&self, message: &Message) {
-        println!("Broadcast message: {:?}", message);
+impl ConsoleMessageListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
     }
 }
 
-struct ContactListenerTest;
-impl ContactListener for ContactListenerTest {
-    fn on_contacts_updating(&self,
-        _version_id: &str,
-        _contacts: Vec<Contact>
-    ) {
-        println!("Contacts updating!");
+impl MessageListener for ConsoleMessageListener {
+    fn on_message(&self, message: &dyn Message) {
+        self.output
+            .println(format!("Received message {}", message.id()));
     }
 
-    fn on_contacts_updated(&self,
-        _base_version_id: &str,
-        _new_version_id: &str,
-        _contacts: Vec<Contact>
-    ) {
-        println!("Contacts updated");
+    fn on_sent(&self, message: &dyn Message) {
+        self.output
+            .println(format!("Sent message {}", message.id()));
+    }
+}
+
+struct ConsoleContactListener {
+    output: ConsoleOutput,
+}
+
+impl ConsoleContactListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
+    }
+}
+
+impl ContactListener for ConsoleContactListener {
+    fn on_contact_added(&self, contact: &dyn Contact) {
+        self.output
+            .println(format!("Contact added: {}", contact.id()));
+    }
+
+    fn on_contacts_updated(&self, contacts: &[Box<dyn Contact>]) {
+        self.output
+            .println(format!("Updated {} contact(s)", contacts.len()));
+    }
+
+    fn on_contacts_removed(&self, contact_ids: &[Id]) {
+        self.output
+            .println(format!("Removed {} contact(s)", contact_ids.len()));
     }
 
     fn on_contacts_cleared(&self) {
-        println!("Contacts cleared");
-    }
-
-    fn on_contact_profile(&self,
-        _contact_id: &Id,
-        _profile: &Contact
-    ) {
-        println!("Contact profile ");
+        self.output.println("Contacts cleared");
     }
 }
 
-struct ProfileListenerTest;
-impl ProfileListener for ProfileListenerTest {
-    fn on_user_profile_acquired(&self, _profile: &UserProfile) {
-        println!("User profile acquired");
+struct ConsoleChannelListener {
+    output: ConsoleOutput,
+}
+
+impl ConsoleChannelListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
+    }
+}
+
+impl ChannelListener for ConsoleChannelListener {
+    fn on_channel_created(&self, channel: &dyn Channel) {
+        self.output
+            .println(format!("Channel created: {}", channel.id()));
     }
 
-    fn on_user_profile_changed(&self, _avatar: bool) {
-        println!("User profile changed");
+    fn on_channel_deleted(&self, channel: &dyn Channel) {
+        self.output
+            .println(format!("Channel deleted: {}", channel.id()));
+    }
+
+    fn on_joined_channel(&self, channel: &dyn Channel) {
+        self.output
+            .println(format!("Joined channel: {}", channel.id()));
+    }
+
+    fn on_left_channel(&self, channel: &dyn Channel) {
+        self.output
+            .println(format!("Left channel: {}", channel.id()));
+    }
+}
+
+struct ConsoleSessionListener {
+    output: ConsoleOutput,
+}
+
+impl ConsoleSessionListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
+    }
+}
+
+impl SessionListener for ConsoleSessionListener {
+    fn on_new_session(&self, session: &SessionInfo) {
+        self.output
+            .println(format!("New device session: {}", session.device_id()));
+    }
+}
+
+struct ConsoleFriendRequestListener {
+    output: ConsoleOutput,
+}
+
+impl ConsoleFriendRequestListener {
+    fn new(output: ConsoleOutput) -> Self {
+        Self { output }
+    }
+}
+
+impl FriendRequestListener for ConsoleFriendRequestListener {
+    fn on_friend_request(&self, user_id: &Id, hello: Option<&str>) {
+        self.output.println(format!(
+            "Friend request from {}: {}",
+            user_id,
+            hello.unwrap_or("<no greeting>")
+        ));
+    }
+
+    fn on_friend_request_accepted(&self, user_id: &Id) {
+        self.output
+            .println(format!("Friend request accepted by {user_id}"));
+    }
+}
+
+struct ConnectionReadiness {
+    connected_networks: AtomicU8,
+}
+
+impl ConnectionReadiness {
+    fn new() -> Self {
+        Self {
+            connected_networks: AtomicU8::new(0),
+        }
+    }
+
+    fn set_network_connected(&self, network: Network, connected: bool) {
+        let network_mask = match network {
+            Network::IPv4 => 0b01,
+            Network::IPv6 => 0b10,
+        };
+        if connected {
+            self.connected_networks
+                .fetch_or(network_mask, Ordering::AcqRel);
+        } else {
+            self.connected_networks
+                .fetch_and(!network_mask, Ordering::AcqRel);
+        }
+    }
+}
+
+struct DefaultConnectionStatusListener {
+    readiness: Arc<ConnectionReadiness>,
+}
+
+impl ConnectionStatusListener for DefaultConnectionStatusListener {
+    fn status_changed(
+        &self,
+        network: Network,
+        new_status: ConnectionStatus,
+        old_status: ConnectionStatus,
+    ) {
+        debug!("DHT {network} status changed: {old_status}->{new_status}");
+    }
+
+    fn connecting(&self, network: Network) {
+        info!("Connecting to DHT network {network}...");
+    }
+
+    fn connected(&self, network: Network) {
+        info!("Connected to DHT network {network}");
+        self.readiness.set_network_connected(network, true);
+    }
+
+    fn disconnected(&self, network: Network) {
+        warn!("Disconnected from DHT network {network}");
+        self.readiness.set_network_connected(network, false);
     }
 }

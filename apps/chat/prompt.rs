@@ -5,7 +5,7 @@ pub(crate) struct MyPrompt;
 
 impl Prompt for MyPrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        "tau> ".into()
+        "photon> ".into()
     }
 
     fn render_prompt_right(&self) -> Cow<'_, str> {

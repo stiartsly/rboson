@@ -29,7 +29,7 @@ path = "apps/launcher/main.rs"
 
 [[bin]]
 name = "chat"
-path = "apps/chat/mod.rs"
+path = "apps/chat/main.rs"
 
 [[bin]]
 name = "identity"

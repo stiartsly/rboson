@@ -4,7 +4,7 @@ ipv4: true
 # Set to 'true' to enable IPv6 support for DHT communication.
 ipv6: false
 
-# Port number for DHT UDP traffic
+# Default DHT UDP port. Override with --port when running multiple instances.
 port: 39001
 
 # Node private key
@@ -19,8 +19,8 @@ logLevel: debug
 logFile: chat.log
 logConsole: true
 
-# Root directory for persistent data.
-dataDir: "~/.boson_chat"
+# Root directory for persistent DHT data. Override with --datadir per instance.
+#dataDir: "~/.chat"
 
 # Persistence Layer Configuration.
 databaseUri: jdbc:sqlite:node.db
@@ -35,10 +35,6 @@ bootstraps:
   - - 66yzSu9imYLtG4TWMZKdk79BXGcX17s2b259taYFeyKw
     - 45.32.138.246
     - 39001
-
-# Security: Identifies and isolates peers exhibiting malicious or abnormal behaviors.
-# Default: true
-enableSuspiciousNodeDetector: true
 
 # Development: Allows participation in the DHT using local/private IPs (RFC1918).
 # WARNING: Setting this to 'true' in a public or production deployment may lead to routing issues.

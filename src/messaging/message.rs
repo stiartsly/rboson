@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::time::SystemTime;
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
-use crate::Id;
 use crate::messaging::errors::{Error, Result};
+use crate::Id;
 
 // ---------------------------------------------------------------------------
 // ContentType
@@ -12,78 +13,256 @@ use crate::messaging::errors::{Error, Result};
 /// MIME content-type constants.
 pub mod content_type {
     pub const HEADER_NAME: &str = "Content-Type";
-    pub const TEXT:        &str = "text/plain";
-    pub const JSON:        &str = "application/json";
-    pub const CBOR:        &str = "application/cbor";
-    pub const IMAGE_JPEG:  &str = "image/jpeg";
-    pub const IMAGE_PNG:   &str = "image/png";
-    pub const IMAGE_WEBP:  &str = "image/webp";
-    pub const AUDIO_AAC:   &str = "audio/aac";
-    pub const AUDIO_MP3:   &str = "audio/mpeg";
-    pub const AUDIO_WEBM:  &str = "audio/webm";
-    pub const VIDEO_MP4:   &str = "video/mp4";
-    pub const VIDEO_WEBM:  &str = "video/webm";
-    pub const BINARY:      &str = "application/octet-stream";
+    pub const TEXT: &str = "text/plain";
+    pub const JSON: &str = "application/json";
+    pub const CBOR: &str = "application/cbor";
+    pub const IMAGE_JPEG: &str = "image/jpeg";
+    pub const IMAGE_PNG: &str = "image/png";
+    pub const IMAGE_WEBP: &str = "image/webp";
+    pub const AUDIO_AAC: &str = "audio/aac";
+    pub const AUDIO_MP3: &str = "audio/mpeg";
+    pub const AUDIO_WEBM: &str = "audio/webm";
+    pub const VIDEO_MP4: &str = "video/mp4";
+    pub const VIDEO_WEBM: &str = "video/webm";
+    pub const BINARY: &str = "application/octet-stream";
 }
 
 // ---------------------------------------------------------------------------
 // ContentDisposition
 // ---------------------------------------------------------------------------
 
-/// Whether a message body should be shown inline or as a downloadable attachment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContentDisposition {
-    /// Display the content inline.
+pub const CONTENT_DISPOSITION_HEADER: &str = "Content-Disposition";
+
+/// How message content should be presented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentDispositionType {
     Inline,
-    /// Offer the content as a download, with an optional filename.
-    Attachment { filename: Option<String> },
+    Attachment,
+}
+
+impl ContentDispositionType {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "inline" => Ok(Self::Inline),
+            "attachment" => Ok(Self::Attachment),
+            _ => Err(Error::Argument(format!(
+                "Invalid content disposition type: {value}"
+            ))),
+        }
+    }
+}
+
+impl fmt::Display for ContentDispositionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Inline => "inline",
+            Self::Attachment => "attachment",
+        })
+    }
+}
+
+/// Parsed value of a `Content-Disposition` header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentDisposition {
+    disposition_type: ContentDispositionType,
+    ascii_filename: Option<String>,
+    rfc5987_filename: Option<String>,
+    filename: Option<String>,
 }
 
 impl ContentDisposition {
     /// An inline disposition with no filename.
     pub fn inline() -> Self {
-        ContentDisposition::Inline
+        Self {
+            disposition_type: ContentDispositionType::Inline,
+            ascii_filename: None,
+            rfc5987_filename: None,
+            filename: None,
+        }
     }
 
     /// An inline disposition carrying a filename hint.
-    pub fn inline_with_name(_filename: impl Into<String>) -> Self {
-        ContentDisposition::Inline // simplified: ignore filename for inline
+    pub fn inline_with_name(filename: impl Into<String>) -> Self {
+        Self::with_filename(ContentDispositionType::Inline, filename.into())
     }
 
     /// An attachment disposition.
     pub fn attachment(filename: impl Into<String>) -> Self {
-        ContentDisposition::Attachment { filename: Some(filename.into()) }
+        Self::with_filename(ContentDispositionType::Attachment, filename.into())
+    }
+
+    fn with_filename(disposition_type: ContentDispositionType, filename: String) -> Self {
+        if filename.is_empty() {
+            return Self {
+                disposition_type,
+                ascii_filename: None,
+                rfc5987_filename: None,
+                filename: None,
+            };
+        }
+
+        Self {
+            disposition_type,
+            ascii_filename: Some(ascii_fallback(&filename)),
+            rfc5987_filename: Some(encode_rfc5987(&filename)),
+            filename: Some(filename),
+        }
+    }
+
+    pub fn parse(header: &str) -> Result<Self> {
+        let mut parts = header.split(';');
+        let disposition_type = ContentDispositionType::parse(
+            &parts.next().unwrap_or_default().trim().to_ascii_lowercase(),
+        )?;
+        let mut ascii_filename = None;
+        let mut rfc5987_filename = None;
+
+        for part in parts {
+            let Some((name, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            match name.trim().to_ascii_lowercase().as_str() {
+                "filename" => {
+                    ascii_filename = Some(unquote(value.trim()).to_string());
+                }
+                "filename*" => {
+                    rfc5987_filename = Some(value.trim().to_string());
+                }
+                _ => {}
+            }
+        }
+
+        let filename = match rfc5987_filename.as_deref() {
+            Some(value) => Some(decode_rfc5987(value)?),
+            None => ascii_filename.clone(),
+        };
+
+        Ok(Self {
+            disposition_type,
+            ascii_filename,
+            rfc5987_filename,
+            filename,
+        })
+    }
+
+    pub fn disposition_type(&self) -> ContentDispositionType {
+        self.disposition_type
     }
 
     /// The disposition type as a lowercase string (`"inline"` or `"attachment"`).
     pub fn type_str(&self) -> &'static str {
-        match self {
-            ContentDisposition::Inline       => "inline",
-            ContentDisposition::Attachment { .. } => "attachment",
+        match self.disposition_type {
+            ContentDispositionType::Inline => "inline",
+            ContentDispositionType::Attachment => "attachment",
         }
     }
 
     /// The filename hint, if any.
     pub fn filename(&self) -> Option<&str> {
-        match self {
-            ContentDisposition::Attachment { filename } => filename.as_deref(),
-            _ => None,
+        self.filename.as_deref()
+    }
+
+    pub fn ascii_filename(&self) -> Option<&str> {
+        self.ascii_filename.as_deref()
+    }
+
+    pub fn rfc5987_filename(&self) -> Option<&str> {
+        self.rfc5987_filename.as_deref()
+    }
+
+    pub fn is_inline(&self) -> bool {
+        self.disposition_type == ContentDispositionType::Inline
+    }
+
+    pub fn is_attachment(&self) -> bool {
+        self.disposition_type == ContentDispositionType::Attachment
+    }
+
+    pub fn value(&self) -> String {
+        let mut value = self.disposition_type.to_string();
+        if let Some(filename) = &self.ascii_filename {
+            value.push_str(&format!("; filename=\"{filename}\""));
         }
+        if let Some(filename) = &self.rfc5987_filename {
+            value.push_str(&format!("; filename*={filename}"));
+        }
+        value
     }
 }
 
 impl fmt::Display for ContentDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ContentDisposition::Inline => f.write_str("inline"),
-            ContentDisposition::Attachment { filename: Some(name) } => {
-                write!(f, "attachment; filename=\"{}\"", name)
-            },
-            ContentDisposition::Attachment { filename: _ } => {
-                f.write_str("attachment")
-            },
+        write!(f, "{CONTENT_DISPOSITION_HEADER}: {}", self.value())
+    }
+}
+
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+fn ascii_fallback(filename: &str) -> String {
+    filename
+        .nfkd()
+        .filter(|ch| !is_combining_mark(*ch))
+        .map(|ch| {
+            if ch.is_ascii() && !ch.is_ascii_control() {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn encode_rfc5987(filename: &str) -> String {
+    let mut encoded = String::from("UTF-8''");
+    for byte in filename.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
         }
     }
+    encoded
+}
+
+fn decode_rfc5987(value: &str) -> Result<String> {
+    let (charset, encoded) = value
+        .split_once('\'')
+        .and_then(|(charset, rest)| rest.strip_prefix('\'').map(|encoded| (charset, encoded)))
+        .ok_or_else(|| Error::Argument(format!("Invalid RFC 5987 content disposition: {value}")))?;
+    if !charset.eq_ignore_ascii_case("utf-8") {
+        return Err(Error::Argument(format!(
+            "Unsupported RFC 5987 charset: {charset}"
+        )));
+    }
+
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut pos = 0;
+    while pos < bytes.len() {
+        if bytes[pos] == b'%' {
+            if pos + 2 >= bytes.len() {
+                return Err(Error::Argument(format!(
+                    "Invalid RFC 5987 content disposition: {value}"
+                )));
+            }
+            let hex = std::str::from_utf8(&bytes[pos + 1..pos + 3])
+                .map_err(|_| Error::Argument("Invalid RFC 5987 escape".into()))?;
+            decoded.push(u8::from_str_radix(hex, 16).map_err(|_| {
+                Error::Argument(format!("Invalid RFC 5987 content disposition: {value}"))
+            })?);
+            pos += 3;
+        } else {
+            decoded.push(bytes[pos]);
+            pos += 1;
+        }
+    }
+    String::from_utf8(decoded)
+        .map_err(|_| Error::Argument(format!("Invalid RFC 5987 content disposition: {value}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -97,11 +276,11 @@ pub enum MessageType {
     /// Initial handshake / key-exchange message.
     HandshakeMessage = 0,
     /// Regular user-visible content message.
-    ContentMessage   = 1,
+    ContentMessage = 1,
     /// Control / signalling message (not user-visible).
-    ControlMessage   = 2,
+    ControlMessage = 2,
     /// State-synchronisation message.
-    StateMessage     = 3,
+    StateMessage = 3,
 }
 
 impl TryFrom<i32> for MessageType {
@@ -113,7 +292,10 @@ impl TryFrom<i32> for MessageType {
             1 => Ok(MessageType::ContentMessage),
             2 => Ok(MessageType::ControlMessage),
             3 => Ok(MessageType::StateMessage),
-            _ => Err(Error::Argument(format!("Unknown MessageType value: {}", value))),
+            _ => Err(Error::Argument(format!(
+                "Unknown MessageType value: {}",
+                value
+            ))),
         }
     }
 }
@@ -124,35 +306,41 @@ impl TryFrom<i32> for MessageType {
 
 /// The decoded content of a [`Message`].
 pub struct Content {
-    headers:      HashMap<String, String>,
-    content_type: Option<String>,
-    disposition:  Option<ContentDisposition>,
-    body:         Vec<u8>,
+    headers: HashMap<String, serde_json::Value>,
+    body: Vec<u8>,
 }
 
 impl Content {
-    pub(crate) fn _new(
-        headers:      HashMap<String, String>,
-        content_type: Option<String>,
-        disposition:  Option<ContentDisposition>,
-        body:         Vec<u8>,
-    ) -> Self {
-        Self { headers, content_type, disposition, body }
+    pub(crate) fn _new(headers: HashMap<String, serde_json::Value>, body: Vec<u8>) -> Self {
+        Self { headers, body }
     }
 
     /// The raw header map.
-    pub fn headers(&self) -> &HashMap<String, String> {
+    pub fn headers(&self) -> &HashMap<String, serde_json::Value> {
         &self.headers
     }
 
     /// The MIME content type, defaulting to `text/plain` when absent.
     pub fn content_type(&self) -> &str {
-        self.content_type.as_deref().unwrap_or(content_type::TEXT)
+        self.headers
+            .get("Content-Type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(content_type::TEXT)
     }
 
-    /// The content disposition, defaulting to `inline` when absent.
-    pub fn content_disposition(&self) -> ContentDisposition {
-        self.disposition.clone().unwrap_or(ContentDisposition::Inline)
+    /// The parsed content disposition, if the header is present and valid.
+    pub fn content_disposition(&self) -> Result<Option<ContentDisposition>> {
+        self.headers
+            .get(CONTENT_DISPOSITION_HEADER)
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| {
+                        Error::Argument("Content-Disposition header must be a string".into())
+                    })
+                    .and_then(ContentDisposition::parse)
+            })
+            .transpose()
     }
 
     /// The raw body bytes.
@@ -177,20 +365,23 @@ impl Content {
 
 /// A single message in a conversation.
 pub trait Message: Send + Sync {
-    /// The local storage ID for this message.
-    fn id(&self) -> i64;
+    /// The globally unique sender-generated message ID.
+    fn id(&self) -> &Id;
 
-    /// The ID of the conversation (= the other party's boson `Id`).
-    fn conversation_id(&self) -> &Id;
+    /// The device-local, store-assigned row ID, or zero before persistence.
+    fn rid(&self) -> i64;
+
+    /// The conversation ID, if assigned.
+    fn conversation_id(&self) -> Option<&Id>;
 
     /// The intended recipient's boson `Id`.
-    fn recipient(&self) -> Option<&Id>;
+    fn recipient(&self) -> &Id;
 
     /// The category of this message.
     fn message_type(&self) -> MessageType;
 
-    /// The sender's boson `Id`.
-    fn from(&self) -> &Id;
+    /// The sender's boson `Id`, if the message has been stamped for dispatch.
+    fn from(&self) -> Option<&Id>;
 
     /// When the message was authored.
     fn created_at(&self) -> SystemTime;
@@ -201,7 +392,7 @@ pub trait Message: Send + Sync {
     /// When this device successfully sent the message (`None` for inbound).
     fn sent_at(&self) -> Option<SystemTime>;
 
-    /// The raw encrypted payload bytes.
+    /// The raw payload bytes.
     fn payload_as_bytes(&self) -> &[u8];
 
     /// The decoded content, if decryption succeeded.
@@ -230,4 +421,37 @@ pub trait MessageBuilder: Send + Sync {
 
     /// Add an arbitrary header.
     fn header(self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ContentDisposition;
+
+    #[test]
+    fn parses_rfc5987_filename() {
+        let disposition = ContentDisposition::parse(
+            "attachment; filename=\"file_name.jpg\"; filename*=UTF-8''file%20name.jpg",
+        )
+        .unwrap();
+
+        assert!(disposition.is_attachment());
+        assert_eq!(disposition.filename(), Some("file name.jpg"));
+        assert_eq!(disposition.ascii_filename(), Some("file_name.jpg"));
+        assert_eq!(
+            disposition.rfc5987_filename(),
+            Some("UTF-8''file%20name.jpg")
+        );
+    }
+
+    #[test]
+    fn creates_unicode_attachment() {
+        let disposition = ContentDisposition::attachment("fïle nãme.jpg");
+
+        assert_eq!(disposition.filename(), Some("fïle nãme.jpg"));
+        assert_eq!(disposition.ascii_filename(), Some("file name.jpg"));
+        assert_eq!(
+            disposition.value(),
+            "attachment; filename=\"file name.jpg\"; filename*=UTF-8''f%C3%AFle%20n%C3%A3me.jpg"
+        );
+    }
 }

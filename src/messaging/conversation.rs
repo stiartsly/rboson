@@ -1,6 +1,6 @@
-use std::time::SystemTime;
-use crate::Id;
 use crate::messaging::contact::Contact;
+use crate::Id;
+use std::time::SystemTime;
 
 /// A conversation between the local user and another party (person or channel).
 ///

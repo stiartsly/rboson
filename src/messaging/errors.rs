@@ -24,14 +24,14 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Io(e)                        => write!(f, "IO error: {}", e),
-            Error::Argument(m)                  => write!(f, "Invalid argument: {}", m),
-            Error::Protocol { code, message }   => write!(f, "Protocol error {}: {}", code, message),
-            Error::State(m)                     => write!(f, "State error: {}", m),
-            Error::Encoding(m)                  => write!(f, "Encoding error: {}", m),
-            Error::Auth(m)                      => write!(f, "Auth error: {}", m),
-            Error::NotFound(m)                  => write!(f, "Not found: {}", m),
-            Error::Timeout                      => write!(f, "Operation timed out"),
+            Error::Io(e) => write!(f, "IO error: {}", e),
+            Error::Argument(m) => write!(f, "Invalid argument: {}", m),
+            Error::Protocol { code, message } => write!(f, "Protocol error {}: {}", code, message),
+            Error::State(m) => write!(f, "State error: {}", m),
+            Error::Encoding(m) => write!(f, "Encoding error: {}", m),
+            Error::Auth(m) => write!(f, "Auth error: {}", m),
+            Error::NotFound(m) => write!(f, "Not found: {}", m),
+            Error::Timeout => write!(f, "Operation timed out"),
         }
     }
 }

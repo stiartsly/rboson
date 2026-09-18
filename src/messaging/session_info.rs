@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::Id;
+use serde::{Deserialize, Serialize};
 
 /// Information about a single device session for the current user.
 ///
@@ -26,12 +26,17 @@ pub struct SessionInfo {
 
 impl SessionInfo {
     pub fn new(
-        device_id:     Id,
-        online:        bool,
+        device_id: Id,
+        online: bool,
         last_active_ms: i64,
-        last_address:  Option<String>,
+        last_address: Option<String>,
     ) -> Self {
-        Self { device_id, online, last_active_ms, last_address }
+        Self {
+            device_id,
+            online,
+            last_active_ms,
+            last_address,
+        }
     }
 
     pub fn device_id(&self) -> &Id {

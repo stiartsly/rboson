@@ -1,5 +1,5 @@
-use std::time::SystemTime;
 use crate::Id;
+use std::time::SystemTime;
 
 /// A pending or resolved friend request.
 ///

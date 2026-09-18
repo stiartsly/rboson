@@ -1,0 +1,79 @@
+# This is the sample configuration file for the Photon Messaging client.
+
+# Configuration for the messaging service peer.
+# The peerId is mandatory.
+# The endpoint is optional. If omitted, the client will perform a DHT lookup to resolve
+# the peer’s endpoint. If provided, these values will be used directly as the peer’s endpoint.
+service:
+  # Peer ID of the remote messaging service.
+  #
+  # This is the unique identifier of the target service node in the network.
+  peerId: ${MESSAGING_SERVICE_PEER_ID}
+
+  # Endpoint used to connect to the messaging service.
+  #
+  # Supported schemes depend on the transport implementation.
+  # Example:
+  #   - MQTT: mqtt://host:port
+  #
+  # Ensure the endpoint is reachable from the client environment.
+  endpoint: ${MESSAGING_SERVICE_ENDPOINT}
+
+
+# Client identity and authentication configuration.
+#
+# Both user-level and device-level private keys are required to establish
+# authenticated communication with the messaging service.
+client:
+  # Private key representing the user identity.
+  #
+  # This key is shared across all devices owned by the same user.
+  # Keep this value secret.
+  userPrivateKey: ${MESSAGING_USER_PRIVATE_KEY}
+
+  # Private key representing the device identity.
+  #
+  # Each device should have a unique key. This allows the system to
+  # distinguish between multiple devices belonging to the same user.
+  # Keep this value secret.
+  devicePrivateKey: ${MESSAGING_DEVICE_PRIVATE_KEY}
+
+# Root directory for the messaging data storage.
+#
+# If omitted, defaults to the current working directory.
+#
+# Recommended locations for user deployments:
+#   - Unix-like: ~/.local/share/boson/client/photon-messaging
+#   - Windows:   %LOCALAPPDATA%\boson\client\photon-messaging
+#
+# Recommended locations for system-wide deployments:
+#   - Unix-like: /var/lib/boson/client/photon-messaging
+#   - Windows:   %ProgramData%\boson\client\photon-messaging
+dataDir: "${YOUR_MESSAGING_DATADIR}"
+
+database:
+  # Storage backend used by the messaging database.
+  #
+  # Supported values:
+  #   - PostgreSQL: postgresql://user:password@host:port/database
+  #   - SQLite:     jdbc:sqlite:/path/to/sqlite.db
+  #
+  # Recommendations:
+  #   - SQLite: suitable for local, embedded, or low-throughput deployments
+  #   - PostgreSQL: recommended for production or high-throughput environments
+  uri: jdbc:sqlite:messaging.db
+
+  # Maximum number of connections in the database connection pool.
+  #
+  # Notes:
+  #   - For SQLite, this should typically be set to 1 due to its
+  #     single-writer concurrency model.
+  #   - For PostgreSQL, increase this value based on workload and
+  #     available resources.
+  poolSize: 1
+
+  # Database schema name (optional).
+  #
+  # Only applicable when using PostgreSQL.
+  # If not specified, the default schema (usually "public") is used.
+  schema: photon

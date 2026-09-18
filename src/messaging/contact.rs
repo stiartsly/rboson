@@ -1,4 +1,3 @@
-use std::time::SystemTime;
 use crate::Id;
 
 /// The type of a contact.
@@ -6,9 +5,9 @@ use crate::Id;
 #[repr(u8)]
 pub enum ContactType {
     /// Automatically added contact (e.g. channel member discovered via message).
-    Auto    = 0,
+    Auto = 0,
     /// Manually added friend contact.
-    Friend  = 1,
+    Friend = 1,
     /// A channel (group) contact.
     Channel = 2,
 }
@@ -39,43 +38,38 @@ pub trait Contact: Send + Sync {
     /// Whether this contact has been blocked.
     fn is_blocked(&self) -> bool;
 
-    /// Timestamp when this contact was first created locally.
-    fn created_at(&self) -> SystemTime;
+    /// Timestamp when this contact was first created locally, in milliseconds.
+    fn created_at(&self) -> i64;
 
-    /// Timestamp of the last update to this contact's record.
-    fn updated_at(&self) -> SystemTime;
+    /// Timestamp of the last update to this contact's record, in milliseconds.
+    fn updated_at(&self) -> i64;
 
     /// Monotonically increasing revision counter for sync purposes.
     fn revision(&self) -> i32;
-
-    /// Optional avatar URI / identifier string.
-    fn avatar(&self) -> Option<&str>;
-
-    /// Returns `true` if this contact has an avatar set.
-    fn has_avatar(&self) -> bool {
-        self.avatar().is_some()
-    }
-
-    /// The name to show in the UI: remark if set, otherwise `name()`.
-    fn display_name(&self) -> &str;
 
     /// Returns `true` if `other` refers to the same contact as `self`.
     fn is(&self, other: &dyn Contact) -> bool {
         self.id() == other.id()
     }
+
+    /// Creates an editor that builds a new contact without mutating this one.
+    fn edit(&self) -> Box<dyn ContactEditor>;
 }
 
-/// Mutable operations exposed by a contact when editing.
-pub trait ContactEditor {
+/// Builder for an immutable contact update.
+pub trait ContactEditor: Send {
     /// Set the user-defined remark (alias).
-    fn set_remark(&mut self, remark: Option<String>);
+    fn remark(self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditor>;
 
     /// Set the user-defined tags.
-    fn set_tags(&mut self, tags: Option<String>);
+    fn tags(self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditor>;
 
     /// Toggle the muted state.
-    fn set_muted(&mut self, muted: bool);
+    fn muted(self: Box<Self>, muted: bool) -> Box<dyn ContactEditor>;
 
     /// Toggle the blocked state.
-    fn set_blocked(&mut self, blocked: bool);
+    fn blocked(self: Box<Self>, blocked: bool) -> Box<dyn ContactEditor>;
+
+    /// Build the updated immutable contact.
+    fn build(self: Box<Self>) -> Box<dyn Contact>;
 }

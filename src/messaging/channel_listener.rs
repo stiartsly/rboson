@@ -1,5 +1,5 @@
-use crate::Id;
 use crate::messaging::channel::{Channel, ChannelMember};
+use crate::Id;
 
 /// Receives channel lifecycle and membership events.
 pub trait ChannelListener: Send + Sync {
@@ -18,10 +18,11 @@ pub trait ChannelListener: Send + Sync {
     /// Called when channel ownership was transferred.
     fn on_channel_ownership_transferred(
         &self,
-        _channel:   &dyn Channel,
+        _channel: &dyn Channel,
         _old_owner: &Id,
         _new_owner: &Id,
-    ) {}
+    ) {
+    }
 
     /// Called when the channel session key was rotated.
     fn on_channel_session_key_rotated(&self, _channel: &dyn Channel) {}
@@ -36,14 +37,34 @@ pub trait ChannelListener: Send + Sync {
     fn on_channel_member_left(&self, _channel: &dyn Channel, _member: &dyn ChannelMember) {}
 
     /// Called when members were removed by an administrator.
-    fn on_channel_members_removed(&self, _channel: &dyn Channel, _members: &[Box<dyn ChannelMember>]) {}
+    fn on_channel_members_removed(
+        &self,
+        _channel: &dyn Channel,
+        _members: &[Box<dyn ChannelMember>],
+    ) {
+    }
 
     /// Called when members were banned.
-    fn on_channel_members_banned(&self, _channel: &dyn Channel, _banned: &[Box<dyn ChannelMember>]) {}
+    fn on_channel_members_banned(
+        &self,
+        _channel: &dyn Channel,
+        _banned: &[Box<dyn ChannelMember>],
+    ) {
+    }
 
     /// Called when members were unbanned.
-    fn on_channel_members_unbanned(&self, _channel: &dyn Channel, _unbanned: &[Box<dyn ChannelMember>]) {}
+    fn on_channel_members_unbanned(
+        &self,
+        _channel: &dyn Channel,
+        _unbanned: &[Box<dyn ChannelMember>],
+    ) {
+    }
 
     /// Called when member roles were updated.
-    fn on_channel_members_role_updated(&self, _channel: &dyn Channel, _members: &[Box<dyn ChannelMember>]) {}
+    fn on_channel_members_role_updated(
+        &self,
+        _channel: &dyn Channel,
+        _members: &[Box<dyn ChannelMember>],
+    ) {
+    }
 }

@@ -1,26 +1,20 @@
-use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use crate::Id;
 use crate::messaging::{
-    errors::Result,
-    channel::Permission,
-    contact::Contact,
-    channel::Channel,
-    channel_listener::ChannelListener,
-    connection_listener::ConnectionListener,
-    contact_listener::ContactListener,
-    conversation::Conversation,
-    friend_request::FriendRequest,
-    friend_request_listener::FriendRequestListener,
-    invite_ticket::InviteTicket,
-    message::Message,
-    message::MessageBuilder,
-    message_listener::MessageListener,
-    session_info::SessionInfo,
+    channel::Channel, channel::Permission, channel_listener::ChannelListener,
+    connection_listener::ConnectionListener, contact::Contact, contact_listener::ContactListener,
+    conversation::Conversation, errors::Result, friend_request::FriendRequest,
+    friend_request_listener::FriendRequestListener, invite_ticket::InviteTicket, message::Message,
+    message::MessageBuilder, message_listener::MessageListener, session_info::SessionInfo,
     session_listener::SessionListener,
 };
+use crate::messaging::{
+    config::Configuration,
+    photon_messaging_client::{InitialListeners, PhotonMessagingClient},
+};
+use crate::Id;
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -121,17 +115,17 @@ pub trait MessagingClient: Send + Sync {
     fn get_messages(
         &self,
         conversation_id: &Id,
-        until:           Option<i64>,
-        limit:           usize,
-        offset:          usize,
+        until: Option<i64>,
+        limit: usize,
+        offset: usize,
     ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>>;
 
     /// Retrieve messages from a time range `[begin, end)` (milliseconds).
     fn get_messages_in_range(
         &self,
         conversation_id: &Id,
-        begin:           i64,
-        end:             i64,
+        begin: i64,
+        end: i64,
     ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>>;
 
     /// Delete a single message by its local ID.
@@ -164,7 +158,10 @@ pub trait MessagingClient: Send + Sync {
     fn accept_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>>;
 
     /// Look up a specific friend request by the initiator's `Id`.
-    fn get_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<Option<Box<dyn FriendRequest>>>>;
+    fn get_friend_request(
+        &self,
+        user_id: &Id,
+    ) -> BoxFuture<'_, Result<Option<Box<dyn FriendRequest>>>>;
 
     /// Retrieve all pending / received friend requests.
     fn get_friend_requests(&self) -> BoxFuture<'_, Result<Vec<Box<dyn FriendRequest>>>>;
@@ -181,9 +178,9 @@ pub trait MessagingClient: Send + Sync {
     /// Add a contact as a friend once a shared session key has been established.
     fn add_friend(
         &self,
-        user_id:     Id,
+        user_id: Id,
         session_key: Vec<u8>,
-        remark:      Option<String>,
+        remark: Option<String>,
     ) -> BoxFuture<'_, Result<()>>;
 
     // -----------------------------------------------------------------
@@ -193,9 +190,9 @@ pub trait MessagingClient: Send + Sync {
     /// Create a new channel.
     fn create_channel(
         &self,
-        permission:  Permission,
-        name:        String,
-        notice:      Option<String>,
+        permission: Permission,
+        name: String,
+        notice: Option<String>,
         announcement: Option<String>,
     ) -> BoxFuture<'_, Result<Box<dyn Channel>>>;
 
@@ -212,14 +209,14 @@ pub trait MessagingClient: Send + Sync {
     fn create_invite_ticket(
         &self,
         channel_id: &Id,
-        invitee:    Option<Id>,
+        invitee: Option<Id>,
     ) -> BoxFuture<'_, Result<InviteTicket>>;
 
     /// Transfer channel ownership to another user.
     fn transfer_channel_ownership(
         &self,
         channel_id: &Id,
-        new_owner:  Id,
+        new_owner: Id,
     ) -> BoxFuture<'_, Result<()>>;
 
     /// Rotate the channel session key, optionally supplying a pre-generated keypair.
@@ -232,8 +229,8 @@ pub trait MessagingClient: Send + Sync {
     fn set_channel_members_role(
         &self,
         channel_id: &Id,
-        members:    &[Id],
-        role:       crate::messaging::channel::Role,
+        members: &[Id],
+        role: crate::messaging::channel::Role,
     ) -> BoxFuture<'_, Result<()>>;
 
     /// Ban a set of channel members.
@@ -274,17 +271,18 @@ pub trait MessagingClient: Send + Sync {
 
 /// Fluent builder for constructing a [`MessagingClient`].
 pub struct MessagingClientBuilder {
-    service_peer_id:  Option<Id>,
+    configuration: Option<Configuration>,
+    service_peer_id: Option<Id>,
     service_endpoint: Option<url::Url>,
-    user_key:         Option<crate::signature::KeyPair>,
-    device_key:       Option<crate::signature::KeyPair>,
-    data_dir:         Option<std::path::PathBuf>,
+    user_key: Option<crate::signature::KeyPair>,
+    device_key: Option<crate::signature::KeyPair>,
+    data_dir: Option<std::path::PathBuf>,
 
-    connection_listener:     Option<Arc<dyn ConnectionListener>>,
-    message_listener:        Option<Arc<dyn MessageListener>>,
-    channel_listener:        Option<Arc<dyn ChannelListener>>,
-    contact_listener:        Option<Arc<dyn ContactListener>>,
-    session_listener:        Option<Arc<dyn SessionListener>>,
+    connection_listener: Option<Arc<dyn ConnectionListener>>,
+    message_listener: Option<Arc<dyn MessageListener>>,
+    channel_listener: Option<Arc<dyn ChannelListener>>,
+    contact_listener: Option<Arc<dyn ContactListener>>,
+    session_listener: Option<Arc<dyn SessionListener>>,
     friend_request_listener: Option<Arc<dyn FriendRequestListener>>,
 }
 
@@ -297,61 +295,121 @@ impl Default for MessagingClientBuilder {
 impl MessagingClientBuilder {
     pub fn new() -> Self {
         Self {
-            service_peer_id:  None,
+            configuration: None,
+            service_peer_id: None,
             service_endpoint: None,
-            user_key:         None,
-            device_key:       None,
-            data_dir:         None,
-            connection_listener:     None,
-            message_listener:        None,
-            channel_listener:        None,
-            contact_listener:        None,
-            session_listener:        None,
+            user_key: None,
+            device_key: None,
+            data_dir: None,
+            connection_listener: None,
+            message_listener: None,
+            channel_listener: None,
+            contact_listener: None,
+            session_listener: None,
             friend_request_listener: None,
         }
     }
 
+    /// Use a fully validated messaging [`Configuration`].
+    pub fn configuration(mut self, configuration: Configuration) -> Self {
+        self.configuration = Some(configuration);
+        self
+    }
+
     pub fn service_peer_id(mut self, id: Id) -> Self {
-        self.service_peer_id = Some(id); self
+        self.service_peer_id = Some(id);
+        self
     }
 
     pub fn service_endpoint(mut self, url: url::Url) -> Self {
-        self.service_endpoint = Some(url); self
+        self.service_endpoint = Some(url);
+        self
     }
 
     pub fn user_key(mut self, kp: crate::signature::KeyPair) -> Self {
-        self.user_key = Some(kp); self
+        self.user_key = Some(kp);
+        self
     }
 
     pub fn device_key(mut self, kp: crate::signature::KeyPair) -> Self {
-        self.device_key = Some(kp); self
+        self.device_key = Some(kp);
+        self
     }
 
     pub fn data_dir(mut self, dir: std::path::PathBuf) -> Self {
-        self.data_dir = Some(dir); self
+        self.data_dir = Some(dir);
+        self
     }
 
     pub fn connection_listener(mut self, l: Arc<dyn ConnectionListener>) -> Self {
-        self.connection_listener = Some(l); self
+        self.connection_listener = Some(l);
+        self
     }
 
     pub fn message_listener(mut self, l: Arc<dyn MessageListener>) -> Self {
-        self.message_listener = Some(l); self
+        self.message_listener = Some(l);
+        self
     }
 
     pub fn channel_listener(mut self, l: Arc<dyn ChannelListener>) -> Self {
-        self.channel_listener = Some(l); self
+        self.channel_listener = Some(l);
+        self
     }
 
     pub fn contact_listener(mut self, l: Arc<dyn ContactListener>) -> Self {
-        self.contact_listener = Some(l); self
+        self.contact_listener = Some(l);
+        self
     }
 
     pub fn session_listener(mut self, l: Arc<dyn SessionListener>) -> Self {
-        self.session_listener = Some(l); self
+        self.session_listener = Some(l);
+        self
     }
 
     pub fn friend_request_listener(mut self, l: Arc<dyn FriendRequestListener>) -> Self {
-        self.friend_request_listener = Some(l); self
+        self.friend_request_listener = Some(l);
+        self
+    }
+
+    /// Build the concrete MQTT-backed client behind the object-safe public API.
+    pub fn build(self) -> Result<Arc<dyn MessagingClient>> {
+        Ok(self.build_client()?)
+    }
+
+    /// Build the concrete client when callers need its concrete type.
+    pub fn build_client(self) -> Result<Arc<PhotonMessagingClient>> {
+        let config = match self.configuration {
+            Some(config) => config,
+            None => {
+                let service_peer_id = self.service_peer_id.ok_or_else(|| {
+                    crate::messaging::Error::Argument("service_peer_id must be set".into())
+                })?;
+                let user_key = self.user_key.ok_or_else(|| {
+                    crate::messaging::Error::Argument("user_key must be set".into())
+                })?;
+                let device_key = self.device_key.ok_or_else(|| {
+                    crate::messaging::Error::Argument("device_key must be set".into())
+                })?;
+                if let Some(endpoint) = &self.service_endpoint {
+                    Configuration::validate_endpoint(endpoint)?;
+                }
+                Configuration::new(
+                    service_peer_id,
+                    self.service_endpoint,
+                    user_key,
+                    device_key,
+                    self.data_dir,
+                )
+            }
+        };
+        let listeners = InitialListeners {
+            connection: self.connection_listener,
+            message: self.message_listener,
+            channel: self.channel_listener,
+            contact: self.contact_listener,
+            session: self.session_listener,
+            friend_request: self.friend_request_listener,
+        };
+        Ok(Arc::new(PhotonMessagingClient::new(config, listeners)))
     }
 }

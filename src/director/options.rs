@@ -117,9 +117,7 @@ impl DirectorOptions {
             ));
         }
         if self.user_id.is_some() && self.user_key.is_none() && self.device_key.is_none() {
-            return Err(ArgumentError::new(
-                "A user ID requires a device key"
-            ));
+            return Err(ArgumentError::new("A user ID requires a device key"));
         }
 
         // TODO:
@@ -136,9 +134,12 @@ impl DirectorOptions {
 impl fmt::Display for DirectorOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let idstr = |id: &Option<Id>| {
-            id.as_ref().map(|v| v.to_base58()).unwrap_or("N/A".to_string())
+            id.as_ref()
+                .map(|v| v.to_base58())
+                .unwrap_or("N/A".to_string())
         };
-        write!(f,
+        write!(
+            f,
             "DirectorOptions {{url:{}, node_id:{}, insecure:{}",
             self.director_url,
             idstr(&self.node_id),
@@ -157,9 +158,7 @@ impl fmt::Display for DirectorOptions {
 }
 
 fn parse_director_url(url: &str) -> Result<Url> {
-    let url = Url::parse(url).map_err(|e|
-        ArgumentError::new(e.to_string())
-    )?;
+    let url = Url::parse(url).map_err(|e| ArgumentError::new(e.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(ArgumentError::new("Director URL must use http or https"));
     }

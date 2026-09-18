@@ -14,13 +14,12 @@ use super::{
         RateLimitError, RegistrationDisabledError, ServerError, ServiceBusyError,
         UnauthorizedError,
     },
-    sign_nonce, Avatar, Device, Options, NodeStatus, Plan, Profile, ProfileUpdate,
-    Subscription, UserPlan, UserRegistration,
+    sign_nonce, Avatar, Device, NodeStatus, Options, Plan, Profile, ProfileUpdate, Subscription,
+    UserPlan, UserRegistration,
 };
 use crate::{
     errors::{MalformedError, NetworkError, Result, StateError},
-    signature,
-    Id,
+    signature, Id,
 };
 
 const API_PREFIX: &str = "api/v1/client";
@@ -62,16 +61,13 @@ impl Client {
         base_url.set_query(None);
         base_url.set_fragment(None);
 
-        let mut b = reqwest::Client::builder().redirect(
-            reqwest::redirect::Policy::none()
-        );
+        let mut b = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         if options.is_insecure() {
             b = b.danger_accept_invalid_certs(true);
         }
-        let client = b
-            .build()
-            .map_err(|e| NetworkError::new(e.to_string()))?;
-        let device_id = options.device_private_key()
+        let client = b.build().map_err(|e| NetworkError::new(e.to_string()))?;
+        let device_id = options
+            .device_private_key()
             .map(signature::KeyPair::from)
             .map(|kp| Id::from(kp.public_key()));
 
@@ -140,9 +136,9 @@ impl Client {
             .and_then(Value::as_str)
             .ok_or_else(|| MalformedError::new("missing 'id'"))?;
 
-        let id = node_id.parse::<Id>().map_err(|e| {
-            MalformedError::new(format!("error parsing node id {e}"))
-        })?;
+        let id = node_id
+            .parse::<Id>()
+            .map_err(|e| MalformedError::new(format!("error parsing node id {e}")))?;
         Ok(id)
     }
 

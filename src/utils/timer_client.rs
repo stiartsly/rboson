@@ -1,11 +1,11 @@
 use std::sync::{
+    atomic::{AtomicU64, Ordering},
     Arc,
-    atomic::{AtomicU64, Ordering}
 };
 use tokio::sync::{mpsc, oneshot};
 
-use crate::errors::{Result, StateError};
 use super::handler::{BoxHandler, LocalBoxHandler};
+use crate::errors::{Result, StateError};
 
 pub(crate) type TimerId = u64;
 
@@ -31,9 +31,7 @@ pub(crate) struct TimerClient<H> {
 }
 
 impl<H> TimerClient<H> {
-    pub(crate) fn new(
-        sender: mpsc::UnboundedSender<TimerCmd<H>>,
-    ) -> Self {
+    pub(crate) fn new(sender: mpsc::UnboundedSender<TimerCmd<H>>) -> Self {
         Self {
             sender,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -51,44 +49,33 @@ impl<H> TimerClient<H> {
         callback: H,
     ) -> Result<TimerId> {
         let timer_id = self.next_timer_id();
-        self.sender.send(
-            TimerCmd::Add {
+        self.sender
+            .send(TimerCmd::Add {
                 timer_id,
                 delay,
                 interval,
                 cb: callback,
-            }
-        ).map_err(|_| {
-            StateError::new("timer channel closed")
-        }).map(|_|
-            timer_id
-        )
+            })
+            .map_err(|_| StateError::new("timer channel closed"))?;
+        Ok(timer_id)
     }
 
-    pub(crate) fn cancel_timer(
-        &self,
-        timer_id: TimerId,
-    ) -> Result<()> {
-        self.sender.send(
-            TimerCmd::Cancel { timer_id }
-        ).map_err(|_| {
-            StateError::new("timer channel closed")
-        }).map(|_| ())
+    pub(crate) fn cancel_timer(&self, timer_id: TimerId) -> Result<()> {
+        self.sender
+            .send(TimerCmd::Cancel { timer_id })
+            .map_err(|_| StateError::new("timer channel closed"))?;
+        Ok(())
     }
 
-    pub(crate) async fn stop_timers(
-        &self,
-    ) -> Result<()> {
+    pub(crate) async fn stop_timers(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.sender.send(
-            TimerCmd::Stop { complete: tx }
-        ).map_err(|_| {
-            StateError::new("timer channel closed")
-        })?;
+        self.sender
+            .send(TimerCmd::Stop { complete: tx })
+            .map_err(|_| StateError::new("timer channel closed"))?;
 
-        rx.await.map_err(|_| {
-            StateError::new("timer shutdown acknowledgement dropped")
-        }).map(|_| ())
+        rx.await
+            .map_err(|_| StateError::new("timer shutdown acknowledgement dropped"))?;
+        Ok(())
     }
 }
 

@@ -17,7 +17,7 @@ const DEFAULT_RUN_SECONDS: u64 = 60 * 10;
 struct SampleConfig {
     data_dir: PathBuf,
     port: u16,
-    bootstrap_nodes: Vec<NodeInfo>,
+    bootstrap_node: Option<NodeInfo>,
     verbose: bool,
 }
 
@@ -26,7 +26,7 @@ impl Default for SampleConfig {
         Self {
             data_dir: PathBuf::from(DEFAULT_DATA_DIR),
             port: DEFAULT_PORT,
-            bootstrap_nodes: Vec::new(),
+            bootstrap_node: None,
             verbose: false,
         }
     }
@@ -107,7 +107,10 @@ fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
         .parse::<SocketAddr>()
         .map_err(|e| format!("Invalid bootstrap address '{address}': {e}"))?;
 
-    Ok(NodeInfo::new(id, address))
+    let ni = NodeInfo::new(id, address);
+    println!("{}", ni);
+    // Ok(NodeInfo::new(id, address))
+    Ok(ni)
 }
 
 fn parse_args() -> Result<Option<SampleConfig>, String> {
@@ -139,15 +142,13 @@ fn parse_args() -> Result<Option<SampleConfig>, String> {
                 let Some(arg) = iter.next() else {
                     return Err("Missing --bootstrap value; expected NODEID@IP:PORT".to_string());
                 };
-                config.bootstrap_nodes.push(parse_bootstrap(arg)?);
+                config.bootstrap_node = Some(parse_bootstrap(arg)?);
             }
             "--verbose" => {
                 config.verbose = true;
             }
             arg if arg.starts_with("--bootstrap=") => {
-                config
-                    .bootstrap_nodes
-                    .push(parse_bootstrap(&arg["--bootstrap=".len()..])?);
+                config.bootstrap_node = Some(parse_bootstrap(&arg["--bootstrap=".len()..])?);
             }
             _ => {
                 return Err(format!("Unknown argument: {argv}"));
@@ -197,12 +198,16 @@ async fn main() {
     } else {
         log::LevelFilter::Info
     };
+    let mut bootstrap_nodes: Vec<NodeInfo> = Vec::new();
+    if let Some(ref bootstrap_node) = config.bootstrap_node {
+        bootstrap_nodes.push(bootstrap_node.clone());
+    }
     let options = NodeOptions::new(private_key)
         .with_port(config.port)
         .with_host4(host.as_str())
         .with_data_dir(data_dir.as_ref())
         .with_log_level(log_level)
-        .with_bootstrap_nodes(config.bootstrap_nodes);
+        .with_bootstrap_nodes(bootstrap_nodes);
 
     let node = match Node::new(options) {
         Ok(node) => node,
@@ -221,6 +226,9 @@ async fn main() {
     println!("  node id : {}", node.id());
     println!("  address : {}:{}", host, config.port);
     println!("  data dir: {}", config.data_dir.display());
+    if let Some(ref ni) = config.bootstrap_node {
+        println!("  bootstrap node: {}", ni);
+    }
     println!("The process will stop automatically after {DEFAULT_RUN_SECONDS} seconds.");
 
     sleep(Duration::from_secs(DEFAULT_RUN_SECONDS)).await;

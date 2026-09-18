@@ -10,7 +10,7 @@ service:
 # Client credentials.
 # The user id and the device private key are required.
 client:
-  userPrivateKey: 0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d13410da72883c6da7a6be00c2e5d70bbbf9a90c10bb099d01a656af2955e4af79
+  userPrivateKey: ${BOSON_USER_PRIVATE_KEY}
   userId: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg
   devicePrivateKey: 0x869c5a431268de9bfda43db0908e0cbdfe37516762a0b24cb3f08291228fd6ff2a123fe345b5beed47a5a106aba8695a2a170928ffb082ea8a5a3bc2a5b757a3
 

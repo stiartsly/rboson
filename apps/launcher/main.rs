@@ -1,40 +1,18 @@
-use std::{
-    env,
-    process::exit,
-    sync::Arc,
-    time::Duration,
-};
 use clap::Parser;
+use std::{env, process::exit, sync::Arc, time::Duration};
 use tokio::sync::Notify;
 
+use boson::activeproxy::{Client as ActiveProxyClient, Options as ActiveProxyOptions};
+use boson::dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions};
+use boson::director::{Client as DirectorClient, Options as DirectorOptions};
 use boson::{
-    Id,
-    Network,
-    Result,
-    dht::{
-        Node,
-        ConnectionStatus,
-        ConnectionStatusListener,
-        NodeOptions,
-    },
-    activeproxy::{
-        Client as ActiveProxyClient,
-        Options as ActiveProxyOptions,
-    },
-    director::{
-        Client as DirectorClient,
-        Options as DirectorOptions,
-        NotFoundError,
-        UnauthorizedError,
-    },
     errors::{ArgumentError, StateError},
+    Id, Network, Result,
 };
 
 const DEFAULT_ACTIVEPROXY_CONFIG: &str = "apps/launcher/activeproxy.yaml";
 const DEFAULT_NODE_CONFIG: &str = "apps/launcher/node.yaml";
-
-const DEFAULT_DIRECTOR_URL: &str = "https://47.101.142.224:9000";
-//const DEFAULT_DIRECTOR_NODEID: &str = "GhVW54uEd179PzRPpaiENKZuMezMNExTP6bXRK3rLDAQ";
+//const DEFAULT_DIRECTOR_URL: &str = "https://47.101.142.224:9000";
 const DEFAULT_INSECURE: bool = true;
 
 #[derive(Parser, Debug)]
@@ -58,7 +36,12 @@ struct Options {
 /// Notifies once the node has connected to the Boson network.
 struct ReadyListener(Arc<Notify>);
 impl ConnectionStatusListener for ReadyListener {
-    fn status_changed(&self, network: Network, new_status: ConnectionStatus, old_status: ConnectionStatus) {
+    fn status_changed(
+        &self,
+        network: Network,
+        new_status: ConnectionStatus,
+        old_status: ConnectionStatus,
+    ) {
         println!("Connection status changed for network {network}: {old_status}->{new_status}");
     }
     fn connecting(&self, network: Network) {
@@ -89,34 +72,15 @@ async fn ensure_device_admitted(
         ));
     }
 
-    let devices = match director.list_devices().await {
-        Ok(devices) => devices,
-        Err(e)
-            if e.downcast_ref::<UnauthorizedError>().is_some()
-                || e.downcast_ref::<NotFoundError>().is_some() =>
-        {
-            director.register_user().await?;
-            director.list_devices().await?
-        }
-        Err(e) => return Err(e),
-    };
+    let devices = director.list_devices().await?;
 
     if devices.iter().any(|device| device.id() == device_id) {
         println!("ActiveProxy device {device_id} is admitted by the Director.");
         return Ok(());
     }
 
-    let registration = director.options().registration().ok_or_else(|| {
-        StateError::new("Director registration settings are required to register the ActiveProxy device")
-    })?;
-    let name = registration.device_name().ok_or_else(|| {
-        StateError::new("Director device.name is required to register the ActiveProxy device")
-    })?;
-    let app = registration.app_name().ok_or_else(|| {
-        StateError::new("Director device.app is required to register the ActiveProxy device")
-    })?;
     director
-        .register_device(name, app, registration.passphrase())
+        .register_device("Launcher", "Boson Launcher", None)
         .await?;
 
     let admitted = director
@@ -134,6 +98,33 @@ async fn ensure_device_admitted(
     Ok(())
 }
 
+fn build_director_options(
+    director_url: impl AsRef<str>,
+    activeproxy_options: &ActiveProxyOptions,
+) -> Result<DirectorOptions> {
+    let user_id = activeproxy_options
+        .user_id()
+        .cloned()
+        .ok_or_else(|| ArgumentError::new("ActiveProxy configuration is missing userId"))?;
+    let device_private_key = activeproxy_options
+        .device_private_key()
+        .cloned()
+        .ok_or_else(|| {
+            ArgumentError::new("ActiveProxy configuration is missing devicePrivateKey")
+        })?;
+
+    let mut options = DirectorOptions::new(director_url)?
+        .with_user_id(user_id)
+        .with_device_private_key(device_private_key)
+        .with_insecure(DEFAULT_INSECURE);
+
+    if let Some(user_private_key) = activeproxy_options.user_private_key().cloned() {
+        options = options.with_user_private_key(user_private_key);
+    }
+
+    Ok(options)
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let options = Options::parse();
@@ -142,13 +133,12 @@ async fn main() {
         .activeproxy_config
         .as_deref()
         .map(str::to_owned)
-        .or_else(|| env::var("ACTIVEPROXY_CONFIG").ok())
-        .unwrap_or(DEFAULT_ACTIVEPROXY_CONFIG.to_string());
+        .unwrap_or(format!("{DEFAULT_ACTIVEPROXY_CONFIG}"));
 
     let ap_opts = match ActiveProxyOptions::load(&ap_config) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Error building ActiveProxy configuration: {e}");
+            eprintln!("Error building ActiveProxy Options: {e}");
             exit(1);
         }
     };
@@ -161,36 +151,45 @@ async fn main() {
         .director_url
         .as_deref()
         .map(str::to_owned)
-        .or_else(|| env::var("DIRECTOR_URL").ok())
-        .unwrap_or(DEFAULT_DIRECTOR_URL.to_string());
+        .or_else(|| env::var("BOSON_DIRECTOR_URL").ok());
 
-    let dir_opts = DirectorOptions::new(director_url)
-        .unwrap()
-        .with_insecure(DEFAULT_INSECURE)
-        .with_user_id(ap_opts.user_id().cloned().unwrap())
-        //.with_user_private_key(ap_opts.user_private_key().cloned().unwrap())
-        .with_device_private_key(ap_opts.device_private_key().cloned().unwrap());
-
-    if let Err(e) = dir_opts.check_completeness() {
-        eprintln!("{e}");
+    let Some(ref director_url) = director_url else {
+        eprintln!("Director URL is not specified");
         exit(1);
-    }
+    };
 
-    let director = DirectorClient::new(dir_opts)
-        .map_err(|e| {
+    let dir_opts = match build_director_options(&director_url, &ap_opts) {
+        Ok(options) => options,
+        Err(e) => {
+            eprintln!("Error building Director options: {e}");
+            exit(1);
+        }
+    };
+
+    let director = match DirectorClient::new(dir_opts) {
+        Ok(client) => client,
+        Err(e) => {
             eprintln!("Creating Director client error: {e}");
             exit(1);
-        })
-        .unwrap();
+        }
+    };
 
-    let user_id = ap_opts.user_id().cloned().unwrap();
-    let device_id = ap_opts.device_id().cloned().unwrap();
+    let user_id = match ap_opts.user_id() {
+        Some(user_id) => user_id.clone(),
+        None => {
+            eprintln!("ActiveProxy configuration is missing userId");
+            exit(1);
+        }
+    };
+    let device_id = match ap_opts.device_id() {
+        Some(device_id) => device_id.clone(),
+        None => {
+            eprintln!("ActiveProxy configuration is missing devicePrivateKey");
+            exit(1);
+        }
+    };
 
-    if let Err(e) = ensure_device_admitted(
-        &director,
-        &user_id,
-        &device_id,
-    ).await {
+    if let Err(e) = ensure_device_admitted(&director, &user_id, &device_id).await {
         eprintln!("Admitting the ActiveProxy device through the Director failed: {e}");
         exit(1);
     }
@@ -228,12 +227,15 @@ async fn main() {
     println!("Boson node {} is up and running.", node.id());
 
     println!("Waiting for the node to connect to the Boson network...");
-    if tokio::time::timeout(Duration::from_secs(30), ready.notified()).await.is_err() {
+    if tokio::time::timeout(Duration::from_secs(30), ready.notified())
+        .await
+        .is_err()
+    {
         println!("Timed out waiting for a network connection; continuing anyway.");
     }
 
     let ap = match ActiveProxyClient::new(Some(node.clone()), ap_opts) {
-        Ok(ap) => Arc::new(ap),
+        Ok(ap) => ap,
         Err(e) => {
             eprintln!("Creating ActiveProxy client error: {e}");
             exit(1);

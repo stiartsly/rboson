@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
-use boson::messaging::MessagingClient;
+use boson::messaging::{MessagingClient, Client};
 
 use super::parse_id;
 
@@ -25,7 +25,7 @@ pub(crate) fn cli() -> Command {
         .help_template("{subcommands}")
 }
 
-pub(crate) async fn execute(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+pub(crate) async fn execute(args: &ArgMatches, client: &Arc<Client>) {
     match args.subcommand() {
         Some(("list", _)) => list(client).await,
         Some(("revoke", args)) => revoke(args, client).await,
@@ -33,7 +33,7 @@ pub(crate) async fn execute(args: &ArgMatches, client: &Arc<dyn MessagingClient>
     }
 }
 
-async fn list(client: &Arc<dyn MessagingClient>) {
+async fn list(client: &Arc<Client>) {
     match client.get_sessions().await {
         Ok(sessions) => {
             for session in sessions {
@@ -50,7 +50,7 @@ async fn list(client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn revoke(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn revoke(args: &ArgMatches, client: &Arc<Client>) {
     let Some(id) = parse_id(args.get_one::<String>("id").unwrap()) else {
         return;
     };

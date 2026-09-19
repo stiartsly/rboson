@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::{error, ArgMatches, Command};
 
-use boson::{messaging::MessagingClient, Id};
+use boson::{messaging::Client, Id};
 
 pub(crate) mod channel;
 pub(crate) mod device;
@@ -24,7 +24,7 @@ pub(crate) fn build_cli() -> Command {
     command
 }
 
-pub(crate) async fn execute_command(matches: ArgMatches, client: &Arc<dyn MessagingClient>) {
+pub(crate) async fn execute_command(matches: ArgMatches, client: &Arc<Client>) {
     match matches.subcommand() {
         Some(("channel", channel)) => channel::execute(channel, client).await,
         Some(("device", device)) => device::execute(device, client).await,

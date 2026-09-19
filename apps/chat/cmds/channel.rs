@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use clap::{arg, Arg, ArgMatches, Command};
 
 use boson::{
-    messaging::{Contact, ContactType, InviteTicket, MessagingClient, Permission},
+    messaging::{Client, Contact, ContactType, InviteTicket, MessagingClient, Permission},
     Id,
 };
 
@@ -61,7 +61,7 @@ pub(crate) fn cli() -> Command {
         .disable_help_flag(true)
 }
 
-pub(crate) async fn execute(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+pub(crate) async fn execute(args: &ArgMatches, client: &Arc<Client>) {
     match args.subcommand() {
         Some(("create", args)) => create(args, client).await,
         Some(("delete", args)) => delete(args, client).await,
@@ -74,7 +74,7 @@ pub(crate) async fn execute(args: &ArgMatches, client: &Arc<dyn MessagingClient>
     }
 }
 
-async fn create(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn create(args: &ArgMatches, client: &Arc<Client>) {
     let permission = match args
         .get_one::<String>("allow-inviter")
         .map(String::as_str)
@@ -93,7 +93,7 @@ async fn create(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn delete(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn delete(args: &ArgMatches, client: &Arc<Client>) {
     let Some(id) = parse_id(args.get_one::<String>("ID").unwrap()) else {
         return;
     };
@@ -103,7 +103,7 @@ async fn delete(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn join(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn join(args: &ArgMatches, client: &Arc<Client>) {
     let encoded = args.get_one::<String>("TICKET").unwrap();
     let ticket = match InviteTicket::from_str(encoded) {
         Ok(ticket) => ticket,
@@ -118,7 +118,7 @@ async fn join(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn leave(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn leave(args: &ArgMatches, client: &Arc<Client>) {
     let Some(id) = parse_id(args.get_one::<String>("ID").unwrap()) else {
         return;
     };
@@ -128,7 +128,7 @@ async fn leave(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn ticket(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn ticket(args: &ArgMatches, client: &Arc<Client>) {
     let Some(channel_id) = parse_id(args.get_one::<String>("ID").unwrap()) else {
         return;
     };
@@ -148,7 +148,7 @@ async fn ticket(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn info(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+async fn info(args: &ArgMatches, client: &Arc<Client>) {
     let Some(id) = parse_id(args.get_one::<String>("ID").unwrap()) else {
         return;
     };
@@ -162,7 +162,7 @@ async fn info(args: &ArgMatches, client: &Arc<dyn MessagingClient>) {
     }
 }
 
-async fn list(client: &Arc<dyn MessagingClient>) {
+async fn list(client: &Arc<Client>) {
     match client.get_contacts().await {
         Ok(contacts) => {
             for contact in contacts

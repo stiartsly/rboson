@@ -1,17 +1,15 @@
-use std::{
-    env,
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc,
-    },
-};
-
 use clap::Parser;
 use reedline::{ExternalPrinter, Reedline, Signal};
+use std::env;
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 
 use boson::{
     core::logger,
     dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
+    errors::Result,
     messaging::{
         Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
         FriendRequestListener, Message, MessageListener, MessagingClient,
@@ -25,8 +23,8 @@ mod cmds;
 mod prompt;
 use prompt::MyPrompt;
 
-const BOSON_PEER_ID: &str = "BOSON_PEER_ID";
-const BOSON_ENDPOINT: &str = "BOSON_ENDPOINT";
+const BOSON_PEER_ID: &str = "BOSON_MESSAGING_PEER_ID";
+const BOSON_ENDPOINT: &str = "BOSON_MESSAGING_PEER_ENDPOINT";
 const BOSON_USER_ID: &str = "BOSON_USER_ID";
 const BOSON_USER_KEY: &str = "BOSON_USER_KEY";
 const BOSON_DEV_KEY: &str = "BOSON_DEV_KEY";
@@ -36,13 +34,9 @@ const DEFAULT_NODE_CONFIG: &str = "apps/chat/node.yaml";
 #[derive(Parser, Debug)]
 #[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
 struct Options {
-    /// Node configuration file used to start the chat DHT node.
+    /// Node configuration file used to start the chat Boson node.
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
-
-    /// Node configuration file used to start the chat DHT node (alias for --config).
-    #[arg(long = "node-config", value_name = "FILE")]
-    node_config: Option<String>,
 
     /// Messaging configuration file (e.g. apps/chat/bob.yaml).
     #[arg(short = 'm', long = "messaging-config", value_name = "FILE")]
@@ -56,10 +50,6 @@ struct Options {
     #[arg(long, value_name = "ENDPOINT")]
     endpoint: Option<String>,
 
-    /// User private key. BOSON_USER_KEY or BOSON_USER_ID is used as the environment fallback.
-    #[arg(long, value_name = "USERID")]
-    userid: Option<String>,
-
     /// User private key alias (--userkey).
     #[arg(long = "userkey", value_name = "PRIVATE_KEY")]
     userkey: Option<String>,
@@ -68,10 +58,6 @@ struct Options {
     #[arg(long = "dev-key", value_name = "PRIVATE_KEY")]
     dev_key: Option<String>,
 
-    /// Device private key alias (--device or --device-key).
-    #[arg(long = "device", value_name = "PRIVATE_KEY")]
-    device: Option<String>,
-
     /// Override the DHT node UDP port from the node configuration.
     #[arg(long, value_name = "PORT")]
     port: Option<u16>,
@@ -79,12 +65,6 @@ struct Options {
     /// Override the DHT node data directory from the node configuration.
     #[arg(long, value_name = "DIR")]
     datadir: Option<String>,
-
-    #[arg(long)]
-    shadow: bool,
-
-    #[arg(short = 'D', long)]
-    daemonize: bool,
 }
 
 #[tokio::main]
@@ -95,17 +75,10 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn run() -> Result<()> {
     let options = Options::parse();
-    if options.shadow {
-        eprintln!("Note: --shadow is no longer needed by the updated messaging API");
-    }
-    if options.daemonize {
-        eprintln!("Note: --daemonize does not detach the interactive shell");
-    }
-
-    let config = load_chat_config(&options)?;
     let node_options = load_node_options(&options)?;
+    let chat_options = load_chat_options(&options)?;
     let external_printer = ExternalPrinter::new(1_024);
     let output = ConsoleOutput::new(external_printer.clone());
 
@@ -118,7 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     node.start().await?;
     println!("Boson DHT node {} is up and running.", node.id());
 
-    let client: Arc<dyn MessagingClient> = Arc::new(Client::new(config));
+    let client: Arc<Client> = Arc::new(Client::new(chat_options));
     client.add_connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())));
     client.add_message_listener(Arc::new(ConsoleMessageListener::new(output.clone())));
     client.add_channel_listener(Arc::new(ConsoleChannelListener::new(output.clone())));
@@ -181,37 +154,27 @@ fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
     });
 }
 
-fn load_node_options(options: &Options) -> Result<NodeOptions, Box<dyn std::error::Error>> {
+fn load_node_options(options: &Options) -> Result<NodeOptions> {
     let path = options
         .config
         .as_deref()
-        .or(options.node_config.as_deref())
+        .or(options.config.as_deref())
         .unwrap_or(DEFAULT_NODE_CONFIG);
-    let mut node_options = NodeOptions::load(path)?;
+
+    let mut opts = NodeOptions::load(path)?;
     if let Some(port) = options.port {
-        node_options = node_options.with_port(port);
+        opts = opts.with_port(port);
     }
     if let Some(datadir) = options.datadir.as_deref() {
-        node_options = node_options.with_data_dir(datadir);
+        opts = opts.with_data_dir(datadir);
     }
-    Ok(node_options)
+    Ok(opts)
 }
 
-fn load_chat_config(options: &Options) -> Result<MessagingOptions, Box<dyn std::error::Error>> {
-    let mut messaging_options = match options.messaging_config.as_deref() {
+fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
+    let mut opts = match options.messaging_config.as_deref() {
         Some(path) => MessagingOptions::load(path)?,
-        None => {
-            let peerid_str = options
-                .peerid
-                .as_deref()
-                .map(str::to_owned)
-                .or_else(|| env::var(BOSON_PEER_ID).ok())
-                .ok_or_else(|| {
-                    "service peerId is required (via --peerid, BOSON_PEER_ID, or --messaging-config)"
-                })?;
-            let peerid = Id::try_from(peerid_str.as_str())?;
-            MessagingOptions::new(peerid)
-        }
+        _ => MessagingOptions::new(),
     };
 
     if let Some(peerid_str) = options
@@ -220,8 +183,7 @@ fn load_chat_config(options: &Options) -> Result<MessagingOptions, Box<dyn std::
         .map(str::to_owned)
         .or_else(|| env::var(BOSON_PEER_ID).ok())
     {
-        messaging_options =
-            messaging_options.with_service_peerid(Id::try_from(peerid_str.as_str())?);
+        opts = opts.with_service_peerid(Id::try_from(peerid_str.as_str())?);
     }
 
     if let Some(endpoint) = options
@@ -230,39 +192,37 @@ fn load_chat_config(options: &Options) -> Result<MessagingOptions, Box<dyn std::
         .map(str::to_owned)
         .or_else(|| env::var(BOSON_ENDPOINT).ok())
     {
-        messaging_options = messaging_options.with_service_endpoint(endpoint)?;
+        opts = opts.with_service_endpoint(endpoint)?;
     }
 
     if let Some(user_key) = options
         .userkey
         .as_deref()
-        .or(options.userid.as_deref())
         .map(str::to_owned)
         .or_else(|| env::var(BOSON_USER_KEY).ok())
         .or_else(|| env::var(BOSON_USER_ID).ok())
     {
-        messaging_options = messaging_options.with_user_key_str(&user_key)?;
+        opts = opts.with_user_key_str(&user_key)?;
     }
 
     if let Some(device_key) = options
         .dev_key
         .as_deref()
-        .or(options.device.as_deref())
         .map(str::to_owned)
         .or_else(|| env::var(BOSON_DEV_KEY).ok())
         .or_else(|| env::var(BOSON_DEVICE_KEY).ok())
     {
-        messaging_options = messaging_options.with_device_key_str(&device_key)?;
+        opts = opts.with_device_key_str(&device_key)?;
     }
 
-    if messaging_options.user_key().is_none() && messaging_options.user_id().is_none() {
-        messaging_options = messaging_options.with_generated_user_key();
+    if opts.user_key().is_none() && opts.user_id().is_none() {
+        opts = opts.with_generated_user_key();
     }
-    if messaging_options.device_key().is_none() {
-        messaging_options = messaging_options.with_generated_device_key();
+    if opts.device_key().is_none() {
+        opts = opts.with_generated_device_key();
     }
 
-    Ok(messaging_options)
+    Ok(opts)
 }
 
 #[derive(Clone)]

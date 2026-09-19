@@ -8,6 +8,11 @@ use std::sync::{
 };
 use std::time::Duration;
 
+#[path = "messaging_client.rs"]
+pub mod messaging_client;
+
+pub use messaging_client::MessagingClient;
+
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
@@ -38,249 +43,6 @@ const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 /// A boxed future returned by async methods on [`MessagingClient`].
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// The public API surface of the boson messaging client.
-///
-/// All network / async methods return a [`BoxFuture`] so the trait stays
-/// object-safe and the implementation can use any async runtime internally.
-pub trait MessagingClient: Send + Sync {
-    // -----------------------------------------------------------------
-    // Identity
-    // -----------------------------------------------------------------
-
-    /// The boson `Id` of the authenticated user.
-    fn user_id(&self) -> &Id;
-
-    /// The boson `Id` of the current device.
-    fn device_id(&self) -> &Id;
-
-    /// The boson `Id` of the messaging service peer.
-    fn service_peer_id(&self) -> &Id;
-
-    /// The MQTT endpoint of the connected service, if known.
-    fn service_endpoint(&self) -> Option<&str>;
-
-    /// The local data directory used for persistence.
-    fn data_dir(&self) -> &std::path::Path;
-
-    // -----------------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------------
-
-    /// Start the client and connect to the service.
-    fn start(&self) -> BoxFuture<'_, Result<()>>;
-
-    /// Gracefully stop the client.
-    fn stop(&self) -> BoxFuture<'_, Result<()>>;
-
-    /// Whether the client background worker is running.
-    fn is_running(&self) -> bool;
-
-    /// Whether the MQTT connection is currently established.
-    fn is_connected(&self) -> bool;
-
-    /// Whether the client is connected *and* fully initialised.
-    fn is_ready(&self) -> bool;
-
-    // -----------------------------------------------------------------
-    // Listeners
-    // -----------------------------------------------------------------
-
-    fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>);
-    fn remove_connection_listener(&self, listener: &Arc<dyn ConnectionListener>);
-
-    fn add_message_listener(&self, listener: Arc<dyn MessageListener>);
-    fn remove_message_listener(&self, listener: &Arc<dyn MessageListener>);
-
-    fn add_channel_listener(&self, listener: Arc<dyn ChannelListener>);
-    fn remove_channel_listener(&self, listener: &Arc<dyn ChannelListener>);
-
-    fn add_contact_listener(&self, listener: Arc<dyn ContactListener>);
-    fn remove_contact_listener(&self, listener: &Arc<dyn ContactListener>);
-
-    fn add_session_listener(&self, listener: Arc<dyn SessionListener>);
-    fn remove_session_listener(&self, listener: &Arc<dyn SessionListener>);
-
-    fn add_friend_request_listener(&self, listener: Arc<dyn FriendRequestListener>);
-    fn remove_friend_request_listener(&self, listener: &Arc<dyn FriendRequestListener>);
-
-    /// Remove every registered listener.
-    fn remove_all_listeners(&self);
-
-    // -----------------------------------------------------------------
-    // Messages
-    // -----------------------------------------------------------------
-
-    /// Create a message builder addressed to `recipient`.  Pass `None` to
-    /// create a broadcast message.
-    fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder>;
-
-    /// Retrieve a single conversation by the other party's `Id`.
-    fn get_conversation(&self, id: &Id) -> BoxFuture<'_, Result<Option<Box<dyn Conversation>>>>;
-
-    /// Retrieve all conversations.
-    fn get_conversations(&self) -> BoxFuture<'_, Result<Vec<Box<dyn Conversation>>>>;
-
-    /// Delete a conversation and its messages.
-    fn remove_conversation(&self, id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete multiple conversations.
-    fn remove_conversations(&self, ids: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    /// Retrieve messages from `conversation_id`, going back up to `until`
-    /// with at most `limit` rows skipping `offset`.
-    fn get_messages(
-        &self,
-        conversation_id: &Id,
-        until: Option<i64>,
-        limit: usize,
-        offset: usize,
-    ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>>;
-
-    /// Retrieve messages from a time range `[begin, end)` (milliseconds).
-    fn get_messages_in_range(
-        &self,
-        conversation_id: &Id,
-        begin: i64,
-        end: i64,
-    ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>>;
-
-    /// Delete a single message by its local ID.
-    fn remove_message(&self, message_id: i64) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete multiple messages by their local IDs.
-    fn remove_messages_by_ids(&self, message_ids: &[i64]) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete all messages within a conversation.
-    fn remove_messages_in_conversation(&self, conversation_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    // -----------------------------------------------------------------
-    // Sessions
-    // -----------------------------------------------------------------
-
-    /// List all known device sessions for the authenticated user.
-    fn get_sessions(&self) -> BoxFuture<'_, Result<Vec<SessionInfo>>>;
-
-    /// Revoke (log out) the session identified by `device_id`.
-    fn revoke_session(&self, device_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    // -----------------------------------------------------------------
-    // Friends
-    // -----------------------------------------------------------------
-
-    /// Send a friend request to `user_id` with an optional greeting.
-    fn friend_request(&self, user_id: Id, hello: Option<String>) -> BoxFuture<'_, Result<()>>;
-
-    /// Accept an incoming friend request from `user_id`.
-    fn accept_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Look up a specific friend request by the initiator's `Id`.
-    fn get_friend_request(
-        &self,
-        user_id: &Id,
-    ) -> BoxFuture<'_, Result<Option<Box<dyn FriendRequest>>>>;
-
-    /// Retrieve all pending / received friend requests.
-    fn get_friend_requests(&self) -> BoxFuture<'_, Result<Vec<Box<dyn FriendRequest>>>>;
-
-    /// Delete a friend request by user `Id`.
-    fn remove_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete multiple friend requests.
-    fn remove_friend_requests(&self, user_ids: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete all friend requests.
-    fn clear_friend_requests(&self) -> BoxFuture<'_, Result<()>>;
-
-    /// Add a contact as a friend once a shared session key has been established.
-    fn add_friend(
-        &self,
-        user_id: Id,
-        session_key: Vec<u8>,
-        remark: Option<String>,
-    ) -> BoxFuture<'_, Result<()>>;
-
-    // -----------------------------------------------------------------
-    // Channels
-    // -----------------------------------------------------------------
-
-    /// Create a new channel.
-    fn create_channel(
-        &self,
-        permission: Permission,
-        name: String,
-        notice: Option<String>,
-        announcement: Option<String>,
-    ) -> BoxFuture<'_, Result<Box<dyn Channel>>>;
-
-    /// Delete a channel (owner only).
-    fn remove_channel(&self, channel_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Join a channel using an invite ticket.
-    fn join_channel(&self, ticket: InviteTicket) -> BoxFuture<'_, Result<Box<dyn Channel>>>;
-
-    /// Leave a channel.
-    fn leave_channel(&self, channel_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Create an invite ticket for a channel.  If `invitee` is `None` the ticket is a bearer ticket.
-    fn create_invite_ticket(
-        &self,
-        channel_id: &Id,
-        invitee: Option<Id>,
-    ) -> BoxFuture<'_, Result<InviteTicket>>;
-
-    /// Transfer channel ownership to another user.
-    fn transfer_channel_ownership(
-        &self,
-        channel_id: &Id,
-        new_owner: Id,
-    ) -> BoxFuture<'_, Result<()>>;
-
-    /// Rotate the channel session key, optionally supplying a pre-generated keypair.
-    fn rotate_channel_session_key(&self, channel_id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Update channel metadata.
-    fn update_channel_info(&self, channel: &dyn Channel) -> BoxFuture<'_, Result<()>>;
-
-    /// Update the roles of a set of channel members.
-    fn set_channel_members_role(
-        &self,
-        channel_id: &Id,
-        members: &[Id],
-        role: Role,
-    ) -> BoxFuture<'_, Result<()>>;
-
-    /// Ban a set of channel members.
-    fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    /// Unban a set of channel members.
-    fn unban_channel_members(&self, channel_id: &Id, members: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    /// Remove a set of channel members.
-    fn remove_channel_members(&self, channel_id: &Id, members: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    // -----------------------------------------------------------------
-    // Contacts
-    // -----------------------------------------------------------------
-
-    /// Look up a contact by `Id`.
-    fn get_contact(&self, id: &Id) -> BoxFuture<'_, Result<Option<Box<dyn Contact>>>>;
-
-    /// Retrieve all contacts.
-    fn get_contacts(&self) -> BoxFuture<'_, Result<Vec<Box<dyn Contact>>>>;
-
-    /// Persist contact updates (remark, tags, muted, blocked …).
-    fn update_contact(&self, contact: &dyn Contact) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete a contact.
-    fn remove_contact(&self, id: &Id) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete multiple contacts.
-    fn remove_contacts(&self, ids: &[Id]) -> BoxFuture<'_, Result<()>>;
-
-    /// Delete all contacts.
-    fn clear_contacts(&self) -> BoxFuture<'_, Result<()>>;
-}
-
 struct Shared {
     running: AtomicBool,
     connected: AtomicBool,
@@ -298,6 +60,7 @@ struct Shared {
 /// The Boson Messaging Client implementation.
 pub struct Client {
     options: Options,
+    service_peer_id: Id,
     user_id: Id,
     device_id: Id,
     shared: Arc<Shared>,
@@ -321,6 +84,7 @@ impl Client {
             friend_request_listeners: RwLock::new(Vec::new()),
         };
 
+        let service_peer_id = options.peerid.unwrap_or_default();
         let user_id = options
             .user_id
             .or_else(|| options.user_key.as_ref().map(|k| Id::from(k.public_key())))
@@ -336,6 +100,7 @@ impl Client {
             .unwrap_or_else(Id::random);
 
         Self {
+            service_peer_id,
             user_id,
             device_id,
             options,
@@ -408,7 +173,7 @@ impl Client {
     }
 
     pub fn service_peer_id(&self) -> &Id {
-        &self.options.peerid
+        &self.service_peer_id
     }
 
     pub fn service_endpoint(&self) -> Option<&str> {
@@ -419,82 +184,66 @@ impl Client {
         self.options.data_dir.as_path()
     }
 
-    pub fn start(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            if self
-                .shared
-                .running
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_err()
-            {
-                return Ok(());
+    pub async fn start(&self) -> Result<()> {
+        if self
+            .shared
+            .running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        let result = async {
+            let endpoint = self.options.endpoint.as_ref().ok_or_else(|| {
+                Error::State(
+                    "service.endpoint is required: DHT service discovery is not yet wired \
+                        into the updated Rust messaging Options"
+                        .into(),
+                )
+            })?;
+            tokio::fs::create_dir_all(&self.options.data_dir).await?;
+
+            let host = endpoint
+                .host_str()
+                .ok_or_else(|| Error::Argument("service endpoint has no hostname".into()))?;
+            let port = endpoint
+                .port()
+                .ok_or_else(|| Error::Argument("service endpoint has no port".into()))?;
+
+            self.notify_connection(|listener| listener.on_connecting());
+
+            let client_id =
+                bs58::encode(md5::compute(self.device_id.as_bytes()).0).into_string();
+            let mut options = MqttOptions::new(client_id, host.to_string(), port);
+            options.set_credentials(self.user_id.to_string(), self.password()?);
+            options.set_keep_alive(Duration::from_secs(60));
+            options.set_clean_session(false);
+            options.set_max_packet_size(MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE);
+            if endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" {
+                options.set_transport(Transport::tls_with_default_config());
             }
 
-            let result = async {
-                let endpoint = self.options.endpoint.as_ref().ok_or_else(|| {
-                    Error::State(
-                        "service.endpoint is required: DHT service discovery is not yet wired \
-                         into the updated Rust messaging Options"
-                            .into(),
-                    )
-                })?;
-                tokio::fs::create_dir_all(&self.options.data_dir).await?;
+            let (mqtt, mut eventloop) = AsyncClient::new(options, 32);
+            let userid = self.user_id.to_string();
+            mqtt.subscribe_many([
+                SubscribeFilter::new(format!("inbox/{userid}"), QoS::AtLeastOnce),
+                SubscribeFilter::new(format!("outbox/{userid}"), QoS::AtLeastOnce),
+                SubscribeFilter::new("broadcast".to_string(), QoS::AtLeastOnce),
+                SubscribeFilter::new(USER_INBOX.to_string(), QoS::AtLeastOnce),
+                SubscribeFilter::new(USER_OUTBOX.to_string(), QoS::AtLeastOnce),
+                SubscribeFilter::new(DEVICE_INBOX.to_string(), QoS::AtLeastOnce),
+            ])
+            .await
+            .map_err(|error| Error::Io(std::io::Error::other(error)))?;
 
-                let host = endpoint
-                    .host_str()
-                    .ok_or_else(|| Error::Argument("service endpoint has no hostname".into()))?;
-                let port = endpoint
-                    .port()
-                    .ok_or_else(|| Error::Argument("service endpoint has no port".into()))?;
-
-                self.notify_connection(|listener| listener.on_connecting());
-
-                let client_id =
-                    bs58::encode(md5::compute(self.device_id.as_bytes()).0).into_string();
-                let mut options = MqttOptions::new(client_id, host.to_string(), port);
-                options.set_credentials(self.user_id.to_string(), self.password()?);
-                options.set_keep_alive(Duration::from_secs(60));
-                options.set_clean_session(false);
-                options.set_max_packet_size(MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE);
-                if endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" {
-                    options.set_transport(Transport::tls_with_default_config());
-                }
-
-                let (mqtt, mut eventloop) = AsyncClient::new(options, 32);
-                let userid = self.user_id.to_string();
-                mqtt.subscribe_many([
-                    SubscribeFilter::new(format!("inbox/{userid}"), QoS::AtLeastOnce),
-                    SubscribeFilter::new(format!("outbox/{userid}"), QoS::AtLeastOnce),
-                    SubscribeFilter::new("broadcast".to_string(), QoS::AtLeastOnce),
-                    SubscribeFilter::new(USER_INBOX.to_string(), QoS::AtLeastOnce),
-                    SubscribeFilter::new(USER_OUTBOX.to_string(), QoS::AtLeastOnce),
-                    SubscribeFilter::new(DEVICE_INBOX.to_string(), QoS::AtLeastOnce),
-                ])
-                .await
-                .map_err(|error| Error::Io(std::io::Error::other(error)))?;
-
-                *self.shared.mqtt.lock().unwrap() = Some(mqtt);
-                let shared = self.shared.clone();
-                let worker = tokio::spawn(async move {
-                    while shared.running.load(Ordering::Acquire) {
-                        match eventloop.poll().await {
-                            Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                                if connack.code == rumqttc::ConnectReturnCode::Success {
-                                    if !shared.connected.swap(true, Ordering::AcqRel) {
-                                        let listeners =
-                                            shared.connection_listeners.read().unwrap().clone();
-                                        for listener in listeners {
-                                            listener.on_connected();
-                                        }
-                                    }
-                                } else {
-                                    log::warn!(
-                                        "Messaging MQTT ConnAck error code: {:?}",
-                                        connack.code
-                                    );
-                                }
-                            }
-                            Ok(Event::Incoming(Incoming::SubAck(_))) => {
+            *self.shared.mqtt.lock().unwrap() = Some(mqtt);
+            let shared = self.shared.clone();
+            let worker = tokio::spawn(async move {
+                while shared.running.load(Ordering::Acquire) {
+                    match eventloop.poll().await {
+                        Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
+                            if connack.code == rumqttc::ConnectReturnCode::Success {
                                 if !shared.connected.swap(true, Ordering::AcqRel) {
                                     let listeners =
                                         shared.connection_listeners.read().unwrap().clone();
@@ -502,76 +251,88 @@ impl Client {
                                         listener.on_connected();
                                     }
                                 }
-                                if !shared.ready.swap(true, Ordering::AcqRel) {
-                                    let listeners =
-                                        shared.connection_listeners.read().unwrap().clone();
-                                    for listener in listeners {
-                                        listener.on_ready();
-                                    }
+                            } else {
+                                log::warn!(
+                                    "Messaging MQTT ConnAck error code: {:?}",
+                                    connack.code
+                                );
+                            }
+                        }
+                        Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                            if !shared.connected.swap(true, Ordering::AcqRel) {
+                                let listeners =
+                                    shared.connection_listeners.read().unwrap().clone();
+                                for listener in listeners {
+                                    listener.on_connected();
                                 }
                             }
-                            Ok(Event::Incoming(Incoming::Publish(_))) => {}
-                            Ok(_) => {}
-                            Err(error) => {
-                                if shared.connected.swap(false, Ordering::AcqRel) {
-                                    shared.ready.store(false, Ordering::Release);
-                                    let listeners =
-                                        shared.connection_listeners.read().unwrap().clone();
-                                    for listener in listeners {
-                                        listener.on_disconnected();
-                                    }
-                                }
-                                if shared.running.load(Ordering::Acquire) {
-                                    log::warn!("Messaging MQTT connection error: {error}");
-                                    tokio::time::sleep(Duration::from_secs(2)).await;
+                            if !shared.ready.swap(true, Ordering::AcqRel) {
+                                let listeners =
+                                    shared.connection_listeners.read().unwrap().clone();
+                                for listener in listeners {
+                                    listener.on_ready();
                                 }
                             }
                         }
-                    }
-                    if shared.connected.swap(false, Ordering::AcqRel) {
-                        let listeners = shared.connection_listeners.read().unwrap().clone();
-                        for listener in listeners {
-                            listener.on_disconnected();
+                        Ok(Event::Incoming(Incoming::Publish(_))) => {}
+                        Ok(_) => {}
+                        Err(error) => {
+                            if shared.connected.swap(false, Ordering::AcqRel) {
+                                shared.ready.store(false, Ordering::Release);
+                                let listeners =
+                                    shared.connection_listeners.read().unwrap().clone();
+                                for listener in listeners {
+                                    listener.on_disconnected();
+                                }
+                            }
+                            if shared.running.load(Ordering::Acquire) {
+                                log::warn!("Messaging MQTT connection error: {error}");
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                            }
                         }
                     }
-                    shared.ready.store(false, Ordering::Release);
-                });
-                *self.shared.worker.lock().unwrap() = Some(worker);
-                Ok(())
-            }
-            .await;
+                }
+                if shared.connected.swap(false, Ordering::AcqRel) {
+                    let listeners = shared.connection_listeners.read().unwrap().clone();
+                    for listener in listeners {
+                        listener.on_disconnected();
+                    }
+                }
+                shared.ready.store(false, Ordering::Release);
+            });
+            *self.shared.worker.lock().unwrap() = Some(worker);
+            Ok(())
+        }
+        .await;
 
-            if result.is_err() {
-                self.shared.running.store(false, Ordering::Release);
-            }
-            result
-        })
+        if result.is_err() {
+            self.shared.running.store(false, Ordering::Release);
+        }
+        result
     }
 
-    pub fn stop(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            if !self.shared.running.swap(false, Ordering::AcqRel) {
-                return Ok(());
-            }
+    pub async fn stop(&self) -> Result<()> {
+        if !self.shared.running.swap(false, Ordering::AcqRel) {
+            return Ok(());
+        }
 
-            let mqtt = self.shared.mqtt.lock().unwrap().take();
-            if let Some(mqtt) = mqtt {
-                let _ = mqtt.disconnect().await;
+        let mqtt = self.shared.mqtt.lock().unwrap().take();
+        if let Some(mqtt) = mqtt {
+            let _ = mqtt.disconnect().await;
+        }
+        let worker = self.shared.worker.lock().unwrap().take();
+        if let Some(mut worker) = worker {
+            if tokio::time::timeout(Duration::from_secs(2), &mut worker)
+                .await
+                .is_err()
+            {
+                worker.abort();
+                let _ = worker.await;
             }
-            let worker = self.shared.worker.lock().unwrap().take();
-            if let Some(mut worker) = worker {
-                if tokio::time::timeout(Duration::from_secs(2), &mut worker)
-                    .await
-                    .is_err()
-                {
-                    worker.abort();
-                    let _ = worker.await;
-                }
-            }
-            self.shared.connected.store(false, Ordering::Release);
-            self.shared.ready.store(false, Ordering::Release);
-            Ok(())
-        })
+        }
+        self.shared.connected.store(false, Ordering::Release);
+        self.shared.ready.store(false, Ordering::Release);
+        Ok(())
     }
 
     pub fn is_running(&self) -> bool {
@@ -695,14 +456,6 @@ impl MessagingClient for Client {
 
     fn data_dir(&self) -> &Path {
         self.data_dir()
-    }
-
-    fn start(&self) -> BoxFuture<'_, Result<()>> {
-        self.start()
-    }
-
-    fn stop(&self) -> BoxFuture<'_, Result<()>> {
-        self.stop()
     }
 
     fn is_running(&self) -> bool {
@@ -1026,7 +779,9 @@ mod tests {
 
     #[tokio::test]
     async fn start_without_endpoint_fails_and_rolls_back_running_state() {
-        let options = Options::new(Id::random()).with_generated_device_key();
+        let options = Options::new()
+            .with_service_peerid(Id::random())
+            .with_generated_device_key();
         let client = Client::new(options);
 
         let error = client.start().await.unwrap_err();
@@ -1042,7 +797,8 @@ mod tests {
         let device_key = signature::KeyPair::random();
         let expected_user = Id::from(user_key.public_key());
         let expected_device = Id::from(device_key.public_key());
-        let options = Options::new(Id::random())
+        let options = Options::new()
+            .with_service_peerid(Id::random())
             .with_user_keypair(user_key)
             .with_device_keypair(device_key);
         let client = Client::new(options);

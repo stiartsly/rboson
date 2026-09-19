@@ -16,7 +16,7 @@ pub const DEFAULT_DATABASE_URI: &str = "jdbc:sqlite:messaging.db";
 #[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "SerdeOptions")]
 pub struct Options {
-    pub peerid: Id,
+    pub peerid: Option<Id>,
     pub endpoint: Option<url::Url>,
 
     pub user_key: Option<KeyPair>,
@@ -47,9 +47,9 @@ impl Options {
         base.join("boson/client/photon-messaging")
     }
 
-    pub fn new(peerid: Id) -> Self {
+    pub fn new() -> Self {
         Self {
-            peerid,
+            peerid: None,
             endpoint: None,
             user_key: None,
             user_id: None,
@@ -129,12 +129,8 @@ impl Options {
     }
 
     pub fn with_service_peerid(mut self, peer_id: Id) -> Self {
-        self.peerid = peer_id;
+        self.peerid = Some(peer_id);
         self
-    }
-
-    pub fn with_service_peer_id(self, peer_id: Id) -> Self {
-        self.with_service_peerid(peer_id)
     }
 
     pub fn with_service_endpoint(mut self, endpoint: impl AsRef<str>) -> Result<Self> {
@@ -257,12 +253,8 @@ impl Options {
         self
     }
 
-    pub fn service_peerid(&self) -> &Id {
-        &self.peerid
-    }
-
-    pub fn service_peer_id(&self) -> &Id {
-        &self.peerid
+    pub fn service_peerid(&self) -> Option<&Id> {
+        self.peerid.as_ref()
     }
 
     pub fn service_endpoint(&self) -> Option<&url::Url> {
@@ -314,19 +306,9 @@ impl Options {
     }
 }
 
-impl TryFrom<&str> for Options {
-    type Error = Error;
-
-    fn try_from(yaml: &str) -> Result<Self> {
-        Self::parse(yaml)
-    }
-}
-
-impl TryFrom<String> for Options {
-    type Error = Error;
-
-    fn try_from(yaml: String) -> Result<Self> {
-        Self::parse(yaml)
+impl Default for Options {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -375,7 +357,8 @@ impl TryFrom<SerdeOptions> for Options {
     type Error = Error;
 
     fn try_from(sopts: SerdeOptions) -> Result<Self> {
-        let mut opts = Options::new(sopts.service.peer_id);
+        let mut opts = Options::new();
+        opts = opts.with_service_peerid(sopts.service.peer_id);
 
         if let Some(endpoint) = sopts.service.endpoint {
             opts = opts.with_service_endpoint(endpoint)?;

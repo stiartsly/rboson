@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::{ArgMatches, Command};
 
-use boson::messaging::MessagingClient;
+use boson::messaging::Client;
 
 pub(crate) fn cli() -> Command {
     Command::new("me")
@@ -10,7 +10,7 @@ pub(crate) fn cli() -> Command {
         .help_template("{subcommands}")
 }
 
-pub(crate) async fn execute(_: &ArgMatches, client: &Arc<dyn MessagingClient>) {
+pub(crate) async fn execute(_: &ArgMatches, client: &Arc<Client>) {
     println!("user id:    {}", client.user_id());
     println!("device id:  {}", client.device_id());
     println!("service id: {}", client.service_peer_id());

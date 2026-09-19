@@ -67,10 +67,9 @@ fn yaml(
 
 #[test]
 fn test_default_options() {
-    let peerid = Id::random();
-    let options = Options::new(peerid);
+    let options = Options::new();
 
-    assert_eq!(options.service_peer_id(), &peerid);
+    assert_eq!(options.service_peerid(), None);
     assert_eq!(options.service_endpoint(), None);
     assert_eq!(options.user_id(), None);
     assert!(options.user_key().is_none());
@@ -90,7 +89,8 @@ fn test_options_with_builders() {
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
-    let options = Options::new(peerid)
+    let options = Options::new()
+        .with_service_peerid(peerid)
         .with_service_endpoint("mqtts://10.0.0.1:8883")
         .unwrap()
         .with_user_keypair(user_key.clone())
@@ -100,7 +100,7 @@ fn test_options_with_builders() {
         .unwrap()
         .with_database_schema_name("photon");
 
-    assert_eq!(options.service_peer_id(), &peerid);
+    assert_eq!(options.service_peerid(), Some(&peerid));
     assert_eq!(
         options.service_endpoint().map(url::Url::as_str),
         Some("mqtts://10.0.0.1:8883")
@@ -136,7 +136,7 @@ fn test_parse_options() {
     );
 
     let options = Options::parse(&content).unwrap();
-    assert_eq!(options.service_peer_id(), &service_peerid);
+    assert_eq!(options.service_peerid(), Some(&service_peerid));
     assert_eq!(
         options.service_endpoint().map(url::Url::as_str),
         Some("mqtts://192.168.8.80:8883")
@@ -173,7 +173,7 @@ fn test_load_options_from_file() {
 
     let file = ConfigFile::new(&content);
     let options = Options::load(file.path()).unwrap();
-    assert_eq!(options.service_peer_id(), &service_peerid);
+    assert_eq!(options.service_peerid(), Some(&service_peerid));
     assert_eq!(options.data_dir(), Path::new("/tmp/messaging-file"));
     assert_eq!(options.user_id(), Some(&Id::from(user_key.public_key())));
     assert!(options.check_completeness().is_ok());
@@ -218,28 +218,25 @@ fn test_env_var_expansion_in_yaml() {
 }
 
 #[test]
-fn test_rejects_invalid_service_endpoint() {
-    let result = Options::new(Id::random()).with_service_endpoint("tcp://10.0.0.1:8883");
-
-    assert!(result.is_err());
-}
-
-#[test]
 fn test_check_completeness() {
     let peerid = Id::random();
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
     // Incomplete: default options has no user or device key
-    let incomplete = Options::new(peerid);
+    let incomplete = Options::new();
+
     assert!(incomplete.check_completeness().is_err());
 
     // Incomplete: only user key, no device key
-    let no_device = Options::new(peerid).with_user_keypair(user_key.clone());
+    let no_device = Options::new()
+        .with_service_peerid(peerid)
+        .with_user_keypair(user_key.clone());
     assert!(no_device.check_completeness().is_err());
 
     // Complete: has both user and device keys
-    let complete = Options::new(peerid)
+    let complete = Options::new()
+        .with_service_peerid(peerid)
         .with_user_keypair(user_key.clone())
         .with_device_keypair(device_key.clone());
     assert!(complete.check_completeness().is_ok());
@@ -276,7 +273,7 @@ fn test_try_from_str() {
         "photon",
     );
 
-    let options: Options = content.as_str().try_into().unwrap();
-    assert_eq!(options.service_peer_id(), &service_peerid);
+    let options: Options = Options::parse(content).unwrap();
+    assert_eq!(options.service_peerid(), Some(&service_peerid));
     assert_eq!(options.data_dir(), Path::new("/tmp/messaging-tryfrom"));
 }

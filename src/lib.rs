@@ -23,8 +23,11 @@ pub(crate) use crate::utils::{
     timer_manager::{BoxTimerManager, LocalBoxTimerManager},
 };
 
+pub(crate) use crate::core::{
+    crypto_context::{CryptoContext},
+};
+
 pub use crate::core::{
-    crypto_context::{self, CryptoContext},
     cryptobox::{self, CryptoBox},
     errors::{self, Error, Result},
     id::{self, Id, DID_PREFIX},

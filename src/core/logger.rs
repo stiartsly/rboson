@@ -1,54 +1,44 @@
-use log::{LevelFilter, Metadata, Record};
 use std::fs::{File, OpenOptions};
-use std::io::{self, IoSlice, Write};
+use std::io::{self, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, Once,
 };
+use log::{LevelFilter, Metadata, Record};
 
-static mut MY_LOGGER: Option<Logger> = None;
+static LOGGER: Logger = Logger::new();
+static LOGGER_INIT: Once = Once::new();
 
 type ConsoleOutputHandler = Arc<dyn Fn(String) + Send + Sync>;
 
 struct Logger {
     console_output_enabled: AtomicBool,
     console_output_handler: Mutex<Option<ConsoleOutputHandler>>,
+    state: Mutex<LoggerState>,
+}
+
+struct LoggerState {
     max_level: LevelFilter,
-    fp: Option<Arc<Mutex<File>>>,
+    fp: Option<File>,
 }
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= self.max_level
+        metadata.level() <= self.state.lock().unwrap().max_level
     }
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let record_target = record.target().rsplit("::").next().unwrap_or("N/A");
-            let record_target = if record_target.len() > 8 {
-                &record_target[0..8]
-            } else {
-                record_target
-            };
+            let record_target = abbreviate(record.target().rsplit("::").next().unwrap_or("N/A"), 8);
             let record_level = format!("{}", record.level());
-            let record_level = if record_level.len() > 4 {
-                &record_level[0..4]
-            } else {
-                &record_level
-            };
-            let log = format!(
-                "[{:<8}] [{:^4}] {}",
-                record_target,
-                record_level,
-                record.args()
-            );
+            let record_level = abbreviate(&record_level, 4);
+            let log = format!("[{record_target:<8}] [{record_level:^4}] {}", record.args());
 
-            if let Some(fp) = self.fp.as_ref() {
-                _ = fp
-                    .lock()
-                    .unwrap()
-                    .write_vectored(&[IoSlice::new(log.as_bytes())]);
-                _ = fp.lock().unwrap().write(b"\n");
+            {
+                let mut state = self.state.lock().unwrap();
+                if let Some(fp) = state.fp.as_mut() {
+                    _ = writeln!(fp, "{log}");
+                }
             }
 
             if self.console_output_enabled.load(Ordering::Acquire) {
@@ -68,88 +58,90 @@ impl log::Log for Logger {
         }
     }
     fn flush(&self) {
-        io::stdout().flush().unwrap();
+        _ = io::stdout().flush();
+        if let Some(fp) = self.state.lock().unwrap().fp.as_mut() {
+            _ = fp.flush();
+        }
     }
 }
 
 impl Logger {
-    pub(crate) fn new(max_level: LevelFilter, logfile: Option<&str>) -> Self {
-        let mut logger = Self {
+    const fn new() -> Self {
+        Self {
             console_output_enabled: AtomicBool::new(true),
             console_output_handler: Mutex::new(None),
-            max_level,
-            fp: None,
-        };
+            state: Mutex::new(LoggerState {
+                max_level: LevelFilter::Off,
+                fp: None,
+            }),
+        }
+    }
 
-        if let Some(file) = logfile {
-            logger.fp = match OpenOptions::new().append(true).create(true).open(file) {
-                Ok(fp) => Some(Arc::new(Mutex::new(fp))),
+    fn configure(&self, max_level: LevelFilter, logfile: Option<&str>) {
+        let fp = logfile.and_then(|file| {
+            match OpenOptions::new().append(true).create(true).open(file) {
+                Ok(fp) => Some(fp),
                 Err(e) => {
-                    println!("Failed to open log file {e}!!! Unable to log output to file.");
+                    println!("Failed to open log file {file}: {e}. Unable to log output to file.");
                     None
                 }
             }
-        }
-        logger
-    }
-}
+        });
 
-static NULL_LOGGER: NullLogger = NullLogger;
-struct NullLogger;
-impl log::Log for NullLogger {
-    fn enabled(&self, _: &Metadata) -> bool {
-        false
+        let mut state = self.state.lock().unwrap();
+        state.max_level = max_level;
+        state.fp = fp;
     }
-    fn log(&self, _: &Record) {}
-    fn flush(&self) {}
 }
 
 pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
-    unsafe {
-        MY_LOGGER = Some(Logger::new(max_level, logfile));
-        if let Some(ref mut v) = MY_LOGGER {
-            _ = log::set_logger(v);
-            _ = log::set_max_level(v.max_level);
-        }
-    }
+    LOGGER.configure(max_level, logfile);
+    LOGGER
+        .console_output_enabled
+        .store(true, Ordering::Release);
+    *LOGGER.console_output_handler.lock().unwrap() = None;
+
+    LOGGER_INIT.call_once(|| {
+        _ = log::set_logger(&LOGGER);
+    });
+    log::set_max_level(max_level);
 }
 
 #[allow(unused)]
 pub fn enable_console_output() {
-    unsafe {
-        if let Some(ref v) = MY_LOGGER {
-            v.console_output_enabled.store(true, Ordering::Release);
-        }
-    }
+    LOGGER
+        .console_output_enabled
+        .store(true, Ordering::Release);
 }
 
 #[allow(unused)]
 pub fn disable_console_output() {
-    unsafe {
-        if let Some(ref v) = MY_LOGGER {
-            v.console_output_enabled.store(false, Ordering::Release);
-        }
-    }
+    LOGGER
+        .console_output_enabled
+        .store(false, Ordering::Release);
 }
 
 /// Sends console logs to `handler` rather than writing directly to stdout.
 pub fn set_console_output_handler(handler: impl Fn(String) + Send + Sync + 'static) {
-    unsafe {
-        if let Some(ref v) = MY_LOGGER {
-            *v.console_output_handler.lock().unwrap() = Some(Arc::new(handler));
-        }
-    }
+    *LOGGER.console_output_handler.lock().unwrap() = Some(Arc::new(handler));
 }
 
 pub(crate) fn teardown() {
-    _ = log::set_logger(&NULL_LOGGER);
+    log::set_max_level(LevelFilter::Off);
+    LOGGER.configure(LevelFilter::Off, None);
+    *LOGGER.console_output_handler.lock().unwrap() = None;
+    LOGGER
+        .console_output_enabled
+        .store(true, Ordering::Release);
 }
 
 #[allow(unused)]
 pub(crate) fn revert_console_output() {
-    unsafe {
-        if let Some(ref v) = MY_LOGGER {
-            v.console_output_enabled.fetch_xor(true, Ordering::AcqRel);
-        }
-    }
+    LOGGER
+        .console_output_enabled
+        .fetch_xor(true, Ordering::AcqRel);
+}
+
+fn abbreviate(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
 }

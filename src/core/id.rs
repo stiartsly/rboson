@@ -1,12 +1,21 @@
+use std::{
+    cmp::Ordering,
+    fmt,
+    ops::Deref,
+    result::Result as StdResult,
+    str::FromStr
+};
 use bs58;
 use serde::{
     de::{self, Deserializer, Visitor},
     ser::Serializer,
     Deserialize, Serialize,
 };
-use std::{cmp::Ordering, fmt, ops::Deref, result::Result as StdResult, str::FromStr};
-
-use crate::{cryptobox, errors::ArgumentError, signature, Error, Result};
+use crate::{
+    cryptobox,
+    signature,
+    errors::{Error, Result, ArgumentError}
+};
 
 pub const DID_PREFIX: &str = "did:boson:";
 

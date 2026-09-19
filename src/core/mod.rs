@@ -1,15 +1,15 @@
-pub mod logger;
 pub(crate) mod version;
+pub(crate) mod crypto_context;
 
-pub mod crypto_context;
+pub mod logger;
 pub mod cryptobox;
+pub mod signature;
 pub mod errors;
 pub mod id;
 pub mod identity;
 pub mod network;
 pub mod node_info;
 pub mod peer_info;
-pub mod signature;
 pub mod value;
 
 pub use crate::core::{

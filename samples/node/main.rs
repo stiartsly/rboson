@@ -1,7 +1,4 @@
-use boson::{
-    dht::NodeOptions,
-    signature, Id, Node, NodeInfo,
-};
+use boson::{dht::NodeOptions, signature, Id, Node, NodeInfo};
 use get_if_addrs::get_if_addrs;
 use std::{
     env, fs,
@@ -174,7 +171,9 @@ async fn main() {
 
     let Some(host) = get_current_ip_address() else {
         eprintln!("No non-loopback IPv4 address was found.");
-        eprintln!("Connect to a network interface or replace get_current_ip_address() for local testing.");
+        eprintln!(
+            "Connect to a network interface or replace get_current_ip_address() for local testing."
+        );
         return;
     };
     let host = host.to_string();

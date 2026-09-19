@@ -1,7 +1,5 @@
 use clap::{ArgMatches, Command, Parser};
-use reedline::{ExternalPrinter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
 use std::{
-    borrow::Cow,
     env,
     sync::{
         atomic::{AtomicU8, Ordering},
@@ -19,6 +17,7 @@ use log::{debug, info, warn};
 
 mod cmds;
 mod config;
+mod ui;
 
 struct ConnectionReadiness {
     connected_networks: AtomicU8,
@@ -94,30 +93,6 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
     }
 }
 
-struct ShellPrompt;
-
-impl Prompt for ShellPrompt {
-    fn render_prompt_left(&self) -> Cow<'_, str> {
-        "boson> ".into()
-    }
-
-    fn render_prompt_right(&self) -> Cow<'_, str> {
-        "".into()
-    }
-
-    fn render_prompt_indicator(&self, _: PromptEditMode) -> Cow<'_, str> {
-        "".into()
-    }
-
-    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        "... ".into()
-    }
-
-    fn render_prompt_history_search_indicator(&self, _: PromptHistorySearch) -> Cow<'_, str> {
-        "".into()
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(about = "Boson Shell", long_about = None)]
 struct Options {
@@ -176,10 +151,10 @@ fn build_cli() -> Command {
         .subcommand(cmds::status::command())
 }
 
-fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
-    let log_sender = external_printer.sender();
+fn use_ui_log_output(shell_ui: &ui::ShellUi) {
+    let shell_ui = shell_ui.clone();
     logger::set_console_output_handler(move |line| {
-        _ = log_sender.try_send(line);
+        shell_ui.log(line);
     });
 }
 
@@ -189,11 +164,8 @@ async fn execute_command(
     node_private_key: &PrivateKey,
     shell_config: &config::ShellConfig,
     readiness: &ConnectionReadiness,
-    external_printer: &ExternalPrinter<String>,
     login_session: &mut cmds::login::Session,
 ) {
-    logger::set_console_output_handler(|line| println!("{line}"));
-
     match matches.subcommand() {
         Some(("announcepeer", m)) => {
             cmds::announce_peer::run(m, node, node_private_key).await;
@@ -219,13 +191,19 @@ async fn execute_command(
         Some(("status", _)) => cmds::status::run(node, readiness.is_connected()),
         _ => {}
     }
-
-    use_reedline_log_output(external_printer);
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let opts = Options::parse();
+
+    let shell_ui = ui::ShellUi::new();
+    shell_ui.draw();
+    use_ui_log_output(&shell_ui);
+    cmds::set_result_output({
+        let shell_ui = shell_ui.clone();
+        move |line| shell_ui.result(line)
+    });
 
     let shell_config = match config::ShellConfig::new(
         opts.director_url.as_deref(),
@@ -234,14 +212,18 @@ async fn main() {
     ) {
         Ok(config) => config,
         Err(e) => {
-            println!("Creating shell configuration failed: {e}");
+            shell_ui.result(format!("Creating shell configuration failed: {e}"));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            shell_ui.finish();
             return;
         }
     };
     let mut login_session = match cmds::login::Session::new(&shell_config) {
         Ok(session) => session,
         Err(e) => {
-            println!("Creating Director client failed: {e}");
+            shell_ui.result(format!("Creating Director client failed: {e}"));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            shell_ui.finish();
             return;
         }
     };
@@ -256,7 +238,9 @@ async fn main() {
     let mut node_options = match NodeOptions::load(&config) {
         Ok(options) => options,
         Err(e) => {
-            println!("Loading node configuration failed: {e}");
+            shell_ui.result(format!("Loading node configuration failed: {e}"));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            shell_ui.finish();
             return;
         }
     };
@@ -269,7 +253,9 @@ async fn main() {
                 node_options = node_options.with_private_key(private_key);
             }
             Err(e) => {
-                println!("Invalid private key: {e}");
+                shell_ui.result(format!("Invalid private key: {e}"));
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                shell_ui.finish();
                 return;
             }
         }
@@ -277,94 +263,122 @@ async fn main() {
     if let Some(port) = opts.port {
         node_options = node_options.with_port(port);
     }
-    if opts.log {
-        node_options = node_options.with_log_console(true);
-    }
+    let log_console = opts.log || node_options.log_console_enabled();
 
     let node_private_key = node_options.private_key().clone();
     let readiness = Arc::new(ConnectionReadiness::new());
 
-    let node = match Node::new(node_options) {
+    // Temporarily disable log console during Node::new so raw output does not escape before redirection
+    let node_options_for_init = node_options.clone().with_log_console(false);
+    let node = match Node::new(node_options_for_init) {
         Ok(node) => node,
         Err(e) => {
-            println!("Creating node failed: {e}");
+            shell_ui.result(format!("Creating node failed: {e}"));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            shell_ui.finish();
             return;
         }
     };
+
+    // Re-install console output handler to route all logs to Log pane
+    use_ui_log_output(&shell_ui);
+    if log_console {
+        logger::enable_console_output();
+    }
+
     node.add_listener(DefaultConnectionStatusListener {
         readiness: readiness.clone(),
     });
     if let Err(e) = node.start().await {
-        println!("Starting node failed: {e}");
+        shell_ui.result(format!("Starting node failed: {e}"));
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        shell_ui.finish();
         return;
     }
 
-    println!("Waiting for the node to connect to the Boson network...");
+    shell_ui.result("Waiting for the node to connect to the Boson network...");
     tokio::select! {
         _ = readiness.wait_until_connected() => {}
         result = tokio::signal::ctrl_c() => {
             if let Err(e) = result {
-                println!("Waiting for Ctrl-C failed: {e}");
+                shell_ui.result(format!("Waiting for Ctrl-C failed: {e}"));
             }
-            println!("\nGoodbye!");
+            shell_ui.result("Goodbye!");
             if let Err(e) = node.stop().await {
-                println!("Stopping node failed: {e}");
+                shell_ui.result(format!("Stopping node failed: {e}"));
             }
+            shell_ui.finish();
             return;
         }
     }
 
-    let cli = build_cli();
-    let external_printer = ExternalPrinter::new(1_024);
-    use_reedline_log_output(&external_printer);
-    let log_printer = external_printer.clone();
-    let mut rl = Reedline::create().with_external_printer(external_printer);
-    let prompt = ShellPrompt;
-
-    println!("Welcome to the Boson shell. Type 'help' for a list of commands, 'exit' to quit.\n");
+    let mut cli = build_cli();
+    shell_ui
+        .result("Welcome to the Boson shell. Type 'help' for a list of commands, 'exit' to quit.");
 
     loop {
-        let Ok(sig) = rl.read_line(&prompt) else {
-            continue;
-        };
-        match sig {
-            Signal::Success(line) => {
-                let input = line.trim();
-                if input.is_empty() {
-                    continue;
-                }
-                if input == "exit" || input == "quit" {
-                    println!("Goodbye!");
-                    break;
-                }
-
-                let args: Vec<String> = input.split_whitespace().map(str::to_string).collect();
-                match cli.clone().try_get_matches_from(args) {
-                    Ok(matches) => {
-                        execute_command(
-                            matches,
-                            &node,
-                            &node_private_key,
-                            &shell_config,
-                            &readiness,
-                            &log_printer,
-                            &mut login_session,
-                        )
-                        .await
-                    }
-                    Err(e) => println!("{e}"),
-                }
-            }
-            Signal::CtrlC | Signal::CtrlD => {
-                println!("\nGoodbye!");
+        let line = match shell_ui.read_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => {
+                shell_ui.result("Goodbye!");
                 break;
             }
-            _ => {}
+            Err(_) => continue,
+        };
+        let input = line.trim();
+        if input.is_empty() {
+            continue;
+        }
+        shell_ui.result(format!("Command input: {input}"));
+        if input == "exit" || input == "quit" {
+            shell_ui.result("Goodbye!");
+            break;
+        }
+        if input == "help" {
+            print_help(&mut cli, None, &shell_ui);
+            continue;
+        }
+        if let Some(name) = input.strip_prefix("help ") {
+            print_help(&mut cli, Some(name.trim()), &shell_ui);
+            continue;
+        }
+
+        let args: Vec<String> = input.split_whitespace().map(str::to_string).collect();
+        match cli.clone().try_get_matches_from(args) {
+            Ok(matches) => {
+                execute_command(
+                    matches,
+                    &node,
+                    &node_private_key,
+                    &shell_config,
+                    &readiness,
+                    &mut login_session,
+                )
+                .await
+            }
+            Err(e) => shell_ui.result(e.to_string()),
         }
     }
 
+    shell_ui.finish();
     if let Err(e) = node.stop().await {
-        println!("Stopping node failed: {e}");
+        eprintln!("Stopping node failed: {e}");
+    }
+}
+
+fn print_help(cli: &mut Command, command_name: Option<&str>, shell_ui: &ui::ShellUi) {
+    let mut output = Vec::new();
+    let result = match command_name {
+        Some(name) => match cli.find_subcommand_mut(name) {
+            Some(command) => command.write_long_help(&mut output),
+            None => cli.write_long_help(&mut output),
+        },
+        None => cli.write_long_help(&mut output),
+    };
+
+    match result {
+        Ok(()) => shell_ui.result(String::from_utf8_lossy(&output).into_owned()),
+        Err(e) => shell_ui.result(format!("Unable to render help: {e}")),
     }
 }
 

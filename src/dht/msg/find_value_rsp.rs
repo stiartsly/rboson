@@ -79,7 +79,10 @@ struct SerdeFindValueResponse {
     )]
     nonce: Option<Vec<u8>>,
 
-    #[serde(rename = "seq", default, skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "seq",
+        default, skip_serializing_if = "utils::is_default"
+    )]
     seq: i32,
 
     #[serde(

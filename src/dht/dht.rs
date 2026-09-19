@@ -1,18 +1,17 @@
-use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error, info, trace, warn};
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     future::Future,
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    cell::RefCell,
     time::SystemTime,
+    sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, Mutex},
+
 };
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::{debug, error, info, trace, warn};
 use tokio::task;
 
 use crate::dht::{
@@ -41,10 +40,12 @@ use crate::dht::{
     ConnectionStatus, ConnectionStatusListener,
 };
 use crate::{
-    errors::Result,
+    EasyHandler,
+    LocalBoxHandler,
+    LocalBoxTimerClient as TimerClient,
+    errors::{Result, StateError},
     identity::{CryptoIdentity, Identity},
-    EasyHandler, Id, LocalBoxHandler, LocalBoxTimerClient as TimerClient, Network, NodeInfo,
-    PeerInfo, Promise, Value,
+    Id, Network, NodeInfo, PeerInfo, Promise, Value,
 };
 
 pub(crate) struct DHT {
@@ -128,6 +129,10 @@ impl DHT {
 
     pub(crate) fn network(&self) -> Network {
         self.network
+    }
+
+    fn is_running(&self) -> bool {
+        *self.is_running.borrow()
     }
 
     pub(crate) fn ni(&self) -> NodeInfo {
@@ -317,7 +322,7 @@ impl DHT {
 
     async fn update(self: &Rc<Self>) {
         let bootstrap_nodes = {
-            if !*self.is_running.borrow() {
+            if !self.is_running() {
                 return;
             }
 
@@ -369,8 +374,12 @@ impl DHT {
         }
     }
 
+    fn accepts_incoming_messages(&self) -> bool {
+        self.is_running() || *self.status.borrow() == ConnectionStatus::Connecting
+    }
+
     pub(crate) async fn start0(self: &Rc<Self>) -> Result<()> {
-        if *self.is_running.borrow() {
+        if self.is_running() {
             return Ok(());
         }
 
@@ -433,8 +442,8 @@ impl DHT {
     }
 
     pub(crate) async fn start(self: &Rc<Self>, promise: Promise<()>) {
-        if *self.is_running.borrow() {
-            promise.complete(Ok(()));
+        if self.is_running() {
+            promise.complete(Err(StateError::new("DHT is already running.")));
             return;
         }
 
@@ -516,7 +525,7 @@ impl DHT {
     }
 
     pub(crate) async fn stop(&self) {
-        if !*self.is_running.borrow() {
+        if !self.is_running() {
             return;
         }
 
@@ -783,6 +792,9 @@ impl DHT {
         }
 
         self.rt().put(new_entry.clone());
+        if new_entry.is_reachable() {
+            self.set_status(ConnectionStatus::Connected);
+        }
 
         // Optimize: not the standard Kademlia behavior
         // incoming request && the new entry is unreachable && the target bucket not full,
@@ -802,7 +814,7 @@ impl DHT {
     }
 
     pub(crate) fn on_message(self: &Rc<Self>, msg: &Message) {
-        if !*self.is_running.borrow() {
+        if !self.accepts_incoming_messages() {
             return;
         }
 
@@ -1214,7 +1226,7 @@ impl DHT {
     }
 
     pub(crate) async fn bootstrap(self: &Rc<Self>, nodes: Vec<NodeInfo>, promise: Promise<()>) {
-        if !*self.is_running.borrow() {
+        if !self.is_running() {
             warn!("DHT/{} instance is not running.", self.network);
             promise.complete(Ok(()));
             return;

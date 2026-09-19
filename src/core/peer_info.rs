@@ -125,9 +125,10 @@ impl PeerInfo {
 
         if let Some(identity) = node_identity.as_ref() {
             let id = identity.lock().unwrap().id().clone();
-            let sig = identity.lock().unwrap().sign_into(
-                Self::node_digest(&pk, &id, fingerprint, seq).as_slice()
-            )?;
+            let sig = identity
+                .lock()
+                .unwrap()
+                .sign_into(Self::node_digest(&pk, &id, fingerprint, seq).as_slice())?;
 
             nodeid = Some(id);
             node_sig = Some(sig);
@@ -300,7 +301,8 @@ impl PeerInfo {
                 node_sig.as_slice(),
                 &nodeid.to_signature_key(),
             )
-            .unwrap_or(false) {
+            .unwrap_or(false)
+            {
                 return false;
             }
         } else if self.node_sig.is_some() {
@@ -426,7 +428,11 @@ struct SerdePeerInfo {
     )]
     sig: Vec<u8>,
 
-    #[serde(rename = "f", default, skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "f",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     fingerprint: u64,
 
     #[serde(rename = "e", skip_serializing_if = "utils::is_default")]

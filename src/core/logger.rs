@@ -1,10 +1,10 @@
+use log::{LevelFilter, Metadata, Record};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex, Once,
 };
-use log::{LevelFilter, Metadata, Record};
 
 static LOGGER: Logger = Logger::new();
 static LOGGER_INIT: Once = Once::new();
@@ -96,9 +96,7 @@ impl Logger {
 
 pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     LOGGER.configure(max_level, logfile);
-    LOGGER
-        .console_output_enabled
-        .store(true, Ordering::Release);
+    LOGGER.console_output_enabled.store(true, Ordering::Release);
     *LOGGER.console_output_handler.lock().unwrap() = None;
 
     LOGGER_INIT.call_once(|| {
@@ -109,9 +107,7 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
 
 #[allow(unused)]
 pub fn enable_console_output() {
-    LOGGER
-        .console_output_enabled
-        .store(true, Ordering::Release);
+    LOGGER.console_output_enabled.store(true, Ordering::Release);
 }
 
 #[allow(unused)]
@@ -130,9 +126,7 @@ pub(crate) fn teardown() {
     log::set_max_level(LevelFilter::Off);
     LOGGER.configure(LevelFilter::Off, None);
     *LOGGER.console_output_handler.lock().unwrap() = None;
-    LOGGER
-        .console_output_enabled
-        .store(true, Ordering::Release);
+    LOGGER.console_output_enabled.store(true, Ordering::Release);
 }
 
 #[allow(unused)]

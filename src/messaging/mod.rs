@@ -1,11 +1,11 @@
 pub mod channel;
-pub mod config;
 pub mod contact;
 pub mod conversation;
 pub mod errors;
 pub mod friend_request;
 pub mod invite_ticket;
 pub mod message;
+pub mod options;
 pub mod session_info;
 
 pub mod channel_listener;
@@ -16,12 +16,10 @@ pub mod message_listener;
 pub mod session_listener;
 
 pub mod client;
-mod photon_messaging_client;
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
 pub use channel_listener::ChannelListener;
-pub use client::{BoxFuture, MessagingClient, MessagingClientBuilder, DEFAULT_MESSAGES_LIMIT};
-pub use config::{Configuration, ConfigurationBuilder};
+pub use client::{BoxFuture, Client, MessagingClient, DEFAULT_MESSAGES_LIMIT};
 pub use connection_listener::ConnectionListener;
 pub use contact::{Contact, ContactEditor, ContactType};
 pub use contact_listener::ContactListener;
@@ -35,6 +33,6 @@ pub use message::{
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
 pub use message_listener::MessageListener;
-pub use photon_messaging_client::PhotonMessagingClient;
+pub use options::Options;
 pub use session_info::SessionInfo;
 pub use session_listener::SessionListener;

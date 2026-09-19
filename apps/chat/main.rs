@@ -1,7 +1,5 @@
 use std::{
-    collections::HashMap,
     env,
-    fs::File,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
@@ -15,9 +13,9 @@ use boson::{
     core::logger,
     dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
     messaging::{
-        Channel, ChannelListener, Configuration, ConnectionListener, Contact, ContactListener,
-        FriendRequestListener, Message, MessageListener, MessagingClientBuilder, SessionInfo,
-        SessionListener,
+        Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
+        FriendRequestListener, Message, MessageListener, MessagingClient,
+        Options as MessagingOptions, SessionInfo, SessionListener,
     },
     Id, Network,
 };
@@ -30,15 +28,25 @@ use prompt::MyPrompt;
 const BOSON_PEER_ID: &str = "BOSON_PEER_ID";
 const BOSON_ENDPOINT: &str = "BOSON_ENDPOINT";
 const BOSON_USER_ID: &str = "BOSON_USER_ID";
+const BOSON_USER_KEY: &str = "BOSON_USER_KEY";
 const BOSON_DEV_KEY: &str = "BOSON_DEV_KEY";
+const BOSON_DEVICE_KEY: &str = "BOSON_DEVICE_KEY";
 const DEFAULT_NODE_CONFIG: &str = "apps/chat/node.yaml";
 
 #[derive(Parser, Debug)]
 #[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
 struct Options {
-    /// Optional deprecated YAML config file.
+    /// Node configuration file used to start the chat DHT node.
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
+
+    /// Node configuration file used to start the chat DHT node (alias for --config).
+    #[arg(long = "node-config", value_name = "FILE")]
+    node_config: Option<String>,
+
+    /// Messaging configuration file (e.g. apps/chat/bob.yaml).
+    #[arg(short = 'm', long = "messaging-config", value_name = "FILE")]
+    messaging_config: Option<String>,
 
     /// Messaging service peer id.
     #[arg(long, value_name = "PEERID")]
@@ -48,17 +56,21 @@ struct Options {
     #[arg(long, value_name = "ENDPOINT")]
     endpoint: Option<String>,
 
-    /// User private key. BOSON_USER_ID is used as the environment fallback.
+    /// User private key. BOSON_USER_KEY or BOSON_USER_ID is used as the environment fallback.
     #[arg(long, value_name = "USERID")]
     userid: Option<String>,
 
-    /// Device private key.
+    /// User private key alias (--userkey).
+    #[arg(long = "userkey", value_name = "PRIVATE_KEY")]
+    userkey: Option<String>,
+
+    /// Device private key. BOSON_DEV_KEY or BOSON_DEVICE_KEY is used as fallback.
     #[arg(long = "dev-key", value_name = "PRIVATE_KEY")]
     dev_key: Option<String>,
 
-    /// Node configuration file used to start the chat DHT node.
-    #[arg(long = "node-config", value_name = "FILE", default_value = DEFAULT_NODE_CONFIG)]
-    node_config: String,
+    /// Device private key alias (--device or --device-key).
+    #[arg(long = "device", value_name = "PRIVATE_KEY")]
+    device: Option<String>,
 
     /// Override the DHT node UDP port from the node configuration.
     #[arg(long, value_name = "PORT")]
@@ -106,15 +118,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     node.start().await?;
     println!("Boson DHT node {} is up and running.", node.id());
 
-    let client = MessagingClientBuilder::new()
-        .configuration(config)
-        .connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())))
-        .message_listener(Arc::new(ConsoleMessageListener::new(output.clone())))
-        .channel_listener(Arc::new(ConsoleChannelListener::new(output.clone())))
-        .contact_listener(Arc::new(ConsoleContactListener::new(output.clone())))
-        .session_listener(Arc::new(ConsoleSessionListener::new(output.clone())))
-        .friend_request_listener(Arc::new(ConsoleFriendRequestListener::new(output)))
-        .build()?;
+    let client: Arc<dyn MessagingClient> = Arc::new(Client::new(config));
+    client.add_connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())));
+    client.add_message_listener(Arc::new(ConsoleMessageListener::new(output.clone())));
+    client.add_channel_listener(Arc::new(ConsoleChannelListener::new(output.clone())));
+    client.add_contact_listener(Arc::new(ConsoleContactListener::new(output.clone())));
+    client.add_session_listener(Arc::new(ConsoleSessionListener::new(output.clone())));
+    client.add_friend_request_listener(Arc::new(ConsoleFriendRequestListener::new(output)));
 
     client.start().await?;
 
@@ -172,7 +182,12 @@ fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
 }
 
 fn load_node_options(options: &Options) -> Result<NodeOptions, Box<dyn std::error::Error>> {
-    let mut node_options = NodeOptions::load(&options.node_config)?;
+    let path = options
+        .config
+        .as_deref()
+        .or(options.node_config.as_deref())
+        .unwrap_or(DEFAULT_NODE_CONFIG);
+    let mut node_options = NodeOptions::load(path)?;
     if let Some(port) = options.port {
         node_options = node_options.with_port(port);
     }
@@ -182,87 +197,72 @@ fn load_node_options(options: &Options) -> Result<NodeOptions, Box<dyn std::erro
     Ok(node_options)
 }
 
-fn load_chat_config(options: &Options) -> Result<Configuration, Box<dyn std::error::Error>> {
-    let mut values = match options.config.as_deref() {
-        Some(path) => {
-            let file = File::open(path)?;
-            serde_yaml::from_reader(file)?
+fn load_chat_config(options: &Options) -> Result<MessagingOptions, Box<dyn std::error::Error>> {
+    let mut messaging_options = match options.messaging_config.as_deref() {
+        Some(path) => MessagingOptions::load(path)?,
+        None => {
+            let peerid_str = options
+                .peerid
+                .as_deref()
+                .map(str::to_owned)
+                .or_else(|| env::var(BOSON_PEER_ID).ok())
+                .ok_or_else(|| {
+                    "service peerId is required (via --peerid, BOSON_PEER_ID, or --messaging-config)"
+                })?;
+            let peerid = Id::try_from(peerid_str.as_str())?;
+            MessagingOptions::new(peerid)
         }
-        None => HashMap::new(),
     };
 
-    apply_argument_or_env(
-        &mut values,
-        "service",
-        "peerId",
-        options.peerid.as_deref(),
-        BOSON_PEER_ID,
-    )?;
-    apply_argument_or_env(
-        &mut values,
-        "service",
-        "endpoint",
-        options.endpoint.as_deref(),
-        BOSON_ENDPOINT,
-    )?;
-    apply_argument_or_env(
-        &mut values,
-        "client",
-        "userPrivateKey",
-        options.userid.as_deref(),
-        BOSON_USER_ID,
-    )?;
-    apply_argument_or_env(
-        &mut values,
-        "client",
-        "devicePrivateKey",
-        options.dev_key.as_deref(),
-        BOSON_DEV_KEY,
-    )?;
-    ensure_default_database(&mut values)?;
-
-    Ok(Configuration::from_map(&values)?)
-}
-
-fn apply_argument_or_env(
-    values: &mut HashMap<String, serde_json::Value>,
-    section: &str,
-    field: &str,
-    argument: Option<&str>,
-    env_var: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(value) = argument
+    if let Some(peerid_str) = options
+        .peerid
+        .as_deref()
         .map(str::to_owned)
-        .or_else(|| env::var(env_var).ok())
-    else {
-        return Ok(());
-    };
+        .or_else(|| env::var(BOSON_PEER_ID).ok())
+    {
+        messaging_options =
+            messaging_options.with_service_peerid(Id::try_from(peerid_str.as_str())?);
+    }
 
-    let section = values
-        .entry(section.to_string())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()))
-        .as_object_mut()
-        .ok_or_else(|| format!("{section} configuration must be a map"))?;
-    section.insert(field.to_string(), serde_json::Value::String(value));
-    Ok(())
-}
+    if let Some(endpoint) = options
+        .endpoint
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| env::var(BOSON_ENDPOINT).ok())
+    {
+        messaging_options = messaging_options.with_service_endpoint(endpoint)?;
+    }
 
-fn ensure_default_database(
-    values: &mut HashMap<String, serde_json::Value>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let database = values
-        .entry("client".to_string())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()));
-    let _ = database;
-    let database = values
-        .entry("database".to_string())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()))
-        .as_object_mut()
-        .ok_or("database configuration must be a map")?;
-    database
-        .entry("uri".to_string())
-        .or_insert_with(|| serde_json::Value::String("jdbc:sqlite:messaging.db".to_string()));
-    Ok(())
+    if let Some(user_key) = options
+        .userkey
+        .as_deref()
+        .or(options.userid.as_deref())
+        .map(str::to_owned)
+        .or_else(|| env::var(BOSON_USER_KEY).ok())
+        .or_else(|| env::var(BOSON_USER_ID).ok())
+    {
+        messaging_options = messaging_options.with_user_key_str(&user_key)?;
+    }
+
+    if let Some(device_key) = options
+        .dev_key
+        .as_deref()
+        .or(options.device.as_deref())
+        .map(str::to_owned)
+        .or_else(|| env::var(BOSON_DEV_KEY).ok())
+        .or_else(|| env::var(BOSON_DEVICE_KEY).ok())
+    {
+        messaging_options = messaging_options.with_device_key_str(&device_key)?;
+    }
+
+    if messaging_options.user_key().is_none() && messaging_options.user_id().is_none() {
+        messaging_options = messaging_options.with_generated_user_key();
+    }
+    if messaging_options.device_key().is_none() {
+        messaging_options = messaging_options.with_generated_device_key();
+    }
+
+    Ok(messaging_options)
 }
 
 #[derive(Clone)]

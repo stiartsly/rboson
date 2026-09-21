@@ -25,13 +25,27 @@ service:
 # Both user-level and device-level private keys are required to establish
 # authenticated communication with the messaging service.
 client:
+  # User ID of the client.
+  # Optional: If provided, it should match the userPrivateKey.
+  #
+  # This identifies the user within the messaging system.
+  userId: ${MESSAGING_USER_ID}
+
   # Private key representing the user identity.
+  # Optional: If not provided, a new key will be generated.
   #
   # This key is shared across all devices owned by the same user.
   # Keep this value secret.
   userPrivateKey: ${MESSAGING_USER_PRIVATE_KEY}
 
+  # Device ID of the client.
+  # Optional: If provided, it should match the devicePrivateKey.
+  #
+  # This identifies the device within the messaging system.
+  deviceId: ${MESSAGING_DEVICE_ID}
+
   # Private key representing the device identity.
+  # Optional: If not provided, a new key will be generated.
   #
   # Each device should have a unique key. This allows the system to
   # distinguish between multiple devices belonging to the same user.
@@ -40,27 +54,11 @@ client:
 
 # Root directory for the messaging data storage.
 #
-# If omitted, defaults to the current working directory.
-#
-# Recommended locations for user deployments:
-#   - Unix-like: ~/.local/share/boson/client/photon-messaging
-#   - Windows:   %LOCALAPPDATA%\boson\client\photon-messaging
-#
-# Recommended locations for system-wide deployments:
-#   - Unix-like: /var/lib/boson/client/photon-messaging
-#   - Windows:   %ProgramData%\boson\client\photon-messaging
-dataDir: "${YOUR_MESSAGING_DATADIR}"
+dataDir: "${YOUR_DATADIR}"
 
 database:
   # Storage backend used by the messaging database.
   #
-  # Supported values:
-  #   - PostgreSQL: postgresql://user:password@host:port/database
-  #   - SQLite:     jdbc:sqlite:/path/to/sqlite.db
-  #
-  # Recommendations:
-  #   - SQLite: suitable for local, embedded, or low-throughput deployments
-  #   - PostgreSQL: recommended for production or high-throughput environments
   uri: jdbc:sqlite:messaging.db
 
   # Maximum number of connections in the database connection pool.

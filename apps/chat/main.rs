@@ -12,8 +12,8 @@ use boson::{
     errors::Result,
     messaging::{
         Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
-        FriendRequestListener, Message, MessageListener, MessagingClient,
-        Options as MessagingOptions, SessionInfo, SessionListener,
+        FriendRequestListener, Message, MessageListener, Options as MessagingOptions, SessionInfo,
+        SessionListener,
     },
     Id, Network,
 };
@@ -50,13 +50,21 @@ struct Options {
     #[arg(long, value_name = "ENDPOINT")]
     endpoint: Option<String>,
 
-    /// User private key alias (--userkey).
+    /// User private key alias (--userkey or --userid).
     #[arg(long = "userkey", value_name = "PRIVATE_KEY")]
     userkey: Option<String>,
+
+    /// User private key alias (--userid).
+    #[arg(long = "userid", value_name = "PRIVATE_KEY")]
+    userid: Option<String>,
 
     /// Device private key. BOSON_DEV_KEY or BOSON_DEVICE_KEY is used as fallback.
     #[arg(long = "dev-key", value_name = "PRIVATE_KEY")]
     dev_key: Option<String>,
+
+    /// Device private key alias (--device).
+    #[arg(long = "device", value_name = "PRIVATE_KEY")]
+    device: Option<String>,
 
     /// Override the DHT node UDP port from the node configuration.
     #[arg(long, value_name = "PORT")]
@@ -172,57 +180,82 @@ fn load_node_options(options: &Options) -> Result<NodeOptions> {
 }
 
 fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
-    let mut opts = match options.messaging_config.as_deref() {
-        Some(path) => MessagingOptions::load(path)?,
-        _ => MessagingOptions::new(),
-    };
-
-    if let Some(peerid_str) = options
+    let peerid_arg = options
         .peerid
-        .as_deref()
-        .map(str::to_owned)
-        .or_else(|| env::var(BOSON_PEER_ID).ok())
-    {
-        opts = opts.with_service_peerid(Id::try_from(peerid_str.as_str())?);
-    }
-
-    if let Some(endpoint) = options
+        .clone()
+        .or_else(|| env::var(BOSON_PEER_ID).ok());
+    let endpoint_arg = options
         .endpoint
-        .as_deref()
-        .map(str::to_owned)
-        .or_else(|| env::var(BOSON_ENDPOINT).ok())
-    {
-        opts = opts.with_service_endpoint(endpoint)?;
-    }
-
-    if let Some(user_key) = options
+        .clone()
+        .or_else(|| env::var(BOSON_ENDPOINT).ok());
+    let user_key_arg = options
         .userkey
-        .as_deref()
-        .map(str::to_owned)
+        .clone()
+        .or_else(|| options.userid.clone())
         .or_else(|| env::var(BOSON_USER_KEY).ok())
-        .or_else(|| env::var(BOSON_USER_ID).ok())
-    {
-        opts = opts.with_user_key_str(&user_key)?;
-    }
-
-    if let Some(device_key) = options
+        .or_else(|| env::var(BOSON_USER_ID).ok());
+    let device_key_arg = options
         .dev_key
-        .as_deref()
-        .map(str::to_owned)
+        .clone()
+        .or_else(|| options.device.clone())
         .or_else(|| env::var(BOSON_DEV_KEY).ok())
-        .or_else(|| env::var(BOSON_DEVICE_KEY).ok())
-    {
-        opts = opts.with_device_key_str(&device_key)?;
+        .or_else(|| env::var(BOSON_DEVICE_KEY).ok());
+
+    if let Some(path) = options.messaging_config.as_deref() {
+        let opts = MessagingOptions::load(path)?;
+        if peerid_arg.is_none()
+            && endpoint_arg.is_none()
+            && user_key_arg.is_none()
+            && device_key_arg.is_none()
+        {
+            return Ok(opts);
+        }
+        let mut b = MessagingOptions::builder();
+        b.with_service_peerid(*opts.service_peerid());
+        if let Some(endpoint) = opts.service_endpoint() {
+            b.with_service_endpoint_url(endpoint.clone())?;
+        }
+        b.with_user_keypair(opts.user_key().clone());
+        b.with_device_keypair(opts.device_key().clone());
+        b.with_data_dir(opts.data_dir());
+        b.with_database_uri(opts.database_uri())?;
+        b.with_database_pool_size(opts.database_pool_size());
+        b.with_database_schema_name(opts.database_schema());
+
+        if let Some(peerid_str) = peerid_arg {
+            b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
+        }
+        if let Some(endpoint) = endpoint_arg {
+            b.with_service_endpoint(endpoint)?;
+        }
+        if let Some(user_key) = user_key_arg {
+            b.with_user_key_str(&user_key)?;
+        }
+        if let Some(device_key) = device_key_arg {
+            b.with_device_key_str(&device_key)?;
+        }
+        return b.build();
     }
 
-    if opts.user_key().is_none() && opts.user_id().is_none() {
-        opts = opts.with_generated_user_key();
+    let mut b = MessagingOptions::builder();
+    if let Some(peerid_str) = peerid_arg {
+        b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
     }
-    if opts.device_key().is_none() {
-        opts = opts.with_generated_device_key();
+    if let Some(endpoint) = endpoint_arg {
+        b.with_service_endpoint(endpoint)?;
+    }
+    if let Some(user_key) = user_key_arg {
+        b.with_user_key_str(&user_key)?;
+    } else {
+        b.with_generated_user_key();
+    }
+    if let Some(device_key) = device_key_arg {
+        b.with_device_key_str(&device_key)?;
+    } else {
+        b.with_generated_device_key();
     }
 
-    Ok(opts)
+    b.build()
 }
 
 #[derive(Clone)]

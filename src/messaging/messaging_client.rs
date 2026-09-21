@@ -23,13 +23,8 @@ use crate::Id;
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
 
-/// The primary interface for the Boson Messaging Client, translated from
-/// `io.bosonnetwork.photonmessaging.MessagingClient`.
+/// The primary interface for the Boson Messaging Client.
 pub trait MessagingClient: Send + Sync {
-    // -----------------------------------------------------------------
-    // Client identities
-    // -----------------------------------------------------------------
-
     /// Retrieves the identifier of the local user.
     fn user_id(&self) -> &Id;
 
@@ -44,10 +39,6 @@ pub trait MessagingClient: Send + Sync {
 
     /// Retrieves the data directory used by the client.
     fn data_dir(&self) -> &Path;
-
-    // -----------------------------------------------------------------
-    // Listeners
-    // -----------------------------------------------------------------
 
     /// Adds a listener for connection state changes.
     fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>);
@@ -87,15 +78,6 @@ pub trait MessagingClient: Send + Sync {
 
     /// Removes all listeners that have been previously registered with this instance.
     fn remove_all_listeners(&self);
-
-    /// Checks if the messaging client is currently running.
-    fn is_running(&self) -> bool;
-
-    /// Checks if the messaging client is currently connected to the messaging service.
-    fn is_connected(&self) -> bool;
-
-    /// Checks if the messaging client is ready to send and receive messages.
-    fn is_ready(&self) -> bool;
 
     // -----------------------------------------------------------------
     // Message and conversation APIs

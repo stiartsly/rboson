@@ -33,6 +33,6 @@ pub use message::{
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
 pub use message_listener::MessageListener;
-pub use options::Options;
+pub use options::{Options, OptionsBuilder};
 pub use session_info::SessionInfo;
 pub use session_listener::SessionListener;

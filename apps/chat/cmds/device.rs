@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
-use boson::messaging::{MessagingClient, Client};
+use boson::messaging::{Client, MessagingClient};
 
 use super::parse_id;
 

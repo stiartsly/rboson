@@ -2,7 +2,6 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
 };
-
 use serde::Deserialize;
 
 use crate::errors::{ArgumentError, Error, IOError, Result};
@@ -11,76 +10,22 @@ use crate::Id;
 
 pub const SCHEME_MQTT: &str = "mqtt";
 pub const SCHEME_MQTTS: &str = "mqtts";
-pub const DEFAULT_DATABASE_URI: &str = "jdbc:sqlite:messaging.db";
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(try_from = "SerdeOptions")]
-pub struct Options {
-    pub peerid: Option<Id>,
-    pub endpoint: Option<url::Url>,
-
-    pub user_key: Option<KeyPair>,
-    pub user_id: Option<Id>,
-
-    pub device_key: Option<KeyPair>,
-    pub device_id: Option<Id>,
-
-    pub data_dir: PathBuf,
-    pub database_uri: String,
-    pub database_pool_size: usize,
-    pub database_schema_name: Option<String>,
-
-    pub database_path: PathBuf,
+#[derive(Clone, Debug, Default)]
+pub struct OptionsBuilder {
+    peerid: Option<Id>,
+    endpoint: Option<url::Url>,
+    user_key: Option<KeyPair>,
+    user_id: Option<Id>,
+    device_key: Option<KeyPair>,
+    device_id: Option<Id>,
+    data_dir: Option<PathBuf>,
+    database_uri: Option<String>,
+    database_pool_size: Option<usize>,
+    database_schema: Option<String>,
 }
 
-impl Options {
-    pub fn default_data_dir() -> PathBuf {
-        let base = env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                let mut home = env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("."));
-                home.push(".local/share");
-                home
-            });
-        base.join("boson/client/photon-messaging")
-    }
-
-    pub fn new() -> Self {
-        Self {
-            peerid: None,
-            endpoint: None,
-            user_key: None,
-            user_id: None,
-            device_key: None,
-            device_id: None,
-            data_dir: PathBuf::from("."),
-            database_uri: DEFAULT_DATABASE_URI.to_string(),
-            database_pool_size: 0,
-            database_schema_name: None,
-            database_path: PathBuf::from("messaging.db"),
-        }
-    }
-
-    pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
-        let expanded_yaml = expand_environ_vars(yaml.as_ref())?;
-        serde_yaml::from_str::<SerdeOptions>(&expanded_yaml)
-            .map_err(|e| ArgumentError::new(format!("invalid messaging YAML format: {e}")))?
-            .try_into()
-    }
-
-    pub fn read(yaml: impl AsRef<str>) -> Result<Self> {
-        Self::parse(yaml)
-    }
-
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let yaml = fs::read_to_string(path)
-            .map_err(|e| IOError::new(format!("Reading config {} failed: {e}", path.display())))?;
-        Self::parse(yaml)
-    }
-
+impl OptionsBuilder {
     pub fn validate_endpoint(url: &url::Url) -> Result<()> {
         let scheme = url.scheme();
         if scheme != SCHEME_MQTT && scheme != SCHEME_MQTTS {
@@ -97,30 +42,24 @@ impl Options {
         Ok(())
     }
 
-    pub fn check_completeness(&self) -> Result<()> {
-        if let (Some(user_id), Some(user_key)) = (&self.user_id, &self.user_key) {
-            if user_id != &Id::from(user_key.public_key()) {
-                return Err(ArgumentError::new("userId does not match userKey"));
-            }
+    fn check_completeness(&self) -> Result<()> {
+        if self.user_key.is_none() {
+            return Err(ArgumentError::new("user_key is required"));
         }
-        if let (Some(device_id), Some(device_key)) = (&self.device_id, &self.device_key) {
-            if device_id != &Id::from(device_key.public_key()) {
-                return Err(ArgumentError::new("deviceId does not match deviceKey"));
-            }
-        }
-        if self.user_id.is_none() && self.user_key.is_none() {
-            return Err(ArgumentError::new(
-                "user identity (user_id or user_key) is required",
-            ));
-        }
+
         if self.device_key.is_none() {
             return Err(ArgumentError::new("device_key is required"));
         }
-        if self.database_uri.trim().is_empty() {
-            return Err(ArgumentError::new("database URI must not be empty"));
+
+        if let Some(uri) = &self.database_uri {
+            if uri.trim().is_empty() {
+                return Err(ArgumentError::new("database URI must not be empty"));
+            }
         }
-        if self.data_dir.as_os_str().is_empty() {
-            return Err(ArgumentError::new("data_dir must not be empty"));
+        if let Some(dir) = &self.data_dir {
+            if dir.as_os_str().is_empty() {
+                return Err(ArgumentError::new("data_dir must not be empty"));
+            }
         }
         if let Some(endpoint) = &self.endpoint {
             Self::validate_endpoint(endpoint)?;
@@ -128,12 +67,12 @@ impl Options {
         Ok(())
     }
 
-    pub fn with_service_peerid(mut self, peer_id: Id) -> Self {
+    pub fn with_service_peerid(&mut self, peer_id: Id) -> &mut Self {
         self.peerid = Some(peer_id);
         self
     }
 
-    pub fn with_service_endpoint(mut self, endpoint: impl AsRef<str>) -> Result<Self> {
+    pub fn with_service_endpoint(&mut self, endpoint: impl AsRef<str>) -> Result<&mut Self> {
         let url = url::Url::parse(endpoint.as_ref())
             .map_err(|e| ArgumentError::new(format!("Invalid endpoint URL: {e}")))?;
         Self::validate_endpoint(&url)?;
@@ -141,148 +80,221 @@ impl Options {
         Ok(self)
     }
 
-    pub fn with_service_endpoint_url(mut self, url: url::Url) -> Result<Self> {
+    pub fn with_service_endpoint_str(&mut self, endpoint: &str) -> Result<&mut Self> {
+        let url = url::Url::parse(endpoint)
+            .map_err(|e| ArgumentError::new(format!("Invalid endpoint URL: {e}")))?;
+        self.with_service_endpoint_url(url)
+    }
+
+    pub fn with_service_endpoint_url(&mut self, url: url::Url) -> Result<&mut Self> {
         Self::validate_endpoint(&url)?;
         self.endpoint = Some(url);
         Ok(self)
     }
 
-    pub fn with_user_id(mut self, user_id: Id) -> Self {
+    pub fn with_user_id(&mut self, user_id: Id) -> &mut Self {
         self.user_id = Some(user_id);
         self
     }
 
-    pub fn with_userid(self, user_id: Id) -> Self {
-        self.with_user_id(user_id)
-    }
-
-    pub fn with_user_keypair(mut self, user_key: KeyPair) -> Self {
+    pub fn with_user_keypair(&mut self, user_key: KeyPair) -> &mut Self {
         self.user_id = Some(Id::from(user_key.public_key()));
         self.user_key = Some(user_key);
         self
     }
 
-    pub fn with_user_private_key(self, private_key: PrivateKey) -> Self {
+    pub fn with_user_private_key(&mut self, private_key: PrivateKey) -> &mut Self {
         self.with_user_keypair(KeyPair::from(private_key))
     }
 
-    pub fn with_user_key_str(self, key_str: &str) -> Result<Self> {
+    pub fn with_user_key_str(&mut self, key_str: &str) -> Result<&mut Self> {
         let sk = PrivateKey::try_from(key_str).map_err(|e| ArgumentError::new(e.to_string()))?;
         Ok(self.with_user_private_key(sk))
     }
 
-    pub fn with_generated_user_key(self) -> Self {
+    pub fn with_generated_user_key(&mut self) -> &mut Self {
         self.with_user_keypair(KeyPair::random())
     }
 
-    pub fn with_device_id(mut self, device_id: Id) -> Self {
+    pub fn with_device_id(&mut self, device_id: Id) -> &mut Self {
         self.device_id = Some(device_id);
         self
     }
 
-    pub fn with_device_keypair(mut self, device_key: KeyPair) -> Self {
+    pub fn with_device_keypair(&mut self, device_key: KeyPair) -> &mut Self {
         self.device_id = Some(Id::from(device_key.public_key()));
         self.device_key = Some(device_key);
         self
     }
 
-    pub fn with_device_private_key(self, private_key: PrivateKey) -> Self {
+    pub fn with_device_private_key(&mut self, private_key: PrivateKey) -> &mut Self {
         self.with_device_keypair(KeyPair::from(private_key))
     }
 
-    pub fn with_device_key_str(self, key_str: &str) -> Result<Self> {
+    pub fn with_device_key_str(&mut self, key_str: &str) -> Result<&mut Self> {
         let sk = PrivateKey::try_from(key_str).map_err(|e| ArgumentError::new(e.to_string()))?;
         Ok(self.with_device_private_key(sk))
     }
 
-    pub fn with_generated_device_key(self) -> Self {
+    pub fn with_generated_device_key(&mut self) -> &mut Self {
         self.with_device_keypair(KeyPair::random())
     }
 
-    pub fn with_data_dir(mut self, data_dir: impl AsRef<Path>) -> Self {
-        self.data_dir = data_dir.as_ref().to_path_buf();
-        self.database_path = sqlite_path(&self.database_uri)
-            .map(PathBuf::from)
-            .map(|path| {
-                if path.is_absolute() {
-                    path
-                } else {
-                    self.data_dir.join(path)
-                }
-            })
-            .unwrap_or_else(|| self.data_dir.join("messaging.db"));
+    pub fn with_data_dir(&mut self, data_dir: impl AsRef<Path>) -> &mut Self {
+        self.data_dir = Some(data_dir.as_ref().to_path_buf());
         self
     }
 
-    pub fn with_database(mut self, uri: impl Into<String>, pool_size: usize) -> Result<Self> {
-        self = self.with_database_uri(uri)?;
+    pub fn with_database(&mut self, uri: impl Into<String>, pool_size: usize) -> Result<&mut Self> {
+        self.with_database_uri(uri)?;
         Ok(self.with_database_pool_size(pool_size))
     }
 
-    pub fn with_database_uri(mut self, uri: impl Into<String>) -> Result<Self> {
+    pub fn with_database_uri(&mut self, uri: impl Into<String>) -> Result<&mut Self> {
         let uri = uri.into();
         if uri.trim().is_empty() {
             return Err(ArgumentError::new("Database URI is empty"));
         }
-        self.database_path = sqlite_path(&uri)
+        self.database_uri = Some(uri);
+        Ok(self)
+    }
+
+    pub fn with_database_pool_size(&mut self, pool_size: usize) -> &mut Self {
+        self.database_pool_size = Some(pool_size);
+        self
+    }
+
+    pub fn with_database_schema_name(&mut self, schema: impl Into<String>) -> &mut Self {
+        self.database_schema = Some(schema.into());
+        self
+    }
+
+    /*
+    pub fn with_database_path(&mut self, path: impl AsRef<Path>) -> &mut Self {
+        self.database_path = Some(path.as_ref().to_path_buf());
+        self
+    }
+    */
+
+    pub fn build(&self) -> Result<Options> {
+        self.check_completeness()?;
+
+        let peerid = self.peerid.unwrap_or_default();
+        let user_key = self.user_key.clone().unwrap();
+        let user_id = self
+            .user_id
+            .unwrap_or_else(|| Id::from(user_key.public_key()));
+        let device_key = self.device_key.clone().unwrap();
+        let device_id = self
+            .device_id
+            .unwrap_or_else(|| Id::from(device_key.public_key()));
+        let data_dir = self.data_dir.clone().unwrap_or_else(get_current_path);
+        let database_uri = self
+            .database_uri
+            .clone()
+            .unwrap_or_else(|| "jdbc:sqlite:messaging.db".to_string());
+        let database_pool_size = self.database_pool_size.unwrap_or(1);
+        let database_schema = self
+            .database_schema
+            .clone()
+            .unwrap_or_else(|| "public".to_string());
+        let database_path = sqlite_path(&database_uri)
             .map(PathBuf::from)
             .map(|path| {
                 if path.is_absolute() {
                     path
                 } else {
-                    self.data_dir.join(path)
+                    data_dir.join(path)
                 }
             })
-            .unwrap_or_else(|| self.data_dir.join("messaging.db"));
-        self.database_uri = uri;
-        Ok(self)
+            .unwrap_or_else(|| data_dir.join("messaging.db"));
+
+        Ok(Options {
+            peerid,
+            endpoint: self.endpoint.clone(),
+            user_id,
+            user_key,
+            device_id,
+            device_key,
+            data_dir,
+            database_uri,
+            database_pool_size,
+            database_schema,
+            database_path,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "SerdeOptions")]
+pub struct Options {
+    peerid: Id,
+    endpoint: Option<url::Url>,
+
+    user_id: Id,
+    user_key: KeyPair,
+    device_id: Id,
+    device_key: KeyPair,
+    data_dir: PathBuf,
+
+    database_uri: String,
+    database_pool_size: usize,
+    database_schema: String,
+
+    database_path: PathBuf,
+}
+
+impl Options {
+    pub fn builder() -> OptionsBuilder {
+        OptionsBuilder::default()
     }
 
-    pub fn with_database_pool_size(mut self, pool_size: usize) -> Self {
-        self.database_pool_size = pool_size;
-        self
+    pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
+        let expanded = expand_environ_vars(yaml.as_ref())?;
+        serde_yaml::from_str::<SerdeOptions>(&expanded)
+            .map_err(|e| {
+                ArgumentError::new(format!("Invalid content in messaging client config: {e}"))
+            })?
+            .try_into()
     }
 
-    pub fn with_database_schema_name(mut self, schema: impl Into<String>) -> Self {
-        self.database_schema_name = Some(schema.into());
-        self
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let yaml = fs::read_to_string(path)
+            .map_err(|e| IOError::new(format!("Error reading config {}: {e}", path.display())))?;
+        Self::parse(yaml)
     }
 
-    pub fn with_database_path(mut self, path: impl AsRef<Path>) -> Self {
-        self.database_path = path.as_ref().to_path_buf();
-        self
-    }
-
-    pub fn service_peerid(&self) -> Option<&Id> {
-        self.peerid.as_ref()
+    pub fn service_peerid(&self) -> &Id {
+        &self.peerid
     }
 
     pub fn service_endpoint(&self) -> Option<&url::Url> {
         self.endpoint.as_ref()
     }
 
-    pub fn user_key(&self) -> Option<&KeyPair> {
-        self.user_key.as_ref()
+    pub fn user_key(&self) -> &KeyPair {
+        &self.user_key
     }
 
-    pub fn user_private_key(&self) -> Option<&PrivateKey> {
-        self.user_key.as_ref().map(|key| key.private_key())
+    pub fn user_private_key(&self) -> &PrivateKey {
+        self.user_key.private_key()
     }
 
-    pub fn user_id(&self) -> Option<&Id> {
-        self.user_id.as_ref()
+    pub fn user_id(&self) -> &Id {
+        &self.user_id
     }
 
-    pub fn device_key(&self) -> Option<&KeyPair> {
-        self.device_key.as_ref()
+    pub fn device_key(&self) -> &KeyPair {
+        &self.device_key
     }
 
-    pub fn device_private_key(&self) -> Option<&PrivateKey> {
-        self.device_key.as_ref().map(|key| key.private_key())
+    pub fn device_private_key(&self) -> &PrivateKey {
+        self.device_key.private_key()
     }
 
-    pub fn device_id(&self) -> Option<&Id> {
-        self.device_id.as_ref()
+    pub fn device_id(&self) -> &Id {
+        &self.device_id
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -297,8 +309,8 @@ impl Options {
         self.database_pool_size
     }
 
-    pub fn database_schema_name(&self) -> Option<&str> {
-        self.database_schema_name.as_deref()
+    pub fn database_schema(&self) -> &str {
+        &self.database_schema
     }
 
     pub fn database_path(&self) -> &Path {
@@ -306,17 +318,11 @@ impl Options {
     }
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct SerdeOptions {
     service: SerdeService,
-    #[serde(default)]
-    client: Option<SerdeClient>,
+    client: SerdeClient,
     #[serde(rename = "dataDir", default)]
     data_dir: Option<String>,
     #[serde(default)]
@@ -327,18 +333,17 @@ struct SerdeOptions {
 struct SerdeService {
     #[serde(rename = "peerId")]
     peer_id: Id,
-    #[serde(default)]
     endpoint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SerdeClient {
     #[serde(rename = "userId", default)]
-    user_id: Id,
-    #[serde(rename = "userPrivateKey", default)]
+    user_id: Option<Id>,
+    #[serde(rename = "userPrivateKey")]
     user_private_key: Option<String>,
     #[serde(rename = "deviceId", default)]
-    device_id: Id,
+    device_id: Option<Id>,
     #[serde(rename = "devicePrivateKey", default)]
     device_private_key: Option<String>,
 }
@@ -346,84 +351,92 @@ struct SerdeClient {
 #[derive(Debug, Deserialize)]
 struct SerdeDatabase {
     #[serde(default)]
-    uri: Option<String>,
+    uri: String,
     #[serde(rename = "poolSize", default)]
-    pool_size: Option<usize>,
+    pool_size: usize,
     #[serde(default)]
-    schema: Option<String>,
+    schema: String,
 }
 
 impl TryFrom<SerdeOptions> for Options {
     type Error = Error;
 
     fn try_from(sopts: SerdeOptions) -> Result<Self> {
-        let mut opts = Options::new();
-        opts = opts.with_service_peerid(sopts.service.peer_id);
+        let mut b = Options::builder();
+        b.with_service_peerid(sopts.service.peer_id);
 
         if let Some(endpoint) = sopts.service.endpoint {
-            opts = opts.with_service_endpoint(endpoint)?;
+            b.with_service_endpoint(endpoint)?;
         }
 
-        if let Some(client) = sopts.client {
-            let user_key = client
-                .user_private_key
-                .as_deref()
-                .map(PrivateKey::try_from)
-                .transpose()
-                .map_err(|e| ArgumentError::new(e.to_string()) as Error)?
-                .map(KeyPair::from);
+        let user_key = sopts
+            .client
+            .user_private_key
+            .as_deref()
+            .map(PrivateKey::try_from)
+            .transpose()
+            .map_err(|e| ArgumentError::new(e.to_string()) as Error)?
+            .map(KeyPair::from)
+            .unwrap_or_else(KeyPair::random);
 
-            if let Some(key) = user_key {
-                if client.user_id != Id::default() && client.user_id != Id::from(key.public_key()) {
-                    return Err(ArgumentError::new("userId does not match userPrivateKey") as Error);
-                }
-                opts = opts.with_user_keypair(key);
-            } else if client.user_id != Id::default() {
-                opts = opts.with_user_id(client.user_id);
+        if let Some(userid) = sopts.client.user_id {
+            let fromid = Id::from(user_key.public_key());
+            if userid != fromid {
+                return Err(ArgumentError::new("userId does not match userPrivateKey") as Error);
             }
+            b.with_user_id(userid);
+        }
+        b.with_user_keypair(user_key);
 
-            let device_key = client
-                .device_private_key
-                .as_deref()
-                .map(PrivateKey::try_from)
-                .transpose()
-                .map_err(|e| ArgumentError::new(e.to_string()) as Error)?
-                .map(KeyPair::from);
+        let device_key = sopts
+            .client
+            .device_private_key
+            .as_deref()
+            .map(PrivateKey::try_from)
+            .transpose()
+            .map_err(|e| ArgumentError::new(e.to_string()) as Error)?
+            .map(KeyPair::from)
+            .unwrap_or_else(KeyPair::random);
 
-            if let Some(key) = device_key {
-                if client.device_id != Id::default()
-                    && client.device_id != Id::from(key.public_key())
-                {
-                    return Err(
-                        ArgumentError::new("deviceId does not match devicePrivateKey") as Error,
-                    );
-                }
-                opts = opts.with_device_keypair(key);
-            } else if client.device_id != Id::default() {
-                opts = opts.with_device_id(client.device_id);
+        if let Some(device_id) = sopts.client.device_id {
+            let fromid = Id::from(device_key.public_key());
+            if device_id != fromid {
+                return Err(
+                    ArgumentError::new("deviceId does not match devicePrivateKey") as Error,
+                );
             }
+            b.with_device_id(device_id);
+        }
+        b.with_device_keypair(device_key);
+
+        let path = if let Some(data_dir) = sopts.data_dir {
+            expand_home_dir(&data_dir)
+        } else {
+            get_current_path()
+        };
+        b.with_data_dir(path);
+
+        if let Some(database) = sopts.database {
+            b.with_database_uri(&database.uri)?
+                .with_database_pool_size(database.pool_size)
+                .with_database_schema_name(&database.schema);
+        } else {
+            let database = SerdeDatabase {
+                uri: "jdbc:sqlite:messaging.db".to_string(),
+                pool_size: 1,
+                schema: "public".to_string(),
+            };
+            b.with_database_uri(&database.uri)?
+                .with_database_pool_size(database.pool_size)
+                .with_database_schema_name(&database.schema);
         }
 
-        if let Some(data_dir) = sopts.data_dir {
-            let path = expand_home_dir(&data_dir);
-            opts = opts.with_data_dir(path);
-        }
-
-        if let Some(db) = sopts.database {
-            if let Some(uri) = db.uri {
-                opts = opts.with_database_uri(uri)?;
-            }
-            if let Some(pool_size) = db.pool_size {
-                opts = opts.with_database_pool_size(pool_size);
-            }
-            if let Some(schema) = db.schema {
-                opts = opts.with_database_schema_name(schema);
-            }
-        }
-
-        opts.check_completeness()?;
-        Ok(opts)
+        b.build()
     }
+}
+
+fn get_current_path() -> PathBuf {
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn expand_environ_vars(input: &str) -> Result<String> {

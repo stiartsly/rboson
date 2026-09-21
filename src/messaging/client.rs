@@ -60,7 +60,6 @@ struct Shared {
 /// The Boson Messaging Client implementation.
 pub struct Client {
     options: Options,
-    service_peer_id: Id,
     user_id: Id,
     device_id: Id,
     shared: Arc<Shared>,
@@ -84,23 +83,10 @@ impl Client {
             friend_request_listeners: RwLock::new(Vec::new()),
         };
 
-        let service_peer_id = options.peerid.unwrap_or_default();
-        let user_id = options
-            .user_id
-            .or_else(|| options.user_key.as_ref().map(|k| Id::from(k.public_key())))
-            .unwrap_or_else(Id::random);
-        let device_id = options
-            .device_id
-            .or_else(|| {
-                options
-                    .device_key
-                    .as_ref()
-                    .map(|k| Id::from(k.public_key()))
-            })
-            .unwrap_or_else(Id::random);
+        let user_id = *options.user_id();
+        let device_id = *options.device_id();
 
         Self {
-            service_peer_id,
             user_id,
             device_id,
             options,
@@ -119,12 +105,8 @@ impl Client {
 
     fn password(&self) -> Result<String> {
         let nonce = crate::cryptobox::Nonce::random();
-        let device_key = self
-            .options
-            .device_key
-            .as_ref()
-            .ok_or_else(|| Error::State("device_key is required".into()))?;
-        let user_key = self.options.user_key.as_ref().unwrap_or(device_key);
+        let user_key = self.options.user_key();
+        let device_key = self.options.device_key();
 
         let usign = user_key
             .private_key()
@@ -165,23 +147,23 @@ impl Client {
     }
 
     pub fn user_id(&self) -> &Id {
-        &self.user_id
+        self.options.user_id()
     }
 
     pub fn device_id(&self) -> &Id {
-        &self.device_id
+        self.options.device_id()
     }
 
     pub fn service_peer_id(&self) -> &Id {
-        &self.service_peer_id
+        self.options.service_peerid()
     }
 
     pub fn service_endpoint(&self) -> Option<&str> {
-        self.options.endpoint.as_ref().map(url::Url::as_str)
+        self.options.service_endpoint().map(url::Url::as_str)
     }
 
     pub fn data_dir(&self) -> &Path {
-        self.options.data_dir.as_path()
+        self.options.data_dir()
     }
 
     pub async fn start(&self) -> Result<()> {
@@ -195,14 +177,14 @@ impl Client {
         }
 
         let result = async {
-            let endpoint = self.options.endpoint.as_ref().ok_or_else(|| {
+            let endpoint = self.options.service_endpoint().ok_or_else(|| {
                 Error::State(
                     "service.endpoint is required: DHT service discovery is not yet wired \
                         into the updated Rust messaging Options"
                         .into(),
                 )
             })?;
-            tokio::fs::create_dir_all(&self.options.data_dir).await?;
+            tokio::fs::create_dir_all(self.options.data_dir()).await?;
 
             let host = endpoint
                 .host_str()
@@ -213,8 +195,7 @@ impl Client {
 
             self.notify_connection(|listener| listener.on_connecting());
 
-            let client_id =
-                bs58::encode(md5::compute(self.device_id.as_bytes()).0).into_string();
+            let client_id = bs58::encode(md5::compute(self.device_id.as_bytes()).0).into_string();
             let mut options = MqttOptions::new(client_id, host.to_string(), port);
             options.set_credentials(self.user_id.to_string(), self.password()?);
             options.set_keep_alive(Duration::from_secs(60));
@@ -252,23 +233,18 @@ impl Client {
                                     }
                                 }
                             } else {
-                                log::warn!(
-                                    "Messaging MQTT ConnAck error code: {:?}",
-                                    connack.code
-                                );
+                                log::warn!("Messaging MQTT ConnAck error code: {:?}", connack.code);
                             }
                         }
                         Ok(Event::Incoming(Incoming::SubAck(_))) => {
                             if !shared.connected.swap(true, Ordering::AcqRel) {
-                                let listeners =
-                                    shared.connection_listeners.read().unwrap().clone();
+                                let listeners = shared.connection_listeners.read().unwrap().clone();
                                 for listener in listeners {
                                     listener.on_connected();
                                 }
                             }
                             if !shared.ready.swap(true, Ordering::AcqRel) {
-                                let listeners =
-                                    shared.connection_listeners.read().unwrap().clone();
+                                let listeners = shared.connection_listeners.read().unwrap().clone();
                                 for listener in listeners {
                                     listener.on_ready();
                                 }
@@ -279,8 +255,7 @@ impl Client {
                         Err(error) => {
                             if shared.connected.swap(false, Ordering::AcqRel) {
                                 shared.ready.store(false, Ordering::Release);
-                                let listeners =
-                                    shared.connection_listeners.read().unwrap().clone();
+                                let listeners = shared.connection_listeners.read().unwrap().clone();
                                 for listener in listeners {
                                     listener.on_disconnected();
                                 }
@@ -456,18 +431,6 @@ impl MessagingClient for Client {
 
     fn data_dir(&self) -> &Path {
         self.data_dir()
-    }
-
-    fn is_running(&self) -> bool {
-        self.is_running()
-    }
-
-    fn is_connected(&self) -> bool {
-        self.is_connected()
-    }
-
-    fn is_ready(&self) -> bool {
-        self.is_ready()
     }
 
     fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>) {
@@ -769,41 +732,5 @@ impl MessageBuilder for ComposedMessageBuilder {
     fn header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder> {
         self.headers.push((key.to_string(), value.to_string()));
         self
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::signature;
-
-    #[tokio::test]
-    async fn start_without_endpoint_fails_and_rolls_back_running_state() {
-        let options = Options::new()
-            .with_service_peerid(Id::random())
-            .with_generated_device_key();
-        let client = Client::new(options);
-
-        let error = client.start().await.unwrap_err();
-        assert!(error.to_string().contains("service.endpoint is required"));
-        assert!(!client.is_running());
-        assert!(!client.is_connected());
-        assert!(!client.is_ready());
-    }
-
-    #[test]
-    fn identities_are_derived_from_options_keys() {
-        let user_key = signature::KeyPair::random();
-        let device_key = signature::KeyPair::random();
-        let expected_user = Id::from(user_key.public_key());
-        let expected_device = Id::from(device_key.public_key());
-        let options = Options::new()
-            .with_service_peerid(Id::random())
-            .with_user_keypair(user_key)
-            .with_device_keypair(device_key);
-        let client = Client::new(options);
-
-        assert_eq!(client.user_id(), &expected_user);
-        assert_eq!(client.device_id(), &expected_device);
     }
 }

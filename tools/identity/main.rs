@@ -17,10 +17,11 @@ fn main() {
     println!("+--------------------------------------------------------------+");
     println!("|                 Boson User Identity Created                 |");
     println!("+--------------------------------------------------------------+");
-    println!("  User ID     : {}", id.to_base58());
+    println!("  User ID     : {} (base58)", id.to_base58());
     println!("  DID         : {}", id.to_did_string());
     println!("  Public Key  : {}", keypair.public_key());
-    println!("  Private Key : {}", keypair.private_key().to_hexstr());
+    println!("  Private Key : {} (hexstr)", keypair.private_key().to_hexstr());
+    println!("  Private Key : {} (base58)", keypair.private_key().to_base58());
     println!();
     println!("Keep the private key secret. It controls this identity.");
 }

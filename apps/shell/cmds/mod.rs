@@ -15,6 +15,7 @@ type OutputHandler = Arc<dyn Fn(String) + Send + Sync>;
 static RESULT_OUTPUT: Mutex<Option<OutputHandler>> = Mutex::new(None);
 
 pub(crate) mod announce_peer;
+pub(crate) mod device;
 pub(crate) mod find_node;
 pub(crate) mod find_peer;
 pub(crate) mod find_value;

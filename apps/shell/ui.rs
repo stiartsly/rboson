@@ -68,6 +68,7 @@ struct Layout {
     input_height: u16,
 }
 
+#[derive(Clone, Copy)]
 enum Pane {
     Log,
     Result,
@@ -124,13 +125,7 @@ impl ShellUi {
         let mut rendered = String::new();
         {
             let mut state = self.state.lock().unwrap();
-            let max_lines = state.layout.top_inner_height();
-            for line in split_lines(&text) {
-                match pane {
-                    Pane::Log => push_line(&mut state.logs, line, max_lines),
-                    Pane::Result => push_line(&mut state.results, line, max_lines),
-                }
-            }
+            state.push_text(pane, &text);
             rendered.push_str(save_cursor());
             rendered.push_str(&state.render_pane(pane));
             rendered.push_str(restore_cursor());
@@ -388,6 +383,21 @@ impl ShellUi {
 }
 
 impl UiState {
+    fn push_text(&mut self, pane: Pane, text: &str) {
+        let inner_width = match pane {
+            Pane::Log => self.layout.left_width.saturating_sub(2) as usize,
+            Pane::Result => self.layout.right_width.saturating_sub(2) as usize,
+        };
+        for raw_line in split_lines(text) {
+            for line in wrap_line(&raw_line, inner_width) {
+                match pane {
+                    Pane::Log => push_line(&mut self.logs, line),
+                    Pane::Result => push_line(&mut self.results, line),
+                }
+            }
+        }
+    }
+
     fn render_full(&self) -> String {
         let mut out = String::new();
         out.push_str(clear_screen());
@@ -457,15 +467,30 @@ impl UiState {
         };
 
         let inner_width = width.saturating_sub(2) as usize;
-        let inner_height = self.layout.top_inner_height();
+        let inner_height = self.layout.top_inner_height() as usize;
+
+        let mut visual_lines = Vec::new();
+        for line in lines {
+            if line.chars().count() <= inner_width {
+                visual_lines.push(line.clone());
+            } else {
+                for wrapped in wrap_line(line, inner_width) {
+                    visual_lines.push(wrapped);
+                }
+            }
+        }
+
+        let start = visual_lines.len().saturating_sub(inner_height);
+        let visible = &visual_lines[start..];
+
         let mut out = String::new();
         for row in 0..inner_height {
-            let y = y + 1 + row;
-            let x = x + 1;
-            out.push_str(&move_to(y, x));
+            let row_y = y + 1 + row as u16;
+            let col_x = x + 1;
+            out.push_str(&move_to(row_y, col_x));
             out.push_str(&" ".repeat(inner_width));
-            if let Some(line) = lines.get(row as usize) {
-                out.push_str(&move_to(y, x));
+            if let Some(line) = visible.get(row) {
+                out.push_str(&move_to(row_y, col_x));
                 out.push_str(&fit_line(line, inner_width));
             }
         }
@@ -571,11 +596,148 @@ fn terminal_size() -> Option<(u16, u16)> {
     }
 }
 
-fn push_line(lines: &mut VecDeque<String>, line: String, max_lines: u16) {
-    while lines.len() >= max_lines as usize {
+const MAX_BUFFER_LINES: usize = 1000;
+
+fn push_line(lines: &mut VecDeque<String>, line: String) {
+    while lines.len() >= MAX_BUFFER_LINES {
         lines.pop_front();
     }
     lines.push_back(line);
+}
+
+fn wrap_line(line: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![line.to_string()];
+    }
+    if line.chars().count() <= width {
+        return vec![line.to_string()];
+    }
+
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0;
+
+    // Split line into alternating tokens of words and spaces
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut in_space = false;
+
+    for ch in line.chars() {
+        if ch == ' ' {
+            if !in_space && !token.is_empty() {
+                tokens.push(token);
+                token = String::new();
+            }
+            in_space = true;
+            token.push(ch);
+        } else {
+            if in_space && !token.is_empty() {
+                tokens.push(token);
+                token = String::new();
+            }
+            in_space = false;
+            token.push(ch);
+        }
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+
+    for tok in tokens {
+        let tok_len = tok.chars().count();
+        let is_space = tok.chars().all(|c| c == ' ');
+
+        if is_space {
+            if current_len == 0 {
+                // Leading spaces on a line (preserve indentation)
+                if tok_len <= width {
+                    current.push_str(&tok);
+                    current_len = tok_len;
+                } else {
+                    result.push(tok[..width].to_string());
+                    current = String::new();
+                    current_len = 0;
+                }
+            } else if current_len + tok_len <= width {
+                current.push_str(&tok);
+                current_len += tok_len;
+            } else {
+                // Spaces don't fit at the end of the line, wrap to next line
+                let trimmed = current.trim_end().to_string();
+                if !trimmed.is_empty() {
+                    result.push(trimmed);
+                }
+                current = String::new();
+                current_len = 0;
+            }
+        } else {
+            // It's a non-space token
+            if current_len + tok_len <= width {
+                current.push_str(&tok);
+                current_len += tok_len;
+            } else if current_len == 0 {
+                // Token itself exceeds width, chunk it into width slices
+                let mut chars = tok.chars();
+                while let Some(ch) = chars.next() {
+                    let mut chunk = String::with_capacity(width);
+                    chunk.push(ch);
+                    for _ in 1..width {
+                        if let Some(c) = chars.next() {
+                            chunk.push(c);
+                        } else {
+                            break;
+                        }
+                    }
+                    if chunk.chars().count() == width && chars.clone().next().is_some() {
+                        result.push(chunk);
+                    } else {
+                        current = chunk;
+                        current_len = current.chars().count();
+                    }
+                }
+            } else {
+                // Wrap to next line
+                let trimmed = current.trim_end().to_string();
+                if !trimmed.is_empty() {
+                    result.push(trimmed);
+                }
+                current = String::new();
+                current_len = 0;
+
+                if tok_len <= width {
+                    current.push_str(&tok);
+                    current_len = tok_len;
+                } else {
+                    // Token itself exceeds width, chunk it
+                    let mut chars = tok.chars();
+                    while let Some(ch) = chars.next() {
+                        let mut chunk = String::with_capacity(width);
+                        chunk.push(ch);
+                        for _ in 1..width {
+                            if let Some(c) = chars.next() {
+                                chunk.push(c);
+                            } else {
+                                break;
+                            }
+                        }
+                        if chunk.chars().count() == width && chars.clone().next().is_some() {
+                            result.push(chunk);
+                        } else {
+                            current = chunk;
+                            current_len = current.chars().count();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let trimmed = current.trim_end().to_string();
+    if !trimmed.is_empty() || result.is_empty() {
+        result.push(trimmed);
+    }
+
+    result
 }
 
 fn split_lines(text: &str) -> Vec<String> {
@@ -768,5 +930,114 @@ mod tests {
         assert!(full.contains(" Output "));
         assert!(full.contains(" Command "));
         assert!(full.contains("boson> "));
+    }
+
+    #[test]
+    fn test_wrap_line_short_and_long() {
+        // Short line fits
+        assert_eq!(wrap_line("hello world", 20), vec!["hello world"]);
+
+        // Long line with spaces wraps at word boundary
+        let wrapped = wrap_line("this is a test of word wrapping across lines", 15);
+        for line in &wrapped {
+            assert!(line.chars().count() <= 15);
+        }
+        assert_eq!(
+            wrapped,
+            vec!["this is a test", "of word", "wrapping across", "lines"]
+        );
+
+        // Long line without spaces (e.g. hex key) chunks into width
+        let hex_key = "0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d1";
+        let wrapped_key = wrap_line(hex_key, 20);
+        for line in &wrapped_key {
+            assert!(line.chars().count() <= 20);
+        }
+        assert_eq!(
+            wrapped_key.concat(),
+            hex_key
+        );
+
+        // Line with label and long key
+        let label_and_key = format!("Private Key: {hex_key}");
+        let wrapped_labeled = wrap_line(&label_and_key, 25);
+        for line in &wrapped_labeled {
+            assert!(line.chars().count() <= 25);
+        }
+        // First line contains label
+        assert!(wrapped_labeled[0].starts_with("Private Key:"));
+        // Key is completely preserved across chunks
+        let reconstructed: String = wrapped_labeled.join(" ");
+        assert!(reconstructed.contains("0xbc12dc10"));
+        assert!(reconstructed.contains("69d72d1"));
+    }
+
+    #[test]
+    fn test_render_pane_displays_wrapped_multiline_output() {
+        let layout = Layout {
+            rows: 20,
+            cols: 80,
+            top_height: 14,
+            left_width: 39,
+            right_width: 39,
+            input_height: 4,
+        };
+        // inner_width = 39 - 2 = 37
+        let hex_key = "0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d1";
+        let mut results = VecDeque::new();
+        // A single long result line that requires more than 1 line to display
+        results.push_back(format!("Private Key: {hex_key}"));
+
+        let state = UiState {
+            layout,
+            logs: VecDeque::new(),
+            results,
+            input_buffer: String::new(),
+            cursor_pos: 0,
+            history: Vec::new(),
+            history_idx: None,
+            saved_input: String::new(),
+        };
+
+        let rendered = state.render_pane(Pane::Result);
+        // Both the start and the end of the long key should be visible in the output pane
+        assert!(rendered.contains("Private Key:"));
+        assert!(rendered.contains("0xbc12dc10"));
+        assert!(rendered.contains("69d72d1"));
+    }
+
+    #[test]
+    fn test_push_multiline_and_long_line() {
+        let layout = Layout {
+            rows: 20,
+            cols: 80,
+            top_height: 14,
+            left_width: 39,
+            right_width: 39,
+            input_height: 4,
+        };
+        let mut state = UiState {
+            layout,
+            logs: VecDeque::new(),
+            results: VecDeque::new(),
+            input_buffer: String::new(),
+            cursor_pos: 0,
+            history: Vec::new(),
+            history_idx: None,
+            saved_input: String::new(),
+        };
+
+        // Push a multi-line message containing both newlines and long content
+        let hex_key = "0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d1";
+        let message = format!("Device ID: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg\nPrivate Key: {hex_key}");
+        state.push_text(Pane::Result, &message);
+
+        // Since the message has 2 lines and the private key line exceeds pane width,
+        // it must have been wrapped into more than 2 lines.
+        assert!(state.results.len() > 2);
+        let rendered = state.render_pane(Pane::Result);
+        assert!(rendered.contains("Device ID:"));
+        assert!(rendered.contains("Private Key:"));
+        assert!(rendered.contains("69d72d1"));
     }
 }

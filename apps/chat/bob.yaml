@@ -3,8 +3,8 @@ service:
   endpoint: mqtt://47.101.142.224:9083
 
 client:
-  userPrivateKey: 0xf40bbf1201e8e87e7233cf2bf917058cbdd58d85cffef329c180381fc346719e251c4274dd819d81ccbf12d4ad56d3bf7f50151de09c9e4a5f417c290da0e434
-  devicePrivateKey: 0x40dfebb9b7f8c5e39adf530d9ee5a230ac128a95ede8b30caf5cda7cd995de95109501b378b67150c454d3bba5792fbc96355d3d74f92a54c7a7f5ecc0a48df7
+  userId: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg
+  devicePrivateKey: 0x7cbde1f7c8614c5f059115b23d2e7ecc358d4a416047851f7d73acdf45f65f861a0597a8d7e69aaed464e8e751aa572ddb96c4d2a6204bed7d57dbaf51ea9bb7
 
 dataDir: .chat_bob
 

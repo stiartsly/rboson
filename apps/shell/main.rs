@@ -147,6 +147,7 @@ fn build_cli() -> Command {
         .subcommand(cmds::identity::command())
         .subcommand(cmds::login::command())
         .subcommand(cmds::me::command())
+        .subcommand(cmds::device::command())
         .subcommand(cmds::log::command())
         .subcommand(cmds::status::command())
 }
@@ -184,6 +185,9 @@ async fn execute_command(
         }
         Some(("identity", m)) => {
             cmds::identity::run(m, shell_config.user_private_key());
+        }
+        Some(("device", m)) => {
+            cmds::device::run(m, login_session.client(), node.options().data_dir()).await;
         }
         Some(("login", _)) => cmds::login::run(login_session).await,
         Some(("me", _)) => cmds::me::run(login_session).await,
@@ -404,6 +408,13 @@ mod tests {
                 .unwrap()
                 .subcommand_name(),
             Some("me")
+        );
+        assert_eq!(
+            build_cli()
+                .try_get_matches_from(["device", "--list"])
+                .unwrap()
+                .subcommand_name(),
+            Some("device")
         );
     }
 

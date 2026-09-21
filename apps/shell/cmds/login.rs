@@ -19,6 +19,10 @@ impl Session {
         })
     }
 
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub(crate) async fn login(&mut self) {
         let profile = match self.client.get_profile().await {
             Ok(profile) => profile,

@@ -266,6 +266,10 @@ impl KeyPair {
         KeyPair(PrivateKey(sk), PublicKey(pk))
     }
 
+    pub fn generate() -> Self {
+        Self::random()
+    }
+
     pub fn try_from_seed<'a>(seed: &[u8]) -> Result<Self> {
         if seed.len() != KeyPair::SEED_BYTES {
             return Err(ArgumentError::new(format!(

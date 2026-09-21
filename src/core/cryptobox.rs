@@ -176,6 +176,10 @@ impl Nonce {
         Nonce(crate::random_array::<{ Self::BYTES }>())
     }
 
+    pub fn generate() -> Self {
+        Self::random()
+    }
+
     pub fn increment(&mut self) -> &Self {
         unsafe { sodium_increment(as_uchar_ptr_mut!(self.0), Self::BYTES) }
         self
@@ -260,6 +264,10 @@ impl KeyPair {
         }
 
         Self(PrivateKey(sk), PublicKey(pk))
+    }
+
+    pub fn generate() -> Self {
+        Self::random()
     }
 
     pub fn try_from_seed(seed: &[u8]) -> Result<Self> {

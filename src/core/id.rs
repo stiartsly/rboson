@@ -33,6 +33,10 @@ impl Id {
         Id(crate::random_array::<{ Self::BYTES }>())
     }
 
+    pub fn generate() -> Self {
+        Self::random()
+    }
+
     pub fn from_bytes(input: [u8; Id::BYTES]) -> Self {
         Id(input)
     }

@@ -80,6 +80,25 @@ pub trait MessagingClient: Send + Sync {
     fn remove_all_listeners(&self);
 
     // -----------------------------------------------------------------
+    // Start and stop, status check
+    // -----------------------------------------------------------------
+
+    /// Starts the messaging client, initiating the connection and synchronization process.
+    fn start(&self) -> BoxFuture<'_, Result<()>>;
+
+    /// Stops the messaging client and releases all associated resources.
+    fn stop(&self) -> BoxFuture<'_, Result<()>>;
+
+    /// Checks if the messaging client is currently running.
+    fn is_running(&self) -> bool;
+
+    /// Checks if the messaging client is currently connected to the messaging service.
+    fn is_connected(&self) -> bool;
+
+    /// Checks if the messaging client is ready to send and receive messages.
+    fn is_ready(&self) -> bool;
+
+    // -----------------------------------------------------------------
     // Message and conversation APIs
     // -----------------------------------------------------------------
 

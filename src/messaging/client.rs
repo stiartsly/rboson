@@ -1,4 +1,3 @@
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, SubscribeFilter, Transport};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -6,12 +5,13 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex, RwLock,
 };
-use std::time::Duration;
 
 #[path = "messaging_client.rs"]
 pub mod messaging_client;
 
 pub use messaging_client::MessagingClient;
+
+use super::verticle::{self, VerticleClient};
 
 use crate::messaging::{
     channel::{Channel, Permission, Role},
@@ -35,62 +35,50 @@ use crate::Id;
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
 
-const USER_INBOX: &str = "u/i";
-const USER_OUTBOX: &str = "u/o";
-const DEVICE_INBOX: &str = "d/i";
-const MAX_MESSAGE_SIZE: usize = 256 * 1024;
-
 /// A boxed future returned by async methods on [`MessagingClient`].
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-struct Shared {
-    running: AtomicBool,
-    connected: AtomicBool,
-    ready: AtomicBool,
-    mqtt: Mutex<Option<AsyncClient>>,
-    worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    connection_listeners: RwLock<Vec<Arc<dyn ConnectionListener>>>,
-    message_listeners: RwLock<Vec<Arc<dyn MessageListener>>>,
-    channel_listeners: RwLock<Vec<Arc<dyn ChannelListener>>>,
-    contact_listeners: RwLock<Vec<Arc<dyn ContactListener>>>,
-    session_listeners: RwLock<Vec<Arc<dyn SessionListener>>>,
-    friend_request_listeners: RwLock<Vec<Arc<dyn FriendRequestListener>>>,
+pub(crate) struct SharedListeners {
+    pub(crate) connected: AtomicBool,
+    pub(crate) ready: AtomicBool,
+    pub(crate) connection_listeners: RwLock<Vec<Arc<dyn ConnectionListener>>>,
+    pub(crate) message_listeners: RwLock<Vec<Arc<dyn MessageListener>>>,
+    pub(crate) channel_listeners: RwLock<Vec<Arc<dyn ChannelListener>>>,
+    pub(crate) contact_listeners: RwLock<Vec<Arc<dyn ContactListener>>>,
+    pub(crate) session_listeners: RwLock<Vec<Arc<dyn SessionListener>>>,
+    pub(crate) friend_request_listeners: RwLock<Vec<Arc<dyn FriendRequestListener>>>,
 }
 
-/// The Boson Messaging Client implementation.
-pub struct Client {
-    options: Options,
-    user_id: Id,
-    device_id: Id,
-    shared: Arc<Shared>,
-}
-
-pub type PhotonMessagingClient = Client;
-
-impl Client {
-    pub fn new(options: Options) -> Self {
-        let shared = Shared {
-            running: AtomicBool::new(false),
+impl SharedListeners {
+    pub(crate) fn new() -> Self {
+        Self {
             connected: AtomicBool::new(false),
             ready: AtomicBool::new(false),
-            mqtt: Mutex::new(None),
-            worker: Mutex::new(None),
             connection_listeners: RwLock::new(Vec::new()),
             message_listeners: RwLock::new(Vec::new()),
             channel_listeners: RwLock::new(Vec::new()),
             contact_listeners: RwLock::new(Vec::new()),
             session_listeners: RwLock::new(Vec::new()),
             friend_request_listeners: RwLock::new(Vec::new()),
-        };
+        }
+    }
+}
 
-        let user_id = *options.user_id();
-        let device_id = *options.device_id();
+/// The Boson Messaging Client implementation.
+pub struct Client {
+    options: Options,
+    listeners: Arc<SharedListeners>,
+    verticle: Mutex<Option<VerticleClient>>,
+}
 
+pub type PhotonMessagingClient = Client;
+
+impl Client {
+    pub fn new(options: Options) -> Self {
         Self {
-            user_id,
-            device_id,
             options,
-            shared: Arc::new(shared),
+            listeners: Arc::new(SharedListeners::new()),
+            verticle: Mutex::new(None),
         }
     }
 
@@ -101,35 +89,6 @@ impl Client {
             "the messaging client is not running"
         };
         Err(Error::State(format!("{operation} is unavailable: {state}")))
-    }
-
-    fn password(&self) -> Result<String> {
-        let nonce = crate::cryptobox::Nonce::random();
-        let user_key = self.options.user_key();
-        let device_key = self.options.device_key();
-
-        let usign = user_key
-            .private_key()
-            .sign_into(nonce.as_bytes())
-            .map_err(|error| Error::Auth(error.to_string()))?;
-        let dsign = device_key
-            .private_key()
-            .sign_into(nonce.as_bytes())
-            .map_err(|error| Error::Auth(error.to_string()))?;
-
-        let mut password = Vec::with_capacity(nonce.size() + usign.len() + dsign.len());
-        password.extend_from_slice(nonce.as_bytes());
-        password.extend_from_slice(&usign);
-        password.extend_from_slice(&dsign);
-
-        Ok(bs58::encode(password).into_string())
-    }
-
-    fn notify_connection(&self, callback: impl Fn(&dyn ConnectionListener)) {
-        let listeners = self.shared.connection_listeners.read().unwrap().clone();
-        for listener in listeners {
-            callback(listener.as_ref());
-        }
     }
 
     fn remove_listener<T: ?Sized>(listeners: &RwLock<Vec<Arc<T>>>, target: &Arc<T>) {
@@ -167,163 +126,43 @@ impl Client {
     }
 
     pub async fn start(&self) -> Result<()> {
-        if self
-            .shared
-            .running
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        let is_running = self.verticle.lock().unwrap().is_some();
+        if is_running {
             return Ok(());
         }
 
-        let result = async {
-            let endpoint = self.options.service_endpoint().ok_or_else(|| {
-                Error::State(
-                    "service.endpoint is required: DHT service discovery is not yet wired \
-                        into the updated Rust messaging Options"
-                        .into(),
-                )
-            })?;
-            tokio::fs::create_dir_all(self.options.data_dir()).await?;
-
-            let host = endpoint
-                .host_str()
-                .ok_or_else(|| Error::Argument("service endpoint has no hostname".into()))?;
-            let port = endpoint
-                .port()
-                .ok_or_else(|| Error::Argument("service endpoint has no port".into()))?;
-
-            self.notify_connection(|listener| listener.on_connecting());
-
-            let client_id = bs58::encode(md5::compute(self.device_id.as_bytes()).0).into_string();
-            let mut options = MqttOptions::new(client_id, host.to_string(), port);
-            options.set_credentials(self.user_id.to_string(), self.password()?);
-            options.set_keep_alive(Duration::from_secs(60));
-            options.set_clean_session(false);
-            options.set_max_packet_size(MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE);
-            if endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" {
-                options.set_transport(Transport::tls_with_default_config());
-            }
-
-            let (mqtt, mut eventloop) = AsyncClient::new(options, 32);
-            let userid = self.user_id.to_string();
-            mqtt.subscribe_many([
-                SubscribeFilter::new(format!("inbox/{userid}"), QoS::AtLeastOnce),
-                SubscribeFilter::new(format!("outbox/{userid}"), QoS::AtLeastOnce),
-                SubscribeFilter::new("broadcast".to_string(), QoS::AtLeastOnce),
-                SubscribeFilter::new(USER_INBOX.to_string(), QoS::AtLeastOnce),
-                SubscribeFilter::new(USER_OUTBOX.to_string(), QoS::AtLeastOnce),
-                SubscribeFilter::new(DEVICE_INBOX.to_string(), QoS::AtLeastOnce),
-            ])
-            .await
-            .map_err(|error| Error::Io(std::io::Error::other(error)))?;
-
-            *self.shared.mqtt.lock().unwrap() = Some(mqtt);
-            let shared = self.shared.clone();
-            let worker = tokio::spawn(async move {
-                while shared.running.load(Ordering::Acquire) {
-                    match eventloop.poll().await {
-                        Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                            if connack.code == rumqttc::ConnectReturnCode::Success {
-                                if !shared.connected.swap(true, Ordering::AcqRel) {
-                                    let listeners =
-                                        shared.connection_listeners.read().unwrap().clone();
-                                    for listener in listeners {
-                                        listener.on_connected();
-                                    }
-                                }
-                            } else {
-                                log::warn!("Messaging MQTT ConnAck error code: {:?}", connack.code);
-                            }
-                        }
-                        Ok(Event::Incoming(Incoming::SubAck(_))) => {
-                            if !shared.connected.swap(true, Ordering::AcqRel) {
-                                let listeners = shared.connection_listeners.read().unwrap().clone();
-                                for listener in listeners {
-                                    listener.on_connected();
-                                }
-                            }
-                            if !shared.ready.swap(true, Ordering::AcqRel) {
-                                let listeners = shared.connection_listeners.read().unwrap().clone();
-                                for listener in listeners {
-                                    listener.on_ready();
-                                }
-                            }
-                        }
-                        Ok(Event::Incoming(Incoming::Publish(_))) => {}
-                        Ok(_) => {}
-                        Err(error) => {
-                            if shared.connected.swap(false, Ordering::AcqRel) {
-                                shared.ready.store(false, Ordering::Release);
-                                let listeners = shared.connection_listeners.read().unwrap().clone();
-                                for listener in listeners {
-                                    listener.on_disconnected();
-                                }
-                            }
-                            if shared.running.load(Ordering::Acquire) {
-                                log::warn!("Messaging MQTT connection error: {error}");
-                                tokio::time::sleep(Duration::from_secs(2)).await;
-                            }
-                        }
-                    }
-                }
-                if shared.connected.swap(false, Ordering::AcqRel) {
-                    let listeners = shared.connection_listeners.read().unwrap().clone();
-                    for listener in listeners {
-                        listener.on_disconnected();
-                    }
-                }
-                shared.ready.store(false, Ordering::Release);
-            });
-            *self.shared.worker.lock().unwrap() = Some(worker);
-            Ok(())
-        }
-        .await;
-
-        if result.is_err() {
-            self.shared.running.store(false, Ordering::Release);
-        }
-        result
+        let verticle_client = verticle::deploy(self.options.clone(), self.listeners.clone())?;
+        verticle_client.start().await?;
+        *self.verticle.lock().unwrap() = Some(verticle_client);
+        Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
-        if !self.shared.running.swap(false, Ordering::AcqRel) {
-            return Ok(());
+        let verticle = self.verticle.lock().unwrap().take();
+        if let Some(mut v) = verticle {
+            v.stop().await?;
         }
-
-        let mqtt = self.shared.mqtt.lock().unwrap().take();
-        if let Some(mqtt) = mqtt {
-            let _ = mqtt.disconnect().await;
-        }
-        let worker = self.shared.worker.lock().unwrap().take();
-        if let Some(mut worker) = worker {
-            if tokio::time::timeout(Duration::from_secs(2), &mut worker)
-                .await
-                .is_err()
-            {
-                worker.abort();
-                let _ = worker.await;
-            }
-        }
-        self.shared.connected.store(false, Ordering::Release);
-        self.shared.ready.store(false, Ordering::Release);
         Ok(())
     }
 
     pub fn is_running(&self) -> bool {
-        self.shared.running.load(Ordering::Acquire)
+        self.verticle
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(false, |v| v.is_running())
     }
 
     pub fn is_connected(&self) -> bool {
-        self.shared.connected.load(Ordering::Acquire)
+        self.listeners.connected.load(Ordering::Acquire)
     }
 
     pub fn is_ready(&self) -> bool {
-        self.shared.ready.load(Ordering::Acquire)
+        self.listeners.ready.load(Ordering::Acquire)
     }
 
     pub fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>) {
-        self.shared
+        self.listeners
             .connection_listeners
             .write()
             .unwrap()
@@ -331,11 +170,11 @@ impl Client {
     }
 
     pub fn remove_connection_listener(&self, listener: &Arc<dyn ConnectionListener>) {
-        Self::remove_listener(&self.shared.connection_listeners, listener);
+        Self::remove_listener(&self.listeners.connection_listeners, listener);
     }
 
     pub fn add_message_listener(&self, listener: Arc<dyn MessageListener>) {
-        self.shared
+        self.listeners
             .message_listeners
             .write()
             .unwrap()
@@ -343,11 +182,11 @@ impl Client {
     }
 
     pub fn remove_message_listener(&self, listener: &Arc<dyn MessageListener>) {
-        Self::remove_listener(&self.shared.message_listeners, listener);
+        Self::remove_listener(&self.listeners.message_listeners, listener);
     }
 
     pub fn add_channel_listener(&self, listener: Arc<dyn ChannelListener>) {
-        self.shared
+        self.listeners
             .channel_listeners
             .write()
             .unwrap()
@@ -355,11 +194,11 @@ impl Client {
     }
 
     pub fn remove_channel_listener(&self, listener: &Arc<dyn ChannelListener>) {
-        Self::remove_listener(&self.shared.channel_listeners, listener);
+        Self::remove_listener(&self.listeners.channel_listeners, listener);
     }
 
     pub fn add_contact_listener(&self, listener: Arc<dyn ContactListener>) {
-        self.shared
+        self.listeners
             .contact_listeners
             .write()
             .unwrap()
@@ -367,11 +206,11 @@ impl Client {
     }
 
     pub fn remove_contact_listener(&self, listener: &Arc<dyn ContactListener>) {
-        Self::remove_listener(&self.shared.contact_listeners, listener);
+        Self::remove_listener(&self.listeners.contact_listeners, listener);
     }
 
     pub fn add_session_listener(&self, listener: Arc<dyn SessionListener>) {
-        self.shared
+        self.listeners
             .session_listeners
             .write()
             .unwrap()
@@ -379,11 +218,11 @@ impl Client {
     }
 
     pub fn remove_session_listener(&self, listener: &Arc<dyn SessionListener>) {
-        Self::remove_listener(&self.shared.session_listeners, listener);
+        Self::remove_listener(&self.listeners.session_listeners, listener);
     }
 
     pub fn add_friend_request_listener(&self, listener: Arc<dyn FriendRequestListener>) {
-        self.shared
+        self.listeners
             .friend_request_listeners
             .write()
             .unwrap()
@@ -391,16 +230,16 @@ impl Client {
     }
 
     pub fn remove_friend_request_listener(&self, listener: &Arc<dyn FriendRequestListener>) {
-        Self::remove_listener(&self.shared.friend_request_listeners, listener);
+        Self::remove_listener(&self.listeners.friend_request_listeners, listener);
     }
 
     pub fn remove_all_listeners(&self) {
-        self.shared.connection_listeners.write().unwrap().clear();
-        self.shared.message_listeners.write().unwrap().clear();
-        self.shared.channel_listeners.write().unwrap().clear();
-        self.shared.contact_listeners.write().unwrap().clear();
-        self.shared.session_listeners.write().unwrap().clear();
-        self.shared
+        self.listeners.connection_listeners.write().unwrap().clear();
+        self.listeners.message_listeners.write().unwrap().clear();
+        self.listeners.channel_listeners.write().unwrap().clear();
+        self.listeners.contact_listeners.write().unwrap().clear();
+        self.listeners.session_listeners.write().unwrap().clear();
+        self.listeners
             .friend_request_listeners
             .write()
             .unwrap()
@@ -431,6 +270,26 @@ impl MessagingClient for Client {
 
     fn data_dir(&self) -> &Path {
         self.data_dir()
+    }
+
+    fn start(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.start().await })
+    }
+
+    fn stop(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.stop().await })
+    }
+
+    fn is_running(&self) -> bool {
+        self.is_running()
+    }
+
+    fn is_connected(&self) -> bool {
+        self.is_connected()
+    }
+
+    fn is_ready(&self) -> bool {
+        self.is_ready()
     }
 
     fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>) {

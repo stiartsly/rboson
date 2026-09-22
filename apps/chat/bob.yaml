@@ -4,6 +4,7 @@ service:
 
 client:
   userId: 4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg
+  userPrivateKey: 0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d13410da72883c6da7a6be00c2e5d70bbbf9a90c10bb099d01a656af2955e4af79
   devicePrivateKey: 0x7cbde1f7c8614c5f059115b23d2e7ecc358d4a416047851f7d73acdf45f65f861a0597a8d7e69aaed464e8e751aa572ddb96c4d2a6204bed7d57dbaf51ea9bb7
 
 dataDir: .chat_bob

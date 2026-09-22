@@ -25,8 +25,8 @@ use prompt::MyPrompt;
 
 const BOSON_PEER_ID: &str = "BOSON_MESSAGING_PEER_ID";
 const BOSON_ENDPOINT: &str = "BOSON_MESSAGING_PEER_ENDPOINT";
-const BOSON_USER_ID: &str = "BOSON_USER_ID";
 const BOSON_USER_KEY: &str = "BOSON_USER_KEY";
+const BOSON_USER_PRIVATE_KEY: &str = "BOSON_USER_PRIVATE_KEY";
 const BOSON_DEV_KEY: &str = "BOSON_DEV_KEY";
 const BOSON_DEVICE_KEY: &str = "BOSON_DEVICE_KEY";
 const DEFAULT_NODE_CONFIG: &str = "apps/chat/node.yaml";
@@ -49,6 +49,14 @@ struct Options {
     /// Messaging service endpoint, for example mqtt://127.0.0.1:1883.
     #[arg(long, value_name = "ENDPOINT")]
     endpoint: Option<String>,
+
+    /// Director service endpoint URL (or BOSON_DIRECTOR_URL).
+    #[arg(long, value_name = "URL")]
+    director_url: Option<String>,
+
+    /// Director node ID (or BOSON_DIRECTOR_NODEID).
+    #[arg(long, value_name = "NODEID")]
+    director_nodeid: Option<String>,
 
     /// User private key alias (--userkey or --userid).
     #[arg(long = "userkey", value_name = "PRIVATE_KEY")]
@@ -87,8 +95,18 @@ async fn run() -> Result<()> {
     let options = Options::parse();
     let node_options = load_node_options(&options)?;
     let chat_options = load_chat_options(&options)?;
-    let external_printer = ExternalPrinter::new(1_024);
+    let external_printer = ExternalPrinter::new(4_096);
     let output = ConsoleOutput::new(external_printer.clone());
+
+    let printer_for_cmds = external_printer.clone();
+    cmds::set_result_output(move |text| {
+        for line in text.lines() {
+            let _ = printer_for_cmds.sender().send(line.to_string());
+        }
+        if text.is_empty() {
+            let _ = printer_for_cmds.sender().send(String::new());
+        }
+    });
 
     let node = Node::new(node_options)?;
     use_reedline_log_output(&external_printer);
@@ -97,7 +115,7 @@ async fn run() -> Result<()> {
         readiness: readiness.clone(),
     });
     node.start().await?;
-    println!("Boson DHT node {} is up and running.", node.id());
+    cmds::print_result(format!("Boson DHT node {} is up and running.", node.id()));
 
     let client: Arc<Client> = Arc::new(Client::new(chat_options));
     client.add_connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())));
@@ -112,7 +130,7 @@ async fn run() -> Result<()> {
     let mut cli = cmds::build_cli();
     let mut editor = Reedline::create().with_external_printer(external_printer);
     let prompt = MyPrompt;
-    println!("Welcome to the messaging shell. Type 'help' or 'exit'.");
+    cmds::print_result("Welcome to the messaging shell. Type 'help' or 'exit'.".to_string());
 
     loop {
         match editor.read_line(&prompt) {
@@ -125,26 +143,28 @@ async fn run() -> Result<()> {
                     break;
                 }
                 if args[0] == "help" {
+                    let mut buf = Vec::new();
                     if let Some(name) = args.get(1) {
                         match cli.find_subcommand_mut(name) {
-                            Some(command) => command.print_long_help()?,
-                            None => cli.print_long_help()?,
+                            Some(command) => command.write_long_help(&mut buf)?,
+                            None => cli.write_long_help(&mut buf)?,
                         }
                     } else {
-                        cli.print_long_help()?;
+                        cli.write_long_help(&mut buf)?;
                     }
-                    println!();
+                    let s = String::from_utf8_lossy(&buf);
+                    cmds::print_result(s.to_string());
                     continue;
                 }
                 match cli.clone().try_get_matches_from(args) {
                     Ok(matches) => cmds::execute_command(matches, &client).await,
-                    Err(error) => println!("{error}"),
+                    Err(error) => cmds::print_result(error.to_string()),
                 }
             }
             Ok(Signal::CtrlC | Signal::CtrlD) => break,
             Ok(_) => continue,
             Err(error) => {
-                println!("Input error: {error}");
+                cmds::print_result(format!("Input error: {error}"));
                 break;
             }
         }
@@ -158,7 +178,9 @@ async fn run() -> Result<()> {
 fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
     let log_sender = external_printer.sender();
     logger::set_console_output_handler(move |line| {
-        _ = log_sender.try_send(line);
+        for l in line.lines() {
+            _ = log_sender.send(l.to_string());
+        }
     });
 }
 
@@ -180,6 +202,56 @@ fn load_node_options(options: &Options) -> Result<NodeOptions> {
 }
 
 fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
+    if let Some(path) = options.messaging_config.as_deref() {
+        let opts = MessagingOptions::load(path)?;
+        if options.peerid.is_none()
+            && options.endpoint.is_none()
+            && options.userkey.is_none()
+            && options.userid.is_none()
+            && options.dev_key.is_none()
+            && options.device.is_none()
+        {
+            return Ok(opts);
+        }
+        let mut b = MessagingOptions::builder();
+        b.with_service_peerid(*opts.service_peerid());
+        if let Some(endpoint) = opts.service_endpoint() {
+            b.with_service_endpoint_url(endpoint.clone())?;
+        }
+        if let Some(node_id) = opts.director_node_id() {
+            b.with_director_node_id(*node_id);
+        }
+        if let Some(endpoint) = opts.director_endpoint() {
+            b.with_director_endpoint_url(endpoint.clone());
+        }
+        b.with_user_keypair(opts.user_key().clone());
+        b.with_device_keypair(opts.device_key().clone());
+        b.with_data_dir(opts.data_dir());
+        b.with_database_uri(opts.database_uri())?;
+        b.with_database_pool_size(opts.database_pool_size());
+        b.with_database_schema_name(opts.database_schema());
+
+        if let Some(peerid_str) = &options.peerid {
+            b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
+        }
+        if let Some(endpoint) = &options.endpoint {
+            b.with_service_endpoint(endpoint)?;
+        }
+        if let Some(node_id_str) = &options.director_nodeid {
+            b.with_director_node_id(Id::try_from(node_id_str.as_str())?);
+        }
+        if let Some(director_url) = &options.director_url {
+            b.with_director_endpoint(director_url)?;
+        }
+        if let Some(user_key) = options.userkey.as_ref().or(options.userid.as_ref()) {
+            b.with_user_key_str(user_key)?;
+        }
+        if let Some(device_key) = options.dev_key.as_ref().or(options.device.as_ref()) {
+            b.with_device_key_str(device_key)?;
+        }
+        return b.build();
+    }
+
     let peerid_arg = options
         .peerid
         .clone()
@@ -193,7 +265,7 @@ fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
         .clone()
         .or_else(|| options.userid.clone())
         .or_else(|| env::var(BOSON_USER_KEY).ok())
-        .or_else(|| env::var(BOSON_USER_ID).ok());
+        .or_else(|| env::var(BOSON_USER_PRIVATE_KEY).ok());
     let device_key_arg = options
         .dev_key
         .clone()
@@ -201,41 +273,14 @@ fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
         .or_else(|| env::var(BOSON_DEV_KEY).ok())
         .or_else(|| env::var(BOSON_DEVICE_KEY).ok());
 
-    if let Some(path) = options.messaging_config.as_deref() {
-        let opts = MessagingOptions::load(path)?;
-        if peerid_arg.is_none()
-            && endpoint_arg.is_none()
-            && user_key_arg.is_none()
-            && device_key_arg.is_none()
-        {
-            return Ok(opts);
-        }
-        let mut b = MessagingOptions::builder();
-        b.with_service_peerid(*opts.service_peerid());
-        if let Some(endpoint) = opts.service_endpoint() {
-            b.with_service_endpoint_url(endpoint.clone())?;
-        }
-        b.with_user_keypair(opts.user_key().clone());
-        b.with_device_keypair(opts.device_key().clone());
-        b.with_data_dir(opts.data_dir());
-        b.with_database_uri(opts.database_uri())?;
-        b.with_database_pool_size(opts.database_pool_size());
-        b.with_database_schema_name(opts.database_schema());
-
-        if let Some(peerid_str) = peerid_arg {
-            b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
-        }
-        if let Some(endpoint) = endpoint_arg {
-            b.with_service_endpoint(endpoint)?;
-        }
-        if let Some(user_key) = user_key_arg {
-            b.with_user_key_str(&user_key)?;
-        }
-        if let Some(device_key) = device_key_arg {
-            b.with_device_key_str(&device_key)?;
-        }
-        return b.build();
-    }
+    let director_nodeid_arg = options
+        .director_nodeid
+        .clone()
+        .or_else(|| env::var("BOSON_DIRECTOR_NODEID").ok());
+    let director_url_arg = options
+        .director_url
+        .clone()
+        .or_else(|| env::var("BOSON_DIRECTOR_URL").ok());
 
     let mut b = MessagingOptions::builder();
     if let Some(peerid_str) = peerid_arg {
@@ -243,6 +288,12 @@ fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
     }
     if let Some(endpoint) = endpoint_arg {
         b.with_service_endpoint(endpoint)?;
+    }
+    if let Some(node_id_str) = director_nodeid_arg {
+        b.with_director_node_id(Id::try_from(node_id_str.as_str())?);
+    }
+    if let Some(director_url) = director_url_arg {
+        b.with_director_endpoint(director_url)?;
     }
     if let Some(user_key) = user_key_arg {
         b.with_user_key_str(&user_key)?;
@@ -269,7 +320,10 @@ impl ConsoleOutput {
     }
 
     fn println(&self, line: impl Into<String>) {
-        _ = self.printer.sender().try_send(line.into());
+        let text = line.into();
+        for l in text.lines() {
+            let _ = self.printer.sender().send(l.to_string());
+        }
     }
 }
 

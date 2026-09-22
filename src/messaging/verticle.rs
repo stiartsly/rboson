@@ -1,8 +1,5 @@
-use rumqttc::{
-    AsyncClient, Event, Incoming, MqttOptions, Publish, QoS, SubscribeFilter, Transport,
-};
+use log::{debug, error};
 use std::{
-    cell::RefCell,
     rc::Rc,
     result::Result as StdResult,
     sync::{
@@ -10,7 +7,6 @@ use std::{
         mpsc as std_mpsc, Arc,
     },
     thread::JoinHandle,
-    time::Duration,
 };
 use tokio::{
     runtime,
@@ -19,209 +15,18 @@ use tokio::{
 };
 
 use crate::messaging::{
+    channel_listener::ChannelListener,
     client::SharedListeners,
+    connection_listener::ConnectionListener,
+    contact_listener::ContactListener,
     errors::{Error, Result},
+    friend_request_listener::FriendRequestListener,
+    message_listener::MessageListener,
     options::Options,
-    ConnectionListener,
+    session::Session,
+    session_listener::SessionListener,
 };
 use crate::Id;
-
-const USER_INBOX: &str = "u/i";
-const USER_OUTBOX: &str = "u/o";
-const DEVICE_INBOX: &str = "d/i";
-const MAX_MESSAGE_SIZE: usize = 256 * 1024;
-
-/// Session instance holding all necessary information to interact with the MQTT server.
-/// All fields are defined with RefCell since they are exclusively referenced within a
-/// single dedicated thread running in a LocalSet.
-pub(crate) struct Session {
-    options: RefCell<Options>,
-    user_id: RefCell<Id>,
-    device_id: RefCell<Id>,
-    connected: RefCell<bool>,
-    ready: RefCell<bool>,
-    running: RefCell<bool>,
-    mqtt: RefCell<Option<AsyncClient>>,
-    listeners: Arc<SharedListeners>,
-}
-
-impl Session {
-    pub(crate) fn new(options: Options, listeners: Arc<SharedListeners>) -> Result<Self> {
-        let user_id = *options.user_id();
-        let device_id = *options.device_id();
-        Ok(Self {
-            options: RefCell::new(options),
-            user_id: RefCell::new(user_id),
-            device_id: RefCell::new(device_id),
-            connected: RefCell::new(false),
-            ready: RefCell::new(false),
-            running: RefCell::new(false),
-            mqtt: RefCell::new(None),
-            listeners,
-        })
-    }
-
-    fn password(&self) -> Result<String> {
-        let nonce = crate::cryptobox::Nonce::random();
-        let options = self.options.borrow();
-        let user_key = options.user_key();
-        let device_key = options.device_key();
-
-        let usign = user_key
-            .private_key()
-            .sign_into(nonce.as_bytes())
-            .map_err(|error| Error::Auth(error.to_string()))?;
-        let dsign = device_key
-            .private_key()
-            .sign_into(nonce.as_bytes())
-            .map_err(|error| Error::Auth(error.to_string()))?;
-
-        let mut password = Vec::with_capacity(nonce.size() + usign.len() + dsign.len());
-        password.extend_from_slice(nonce.as_bytes());
-        password.extend_from_slice(&usign);
-        password.extend_from_slice(&dsign);
-
-        Ok(bs58::encode(password).into_string())
-    }
-
-    fn notify_connection(&self, callback: impl Fn(&dyn ConnectionListener)) {
-        let listeners = self.listeners.connection_listeners.read().unwrap().clone();
-        for listener in listeners {
-            callback(listener.as_ref());
-        }
-    }
-
-    pub(crate) async fn start(self: &Rc<Self>) -> Result<()> {
-        if *self.running.borrow() {
-            return Ok(());
-        }
-
-        let endpoint = self
-            .options
-            .borrow()
-            .service_endpoint()
-            .cloned()
-            .ok_or_else(|| {
-                Error::State(
-                    "service.endpoint is required: DHT service discovery is not yet wired \
-                 into the updated Rust messaging Options"
-                        .into(),
-                )
-            })?;
-        tokio::fs::create_dir_all(self.options.borrow().data_dir()).await?;
-
-        let host = endpoint
-            .host_str()
-            .ok_or_else(|| Error::Argument("service endpoint has no hostname".into()))?;
-        let port = endpoint
-            .port()
-            .ok_or_else(|| Error::Argument("service endpoint has no port".into()))?;
-
-        self.notify_connection(|listener| listener.on_connecting());
-
-        let client_id =
-            bs58::encode(md5::compute(self.device_id.borrow().as_bytes()).0).into_string();
-        let mut mqtt_opts = MqttOptions::new(client_id, host.to_string(), port);
-        mqtt_opts.set_credentials(self.user_id.borrow().to_string(), self.password()?);
-        mqtt_opts.set_keep_alive(Duration::from_secs(60));
-        mqtt_opts.set_clean_session(false);
-        mqtt_opts.set_max_packet_size(MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE);
-        if endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" {
-            mqtt_opts.set_transport(Transport::tls_with_default_config());
-        }
-
-        let (mqtt, mut eventloop) = AsyncClient::new(mqtt_opts, 32);
-        let userid = self.user_id.borrow().to_string();
-        mqtt.subscribe_many([
-            SubscribeFilter::new(format!("inbox/{userid}"), QoS::AtLeastOnce),
-            SubscribeFilter::new(format!("outbox/{userid}"), QoS::AtLeastOnce),
-            SubscribeFilter::new("broadcast".to_string(), QoS::AtLeastOnce),
-            SubscribeFilter::new(USER_INBOX.to_string(), QoS::AtLeastOnce),
-            SubscribeFilter::new(USER_OUTBOX.to_string(), QoS::AtLeastOnce),
-            SubscribeFilter::new(DEVICE_INBOX.to_string(), QoS::AtLeastOnce),
-        ])
-        .await
-        .map_err(|error| Error::Io(std::io::Error::other(error)))?;
-
-        *self.mqtt.borrow_mut() = Some(mqtt);
-        self.running.replace(true);
-
-        let session = self.clone();
-        task::spawn_local(async move {
-            while *session.running.borrow() {
-                match eventloop.poll().await {
-                    Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                        if connack.code == rumqttc::ConnectReturnCode::Success {
-                            if !session.connected.replace(true) {
-                                session.listeners.connected.store(true, Ordering::Release);
-                                session.notify_connection(|l| l.on_connected());
-                            }
-                        } else {
-                            log::warn!("Messaging MQTT ConnAck error code: {:?}", connack.code);
-                        }
-                    }
-                    Ok(Event::Incoming(Incoming::SubAck(_))) => {
-                        if !session.connected.replace(true) {
-                            session.listeners.connected.store(true, Ordering::Release);
-                            session.notify_connection(|l| l.on_connected());
-                        }
-                        if !session.ready.replace(true) {
-                            session.listeners.ready.store(true, Ordering::Release);
-                            session.notify_connection(|l| l.on_ready());
-                        }
-                    }
-                    Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                        let s = session.clone();
-                        task::spawn_local(async move {
-                            s.handle_publish(publish).await;
-                        });
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        if session.connected.replace(false) {
-                            session.ready.replace(false);
-                            session.listeners.connected.store(false, Ordering::Release);
-                            session.listeners.ready.store(false, Ordering::Release);
-                            session.notify_connection(|l| l.on_disconnected());
-                        }
-                        if *session.running.borrow() {
-                            log::warn!("Messaging MQTT connection error: {error}");
-                            tokio::time::sleep(Duration::from_secs(2)).await;
-                        }
-                    }
-                }
-            }
-            if session.connected.replace(false) {
-                session.listeners.connected.store(false, Ordering::Release);
-                session.notify_connection(|l| l.on_disconnected());
-            }
-            session.ready.replace(false);
-            session.listeners.ready.store(false, Ordering::Release);
-        });
-
-        Ok(())
-    }
-
-    async fn handle_publish(&self, _publish: Publish) {
-        // Dedicated task to process incoming MQTT publish messages
-    }
-
-    pub(crate) async fn stop(&self) {
-        if !self.running.replace(false) {
-            return;
-        }
-
-        let mqtt = self.mqtt.borrow_mut().take();
-        if let Some(mqtt) = mqtt {
-            let _ = mqtt.disconnect().await;
-        }
-
-        self.connected.replace(false);
-        self.ready.replace(false);
-        self.listeners.connected.store(false, Ordering::Release);
-        self.listeners.ready.store(false, Ordering::Release);
-    }
-}
 
 pub(crate) struct VerticleClient {
     event_tx: mpsc::UnboundedSender<VerticleEvent>,
@@ -229,11 +34,32 @@ pub(crate) struct VerticleClient {
     running: Arc<AtomicBool>,
 }
 
-enum VerticleEvent {
+pub(crate) enum VerticleEvent {
     Start {
         complete: oneshot::Sender<StdResult<(), String>>,
     },
     Stop {
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    FriendRequest {
+        user_id: Id,
+        hello: String,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    FriendAccept {
+        user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    FriendReject {
+        user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    FriendRemove {
+        user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    FriendInfo {
+        user_id: Id,
         complete: oneshot::Sender<StdResult<(), String>>,
     },
 }
@@ -252,6 +78,7 @@ impl VerticleClient {
     }
 
     pub(crate) async fn start(&self) -> Result<()> {
+        debug!("VerticleClient: sending Start event to verticle");
         let (tx, rx) = oneshot::channel();
         self.event_tx
             .send(VerticleEvent::Start { complete: tx })
@@ -259,10 +86,12 @@ impl VerticleClient {
         rx.await
             .map_err(|_| Error::State("Messaging verticle startup channel closed".into()))?
             .map_err(Error::State)?;
+        debug!("VerticleClient: verticle started");
         Ok(())
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {
+        debug!("VerticleClient: sending Stop event to verticle");
         let (tx, rx) = oneshot::channel();
         if self
             .event_tx
@@ -274,11 +103,122 @@ impl VerticleClient {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+        debug!("VerticleClient: verticle stopped");
         Ok(())
     }
 
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn sender(&self) -> mpsc::UnboundedSender<VerticleEvent> {
+        self.event_tx.clone()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn friend_request(&self, user_id: Id, hello: String) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::FriendRequest {
+                user_id,
+                hello,
+                complete: tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+        rx.await
+            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+            .map_err(Error::State)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn friend_accept(&self, user_id: Id) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::FriendAccept {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+        rx.await
+            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+            .map_err(Error::State)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn friend_reject(&self, user_id: Id) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::FriendReject {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+        rx.await
+            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+            .map_err(Error::State)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn friend_remove(&self, user_id: Id) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::FriendRemove {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+        rx.await
+            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+            .map_err(Error::State)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn friend_info(&self, user_id: Id) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::FriendInfo {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+        rx.await
+            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+            .map_err(Error::State)?;
+        Ok(())
+    }
+}
+
+pub(crate) struct VerticleOptions {
+    options: Options,
+
+    #[allow(dead_code)]
+    connected: AtomicBool,
+    #[allow(dead_code)]
+    ready: AtomicBool,
+
+    pub(crate) connection_listener: Arc<dyn ConnectionListener>,
+    pub(crate) message_listener: Arc<dyn MessageListener>,
+    pub(crate) channel_listener: Arc<dyn ChannelListener>,
+    pub(crate) contact_listener: Arc<dyn ContactListener>,
+    pub(crate) session_listener: Arc<dyn SessionListener>,
+    pub(crate) friend_request_listener: Arc<dyn FriendRequestListener>,
+}
+
+impl VerticleOptions {
+    pub(crate) fn user_id(&self) -> &Id {
+        self.options.user_id()
+    }
+
+    pub(crate) fn device_id(&self) -> &Id {
+        self.options.device_id()
+    }
+
+    pub(crate) fn into_options(self) -> Options {
+        self.options
     }
 }
 
@@ -291,12 +231,11 @@ pub(crate) struct Verticle {
 
 impl Verticle {
     fn new(
-        options: Options,
-        listeners: Arc<SharedListeners>,
+        options: VerticleOptions,
         event_rx: mpsc::UnboundedReceiver<VerticleEvent>,
         running_flag: Arc<AtomicBool>,
     ) -> Result<Self> {
-        let session = Rc::new(Session::new(options, listeners)?);
+        let session = Rc::new(Session::new(options)?);
         Ok(Self {
             session,
             event_rx,
@@ -308,6 +247,7 @@ impl Verticle {
     fn handle_event(&mut self, event: VerticleEvent) {
         match event {
             VerticleEvent::Start { complete } => {
+                debug!("Verticle handling Start event");
                 let session = self.session.clone();
                 let running_flag = self.running_flag.clone();
                 task::spawn_local(async move {
@@ -319,6 +259,7 @@ impl Verticle {
                 });
             }
             VerticleEvent::Stop { complete } => {
+                debug!("Verticle handling Stop event");
                 self.quit = true;
                 let session = self.session.clone();
                 let running_flag = self.running_flag.clone();
@@ -328,24 +269,219 @@ impl Verticle {
                     let _ = complete.send(Ok(()));
                 });
             }
+            VerticleEvent::FriendRequest {
+                user_id,
+                hello,
+                complete,
+            } => {
+                debug!("Verticle handling FriendRequest event for {user_id}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.friend_request(user_id, hello).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
+            VerticleEvent::FriendAccept { user_id, complete } => {
+                debug!("Verticle handling FriendAccept event for {user_id}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.friend_accept(user_id).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
+            VerticleEvent::FriendReject { user_id, complete } => {
+                debug!("Verticle handling FriendReject event for {user_id}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.friend_reject(user_id).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
+            VerticleEvent::FriendRemove { user_id, complete } => {
+                debug!("Verticle handling FriendRemove event for {user_id}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.friend_remove(user_id).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
+            VerticleEvent::FriendInfo { user_id, complete } => {
+                debug!("Verticle handling FriendInfo event for {user_id}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.friend_info(user_id).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
         }
     }
 
     async fn run_loop(&mut self) {
+        debug!("Verticle run loop entering event wait loop");
         while let Some(event) = self.event_rx.recv().await {
             self.handle_event(event);
             if self.quit {
                 break;
             }
         }
+        debug!("Verticle run loop finished");
+    }
+}
+
+struct CompositeConnectionListener(Arc<SharedListeners>);
+impl ConnectionListener for CompositeConnectionListener {
+    fn on_connecting(&self) {
+        let listeners = self.0.connection_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_connecting();
+        }
+    }
+    fn on_connected(&self) {
+        self.0.connected.store(true, Ordering::Release);
+        let listeners = self.0.connection_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_connected();
+        }
+    }
+    fn on_ready(&self) {
+        self.0.ready.store(true, Ordering::Release);
+        let listeners = self.0.connection_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_ready();
+        }
+    }
+    fn on_disconnected(&self) {
+        self.0.connected.store(false, Ordering::Release);
+        self.0.ready.store(false, Ordering::Release);
+        let listeners = self.0.connection_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_disconnected();
+        }
+    }
+}
+
+struct CompositeMessageListener(Arc<SharedListeners>);
+impl MessageListener for CompositeMessageListener {
+    fn on_message(&self, message: &dyn crate::messaging::message::Message) {
+        let listeners = self.0.message_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_message(message);
+        }
+    }
+    fn on_sent(&self, message: &dyn crate::messaging::message::Message) {
+        let listeners = self.0.message_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_sent(message);
+        }
+    }
+}
+
+struct CompositeChannelListener(Arc<SharedListeners>);
+impl ChannelListener for CompositeChannelListener {
+    fn on_channel_created(&self, channel: &dyn crate::messaging::channel::Channel) {
+        let listeners = self.0.channel_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_channel_created(channel);
+        }
+    }
+    fn on_channel_deleted(&self, channel: &dyn crate::messaging::channel::Channel) {
+        let listeners = self.0.channel_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_channel_deleted(channel);
+        }
+    }
+    fn on_joined_channel(&self, channel: &dyn crate::messaging::channel::Channel) {
+        let listeners = self.0.channel_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_joined_channel(channel);
+        }
+    }
+    fn on_left_channel(&self, channel: &dyn crate::messaging::channel::Channel) {
+        let listeners = self.0.channel_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_left_channel(channel);
+        }
+    }
+    fn on_channel_updated(&self, channel: &dyn crate::messaging::channel::Channel) {
+        let listeners = self.0.channel_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_channel_updated(channel);
+        }
+    }
+}
+
+struct CompositeContactListener(Arc<SharedListeners>);
+impl ContactListener for CompositeContactListener {
+    fn on_contact_added(&self, contact: &dyn crate::messaging::contact::Contact) {
+        let listeners = self.0.contact_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_contact_added(contact);
+        }
+    }
+    fn on_contacts_updated(&self, contacts: &[Box<dyn crate::messaging::contact::Contact>]) {
+        let listeners = self.0.contact_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_contacts_updated(contacts);
+        }
+    }
+    fn on_contacts_removed(&self, contact_ids: &[Id]) {
+        let listeners = self.0.contact_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_contacts_removed(contact_ids);
+        }
+    }
+    fn on_contacts_cleared(&self) {
+        let listeners = self.0.contact_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_contacts_cleared();
+        }
+    }
+}
+
+struct CompositeSessionListener(Arc<SharedListeners>);
+impl SessionListener for CompositeSessionListener {
+    fn on_new_session(&self, session_info: &crate::messaging::session_info::SessionInfo) {
+        let listeners = self.0.session_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_new_session(session_info);
+        }
+    }
+}
+
+struct CompositeFriendRequestListener(Arc<SharedListeners>);
+impl FriendRequestListener for CompositeFriendRequestListener {
+    fn on_friend_request(&self, user_id: &Id, hello: Option<&str>) {
+        let listeners = self.0.friend_request_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_friend_request(user_id, hello);
+        }
+    }
+    fn on_friend_request_accepted(&self, user_id: &Id) {
+        let listeners = self.0.friend_request_listeners.read().unwrap().clone();
+        for l in listeners {
+            l.on_friend_request_accepted(user_id);
+        }
     }
 }
 
 pub(crate) fn deploy(options: Options, listeners: Arc<SharedListeners>) -> Result<VerticleClient> {
+    debug!("Deploying messaging verticle...");
     let (event_tx, event_rx) = mpsc::unbounded_channel::<VerticleEvent>();
     let (reply_tx, reply_rx) = std_mpsc::sync_channel::<StdResult<(), String>>(1);
     let running_flag = Arc::new(AtomicBool::new(false));
     let running_clone = running_flag.clone();
+
+    let verticle_options = VerticleOptions {
+        options,
+        connected: AtomicBool::new(false),
+        ready: AtomicBool::new(false),
+        connection_listener: Arc::new(CompositeConnectionListener(listeners.clone())),
+        message_listener: Arc::new(CompositeMessageListener(listeners.clone())),
+        channel_listener: Arc::new(CompositeChannelListener(listeners.clone())),
+        contact_listener: Arc::new(CompositeContactListener(listeners.clone())),
+        session_listener: Arc::new(CompositeSessionListener(listeners.clone())),
+        friend_request_listener: Arc::new(CompositeFriendRequestListener(listeners.clone())),
+    };
 
     let handle = std::thread::spawn(move || {
         let rt = runtime::Builder::new_current_thread()
@@ -356,7 +492,7 @@ pub(crate) fn deploy(options: Options, listeners: Arc<SharedListeners>) -> Resul
 
         let local = task::LocalSet::new();
         rt.block_on(local.run_until(async move {
-            match Verticle::new(options, listeners, event_rx, running_clone) {
+            match Verticle::new(verticle_options, event_rx, running_clone) {
                 Ok(mut v) => {
                     let _ = reply_tx.send(Ok(()));
                     v.run_loop().await;
@@ -369,10 +505,19 @@ pub(crate) fn deploy(options: Options, listeners: Arc<SharedListeners>) -> Resul
     });
 
     match reply_rx.recv() {
-        Ok(Ok(())) => Ok(VerticleClient::new(event_tx, handle, running_flag)),
-        Ok(Err(msg)) => Err(Error::State(msg)),
-        Err(_) => Err(Error::State(
-            "Messaging verticle startup channel closed".into(),
-        )),
+        Ok(Ok(())) => {
+            debug!("Messaging verticle deployed successfully");
+            Ok(VerticleClient::new(event_tx, handle, running_flag))
+        }
+        Ok(Err(msg)) => {
+            error!("Messaging verticle failed to deploy: {msg}");
+            Err(Error::State(msg))
+        }
+        Err(_) => {
+            error!("Messaging verticle startup channel closed unexpectedly");
+            Err(Error::State(
+                "Messaging verticle startup channel closed".into(),
+            ))
+        }
     }
 }

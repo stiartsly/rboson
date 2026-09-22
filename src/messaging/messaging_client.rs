@@ -31,6 +31,16 @@ pub trait MessagingClient: Send + Sync {
     /// Retrieves the identifier of the current device.
     fn device_id(&self) -> &Id;
 
+    /// Retrieves the identifier of the director node, if configured.
+    fn director_node_id(&self) -> Option<&Id> {
+        None
+    }
+
+    /// Retrieves the endpoint of the director service, if configured.
+    fn director_endpoint(&self) -> Option<&str> {
+        None
+    }
+
     /// Retrieves the identifier of the messaging service peer.
     fn service_peer_id(&self) -> &Id;
 
@@ -97,6 +107,19 @@ pub trait MessagingClient: Send + Sync {
 
     /// Checks if the messaging client is ready to send and receive messages.
     fn is_ready(&self) -> bool;
+
+    /// Retrieves the current connection status of the messaging client.
+    fn connection_status(&self) -> &str {
+        if self.is_ready() {
+            "Connected (Ready)"
+        } else if self.is_connected() {
+            "Connected"
+        } else if self.is_running() {
+            "Connecting"
+        } else {
+            "Disconnected"
+        }
+    }
 
     // -----------------------------------------------------------------
     // Message and conversation APIs

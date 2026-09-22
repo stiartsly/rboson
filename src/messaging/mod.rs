@@ -16,6 +16,7 @@ pub mod message_listener;
 pub mod session_listener;
 
 pub mod client;
+pub(crate) mod session;
 pub mod verticle;
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};

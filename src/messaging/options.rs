@@ -15,6 +15,8 @@ pub const SCHEME_MQTTS: &str = "mqtts";
 pub struct OptionsBuilder {
     peerid: Option<Id>,
     endpoint: Option<url::Url>,
+    director_node_id: Option<Id>,
+    director_endpoint: Option<url::Url>,
     user_key: Option<KeyPair>,
     user_id: Option<Id>,
     device_key: Option<KeyPair>,
@@ -90,6 +92,23 @@ impl OptionsBuilder {
         Self::validate_endpoint(&url)?;
         self.endpoint = Some(url);
         Ok(self)
+    }
+
+    pub fn with_director_node_id(&mut self, node_id: Id) -> &mut Self {
+        self.director_node_id = Some(node_id);
+        self
+    }
+
+    pub fn with_director_endpoint(&mut self, endpoint: impl AsRef<str>) -> Result<&mut Self> {
+        let url = url::Url::parse(endpoint.as_ref())
+            .map_err(|e| ArgumentError::new(format!("Invalid director endpoint URL: {e}")))?;
+        self.director_endpoint = Some(url);
+        Ok(self)
+    }
+
+    pub fn with_director_endpoint_url(&mut self, url: url::Url) -> &mut Self {
+        self.director_endpoint = Some(url);
+        self
     }
 
     pub fn with_user_id(&mut self, user_id: Id) -> &mut Self {
@@ -212,6 +231,8 @@ impl OptionsBuilder {
         Ok(Options {
             peerid,
             endpoint: self.endpoint.clone(),
+            director_node_id: self.director_node_id,
+            director_endpoint: self.director_endpoint.clone(),
             user_id,
             user_key,
             device_id,
@@ -230,6 +251,9 @@ impl OptionsBuilder {
 pub struct Options {
     peerid: Id,
     endpoint: Option<url::Url>,
+
+    director_node_id: Option<Id>,
+    director_endpoint: Option<url::Url>,
 
     user_id: Id,
     user_key: KeyPair,
@@ -271,6 +295,14 @@ impl Options {
 
     pub fn service_endpoint(&self) -> Option<&url::Url> {
         self.endpoint.as_ref()
+    }
+
+    pub fn director_node_id(&self) -> Option<&Id> {
+        self.director_node_id.as_ref()
+    }
+
+    pub fn director_endpoint(&self) -> Option<&url::Url> {
+        self.director_endpoint.as_ref()
     }
 
     pub fn user_key(&self) -> &KeyPair {
@@ -319,10 +351,22 @@ impl Options {
 }
 
 
+#[derive(Debug, Deserialize, Default)]
+struct SerdeDirector {
+    #[serde(rename = "nodeId", default)]
+    node_id: Option<Id>,
+    #[serde(default)]
+    endpoint: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct SerdeOptions {
     service: SerdeService,
     client: SerdeClient,
+    #[serde(default)]
+    director: Option<SerdeDirector>,
     #[serde(rename = "dataDir", default)]
     data_dir: Option<String>,
     #[serde(default)]
@@ -369,6 +413,38 @@ impl TryFrom<SerdeOptions> for Options {
             b.with_service_endpoint(endpoint)?;
         }
 
+        let mut director_node_id = None;
+        let mut director_endpoint = None;
+
+        if let Some(d) = sopts.director {
+            if let Some(node_id) = d.node_id {
+                director_node_id = Some(node_id);
+            }
+            if let Some(endpoint) = d.endpoint.or(d.url) {
+                director_endpoint = Some(endpoint);
+            }
+        }
+
+        if director_node_id.is_none() {
+            if let Ok(id_str) = env::var("BOSON_DIRECTOR_NODEID") {
+                if let Ok(id) = Id::try_from(id_str.as_str()) {
+                    director_node_id = Some(id);
+                }
+            }
+        }
+        if director_endpoint.is_none() {
+            if let Ok(url_str) = env::var("BOSON_DIRECTOR_URL") {
+                director_endpoint = Some(url_str);
+            }
+        }
+
+        if let Some(id) = director_node_id {
+            b.with_director_node_id(id);
+        }
+        if let Some(endpoint) = director_endpoint {
+            b.with_director_endpoint(endpoint)?;
+        }
+
         let user_key = sopts
             .client
             .user_private_key
@@ -384,9 +460,12 @@ impl TryFrom<SerdeOptions> for Options {
             if userid != fromid {
                 return Err(ArgumentError::new("userId does not match userPrivateKey") as Error);
             }
+        }
+        let explicit_user_id = sopts.client.user_id;
+        b.with_user_keypair(user_key);
+        if let Some(userid) = explicit_user_id {
             b.with_user_id(userid);
         }
-        b.with_user_keypair(user_key);
 
         let device_key = sopts
             .client
@@ -405,9 +484,12 @@ impl TryFrom<SerdeOptions> for Options {
                     ArgumentError::new("deviceId does not match devicePrivateKey") as Error,
                 );
             }
+        }
+        let explicit_device_id = sopts.client.device_id;
+        b.with_device_keypair(device_key);
+        if let Some(device_id) = explicit_device_id {
             b.with_device_id(device_id);
         }
-        b.with_device_keypair(device_key);
 
         let path = if let Some(data_dir) = sopts.data_dir {
             expand_home_dir(&data_dir)

@@ -5,7 +5,10 @@ use boson::{CryptoIdentity, Id, Identity};
 
 #[derive(Parser, Debug)]
 #[command(name = "keygen")]
-#[command(about = "Generate a Boson user identity or Device key", long_about = None)]
+#[command(
+    about = "Boson user and device identity generation tool",
+    long_about = None
+)]
 struct Options {
     /// Generate a Boson user identity (default)
     #[arg(short = 'u', long = "user")]

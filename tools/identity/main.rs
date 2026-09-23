@@ -188,7 +188,7 @@ async fn director_command(cli: &Cli, url: Option<&str>) -> Result<()> {
         .with_insecure(cli.insecure);
     let client = Client::new(dir_opts)?;
     let status = client.fetch_node_status().await?;
-    print_status(&status, None);
+    print_status(&director_url, &status, None);
     Ok(())
 }
 
@@ -201,13 +201,12 @@ async fn user_command(
 ) -> Result<()> {
     let director_url = resolve_director_url(cli, None)?;
 
-    // If --all: display director node status and advertised services first
     if all {
         let dir_opts = director::Options::new(&director_url)?
             .with_insecure(cli.insecure);
         let pub_client = Client::new(dir_opts)?;
         let status = pub_client.fetch_node_status().await?;
-        print_status(&status, None);
+        print_status(&director_url, &status, None);
         println!();
     }
 
@@ -511,11 +510,12 @@ fn format_system_time(time: std::time::SystemTime) -> String {
     }
 }
 
-fn print_status(status: &NodeStatus, authenticated_user: Option<&Id>) {
+fn print_status(endpoint: &str, status: &NodeStatus, authenticated_user: Option<&Id>) {
     println!("+------------------------------------------------------------+");
     println!("|                  Boson Super Node Information              |");
     println!("+------------------------------------------------------------+");
     print_field("Node ID", status.node_id());
+    print_field("Endpoint", endpoint);
     print_field("Software", status.software().unwrap_or("-"));
     print_field("Version", status.version().unwrap_or("-"));
     print_field("Name", status.name().unwrap_or("-"));

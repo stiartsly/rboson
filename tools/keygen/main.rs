@@ -18,7 +18,6 @@ struct Options {
 
 fn main() {
     let options = Options::parse();
-
     let generate_device = options.device;
     let generate_user = options.user || !options.device;
 
@@ -40,7 +39,7 @@ fn generate_user_identity() {
     let id = identity.id();
 
     println!("+--------------------------------------------------------------+");
-    println!("|                 Boson User Identity Created                 |");
+    println!("|                 Boson User Identity Created                  |");
     println!("+--------------------------------------------------------------+");
     println!("  User ID     : {} (base58)", id.to_base58());
     println!("  DID         : {}", id.to_did_string());
@@ -55,7 +54,7 @@ fn generate_device_key() {
     let device_id = Id::from(keypair.public_key());
 
     println!("+--------------------------------------------------------------+");
-    println!("|                  Boson Device Key Created                   |");
+    println!("|                  Boson Device Key Created                    |");
     println!("+--------------------------------------------------------------+");
     println!("  Device ID   : {} (base58)", device_id.to_base58());
     println!("  Private Key : {} (hexstr)", keypair.private_key().to_hexstr());

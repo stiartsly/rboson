@@ -32,8 +32,8 @@ name = "chat"
 path = "apps/chat/main.rs"
 
 [[bin]]
-name = "identity"
-path = "tools/identity/main.rs"
+name = "keygen"
+path = "tools/keygen/main.rs"
 
 [[bin]]
 name = "director"

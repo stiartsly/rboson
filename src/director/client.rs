@@ -1,26 +1,31 @@
-use reqwest::{self, Method, StatusCode};
-use serde_json::{json, Value};
+use std::error::Error as StdError;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
 use url::Url;
+use serde_json::{json, Value};
+use reqwest::{self, Method, StatusCode};
 
-use super::pow::{self, Solution};
-use super::{
-    base64url,
-    errors::{
-        ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, PassphraseRequiredError,
-        RateLimitError, RegistrationDisabledError, ServerError, ServiceBusyError,
-        UnauthorizedError,
-    },
-    sign_nonce, Avatar, Device, NodeStatus, Options, Plan, Profile, ProfileUpdate, Subscription,
-    UserPlan, UserRegistration,
-};
 use crate::{
     errors::{MalformedError, NetworkError, Result, StateError},
     signature, Id,
 };
+use super::pow::{self, Solution};
+use super::errors::{
+    ConflictError, ForbiddenError, InvalidRequestError,
+    NotFoundError, PassphraseRequiredError,
+    RateLimitError, RegistrationDisabledError,
+    ServerError, ServiceBusyError,
+    UnauthorizedError,
+};
+use super::{
+    base64url,
+    sign_nonce, Avatar, Device, NodeStatus, Options,
+    Plan, Profile, ProfileUpdate, Subscription,
+    UserPlan, UserRegistration,
+};
+
 
 const API_PREFIX: &str = "api/v1/client";
 const AUTH_NONCE_BYTES: usize = 32;
@@ -61,16 +66,16 @@ impl Client {
         base_url.set_query(None);
         base_url.set_fragment(None);
 
-        let mut b = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+        let mut b = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none());
         if options.is_insecure() {
             b = b.danger_accept_invalid_certs(true);
         }
-        let client = b.build().map_err(|e| NetworkError::new(e.to_string()))?;
-        let device_id = options
-            .device_private_key()
-            .map(signature::KeyPair::from)
-            .map(|kp| Id::from(kp.public_key()));
+        let client = b.build().map_err(|e|
+            NetworkError::new(e.to_string())
+        )?;
 
+        let device_id = options.device_id().cloned();
         Ok(Self {
             client,
             base_url,
@@ -98,7 +103,7 @@ impl Client {
     }
 
     pub fn device_id(&self) -> Option<&Id> {
-        self.device_id.as_ref()
+        self.options.device_id()
     }
 
     pub fn is_closed(&self) -> bool {
@@ -130,12 +135,11 @@ impl Client {
 
     pub async fn fetch_node_id(&self) -> Result<Id> {
         self.check_open()?;
-        let body = self.http_get("id", false).await?;
+        let body: Value = self.http_get_json("id", false).await?;
         let node_id = body
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| MalformedError::new("missing 'id'"))?;
-
         let id = node_id
             .parse::<Id>()
             .map_err(|e| MalformedError::new(format!("error parsing node id {e}")))?;
@@ -147,31 +151,18 @@ impl Client {
         self.http_get_json("node", false).await
     }
 
-    pub async fn register_user(&self) -> Result<()> {
-        let Some(registration) = self.options.registration() else {
-            return Err(StateError::new("No registration configured").into());
-        };
-        self.register_user_with(registration).await
-    }
-
-    pub async fn register_user_with(&self, registration: &UserRegistration) -> Result<()> {
+    pub async fn register_user(&self, registration: &UserRegistration) -> Result<()> {
         self.check_open()?;
 
-        let user_key = self
-            .options
-            .user_private_key()
-            .map(signature::KeyPair::from)
-            .ok_or_else(|| StateError::new("Registering a user needs the user key"))?;
+        let Some(user_key) = self.options.user_key() else {
+            return Err(StateError::new("Registering a user needs the user key"));
+        };
 
         let initial_device_key = if registration.has_initial_device() {
-            let device_key = self
-                .options
-                .device_private_key()
-                .map(signature::KeyPair::from)
-                .ok_or_else(|| {
-                    StateError::new("Registering an initial device needs the device key")
-                })?;
-            Some(device_key)
+            let Some(key) = self.options.device_key() else {
+                return Err(StateError::new("Registering an initial device needs the device ID"));
+            };
+            Some(key)
         } else {
             None
         };
@@ -182,7 +173,7 @@ impl Client {
         };
 
         let challenge = self.fetch_challenge().await?;
-        let solve_key = user_key.clone();
+        let challenge_key = user_key.clone();
         let challenge_nonce = challenge.nonce;
         let challenge_n = challenge.n;
         let challenge_k = challenge.k;
@@ -190,7 +181,7 @@ impl Client {
         let solution = tokio::task::spawn_blocking(move || {
             pow::solve(
                 node_id,
-                &solve_key,
+                &challenge_key,
                 challenge_n,
                 challenge_k,
                 challenge_effort,
@@ -200,13 +191,13 @@ impl Client {
         })
         .await
         .map_err(|error| StateError::new(format!("Registration solver failed: {error}")))?
-        .map_err(|error| StateError::new(error))?;
+        .map_err(|error| StateError::new(format!("{error}")))?;
 
         self.submit_registration(
             registration,
             node_id,
             &user_key,
-            initial_device_key.as_ref(),
+            initial_device_key,
             &challenge,
             solution,
         )
@@ -219,13 +210,9 @@ impl Client {
         app: &str,
         passphrase: Option<&str>,
     ) -> Result<()> {
-        let key = self
-            .options
-            .device_private_key()
-            .map(signature::KeyPair::from)
-            .ok_or_else(|| {
-                StateError::new("No device key configured; pass a device key to register")
-            })?;
+        let Some(key) = self.options.device_key() else {
+            return Err(StateError::new("No device key configured; pass a device key to register"));
+        };
 
         self.register_device_with_key(&key, name, app, passphrase)
             .await
@@ -248,13 +235,15 @@ impl Client {
         }
 
         let nonce = crate::random_array::<AUTH_NONCE_BYTES>();
+        let signature = sign_nonce(key.private_key(), &nonce).map_err(|e|
+            MalformedError::new(e.to_string())
+        )?;
         let mut body = json!({
             "deviceId": Id::from(key.public_key()),
             "deviceName": name,
             "appName": app,
-            "nonce": base64url(&nonce),
-            "deviceSig": sign_nonce(key.private_key(), &nonce).map_err(|e|
-                MalformedError::new(e.to_string()))?
+            "nonce": nonce,
+            "deviceSig": signature,
         });
         if let Some(passphrase) = passphrase {
             if passphrase.is_empty() {
@@ -327,6 +316,10 @@ impl Client {
         self.check_open()?;
         self.check_identity()?;
 
+        if passphrase.map(|p| p.is_empty()).unwrap_or(false) {
+            return Err(InvalidRequestError::new("Passphrase cannot be empty"));
+        }
+
         if update.is_empty() {
             return Err(InvalidRequestError::new(
                 "The profile update changes nothing",
@@ -334,11 +327,9 @@ impl Client {
         }
         let mut body = Value::Object(update.fields());
         if let Some(passphrase) = passphrase {
-            if passphrase.is_empty() {
-                return Err(InvalidRequestError::new("Passphrase cannot be empty"));
-            }
             body["passphrase"] = json!(passphrase);
         }
+
         self.http_call(Method::PUT, "profile", Some(body), None, true)
             .await
             .map(|_| ())
@@ -352,8 +343,7 @@ impl Client {
             return Err(InvalidRequestError::new("The avatar image is empty"));
         }
         let content_type = avatar_content_type(content_type)?;
-        let body = self
-            .http_call(
+        let body = self.http_call(
                 Method::PUT,
                 "avatar",
                 None,
@@ -539,10 +529,11 @@ impl Client {
         }
     }
 
+    /*
     async fn http_get(&self, path: &str, authenticated: bool) -> Result<Value> {
         self.http_call(Method::GET, path, None, None, authenticated)
             .await
-    }
+    }*/
 
     async fn http_get_json<T: serde::de::DeserializeOwned>(
         &self,
@@ -552,8 +543,7 @@ impl Client {
         let response = self
             .raw(Method::GET, path, None, None, authenticated)
             .await?;
-        let response = self.check_response(response).await?;
-        response
+        self.check_response(response).await?
             .json()
             .await
             .map_err(|e| MalformedError::new(e.to_string()).into())
@@ -628,6 +618,7 @@ impl Client {
         if let Some(token) = self.get_token() {
             return Ok(token);
         }
+
         let user_id = self
             .options
             .user_id()
@@ -665,6 +656,7 @@ impl Client {
         self.set_token(Some(token.clone()));
         Ok(token)
     }
+
     fn url(&self, path: &str) -> Result<Url> {
         self.base_url
             .join(path.trim_start_matches('/'))
@@ -691,18 +683,20 @@ fn avatar_content_type(content_type: &str) -> Result<&'static str> {
 
 fn parse_error_message(text: &str) -> String {
     let trimmed = text.trim();
-    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        if let Some(msg) = value.get("message").and_then(Value::as_str) {
-            return msg.to_owned();
-        }
-        if let Some(err) = value.get("error").and_then(Value::as_str) {
-            return err.to_owned();
-        }
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return trimmed.to_owned();
+    };
+
+    if let Some(msg) = value.get("message").and_then(Value::as_str) {
+        return msg.to_owned();
+    }
+    if let Some(err) = value.get("error").and_then(Value::as_str) {
+        return err.to_owned();
     }
     trimmed.to_owned()
 }
 
-fn response_error(status: u16, message: String) -> Box<dyn std::error::Error> {
+fn response_error(status: u16, message: String) -> Box<dyn StdError> {
     match status {
         400 => InvalidRequestError::new(message),
         401 => UnauthorizedError::new(message),

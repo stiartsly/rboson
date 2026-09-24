@@ -1,5 +1,5 @@
 use boson::{
-    director::{Options, UserRegistration},
+    director::{Client, Options, UserRegistration},
     signature::KeyPair,
     Id,
 };
@@ -20,14 +20,6 @@ fn assert_loaded(
         device_key.private_key()
     );
     assert!(options.is_insecure());
-
-    let registration = options.registration().unwrap();
-    assert_eq!(registration.name(), Some("Alice"));
-    assert_eq!(registration.email(), Some("alice@example.com"));
-    assert_eq!(registration.bio(), Some("Boson user"));
-    assert_eq!(registration.passphrase(), Some("secret"));
-    assert_eq!(registration.device_name(), Some("Laptop"));
-    assert_eq!(registration.app_name(), Some("Boson"));
 }
 
 #[test]
@@ -40,8 +32,7 @@ fn test_from_url_options() {
     assert!(options.user_private_key().is_none());
     assert!(options.device_private_key().is_none());
     assert!(!options.is_insecure());
-    assert!(options.registration().is_none());
-    assert!(options.check_completeness().is_ok());
+    assert!(Client::new(options).is_ok());
 }
 
 #[test]
@@ -56,13 +47,19 @@ fn test_options_with_builders() {
         .with_passphrase("secret")
         .with_initial_device("Laptop", "Boson");
 
+    assert_eq!(registration.name(), Some("Alice"));
+    assert_eq!(registration.email(), Some("alice@example.com"));
+    assert_eq!(registration.bio(), Some("Boson user"));
+    assert_eq!(registration.passphrase(), Some("secret"));
+    assert_eq!(registration.device_name(), Some("Laptop"));
+    assert_eq!(registration.app_name(), Some("Boson"));
+
     let options = Options::new("https://director.example")
         .unwrap()
         .with_node_id(node_id)
         .with_user_id(Id::from(user_key.public_key()))
         .with_user_private_key(user_key.private_key().clone())
         .with_device_private_key(device_key.private_key().clone())
-        .with_registration(registration)
         .with_insecure(true);
 
     assert_loaded(
@@ -72,7 +69,7 @@ fn test_options_with_builders() {
         &user_key,
         &device_key,
     );
-    options.check_completeness().unwrap();
+    assert!(Client::new(options).is_ok());
 }
 
 #[test]
@@ -85,7 +82,7 @@ fn test_user_id_builder_clears_user_private_key() {
 
     assert!(options.user_private_key().is_none());
     assert!(options.device_private_key().is_none());
-    assert!(options.check_completeness().is_err());
+    assert!(Client::new(options).is_err());
 }
 
 #[test]
@@ -94,7 +91,7 @@ fn test_check_completion_rejects_device_without_user_identity() {
         .unwrap()
         .with_device_private_key(KeyPair::random().private_key().clone());
 
-    let error = options.check_completeness().unwrap_err();
+    let error = Client::new(options).unwrap_err();
     assert!(error.to_string().contains("device key"));
 }
 
@@ -104,7 +101,7 @@ fn test_check_completion_rejects_user_id_without_device() {
         .unwrap()
         .with_user_id(Id::random());
 
-    let error = options.check_completeness().unwrap_err();
+    let error = Client::new(options).unwrap_err();
     assert!(error.to_string().contains("device key"));
 }
 
@@ -117,12 +114,7 @@ fn test_private_key_builders_update_identity_state() {
         .with_user_private_key(user_key.private_key().clone())
         .with_device_private_key(device_key.private_key().clone());
 
-    /*assert_eq!(
-        options.user_id(),
-        None,
-        "setting a private key does not infer a user ID"
-    );*/
     assert_eq!(options.user_private_key(), Some(user_key.private_key()));
     assert_eq!(options.device_private_key(), Some(device_key.private_key()));
-    assert!(options.check_completeness().is_ok());
+    assert!(Client::new(options).is_ok());
 }

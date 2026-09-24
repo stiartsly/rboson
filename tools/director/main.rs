@@ -27,14 +27,6 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Display all public information about a Director node
-    #[command(name = "director")]
-    Director {
-        /// Director node URL (defaults to $BOSON_DIRECTOR_URL)
-        #[arg(value_name = "DIRECTOR_URL")]
-        url: String,
-    },
-
     /// Display information about a user and list their authorized devices
     #[command(name = "user")]
     User {
@@ -116,9 +108,6 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::Director { url }) => {
-            director_command(&cli, Some(url.as_str())).await
-        }
         Some(Commands::User { user_id, user_key, devices, all }) => {
             user_command(
                 &cli,
@@ -307,7 +296,7 @@ async fn reguser_command(
         reg = reg.with_passphrase(passphrase);
     }
 
-    match client.register_user_with(&reg).await {
+    match client.register_user(&reg).await {
         Ok(()) => {
             println!("User {user_id} successfully registered.");
             println!();

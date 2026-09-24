@@ -78,22 +78,21 @@ mod tests {
         let user_name = format!("user_{:08x}", rand::random::<u32>());
         let email = format!("{user_name}@example.com");
 
+        let registration = UserRegistration::new()
+            .with_name(user_name.clone())
+            .with_email(email)
+            .with_bio("Registered via Director client apitest")
+            .with_passphrase("test_secret_123")
+            .with_initial_device("APITestDevice", "BosonAPITest");
+
         let options = Options::new(&url)?
             .with_user_id(Id::from(user_key.public_key()))
             .with_user_private_key(user_key.private_key().clone())
             .with_device_private_key(device_key.private_key().clone())
-            .with_registration(
-                UserRegistration::new()
-                    .with_name(user_name.clone())
-                    .with_email(email)
-                    .with_bio("Registered via Director client apitest")
-                    .with_passphrase("test_secret_123")
-                    .with_initial_device("APITestDevice", "BosonAPITest"),
-            )
             .with_insecure(true);
         let client = Client::new(options)?;
 
-        client.register_user().await?;
+        client.register_user(&registration).await?;
 
         // Verify registration succeeded and authenticated calls work
         let profile = client.get_profile().await?;
@@ -223,32 +222,24 @@ async fn register_user_on_director(
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
 
-    let mut options = Options::new(&url)?
+    let mut registration = UserRegistration::new()
+        .with_name(user_name)
+        .with_email(email)
+        .with_bio("Registered via Director client apitest")
+        .with_initial_device("APITestDevice", "BosonAPITest");
+
+    if let Some(pass) = passphrase {
+        registration = registration.with_passphrase(pass);
+    }
+
+    let options = Options::new(&url)?
         .with_user_id(Id::from(user_key.public_key()))
         .with_user_private_key(user_key.private_key().clone())
         .with_device_private_key(device_key.private_key().clone())
-        .with_registration(
-            UserRegistration::new()
-                .with_name(user_name)
-                .with_email(email)
-                .with_bio("Registered via Director client apitest")
-                .with_initial_device("APITestDevice", "BosonAPITest"),
-        )
         .with_insecure(true);
 
-    if let Some(pass) = passphrase {
-        options = options.with_registration(
-            UserRegistration::new()
-                .with_name(user_name)
-                .with_email(email)
-                .with_bio("Registered via Director client apitest")
-                .with_passphrase(pass)
-                .with_initial_device("APITestDevice", "BosonAPITest"),
-        );
-    }
-
     let client = Client::new(options)?;
-    client.register_user().await?;
+    client.register_user(&registration).await?;
     Ok((client, user_key))
 }
 

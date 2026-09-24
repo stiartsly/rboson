@@ -75,19 +75,17 @@ async fn test_register_user() {
         respond(&mut stream, &json!([])).await;
     });
 
+    let registration = director::UserRegistration::new()
+        .with_name("Alice")
+        .with_email("alice@example.com")
+        .with_bio("Boson user")
+        .with_passphrase("secret");
     let options = director::Options::new(format!("http://{address}"))
         .unwrap()
         .with_user_id(expected_user_id)
-        .with_user_private_key(user_key.private_key().clone())
-        .with_registration(
-            director::UserRegistration::new()
-                .with_name("Alice")
-                .with_email("alice@example.com")
-                .with_bio("Boson user")
-                .with_passphrase("secret"),
-        );
+        .with_user_private_key(user_key.private_key().clone());
     let client = Client::new(options).unwrap();
-    client.register_user().await.unwrap();
+    client.register_user(&registration).await.unwrap();
     assert!(client.list_devices().await.unwrap().is_empty());
     server.await.unwrap();
 }

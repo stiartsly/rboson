@@ -1,7 +1,6 @@
 use std::fmt;
 use url::Url;
 
-use super::UserRegistration;
 use crate::{
     errors::{ArgumentError, Result},
     signature::{KeyPair, PrivateKey},
@@ -16,9 +15,8 @@ pub struct DirectorOptions {
     node_id: Option<Id>,
     user_id: Option<Id>,
     user_key: Option<KeyPair>,
+    device_id: Option<Id>,
     device_key: Option<KeyPair>,
-
-    registration: Option<UserRegistration>,
 }
 
 impl DirectorOptions {
@@ -28,9 +26,9 @@ impl DirectorOptions {
             node_id: None,
             user_key: None,
             user_id: None,
+            device_id: None,
             device_key: None,
             insecure: false,
-            registration: None,
         })
     }
 
@@ -60,12 +58,8 @@ impl DirectorOptions {
     }
 
     pub fn with_device_keypair(mut self, key: KeyPair) -> Self {
+        self.device_id = Some(Id::from(key.public_key()));
         self.device_key = Some(key);
-        self
-    }
-
-    pub fn with_registration(mut self, registration: UserRegistration) -> Self {
-        self.registration = Some(registration);
         self
     }
 
@@ -90,12 +84,24 @@ impl DirectorOptions {
         self.user_key.as_ref().map(|kp| kp.private_key())
     }
 
+    pub fn user_key(&self) -> Option<&KeyPair> {
+        self.user_key.as_ref()
+    }
+
     pub fn has_user_private_key(&self) -> bool {
         self.user_key.is_some()
     }
 
+    pub fn device_id(&self) -> Option<&Id> {
+        self.device_id.as_ref()
+    }
+
     pub fn device_private_key(&self) -> Option<&PrivateKey> {
         self.device_key.as_ref().map(|kp| kp.private_key())
+    }
+
+    pub fn device_key(&self) -> Option<&KeyPair> {
+        self.device_key.as_ref()
     }
 
     pub fn has_device_private_key(&self) -> bool {
@@ -106,11 +112,7 @@ impl DirectorOptions {
         self.insecure
     }
 
-    pub fn registration(&self) -> Option<&UserRegistration> {
-        self.registration.as_ref()
-    }
-
-    pub fn check_completeness(&self) -> Result<()> {
+    pub(crate) fn check_completeness(&self) -> Result<()> {
         if self.user_id.is_none() && self.device_key.is_some() {
             return Err(ArgumentError::new(
                 "A device key requires a user key or user ID",
@@ -119,14 +121,6 @@ impl DirectorOptions {
         if self.user_id.is_some() && self.user_key.is_none() && self.device_key.is_none() {
             return Err(ArgumentError::new("A user ID requires a device key"));
         }
-
-        // TODO:
-        /*
-        if self.registration.as_ref().map_or(false, |r| r.has_initial_device()) && self.device_key.is_none() {
-            return Err(ArgumentError::new(
-                "An initial device requires a device key",
-            ));
-        }*/
         Ok(())
     }
 }
@@ -146,19 +140,18 @@ impl fmt::Display for DirectorOptions {
             self.is_insecure()
         )?;
 
-        write!(f, ", userid: {}", idstr(&self.user_id))?;
+        write!(f, ", user_id: {}", idstr(&self.user_id))?;
         write!(f, ", has_user_private_key:{}", self.user_key.is_some())?;
         write!(f, ", has_device_private_key:{}", self.device_key.is_some())?;
 
-        if let Some(registration) = &self.registration {
-            write!(f, ", registration:{:?}", registration)?;
-        }
         write!(f, "}}")
     }
 }
 
 fn parse_director_url(url: &str) -> Result<Url> {
-    let url = Url::parse(url).map_err(|e| ArgumentError::new(e.to_string()))?;
+    let url = Url::parse(url).map_err(|e|
+        ArgumentError::new(e.to_string())
+    )?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(ArgumentError::new("Director URL must use http or https"));
     }

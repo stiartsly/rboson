@@ -36,8 +36,8 @@ name = "keygen"
 path = "tools/keygen/main.rs"
 
 [[bin]]
-name = "identity"
-path = "tools/identity/main.rs"
+name = "director"
+path = "tools/director/main.rs"
 
 [features]
 devp        = ["inspect"]

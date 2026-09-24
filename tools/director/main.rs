@@ -41,10 +41,6 @@ enum Commands {
         /// List all authorized devices for this user
         #[arg(short = 'l', long = "devices", default_value_t = false)]
         devices: bool,
-
-        /// Display all information about director node, user, and devices
-        #[arg(long = "all", default_value_t = false)]
-        all: bool,
     },
 
     /// Register a new user with the Director node
@@ -108,13 +104,12 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::User { user_id, user_key, devices, all }) => {
+        Some(Commands::User { user_id, user_key, devices }) => {
             user_command(
                 &cli,
                 user_id.as_deref(),
                 user_key.as_deref(),
-                *devices,
-                *all,
+                *devices
             )
             .await
         }
@@ -185,69 +180,57 @@ async fn user_command(
     cli: &Cli,
     user_id_arg: Option<&str>,
     user_key_arg: Option<&str>,
-    list: bool,
-    all: bool,
+    devices: bool
 ) -> Result<()> {
     let director_url = resolve_director_url(cli, None)?;
 
-    if all {
-        let dir_opts = director::Options::new(&director_url)?
-            .with_insecure(cli.insecure);
-        let pub_client = Client::new(dir_opts)?;
-        let status = pub_client.fetch_node_status().await?;
-        print_status(&director_url, &status, None);
-        println!();
-    }
 
-    // 1. Resolve user ID: from argument or $BOSON_USER_ID
-    let target_user_id_str = user_id_arg
-        .map(str::to_owned);
+    let user_id_arg = user_id_arg
+        .map(str::to_owned)
+        .or_else(|| env::var("BOSON_USER_ID").ok())
+        .map(|s| Id::try_from(s.as_str()))
+        .transpose()?;
 
-    // 2. Resolve user private key: from argument or environment variables
-    let user_sk_opt = user_key_arg
+    let user_key_opt = user_key_arg
         .map(str::to_owned)
         .or_else(|| env::var("BOSON_USER_PRIVATE_KEY").ok())
         .map(|s| signature::PrivateKey::try_from(s.as_str()))
+        .transpose()?
+        .map(signature::KeyPair::try_from)
         .transpose()?;
 
-    let Some(user_sk) = user_sk_opt else {
+    let Some(user_key) = user_key_opt else {
         return Err(boson::errors::ArgumentError::new(
             "User key must be provided or set in $BOSON_USER_PRIVATE_KEY"
         ));
     };
 
-    let userid = Id::from(signature::KeyPair::from(&user_sk).public_key());
+    let Some(user_id) = user_id_arg else {
+        return Err(boson::errors::ArgumentError::new(
+            "User ID must be provided or set in $BOSON_USER_ID"
+        ));
+    };
+
+    if user_id != Id::from(user_key.public_key()) {
+        return Err(boson::errors::ArgumentError::new(
+            "User ID {user_id}does not match the provided user key"
+        ));
+    }
 
     let dir_opts = director::Options::new(&director_url)?
         .with_insecure(cli.insecure)
-        .with_user_private_key(user_sk);
-    let client = Client::new(dir_opts)?;
+        .with_user_keypair(user_key);
 
+    let client = Client::new(dir_opts)?;
     let profile = client.get_profile().await?;
     print_user_profile(&profile);
 
-    if list || all {
+    if devices {
         println!();
         let devices = client.list_devices().await?;
-        print_devices(&devices, Some(&userid));
+        print_devices(&devices, Some(&user_id));
     }
-
-
-    if let Some(id_str) = target_user_id_str {
-        let user_id = Id::try_from(id_str.as_str())?;
-        println!("+------------------------------------------------------------+");
-        println!("|                   User Profile Information                 |");
-        println!("+------------------------------------------------------------+");
-        print_field("User ID", user_id);
-        print_field("DID", user_id.to_did_string());
-        println!();
-        println!("(Provide --user-key or set $BOSON_USER_PRIVATE_KEY to query full profile and devices from Director)");
-        return Ok(());
-    }
-
-    Err(boson::errors::ArgumentError::new(
-        "User ID must be specified, or provide user key via --user-key or $BOSON_USER_PRIVATE_KEY",
-    ))
+    Ok(())
 }
 
 async fn reguser_command(

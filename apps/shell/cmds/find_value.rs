@@ -1,8 +1,6 @@
 use boson::dht::Node;
 use clap::{arg, ArgMatches, Command};
 
-use super::parse_id;
-
 pub(crate) fn command() -> Command {
     Command::new("findvalue")
         .visible_alias("find_value")
@@ -11,7 +9,9 @@ pub(crate) fn command() -> Command {
 }
 
 pub(crate) async fn run(matches: &ArgMatches, node: &Node) {
-    let Some(valueid) = parse_id(matches.get_one::<String>("ID").unwrap()) else {
+    let id_str = matches.get_one::<String>("ID").unwrap();
+    let Ok(valueid) = id_str.parse() else {
+        println!("\x1b[31mInvalid id '{id_str}'\x1b[0m");
         return;
     };
     println!("Attempting to find value with id: {valueid} ...");

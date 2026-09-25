@@ -1,8 +1,6 @@
 use boson::dht::Node;
 use clap::{arg, value_parser, ArgMatches, Command};
 
-use super::parse_id;
-
 pub(crate) fn command() -> Command {
     Command::new("findpeer")
         .visible_alias("find_peer")
@@ -16,9 +14,12 @@ pub(crate) fn command() -> Command {
 }
 
 pub(crate) async fn run(matches: &ArgMatches, node: &Node) {
-    let Some(peerid) = parse_id(matches.get_one::<String>("ID").unwrap()) else {
+    let id_str = matches.get_one::<String>("ID").unwrap();
+    let Ok(peerid) = id_str.parse() else {
+        println!("\x1b[31mInvalid id '{id_str}'\x1b[0m");
         return;
     };
+
     let count = *matches.get_one::<usize>("count").unwrap();
     println!("Attempting to find peers with id: {peerid} ...");
     match node.find_peer(&peerid, -1, count, None).await {

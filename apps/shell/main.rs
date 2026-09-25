@@ -16,7 +16,6 @@ use boson::{
 use log::{debug, info, warn};
 
 mod cmds;
-mod config;
 mod ui;
 
 struct ConnectionReadiness {
@@ -105,30 +104,6 @@ struct Options {
     )]
     config: Option<String>,
 
-    /// Override the node data directory
-    #[arg(long, value_name = "DIR")]
-    datadir: Option<String>,
-
-    /// Override the node private key
-    #[arg(long, value_name = "PRIVATE_KEY")]
-    privatekey: Option<String>,
-
-    /// Override the node listen port
-    #[arg(long, value_name = "PORT")]
-    port: Option<u16>,
-
-    /// Director URL; defaults to BOSON_DIRECTOR_URL or the built-in default
-    #[arg(long, value_name = "URL")]
-    director_url: Option<String>,
-
-    /// User private key; defaults to BOSON_USER_KEY or the built-in default
-    #[arg(long, value_name = "PRIVATE_KEY")]
-    userkey: Option<String>,
-
-    /// Accept invalid Director TLS certificates
-    #[arg(long)]
-    insecure: bool,
-
     /// Enable log output on the console
     #[arg(long)]
     log: bool,
@@ -144,18 +119,15 @@ fn build_cli() -> Command {
         .subcommand(cmds::find_node::command())
         .subcommand(cmds::find_peer::command())
         .subcommand(cmds::find_value::command())
-        .subcommand(cmds::identity::command())
-        .subcommand(cmds::login::command())
-        .subcommand(cmds::me::command())
-        .subcommand(cmds::device::command())
+        .subcommand(cmds::info::command())
         .subcommand(cmds::log::command())
-        .subcommand(cmds::status::command())
+        .subcommand(cmds::routing_table::command())
 }
 
 fn use_ui_log_output(shell_ui: &ui::ShellUi) {
     let shell_ui = shell_ui.clone();
     logger::set_console_output_handler(move |line| {
-        shell_ui.log(line);
+        shell_ui.log(ui::colorize_log_line(&line));
     });
 }
 
@@ -163,9 +135,7 @@ async fn execute_command(
     matches: ArgMatches,
     node: &Node,
     node_private_key: &PrivateKey,
-    shell_config: &config::ShellConfig,
     readiness: &ConnectionReadiness,
-    login_session: &mut cmds::login::Session,
 ) {
     match matches.subcommand() {
         Some(("announcepeer", m)) => {
@@ -183,16 +153,15 @@ async fn execute_command(
         Some(("findvalue", m)) => {
             cmds::find_value::run(m, node).await;
         }
-        Some(("identity", m)) => {
-            cmds::identity::run(m, shell_config.user_private_key());
+        Some(("info", _)) => {
+            cmds::info::run(node, readiness.is_connected());
         }
-        Some(("device", m)) => {
-            cmds::device::run(m, login_session.client(), node.options().data_dir()).await;
+        Some(("log", m)) => {
+            cmds::log::run(m);
         }
-        Some(("login", _)) => cmds::login::run(login_session).await,
-        Some(("me", _)) => cmds::me::run(login_session).await,
-        Some(("log", m)) => cmds::log::run(m),
-        Some(("status", _)) => cmds::status::run(node, readiness.is_connected()),
+        Some(("routingtable", m)) | Some(("rt", m)) => {
+            cmds::routing_table::run(m, node);
+        }
         _ => {}
     }
 }
@@ -209,29 +178,6 @@ async fn main() {
         move |line| shell_ui.result(line)
     });
 
-    let shell_config = match config::ShellConfig::new(
-        opts.director_url.as_deref(),
-        opts.userkey.as_deref(),
-        opts.insecure,
-    ) {
-        Ok(config) => config,
-        Err(e) => {
-            shell_ui.result(format!("Creating shell configuration failed: {e}"));
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            shell_ui.finish();
-            return;
-        }
-    };
-    let mut login_session = match cmds::login::Session::new(&shell_config) {
-        Ok(session) => session,
-        Err(e) => {
-            shell_ui.result(format!("Creating Director client failed: {e}"));
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            shell_ui.finish();
-            return;
-        }
-    };
-
     let config = opts
         .config
         .as_deref()
@@ -239,7 +185,7 @@ async fn main() {
         .or_else(|| env::var("NODE_CONFIG").ok())
         .unwrap_or_else(|| "apps/shell/node.yaml".to_string());
 
-    let mut node_options = match NodeOptions::load(&config) {
+    let node_options = match NodeOptions::load(&config) {
         Ok(options) => options,
         Err(e) => {
             shell_ui.result(format!("Loading node configuration failed: {e}"));
@@ -248,25 +194,6 @@ async fn main() {
             return;
         }
     };
-    if let Some(datadir) = opts.datadir.as_deref() {
-        node_options = node_options.with_data_dir(datadir);
-    }
-    if let Some(key) = opts.privatekey.as_deref() {
-        match PrivateKey::try_from(key) {
-            Ok(private_key) => {
-                node_options = node_options.with_private_key(private_key);
-            }
-            Err(e) => {
-                shell_ui.result(format!("Invalid private key: {e}"));
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                shell_ui.finish();
-                return;
-            }
-        }
-    }
-    if let Some(port) = opts.port {
-        node_options = node_options.with_port(port);
-    }
     let log_console = opts.log || node_options.log_console_enabled();
 
     let node_private_key = node_options.private_key().clone();
@@ -354,9 +281,7 @@ async fn main() {
                     matches,
                     &node,
                     &node_private_key,
-                    &shell_config,
                     &readiness,
-                    &mut login_session,
                 )
                 .await
             }
@@ -375,120 +300,13 @@ fn print_help(cli: &mut Command, command_name: Option<&str>, shell_ui: &ui::Shel
     let result = match command_name {
         Some(name) => match cli.find_subcommand_mut(name) {
             Some(command) => command.write_long_help(&mut output),
-            None => cli.write_long_help(&mut output),
+            _ => cli.write_long_help(&mut output),
         },
-        None => cli.write_long_help(&mut output),
+        _ => cli.write_long_help(&mut output),
     };
 
     match result {
         Ok(()) => shell_ui.result(String::from_utf8_lossy(&output).into_owned()),
         Err(e) => shell_ui.result(format!("Unable to render help: {e}")),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{BOSON_DIRECTOR_URL, BOSON_USER_KEY};
-    use boson::{signature::KeyPair, Id};
-    use serial_test::serial;
-
-    #[test]
-    fn director_commands_are_available() {
-        assert_eq!(
-            build_cli()
-                .try_get_matches_from(["login"])
-                .unwrap()
-                .subcommand_name(),
-            Some("login")
-        );
-        assert_eq!(
-            build_cli()
-                .try_get_matches_from(["me"])
-                .unwrap()
-                .subcommand_name(),
-            Some("me")
-        );
-        assert_eq!(
-            build_cli()
-                .try_get_matches_from(["device", "--list"])
-                .unwrap()
-                .subcommand_name(),
-            Some("device")
-        );
-    }
-
-    #[test]
-    fn identity_command_replaces_keygen() {
-        assert_eq!(
-            build_cli()
-                .try_get_matches_from(["identity"])
-                .unwrap()
-                .subcommand_name(),
-            Some("identity")
-        );
-        assert!(build_cli().try_get_matches_from(["identity", "-g"]).is_ok());
-        assert!(build_cli().try_get_matches_from(["keygen"]).is_err());
-    }
-
-    #[test]
-    fn director_url_and_userkey_are_optional_arguments() {
-        let defaults = Options::try_parse_from(["shell"]).unwrap();
-        assert_eq!(defaults.director_url, None);
-        assert_eq!(defaults.userkey, None);
-
-        let overridden = Options::try_parse_from([
-            "shell",
-            "--director-url",
-            "https://director.example",
-            "--userkey",
-            "0x00",
-        ])
-        .unwrap();
-        assert_eq!(
-            overridden.director_url.as_deref(),
-            Some("https://director.example")
-        );
-        assert_eq!(overridden.userkey.as_deref(), Some("0x00"));
-    }
-
-    #[test]
-    #[serial]
-    fn shell_config_reads_director_url_from_environment() {
-        unsafe {
-            env::set_var(BOSON_DIRECTOR_URL, "https://env-director.example");
-            env::remove_var(BOSON_USER_KEY);
-        }
-
-        let shell_config = config::ShellConfig::new(None, None, false).unwrap();
-        assert_eq!(
-            shell_config
-                .director_options()
-                .unwrap()
-                .director_url()
-                .as_str(),
-            "https://env-director.example/"
-        );
-
-        unsafe {
-            env::remove_var(BOSON_DIRECTOR_URL);
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn shell_config_reads_userkey_from_environment() {
-        let user_key = KeyPair::random();
-        unsafe {
-            env::remove_var(BOSON_DIRECTOR_URL);
-            env::set_var(BOSON_USER_KEY, user_key.private_key().to_string());
-        }
-
-        let shell_config = config::ShellConfig::new(None, None, false).unwrap();
-        assert_eq!(shell_config.user_id(), Id::from(user_key.public_key()));
-
-        unsafe {
-            env::remove_var(BOSON_USER_KEY);
-        }
     }
 }

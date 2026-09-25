@@ -114,7 +114,8 @@ impl ShellUi {
     }
 
     pub(crate) fn log(&self, line: impl Into<String>) {
-        self.push(Pane::Log, line.into());
+        let line = colorize_log_line(&line.into());
+        self.push(Pane::Log, line);
     }
 
     pub(crate) fn result(&self, line: impl Into<String>) {
@@ -343,7 +344,7 @@ impl ShellUi {
                         // Tab autocomplete
                         let known_cmds = [
                             "announcepeer", "announcevalue", "findnode", "findpeer", "findvalue",
-                            "help", "identity", "log", "login", "me", "status", "exit", "quit",
+                            "help", "info", "log", "status", "exit", "quit",
                         ];
                         let current = state.input_buffer.trim_start();
                         if !current.contains(' ') {
@@ -382,11 +383,13 @@ impl ShellUi {
     }
 }
 
+const PANE_PADDING_X: u16 = 1;
+
 impl UiState {
     fn push_text(&mut self, pane: Pane, text: &str) {
         let inner_width = match pane {
-            Pane::Log => self.layout.left_width.saturating_sub(2) as usize,
-            Pane::Result => self.layout.right_width.saturating_sub(2) as usize,
+            Pane::Log => self.layout.left_inner_width(),
+            Pane::Result => self.layout.right_inner_width(),
         };
         for raw_line in split_lines(text) {
             for line in wrap_line(&raw_line, inner_width) {
@@ -451,27 +454,26 @@ impl UiState {
     }
 
     fn render_pane(&self, pane: Pane) -> String {
-        let (x, y, width, lines) = match pane {
+        let (x, y, inner_width, lines) = match pane {
             Pane::Log => (
                 self.layout.inner_x(),
                 self.layout.inner_y(),
-                self.layout.left_width,
+                self.layout.left_inner_width(),
                 &self.logs,
             ),
             Pane::Result => (
                 self.layout.right_x(),
                 self.layout.inner_y(),
-                self.layout.right_width,
+                self.layout.right_inner_width(),
                 &self.results,
             ),
         };
 
-        let inner_width = width.saturating_sub(2) as usize;
         let inner_height = self.layout.top_inner_height() as usize;
 
         let mut visual_lines = Vec::new();
         for line in lines {
-            if line.chars().count() <= inner_width {
+            if visible_width(line) <= inner_width {
                 visual_lines.push(line.clone());
             } else {
                 for wrapped in wrap_line(line, inner_width) {
@@ -486,7 +488,7 @@ impl UiState {
         let mut out = String::new();
         for row in 0..inner_height {
             let row_y = y + 1 + row as u16;
-            let col_x = x + 1;
+            let col_x = x + 1 + PANE_PADDING_X;
             out.push_str(&move_to(row_y, col_x));
             out.push_str(&" ".repeat(inner_width));
             if let Some(line) = visible.get(row) {
@@ -528,6 +530,24 @@ impl UiState {
         out.push_str(&displayed_input);
         out.push_str(&" ".repeat(padding));
 
+        // Line 2: subtle command console hint / status line utilizing the extra room
+        let hint_row = self.layout.input_y() + 2;
+        let hint_text = "\x1b[90mEnter 'help' for commands, 'exit' to quit\x1b[0m";
+        let max_hint_w = self.layout.inner_width().saturating_sub(4) as usize;
+        let visible_hint_len = 39;
+        out.push_str(&move_to(hint_row, start_col));
+        if max_hint_w >= visible_hint_len {
+            out.push_str(hint_text);
+            out.push_str(&" ".repeat(max_hint_w - visible_hint_len));
+        } else {
+            out.push_str(&" ".repeat(max_hint_w));
+        }
+
+        // Line 3: blank breathing room before the bottom border
+        let space_row = self.layout.input_y() + 3;
+        out.push_str(&move_to(space_row, start_col));
+        out.push_str(&" ".repeat(max_hint_w));
+
         let cursor_screen_col = start_col + prompt.len() as u16 + (cursor - view_start) as u16;
         out.push_str(&move_to(row, cursor_screen_col));
         out
@@ -538,10 +558,10 @@ impl Layout {
     fn current() -> Self {
         let (cols, rows) = terminal_size().unwrap_or((120, 40));
         let cols = cols.max(40);
-        let rows = rows.max(14);
+        let rows = rows.max(15);
         let inner_width = cols.saturating_sub(2);
         let inner_height = rows.saturating_sub(2);
-        let input_height = 4;
+        let input_height = 5;
         let top_height = inner_height.saturating_sub(input_height).max(6);
         let left_width = (inner_width / 2).max(19);
         let right_width = inner_width.saturating_sub(left_width).max(19);
@@ -579,6 +599,14 @@ impl Layout {
     fn input_y(&self) -> u16 {
         self.inner_y() + self.top_height
     }
+
+    fn left_inner_width(&self) -> usize {
+        self.left_width.saturating_sub(2 + 2 * PANE_PADDING_X) as usize
+    }
+
+    fn right_inner_width(&self) -> usize {
+        self.right_width.saturating_sub(2 + 2 * PANE_PADDING_X) as usize
+    }
 }
 
 fn terminal_size() -> Option<(u16, u16)> {
@@ -605,24 +633,110 @@ fn push_line(lines: &mut VecDeque<String>, line: String) {
     lines.push_back(line);
 }
 
+pub(crate) fn colorize_log_line(line: &str) -> String {
+    let clean = strip_ansi(line);
+    let trimmed = clean.trim_start();
+
+    // Red: Error
+    if clean.contains("[ERRO]")
+        || clean.contains("[ERROR]")
+        || trimmed.starts_with("ERROR")
+        || trimmed.starts_with("error")
+    {
+        format!("\x1b[31m{clean}\x1b[0m")
+    }
+    // Yellow: Warning
+    else if clean.contains("[WARN]")
+        || clean.contains("[WARNING]")
+        || trimmed.starts_with("WARN")
+        || trimmed.starts_with("warn")
+    {
+        format!("\x1b[33m{clean}\x1b[0m")
+    }
+    // Blue: Info
+    else if clean.contains("[INFO]")
+        || trimmed.starts_with("INFO")
+        || trimmed.starts_with("info")
+    {
+        format!("\x1b[34m{clean}\x1b[0m")
+    }
+    // White: Trace
+    else if clean.contains("[TRAC]")
+        || clean.contains("[TRACE]")
+        || trimmed.starts_with("TRACE")
+        || trimmed.starts_with("trace")
+    {
+        format!("\x1b[37m{clean}\x1b[0m")
+    }
+    // Cyan: Debug
+    else if clean.contains("[DEBU]")
+        || clean.contains("[DEBUG]")
+        || trimmed.starts_with("DEBUG")
+        || trimmed.starts_with("debug")
+    {
+        format!("\x1b[36m{clean}\x1b[0m")
+    }
+    // If it already has custom ANSI codes, keep as is
+    else if line.contains("\x1b[") {
+        line.to_string()
+    } else {
+        line.to_string()
+    }
+}
+
+fn update_active_style(active: &mut Option<String>, s: &str) {
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            let mut seq = String::from("\x1b[");
+            chars.next(); // consume '['
+            while let Some(next) = chars.next() {
+                seq.push(next);
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            if seq == "\x1b[0m" || seq == "\x1b[m" {
+                *active = None;
+            } else if seq.ends_with('m') {
+                *active = Some(seq);
+            }
+        }
+    }
+}
+
 fn wrap_line(line: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![line.to_string()];
     }
-    if line.chars().count() <= width {
+    if visible_width(line) <= width {
         return vec![line.to_string()];
     }
 
     let mut result = Vec::new();
     let mut current = String::new();
     let mut current_len = 0;
+    let mut active_style: Option<String> = None;
 
-    // Split line into alternating tokens of words and spaces
+    // Split line into alternating tokens of words and spaces, keeping ANSI sequences attached
     let mut tokens = Vec::new();
     let mut token = String::new();
     let mut in_space = false;
+    let mut chars = line.chars().peekable();
 
-    for ch in line.chars() {
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            token.push(ch);
+            token.push(chars.next().unwrap());
+            while let Some(next) = chars.next() {
+                token.push(next);
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+
         if ch == ' ' {
             if !in_space && !token.is_empty() {
                 tokens.push(token);
@@ -643,97 +757,114 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
         tokens.push(token);
     }
 
+    let push_line_break = |result: &mut Vec<String>,
+                           current: &mut String,
+                           current_len: &mut usize,
+                           active_style: &Option<String>| {
+        let mut trimmed = current.trim_end().to_string();
+        if !trimmed.is_empty() {
+            if active_style.is_some() && !trimmed.ends_with("\x1b[0m") {
+                trimmed.push_str("\x1b[0m");
+            }
+            result.push(trimmed);
+        }
+        *current = match active_style {
+            Some(style) => style.clone(),
+            None => String::new(),
+        };
+        *current_len = 0;
+    };
+
     for tok in tokens {
-        let tok_len = tok.chars().count();
-        let is_space = tok.chars().all(|c| c == ' ');
+        let tok_len = visible_width(&tok);
+        let is_space = strip_ansi(&tok).chars().all(|c| c == ' ');
 
         if is_space {
             if current_len == 0 {
-                // Leading spaces on a line (preserve indentation)
                 if tok_len <= width {
                     current.push_str(&tok);
                     current_len = tok_len;
                 } else {
-                    result.push(tok[..width].to_string());
-                    current = String::new();
+                    let mut sliced = fit_line(&tok, width);
+                    if active_style.is_some() && !sliced.ends_with("\x1b[0m") {
+                        sliced.push_str("\x1b[0m");
+                    }
+                    result.push(sliced);
+                    current = match &active_style {
+                        Some(s) => s.clone(),
+                        None => String::new(),
+                    };
                     current_len = 0;
                 }
             } else if current_len + tok_len <= width {
                 current.push_str(&tok);
                 current_len += tok_len;
             } else {
-                // Spaces don't fit at the end of the line, wrap to next line
-                let trimmed = current.trim_end().to_string();
-                if !trimmed.is_empty() {
-                    result.push(trimmed);
-                }
-                current = String::new();
-                current_len = 0;
+                push_line_break(&mut result, &mut current, &mut current_len, &active_style);
             }
         } else {
-            // It's a non-space token
+            update_active_style(&mut active_style, &tok);
             if current_len + tok_len <= width {
                 current.push_str(&tok);
                 current_len += tok_len;
-            } else if current_len == 0 {
-                // Token itself exceeds width, chunk it into width slices
-                let mut chars = tok.chars();
-                while let Some(ch) = chars.next() {
-                    let mut chunk = String::with_capacity(width);
-                    chunk.push(ch);
-                    for _ in 1..width {
-                        if let Some(c) = chars.next() {
-                            chunk.push(c);
-                        } else {
-                            break;
-                        }
-                    }
-                    if chunk.chars().count() == width && chars.clone().next().is_some() {
-                        result.push(chunk);
-                    } else {
-                        current = chunk;
-                        current_len = current.chars().count();
-                    }
-                }
             } else {
-                // Wrap to next line
-                let trimmed = current.trim_end().to_string();
-                if !trimmed.is_empty() {
-                    result.push(trimmed);
+                if current_len > 0 {
+                    push_line_break(&mut result, &mut current, &mut current_len, &active_style);
                 }
-                current = String::new();
-                current_len = 0;
-
                 if tok_len <= width {
                     current.push_str(&tok);
                     current_len = tok_len;
                 } else {
-                    // Token itself exceeds width, chunk it
-                    let mut chars = tok.chars();
-                    while let Some(ch) = chars.next() {
-                        let mut chunk = String::with_capacity(width);
-                        chunk.push(ch);
-                        for _ in 1..width {
-                            if let Some(c) = chars.next() {
-                                chunk.push(c);
-                            } else {
-                                break;
+                    // Chunk large word by visible width
+                    let mut chunk = match &active_style {
+                        Some(s) => s.clone(),
+                        None => String::new(),
+                    };
+                    let mut chunk_vis = 0;
+                    let mut tchars = tok.chars().peekable();
+
+                    while let Some(c) = tchars.next() {
+                        if c == '\x1b' && tchars.peek() == Some(&'[') {
+                            let mut seq = String::from("\x1b[");
+                            tchars.next();
+                            while let Some(n) = tchars.next() {
+                                seq.push(n);
+                                if n.is_ascii_alphabetic() {
+                                    break;
+                                }
                             }
-                        }
-                        if chunk.chars().count() == width && chars.clone().next().is_some() {
-                            result.push(chunk);
+                            update_active_style(&mut active_style, &seq);
+                            chunk.push_str(&seq);
                         } else {
-                            current = chunk;
-                            current_len = current.chars().count();
+                            if chunk_vis == width {
+                                if active_style.is_some() && !chunk.ends_with("\x1b[0m") {
+                                    chunk.push_str("\x1b[0m");
+                                }
+                                result.push(chunk);
+                                chunk = match &active_style {
+                                    Some(s) => s.clone(),
+                                    None => String::new(),
+                                };
+                                chunk_vis = 0;
+                            }
+                            chunk.push(c);
+                            chunk_vis += 1;
                         }
+                    }
+                    if chunk_vis > 0 || !chunk.is_empty() {
+                        current = chunk;
+                        current_len = chunk_vis;
                     }
                 }
             }
         }
     }
 
-    let trimmed = current.trim_end().to_string();
+    let mut trimmed = current.trim_end().to_string();
     if !trimmed.is_empty() || result.is_empty() {
+        if active_style.is_some() && !trimmed.ends_with("\x1b[0m") {
+            trimmed.push_str("\x1b[0m");
+        }
         result.push(trimmed);
     }
 
@@ -741,14 +872,14 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
 }
 
 fn split_lines(text: &str) -> Vec<String> {
-    let stripped = sanitize_text(&strip_ansi(text));
-    if stripped.is_empty() {
+    let sanitized = sanitize_ansi_text(text);
+    if sanitized.is_empty() {
         return vec![String::new()];
     }
-    stripped.lines().map(str::to_owned).collect()
+    sanitized.lines().map(str::to_owned).collect()
 }
 
-fn strip_ansi(text: &str) -> String {
+pub(crate) fn strip_ansi(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -756,9 +887,10 @@ fn strip_ansi(text: &str) -> String {
             result.push(ch);
             continue;
         }
-        if chars.next() != Some('[') {
+        if chars.peek() != Some(&'[') {
             continue;
         }
+        chars.next();
         while let Some(next) = chars.next() {
             if next.is_ascii_alphabetic() {
                 break;
@@ -768,19 +900,67 @@ fn strip_ansi(text: &str) -> String {
     result
 }
 
-fn sanitize_text(text: &str) -> String {
-    text.chars()
-        .filter_map(|ch| match ch {
-            '\n' => Some('\n'),
-            '\t' => Some(' '),
-            ch if ch.is_control() => None,
-            ch => Some(ch),
-        })
-        .collect()
+pub(crate) fn visible_width(s: &str) -> usize {
+    strip_ansi(s).chars().count()
 }
 
-fn fit_line(line: &str, width: usize) -> String {
-    line.chars().take(width).collect()
+fn sanitize_ansi_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            out.push(ch);
+            out.push(chars.next().unwrap());
+            while let Some(next) = chars.next() {
+                out.push(next);
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else if ch == '\n' {
+            out.push('\n');
+        } else if ch == '\t' {
+            out.push(' ');
+        } else if !ch.is_control() {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+pub(crate) fn fit_line(line: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(line.len() + 8);
+    let mut current_visible = 0;
+    let mut has_ansi = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            has_ansi = true;
+            out.push(ch);
+            out.push(chars.next().unwrap());
+            while let Some(next) = chars.next() {
+                out.push(next);
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            if current_visible >= width {
+                break;
+            }
+            out.push(ch);
+            current_visible += 1;
+        }
+    }
+
+    if has_ansi && !out.ends_with("\x1b[0m") {
+        out.push_str("\x1b[0m");
+    }
+    out
 }
 
 fn draw_box_outline(x: u16, y: u16, width: u16, height: u16, title: &str) -> String {
@@ -798,33 +978,74 @@ fn draw_box_with_body(
     let mut out = String::new();
     let width = width.max(2);
     let height = height.max(2);
-    let horizontal = "─".repeat(width.saturating_sub(2) as usize);
+    let inner_span = width.saturating_sub(2) as usize;
 
+    let border_color = "\x1b[90m";
+    let title_color = "\x1b[0m\x1b[1m";
+    let reset = "\x1b[0m";
+
+    let horizontal_char = '┄';
+    let vertical_char = '┆';
+    let top_left = '╭';
+    let top_right = '╮';
+    let bottom_left = '╰';
+    let bottom_right = '╯';
+
+    let title_len = title.chars().count();
     out.push_str(&move_to(y, x));
-    out.push('┌');
-    out.push_str(&horizontal);
-    out.push('┐');
+    out.push_str(border_color);
+    out.push(top_left);
+
+    if title_len > 0 && inner_span >= title_len + 3 {
+        out.push(horizontal_char);
+        out.push_str(title_color);
+        out.push_str(title);
+        out.push_str(reset);
+        out.push_str(border_color);
+        let rem = inner_span.saturating_sub(title_len + 1);
+        for _ in 0..rem {
+            out.push(horizontal_char);
+        }
+    } else {
+        for _ in 0..inner_span {
+            out.push(horizontal_char);
+        }
+    }
+    out.push(top_right);
+    out.push_str(reset);
+
+    let body_clear_spaces = if clear_body {
+        " ".repeat(inner_span)
+    } else {
+        String::new()
+    };
 
     for row in 1..height.saturating_sub(1) {
-        out.push_str(&move_to(y + row, x));
-        out.push('│');
+        let row_y = y + row;
+        out.push_str(&move_to(row_y, x));
+        out.push_str(border_color);
+        out.push(vertical_char);
+        out.push_str(reset);
+
         if clear_body {
-            out.push_str(&" ".repeat(width.saturating_sub(2) as usize));
+            out.push_str(&body_clear_spaces);
         } else {
-            out.push_str(&move_to(y + row, x + width - 1));
+            out.push_str(&move_to(row_y, x + width - 1));
         }
-        out.push('│');
+
+        out.push_str(border_color);
+        out.push(vertical_char);
+        out.push_str(reset);
     }
 
     out.push_str(&move_to(y + height - 1, x));
-    out.push('└');
-    out.push_str(&horizontal);
-    out.push('┘');
-
-    if width > 4 {
-        out.push_str(&move_to(y, x + 2));
-        out.push_str(&fit_line(title, width.saturating_sub(4) as usize));
+    out.push_str(border_color);
+    out.push(bottom_left);
+    for _ in 0..inner_span {
+        out.push(horizontal_char);
     }
+    out.push(bottom_right);
+    out.push_str(reset);
 
     out
 }
@@ -868,10 +1089,10 @@ mod tests {
         let layout = Layout {
             rows: 30,
             cols: 100,
-            top_height: 24,
+            top_height: 23,
             left_width: 49,
             right_width: 49,
-            input_height: 4,
+            input_height: 5,
         };
         assert!(layout.input_y() + layout.input_height <= layout.rows);
         assert!(layout.right_x() + layout.right_width <= layout.cols);
@@ -882,10 +1103,10 @@ mod tests {
         let layout = Layout {
             rows: 30,
             cols: 100,
-            top_height: 24,
+            top_height: 23,
             left_width: 49,
             right_width: 49,
-            input_height: 4,
+            input_height: 5,
         };
         let state = UiState {
             layout,
@@ -899,8 +1120,8 @@ mod tests {
         };
         let cmd_line = state.render_command_line();
         assert!(cmd_line.contains("boson> status"));
-        // Prompt is rendered at input_y + 1 (row 27) and start_col 4
-        let expected_prompt_pos = move_to(27, 4);
+        // Prompt is rendered at input_y + 1 (row 26) and start_col 4
+        let expected_prompt_pos = move_to(26, 4);
         assert!(cmd_line.contains(&expected_prompt_pos));
     }
 
@@ -909,10 +1130,10 @@ mod tests {
         let layout = Layout {
             rows: 30,
             cols: 100,
-            top_height: 24,
+            top_height: 23,
             left_width: 49,
             right_width: 49,
-            input_height: 4,
+            input_height: 5,
         };
         let state = UiState {
             layout,
@@ -977,12 +1198,12 @@ mod tests {
         let layout = Layout {
             rows: 20,
             cols: 80,
-            top_height: 14,
+            top_height: 13,
             left_width: 39,
             right_width: 39,
-            input_height: 4,
+            input_height: 5,
         };
-        // inner_width = 39 - 2 = 37
+        // inner_width = 39 - 2 - 2 = 35 (with 1 space edge padding on each side)
         let hex_key = "0xbc12dc1054f83fcf0eba7720b706b369b58069c7e3b453be8d1f5493f69d72d1";
         let mut results = VecDeque::new();
         // A single long result line that requires more than 1 line to display
@@ -1011,10 +1232,10 @@ mod tests {
         let layout = Layout {
             rows: 20,
             cols: 80,
-            top_height: 14,
+            top_height: 13,
             left_width: 39,
             right_width: 39,
-            input_height: 4,
+            input_height: 5,
         };
         let mut state = UiState {
             layout,
@@ -1039,5 +1260,49 @@ mod tests {
         assert!(rendered.contains("Device ID:"));
         assert!(rendered.contains("Private Key:"));
         assert!(rendered.contains("69d72d1"));
+    }
+
+    #[test]
+    fn test_colorize_log_levels() {
+        let err = colorize_log_line("[node    ] [ERRO] Connection failed");
+        assert!(err.starts_with("\x1b[31m"));
+        assert!(err.ends_with("\x1b[0m"));
+
+        let info = colorize_log_line("[node    ] [INFO] Node started");
+        assert!(info.starts_with("\x1b[34m"));
+        assert!(info.ends_with("\x1b[0m"));
+
+        let warn = colorize_log_line("[node    ] [WARN] Suspicious peer detected");
+        assert!(warn.starts_with("\x1b[33m"));
+        assert!(warn.ends_with("\x1b[0m"));
+
+        let trace = colorize_log_line("[node    ] [TRAC] Sent ping to peer");
+        assert!(trace.starts_with("\x1b[37m"));
+        assert!(trace.ends_with("\x1b[0m"));
+
+        let debug = colorize_log_line("[node    ] [DEBU] Periodic maintenance");
+        assert!(debug.starts_with("\x1b[36m"));
+        assert!(debug.ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_ansi_wrap_and_fit() {
+        let colored = "\x1b[34m[node    ] [INFO] hello world test\x1b[0m";
+        let width = 20;
+        let wrapped = wrap_line(colored, width);
+        for line in &wrapped {
+            assert!(visible_width(line) <= width);
+        }
+        // First line has blue color and reset
+        assert!(wrapped[0].contains("\x1b[34m"));
+        assert!(wrapped[0].contains("\x1b[0m"));
+        // Second line continues with blue color and reset
+        assert!(wrapped[1].contains("\x1b[34m"));
+        assert!(wrapped[1].contains("\x1b[0m"));
+
+        // fit_line preserves visible width and resets ANSI
+        let fitted = fit_line(colored, 10);
+        assert_eq!(visible_width(&fitted), 10);
+        assert!(fitted.ends_with("\x1b[0m"));
     }
 }

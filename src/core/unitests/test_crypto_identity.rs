@@ -195,4 +195,17 @@ mod tests {
         let result = receiver.decrypt_into(sender.id(), &cipher);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_decrypt_short_ciphertext() {
+        let sender = CryptoIdentity::new();
+        let receiver = CryptoIdentity::new();
+        // Short ciphertexts must return error rather than panic
+        assert!(receiver.decrypt_into(sender.id(), &[]).is_err());
+        assert!(receiver.decrypt_into(sender.id(), &[0u8; 10]).is_err());
+        assert!(receiver.decrypt_into(sender.id(), &[0u8; 39]).is_err());
+
+        let mut out = [0u8; 10];
+        assert!(receiver.decrypt(sender.id(), &[0u8; 20], &mut out).is_err());
+    }
 }

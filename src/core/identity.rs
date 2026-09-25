@@ -133,7 +133,14 @@ impl Identity for CryptoIdentity {
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        let mut v = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
+        if cipher.len() < Self::CIPHER_OVERHEAD {
+            return Err(ArgumentError::new(format!(
+                "Ciphertext length {} is smaller than the required overhead {}",
+                cipher.len(),
+                Self::CIPHER_OVERHEAD
+            )));
+        }
+        let mut v = vec![0u8; cipher.len() - Self::CIPHER_OVERHEAD];
         self.decrypt(sender, cipher, &mut v).map(|_| v)
     }
 

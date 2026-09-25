@@ -75,13 +75,18 @@ impl Id {
         }
 
         let mut bytes = [0u8; Id::BYTES];
-        bs58::decode(input)
+        let decoded_len = bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
-            .map_err(|e| {
-                println!(">>> e: {}, input:{}", e, input);
-                ArgumentError::new(format!("Invalid base58 format string: {e}"))
-            })?;
+            .map_err(|e| ArgumentError::new(format!("Invalid base58 format string: {e}")))?;
+
+        if decoded_len != Id::BYTES {
+            return Err(ArgumentError::new(format!(
+                "Invalid base58 byte length {decoded_len} for ID, expected {}",
+                Id::BYTES
+            )));
+        }
+
         Ok(Id(bytes))
     }
 

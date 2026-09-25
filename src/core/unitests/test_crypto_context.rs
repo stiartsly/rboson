@@ -131,4 +131,16 @@ mod tests {
         let result = ctx1.decrypt_into(&cipher);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_decrypt_short_ciphertext() {
+        let (ctx1, _) = create_contexts_from_private_key();
+        // Ciphertext shorter than Nonce::BYTES + MAC_BYTES (40) must return error, not panic
+        assert!(ctx1.decrypt_into(&[]).is_err());
+        assert!(ctx1.decrypt_into(&[0u8; 10]).is_err());
+        assert!(ctx1.decrypt_into(&[0u8; 39]).is_err());
+
+        let mut out = [0u8; 10];
+        assert!(ctx1.decrypt(&[0u8; 20], &mut out).is_err());
+    }
 }

@@ -93,4 +93,18 @@ mod tests {
         assert_eq!(id_str, id2_str);
         assert_eq!(id, des);
     }
+
+    #[test]
+    fn test_base58_invalid_lengths() {
+        // Short base58 should fail
+        assert!(Id::try_from_base58("1").is_err());
+        assert!(Id::try_from_base58("abc").is_err());
+        assert!(Id::try_from_base58("").is_err());
+
+        // Valid random Id should round-trip
+        let id = Id::random();
+        let b58 = id.to_base58();
+        let parsed = Id::try_from_base58(&b58).expect("valid base58 should parse");
+        assert_eq!(id, parsed);
+    }
 }

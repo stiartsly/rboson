@@ -113,7 +113,7 @@ impl TryFrom<&str> for PrivateKey {
         }
 
         // Decode as base58 if it doesn't start with "0x"
-        bs58::decode(input)
+        let len = bs58::decode(input)
             .with_alphabet(bs58::Alphabet::DEFAULT)
             .onto(&mut bytes[..])
             .map_err(|e| match e {
@@ -125,6 +125,12 @@ impl TryFrom<&str> for PrivateKey {
                 ),
                 _ => ArgumentError::new(format!("Invalid base58 with unknown error")),
             })?;
+        if len != Self::BYTES {
+            return Err(ArgumentError::new(format!(
+                "Incorrect private key size {len}, should be {}",
+                Self::BYTES
+            )));
+        }
         Ok(PrivateKey(bytes.try_into().unwrap()))
     }
 }
@@ -187,6 +193,56 @@ impl PublicKey {
         self.0.fill(0);
     }
 
+    pub fn to_base58(&self) -> String {
+        bs58::encode(self.0)
+            .with_alphabet(bs58::Alphabet::DEFAULT)
+            .into_string()
+    }
+
+    pub fn to_hexstr(&self) -> String {
+        format!("0x{}", hex::encode(self.0))
+    }
+
+    pub fn try_from_hexstr(input: &str) -> Result<Self> {
+        let input = input.strip_prefix("0x").unwrap_or(input);
+        let mut bytes = [0u8; Self::BYTES];
+        hex::decode_to_slice(input, &mut bytes[..]).map_err(|e| match e {
+            FromHexError::InvalidHexCharacter { c, index } => {
+                ArgumentError::new(format!("Invalid hex character {} at position {}", c, index))
+            }
+            FromHexError::OddLength => {
+                ArgumentError::new(format!("Odd hex string length {}", input.len()))
+            }
+            FromHexError::InvalidStringLength => {
+                ArgumentError::new(format!("Invalid hex string length"))
+            }
+        })?;
+        Ok(PublicKey(bytes))
+    }
+
+    pub fn try_from_base58(input: &str) -> Result<Self> {
+        let mut bytes = [0u8; Self::BYTES];
+        let len = bs58::decode(input)
+            .with_alphabet(bs58::Alphabet::DEFAULT)
+            .onto(&mut bytes[..])
+            .map_err(|e| match e {
+                decode::Error::BufferTooSmall => {
+                    ArgumentError::new(format!("Invalid base58 string length"))
+                }
+                decode::Error::InvalidCharacter { character, index } => ArgumentError::new(
+                    format!("Invalid base58 character {} at {}", character, index),
+                ),
+                _ => ArgumentError::new(format!("Invalid base58 with unknown error")),
+            })?;
+        if len != Self::BYTES {
+            return Err(ArgumentError::new(format!(
+                "Incorrect public key size {len}, should be {}",
+                Self::BYTES
+            )));
+        }
+        Ok(PublicKey(bytes))
+    }
+
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
         if signature.len() != Signature::BYTES {
             return Err(CryptoError::new(format!(
@@ -224,6 +280,17 @@ impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0))?;
         Ok(())
+    }
+}
+
+impl FromStr for PublicKey {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        if s.starts_with("0x") {
+            Self::try_from_hexstr(s)
+        } else {
+            Self::try_from_base58(s)
+        }
     }
 }
 

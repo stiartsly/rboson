@@ -50,6 +50,14 @@ impl CryptoContext {
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
+        let overhead = Nonce::BYTES + CryptoBox::MAC_BYTES;
+        if cipher.len() < overhead {
+            return Err(CryptoError::new(format!(
+                "Cipher text length {} is smaller than required overhead {}",
+                cipher.len(),
+                overhead
+            )));
+        }
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {
@@ -62,6 +70,14 @@ impl CryptoContext {
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
+        let overhead = Nonce::BYTES + CryptoBox::MAC_BYTES;
+        if cipher.len() < overhead {
+            return Err(CryptoError::new(format!(
+                "Cipher text length {} is smaller than required overhead {}",
+                cipher.len(),
+                overhead
+            )));
+        }
         let nonce = &cipher[..Nonce::BYTES];
         if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
             if last_nonce.as_bytes() != nonce {

@@ -428,7 +428,15 @@ impl CryptoBox {
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
+        let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+        if cipher.len() < overhead {
+            return Err(ArgumentError::new(format!(
+                "Cipher text length {} is smaller than required overhead {}",
+                cipher.len(),
+                overhead
+            )));
+        }
+        let expected_len = cipher.len() - overhead;
         if plain.len() < expected_len {
             return Err(ArgumentError::new(format!(
                 "The input buffer is insufficient."
@@ -454,7 +462,15 @@ impl CryptoBox {
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
-        let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
+        let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+        if cipher.len() < overhead {
+            return Err(ArgumentError::new(format!(
+                "Cipher text length {} is smaller than required overhead {}",
+                cipher.len(),
+                overhead
+            )));
+        }
+        let mut plain = vec![0u8; cipher.len() - overhead];
         self.decrypt(cipher, plain.as_mut()).map(|_| plain)
     }
 }
@@ -528,7 +544,15 @@ pub fn encrypt_into(
 }
 
 pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey) -> Result<usize> {
-    let expected_len = cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES;
+    let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+    if cipher.len() < overhead {
+        return Err(ArgumentError::new(format!(
+            "Cipher text length {} is smaller than required overhead {}",
+            cipher.len(),
+            overhead
+        )));
+    }
+    let expected_len = cipher.len() - overhead;
     if plain.len() < expected_len {
         return Err(ArgumentError::new(format!(
             "The input buffer is insufficient."
@@ -555,6 +579,14 @@ pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey)
 }
 
 pub fn decrypt_into(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
-    let mut plain = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
+    let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+    if cipher.len() < overhead {
+        return Err(ArgumentError::new(format!(
+            "Cipher text length {} is smaller than required overhead {}",
+            cipher.len(),
+            overhead
+        )));
+    }
+    let mut plain = vec![0u8; cipher.len() - overhead];
     decrypt(cipher, plain.as_mut(), pk, sk).map(|_| plain)
 }

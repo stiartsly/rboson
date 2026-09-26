@@ -168,10 +168,19 @@ impl ProxyConnection {
         }
 
         *self.relay_tx.borrow_mut() = Some(writer);
-        trace!(
-            "Connection {} sent {label} packet to proxy socket",
-            self.cid()
-        );
+        if label == "DATA" {
+            debug!(
+                "Connection {} sent {label} packet ({} bytes) to proxy socket",
+                self.cid(),
+                payload.len()
+            );
+        } else {
+            info!(
+                "Connection {} sent {label} packet ({} bytes) to proxy socket",
+                self.cid(),
+                payload.len()
+            );
+        }
         Ok(())
     }
 
@@ -354,11 +363,19 @@ impl ProxyConnection {
                 }
             };
 
-            trace!(
-                "Connection {} got {packet_type} packet ({} bytes) from proxy socket",
-                self.cid(),
-                packet.len()
-            );
+            if matches!(packet_type, PacketType::Data(_)) {
+                debug!(
+                    "Connection {} got {packet_type} packet ({} bytes) from proxy socket",
+                    self.cid(),
+                    packet.len()
+                );
+            } else {
+                info!(
+                    "Connection {} got {packet_type} packet ({} bytes) from proxy socket",
+                    self.cid(),
+                    packet.len()
+                );
+            }
 
             if !self.state.borrow().accept(&packet_type) {
                 error!(
@@ -382,6 +399,11 @@ impl ProxyConnection {
 
         match packet::Challenge::decode(packet) {
             Ok(challenge) => {
+                info!(
+                    "Connection {} got CHALLENGE packet ({} bytes) from proxy socket",
+                    self.cid(),
+                    packet.len()
+                );
                 if let Err(e) = self.handle_challenge(challenge).await {
                     error!(
                         "Connection {} got invalid CHALLENGE packet from proxy socket: {e}",
@@ -644,6 +666,11 @@ impl ProxyConnection {
     }
 
     pub(crate) async fn check_keepalive(self: &Rc<Self>) -> Result<()> {
+        let state = *self.state.borrow();
+        if !matches!(state, State::Idling | State::Connecting | State::Relaying) {
+            return Ok(());
+        }
+
         if elapsed_ms!(*self.keepalive.borrow()) >= MAX_KEEP_ALIVE_RETRY * KEEPALIVE_INTERVAL {
             warn!("Connection {} keep alive timeout, closing now", self.cid());
             return Err(StateError::new(format!(

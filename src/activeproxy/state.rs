@@ -35,7 +35,8 @@ impl State {
                     || matches!(pkt, PacketType::Disconnect(_))
             }
             State::Disconnecting => {
-                matches!(pkt, PacketType::Disconnect(_))
+                matches!(pkt, PacketType::PingAck(_))
+                    || matches!(pkt, PacketType::Disconnect(_))
                     || matches!(pkt, PacketType::Data(_))
                     || matches!(pkt, PacketType::DisconnectAck(_))
             }

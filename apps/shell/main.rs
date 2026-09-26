@@ -250,7 +250,7 @@ async fn main() {
     loop {
         let line = match shell_ui.read_line().await {
             Ok(Some(line)) => line,
-            Ok(None) => {
+            Ok(_) => {
                 shell_ui.result("Goodbye!");
                 break;
             }

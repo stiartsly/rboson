@@ -1,5 +1,5 @@
+use std::{rc::Rc, net::SocketAddr};
 use futures::future::LocalBoxFuture;
-use std::{net::SocketAddr, rc::Rc};
 use tokio::net::TcpStream;
 
 use super::connection::ProxyConnection;

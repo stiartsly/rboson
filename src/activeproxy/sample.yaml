@@ -12,7 +12,7 @@ service:
 # The user id and the device private key are specified below.
 client:
   userId: ${CLIENT_USER_ID}
-  userPrivateKey: ${CLIENT_USER_PRIVATE_KEY}
+  #userPrivateKey: ${CLIENT_USER_PRIVATE_KEY}
   devicePrivateKey: ${CLIENT_DEVICE_PRIVATE_KEY}
 
 # Upstream server configuration.

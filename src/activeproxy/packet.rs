@@ -2,12 +2,22 @@ use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    core::errors::MalformedError, cryptobox, signature, CryptoContext, Id, Identity, Result,
-    Signature,
+    core::errors::MalformedError,
+    cryptobox,
+    signature, Signature,
+    CryptoContext,
+    Id, Identity, Result
 };
 
 use super::packet_type::{
-    AttachType, AuthType, ConnType, DataType, DisconnType, ErrType, PacketType, PingType,
+    AttachType,
+    AuthType,
+    ConnType,
+    DataType,
+    DisconnType,
+    ErrType,
+    PacketType,
+    PingType,
 };
 
 pub(crate) const VERSION: i32 = 1;

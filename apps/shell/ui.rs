@@ -770,7 +770,7 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
         }
         *current = match active_style {
             Some(style) => style.clone(),
-            None => String::new(),
+            _ => String::new(),
         };
         *current_len = 0;
     };
@@ -792,7 +792,7 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
                     result.push(sliced);
                     current = match &active_style {
                         Some(s) => s.clone(),
-                        None => String::new(),
+                        _ => String::new(),
                     };
                     current_len = 0;
                 }
@@ -818,7 +818,7 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
                     // Chunk large word by visible width
                     let mut chunk = match &active_style {
                         Some(s) => s.clone(),
-                        None => String::new(),
+                        _ => String::new(),
                     };
                     let mut chunk_vis = 0;
                     let mut tchars = tok.chars().peekable();
@@ -843,7 +843,7 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
                                 result.push(chunk);
                                 chunk = match &active_style {
                                     Some(s) => s.clone(),
-                                    None => String::new(),
+                                    _ => String::new(),
                                 };
                                 chunk_vis = 0;
                             }

@@ -25,7 +25,7 @@ pub use {
     io_error::IOError,
     malformed::MalformedError,
     network_error::NetworkError,
-    not_implemented::NotImplementedError,
+    not_implemented::NotImplemented,
     operation_error::OperationError,
     permission_error::PermissionError,
     protocol_error::ProtocolError,

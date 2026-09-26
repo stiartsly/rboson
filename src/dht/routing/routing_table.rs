@@ -377,7 +377,7 @@ impl RoutingTable {
 
         let mut entries = Vec::with_capacity(self.number_of_entries());
         for item in self.buckets.borrow().values() {
-            entries.extend(item.borrow().entries());
+            item.borrow().for_each_entry(|entry| entries.push(entry.clone()));
         }
 
         let saved = SystemTime::now();

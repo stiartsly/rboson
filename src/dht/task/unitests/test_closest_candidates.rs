@@ -54,6 +54,21 @@ mod tests {
     }
 
     #[test]
+    fn test_add_developer_mode_allows_same_ip_different_port() {
+        let target = Id::MIN_ID;
+        let mut candidates = ClosestCandidates::with_developer_mode(target, 4, true);
+
+        let first = make_node(3, "1.1.1.1", 39011);
+        let second = make_node(1, "1.1.1.1", 39002);
+
+        candidates.add(vec![first.clone().into(), second.clone().into()]);
+
+        assert_eq!(candidates.size(), 2);
+        assert!(candidates.candidate_node(first.id()).is_some());
+        assert!(candidates.candidate_node(second.id()).is_some());
+    }
+
+    #[test]
     fn test_add_rejects_candidates_when_all_entries_are_inflight() {
         let target = Id::MIN_ID;
         let mut candidates = ClosestCandidates::new(target, 2);

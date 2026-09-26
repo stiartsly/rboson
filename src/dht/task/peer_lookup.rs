@@ -24,9 +24,10 @@ impl PeerLookupTask {
         expected_count: usize,
         done_on_eligible_result: bool,
     ) -> Self {
+        let dev_mode = dht.is_developer_mode();
         Self {
             base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result, dev_mode),
             result: EligiblePeers::new(target, expected_seq, expected_count),
             dht: dht.clone(),
         }

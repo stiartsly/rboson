@@ -25,9 +25,10 @@ pub(crate) struct NodeLookupTask {
 
 impl NodeLookupTask {
     pub(crate) fn new(dht: Rc<DHT>, target: Id, done_on_eligible_result: bool) -> Self {
+        let dev_mode = dht.is_developer_mode();
         Self {
             base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result, dev_mode),
             bootstrap: false,
             want_token: false,
             want_target: false,

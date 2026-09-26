@@ -379,6 +379,7 @@ impl Node {
             token_man: self.token_man.clone(),
             bootstrap_nodes: self.options.bootstrap_nodes().to_vec(),
             listener,
+            developer_mode: self.options.developer_mode(),
         };
         let data_dir = self.options.data_dir();
         let port = self.options.port();

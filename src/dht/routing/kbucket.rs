@@ -66,6 +66,12 @@ impl KBucket {
         self.entries.values().cloned().collect()
     }
 
+    pub(crate) fn for_each_entry(&self, mut f: impl FnMut(&KBucketEntry)) {
+        for entry in self.entries.values() {
+            f(entry);
+        }
+    }
+
     #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -140,7 +146,9 @@ impl KBucket {
             }
 
             // Try to replace the bad entry
-            self._replace_bad_entry(new);
+            if self._replace_bad_entry(new) {
+                return;
+            }
 
             // When bucket full and new reachable entry arrives, Kademlia(original paper) pings the
             // oldest/least-recent when full; if unresponsive, replace from cache, else cache the new one.
@@ -156,20 +164,20 @@ impl KBucket {
         self.entries.insert(created_time, entry);
     }
 
-    fn _replace_bad_entry(&mut self, entry: KBucketEntry) {
+    fn _replace_bad_entry(&mut self, entry: KBucketEntry) -> bool {
         let key = self
             .entries
             .iter()
             .find(|(_, v)| v.needs_replacement())
-            .map(|(k, _)| k.clone());
+            .map(|(k, _)| *k);
 
         if let Some(ref key) = key {
             self.entries.remove(key);
+            self._put_as_main_entry(entry);
+            true
         } else {
-            self.entries.pop_last();
+            false
         }
-
-        self._put_as_main_entry(entry);
     }
 
     pub(crate) fn on_timeout(&mut self, id: &Id) {

@@ -32,6 +32,7 @@ pub(super) fn make_dht(
         token_man: tokenman.clone(),
         listener: listener.clone(),
         bootstrap_nodes: Vec::new(),
+        developer_mode: false,
     };
 
     let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);

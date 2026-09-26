@@ -30,6 +30,7 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<DHT> {
         token_man,
         listener,
         bootstrap_nodes: Vec::new(),
+        developer_mode: false,
     };
     let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
     let timer_client = Rc::new(LocalBoxTimerClient::new(tx));

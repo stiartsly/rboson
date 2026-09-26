@@ -242,6 +242,7 @@ pub(crate) struct VerticleOptions {
     pub(crate) token_man: Arc<TokenManager>,
     pub(crate) listener: Arc<dyn ConnectionStatusListener>,
     pub(crate) bootstrap_nodes: Vec<NodeInfo>,
+    pub(crate) developer_mode: bool,
 }
 
 pub(crate) struct Verticle {

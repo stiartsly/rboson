@@ -23,9 +23,10 @@ impl ValueLookupTask {
         expected_seq: i32,
         done_on_eligible_result: bool,
     ) -> Self {
+        let dev_mode = dht.is_developer_mode();
         Self {
             base_data: TaskData::new(),
-            lookup_data: LookupTaskData::new(target, done_on_eligible_result),
+            lookup_data: LookupTaskData::new(target, done_on_eligible_result, dev_mode),
             result: EligibleValue::new(target, expected_seq),
             dht: dht.clone(),
         }

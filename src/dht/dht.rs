@@ -79,6 +79,7 @@ pub(crate) struct DHT {
     rpc_server: RefCell<Option<Rc<RpcServer>>>,
 
     suspicious_detector: RefCell<Option<Rc<RefCell<dyn SuspiciousNodeDetector>>>>,
+    developer_mode: bool,
 }
 
 impl DHT {
@@ -124,7 +125,12 @@ impl DHT {
             timer_client,
             suspicious_detector: RefCell::new(None),
             rpc_server: RefCell::new(None),
+            developer_mode: options.developer_mode,
         })
+    }
+
+    pub(crate) fn is_developer_mode(&self) -> bool {
+        self.developer_mode
     }
 
     pub(crate) fn network(&self) -> Network {
@@ -328,13 +334,15 @@ impl DHT {
 
             let rt = self.rt();
             let entry_sz = rt.number_of_entries();
-            if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES
+            let reachable = self.rs().is_reachable();
+
+            if !reachable {
+                self.bootstrap_nodes.borrow().clone()
+            } else if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES
                 && crate::elapsed_ms!(*self.last_bootstrap.borrow()) <= Self::SELF_LOOKUP_INTERVAL
             {
                 return;
-            }
-
-            if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
+            } else if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
                 self.bootstrap_nodes.borrow().clone()
             } else {
                 Vec::new()
@@ -612,8 +620,8 @@ impl DHT {
         let detector_opt = self.suspicious_detector.borrow().clone();
         if let Some(detector) = detector_opt {
             let _ = self.timer_client.add_timer(
-                60,
-                Some(30),
+                60 * 1000,
+                Some(60 * 1000),
                 LocalBoxHandler::new(move |_| {
                     let detector = detector.clone();
                     Box::pin(async move {
@@ -628,7 +636,7 @@ impl DHT {
         if let Some(path) = path_opt {
             let rt = self.rt();
             let _ = self.timer_client.add_timer(
-                120,
+                120 * 1000,
                 Some(Self::ROUTING_TABLE_PERSIST_INTERVAL),
                 LocalBoxHandler::new(move |_| {
                     let rt = rt.clone();
@@ -662,7 +670,7 @@ impl DHT {
     }
 
     fn received(self: &Rc<Self>, msg: &Message) {
-        let allowed = match cfg!(feature = "devp") {
+        let allowed = match self.is_developer_mode() || cfg!(feature = "devp") {
             true => is_any_unicast(&msg.remote_addr().ip()),
             false => !is_bogon(msg.remote_addr()),
         };
@@ -1139,9 +1147,21 @@ impl DHT {
 
         let peer = body.peer();
         let remote_addr = req.remote_addr().clone();
-        let is_valid =
-            self.tokenman
-                .verify_token(body.token(), req.nodeid(), &remote_addr, peer.id());
+
+        let allowed = match self.is_developer_mode() || cfg!(feature = "devp") {
+            true => is_any_unicast(&remote_addr.ip()),
+            false => !is_bogon(&remote_addr),
+        };
+        if !allowed {
+            debug!(
+                "Received an announce peer request from unsupported address {}, ignored",
+                remote_addr
+            );
+            return;
+        }
+
+        let is_valid = self.tokenman
+            .verify_token(body.token(), req.nodeid(), &remote_addr, peer.id());
 
         if !is_valid {
             warn!(

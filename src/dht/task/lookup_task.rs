@@ -23,10 +23,10 @@ pub(crate) struct LookupTaskData {
 }
 
 impl LookupTaskData {
-    pub(crate) fn new(target: Id, done_on_eligible_result: bool) -> Self {
+    pub(crate) fn new(target: Id, done_on_eligible_result: bool, developer_mode: bool) -> Self {
         Self {
             closest: ClosestSet::new(target, KBucket::MAX_ENTRIES),
-            candidates: ClosestCandidates::new(target, MAX_ITERATIONS),
+            candidates: ClosestCandidates::with_developer_mode(target, MAX_ITERATIONS, developer_mode),
             iteration_count: 0,
             target,
             done_on_eligible_result,
@@ -62,7 +62,7 @@ pub(crate) trait LookupTask: Task {
         let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();
-            let bogon = if cfg!(feature = "devp") {
+            let bogon = if self.dht().is_developer_mode() || cfg!(feature = "devp") {
                 !is_any_unicast(&candidate.addr().ip())
             } else {
                 is_bogon(candidate.addr())

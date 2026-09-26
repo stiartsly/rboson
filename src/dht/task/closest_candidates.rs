@@ -28,6 +28,7 @@ pub(crate) struct ClosestCandidates {
 }
 
 impl ClosestCandidates {
+    #[allow(unused)]
     pub(crate) fn new(target: Id, capacity: usize) -> Self {
         Self::with_developer_mode(target, capacity, false)
     }
@@ -95,29 +96,24 @@ impl ClosestCandidates {
             return;
         }
 
-        // shrink to fit.
-        let mut filtered = self
-            .closest
-            .values()
-            .filter(|cn| !cn.borrow().is_inflight())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        filtered.sort_by(|a, b| Self::candidate_order(&self.target, a, b));
-
+        // self.closest is already sorted by distance (closest first, farthest last).
+        // Evict from the back (farthest entries that are not in-flight) until within capacity.
         while self.closest.len() > self.capacity {
-            let Some(cn) = filtered.pop() else {
+            let candidate_to_evict = self
+                .closest
+                .iter()
+                .rev()
+                .find(|(_, cn)| !cn.borrow().is_inflight())
+                .map(|(id, _)| id.clone());
+
+            let Some(id) = candidate_to_evict else {
                 break;
             };
 
-            let borrowed_cn = cn.borrow();
-            let id = borrowed_cn.id();
-            if let Some(removed_cn) = self.closest.shift_remove(id) {
-                self.dedups_ids.remove(id);
-
+            if let Some(removed_cn) = self.closest.shift_remove(&id) {
                 let borrowed = removed_cn.borrow();
-                let addr = borrowed.addr();
-                let key = self.dedup_key(addr);
+                self.dedups_ids.remove(borrowed.id());
+                let key = self.dedup_key(borrowed.addr());
                 self.dedups_addrs.remove(&key);
             }
         }

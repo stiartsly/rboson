@@ -46,8 +46,14 @@ fn generate_user_identity() {
     println!("+--------------------------------------------------------------+");
     println!("  User ID     : {} (base58)", id.to_base58());
     println!("  DID         : {}", id.to_did_string());
-    println!("  Private Key : {} (hexstr)", keypair.private_key().to_hexstr());
-    println!("  Private Key : {} (base58)", keypair.private_key().to_base58());
+    println!(
+        "  Private Key : {} (hexstr)",
+        keypair.private_key().to_hexstr()
+    );
+    println!(
+        "  Private Key : {} (base58)",
+        keypair.private_key().to_base58()
+    );
     println!();
     println!("Keep the private key secret. It controls this identity.");
 }
@@ -60,8 +66,14 @@ fn generate_device_key() {
     println!("|                  Boson Device Key Created                    |");
     println!("+--------------------------------------------------------------+");
     println!("  Device ID   : {} (base58)", device_id.to_base58());
-    println!("  Private Key : {} (hexstr)", keypair.private_key().to_hexstr());
-    println!("  Private Key : {} (base58)", keypair.private_key().to_base58());
+    println!(
+        "  Private Key : {} (hexstr)",
+        keypair.private_key().to_hexstr()
+    );
+    println!(
+        "  Private Key : {} (base58)",
+        keypair.private_key().to_base58()
+    );
     println!();
     println!("Keep the private key secret. It controls this device identity.");
 }

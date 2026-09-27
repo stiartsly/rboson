@@ -1,10 +1,7 @@
+use boson::director::{self, Client, Device, NodeStatus, Profile, Service, UserRegistration};
+use boson::{signature, Id, Result};
 use clap::{Parser, Subcommand};
 use std::{env, time::UNIX_EPOCH};
-use boson::{signature, Id, Result};
-use boson::director::{self,
-    Client, Device, NodeStatus, Profile,
-    Service, UserRegistration
-};
 
 #[derive(Parser, Debug)]
 #[command(name = "identity")]
@@ -14,7 +11,12 @@ use boson::director::{self,
 )]
 struct Cli {
     /// Director node URL (default: $BOSON_DIRECTOR_URL)
-    #[arg(long = "director-url", visible_alias = "director_url", global = true, value_name = "URL")]
+    #[arg(
+        long = "director-url",
+        visible_alias = "director_url",
+        global = true,
+        value_name = "URL"
+    )]
     director_url: Option<String>,
 
     /// Accept invalid TLS certificates from the Director endpoint
@@ -104,15 +106,11 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::User { user_id, user_key, devices }) => {
-            user_command(
-                &cli,
-                user_id.as_deref(),
-                user_key.as_deref(),
-                *devices
-            )
-            .await
-        }
+        Some(Commands::User {
+            user_id,
+            user_key,
+            devices,
+        }) => user_command(&cli, user_id.as_deref(), user_key.as_deref(), *devices).await,
         Some(Commands::RegUser {
             user_key,
             name,
@@ -147,9 +145,7 @@ async fn run() -> Result<()> {
             )
             .await
         }
-        _ => {
-            director_command(&cli, None).await
-        }
+        _ => director_command(&cli, None).await,
     }
 }
 
@@ -168,8 +164,7 @@ fn resolve_director_url(cli: &Cli, input_url: Option<&str>) -> Result<String> {
 
 async fn director_command(cli: &Cli, url: Option<&str>) -> Result<()> {
     let director_url = resolve_director_url(cli, url)?;
-    let dir_opts = director::Options::new(&director_url)?
-        .with_insecure(cli.insecure);
+    let dir_opts = director::Options::new(&director_url)?.with_insecure(cli.insecure);
     let client = Client::new(dir_opts)?;
     let status = client.fetch_node_status().await?;
     print_status(&director_url, &status, None);
@@ -180,10 +175,9 @@ async fn user_command(
     cli: &Cli,
     user_id_arg: Option<&str>,
     user_key_arg: Option<&str>,
-    devices: bool
+    devices: bool,
 ) -> Result<()> {
     let director_url = resolve_director_url(cli, None)?;
-
 
     let user_id_arg = user_id_arg
         .map(str::to_owned)
@@ -201,19 +195,19 @@ async fn user_command(
 
     let Some(user_key) = user_key_opt else {
         return Err(boson::errors::ArgumentError::new(
-            "User key must be provided or set in $BOSON_USER_PRIVATE_KEY"
+            "User key must be provided or set in $BOSON_USER_PRIVATE_KEY",
         ));
     };
 
     let Some(user_id) = user_id_arg else {
         return Err(boson::errors::ArgumentError::new(
-            "User ID must be provided or set in $BOSON_USER_ID"
+            "User ID must be provided or set in $BOSON_USER_ID",
         ));
     };
 
     if user_id != Id::from(user_key.public_key()) {
         return Err(boson::errors::ArgumentError::new(
-            "User ID {user_id}does not match the provided user key"
+            "User ID {user_id}does not match the provided user key",
         ));
     }
 
@@ -251,7 +245,6 @@ async fn reguser_command(
         .with_insecure(cli.insecure)
         .with_user_private_key(user_sk.clone());
     let client = Client::new(dir_opts)?;
-
 
     if let Ok(profile) = client.get_profile().await {
         println!("User {user_id} is already registered.");

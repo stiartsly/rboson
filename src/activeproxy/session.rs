@@ -5,7 +5,6 @@ use std::{
     collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
     rc::{Rc, Weak},
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 use tokio::{
@@ -15,13 +14,11 @@ use tokio::{
 
 use super::{
     connection::ProxyConnection, connection_handler::ConnectionHandler,
-    connection_registry::ConnectionRegistry, verticle::VerticleOptions, LocalBoxHandler,
-    LocalBoxTimerClient as TimerClient,
+    connection_registry::ConnectionRegistry, options::AnnouncePeerHandler,
+    verticle::VerticleOptions, LocalBoxHandler, LocalBoxTimerClient as TimerClient,
 };
 use crate::{
-    cryptobox,
-    dht::Node,
-    elapsed_ms,
+    cryptobox, elapsed_ms,
     errors::{ArgumentError, NetworkError, StateError},
     identity::CryptoIdentity,
     signature, CryptoContext, Id, Identity, PeerBuilder, PeerInfo, Result,
@@ -44,14 +41,13 @@ struct SessionConfig {
     user_id: Id,
     peerid: Id,
     announce_peer_enabled: bool,
+    announce_peer_handler: Option<AnnouncePeerHandler>,
     name_access_enabled: bool,
 }
 
 pub(crate) struct ProxySession {
     cfg: SessionConfig,
-    node: Option<Arc<Node>>,
 
-    // service_peerinfo            : Option<PeerInfo>,
     service_addr: SocketAddr,
 
     upstream_addr: SocketAddr,
@@ -113,14 +109,13 @@ impl ProxySession {
         let cfg = SessionConfig {
             peerid: options.service_peerid,
             announce_peer_enabled: options.announce_peer_enabled,
+            announce_peer_handler: options.announce_peer_handler,
             name_access_enabled: options.name_access_enabled,
             user_id: options.user_id,
         };
 
         Ok(Rc::new(Self {
             cfg,
-            node: options.node.clone(),
-            //  service_peerinfo            : options.service_peer.clone(),
             service_addr,
 
             upstream_addr: options.upstream_addr,
@@ -166,7 +161,7 @@ impl ProxySession {
         *self.connection_status_listener.borrow_mut() = listener;
     }
 
-    pub(crate) async fn start(self: &Rc<Self>) -> Result<()> {
+    pub(crate) async fn start0(self: &Rc<Self>) -> Result<()> {
         *self.last_idle_check_timestamp.borrow_mut() = SystemTime::now();
 
         *self.running.borrow_mut() = true;
@@ -175,13 +170,19 @@ impl ProxySession {
             return Err(e);
         }
 
+        debug!("Proxy session {} started", self.peer_id());
+        Ok(())
+    }
+
+    pub(crate) async fn start(self: &Rc<Self>) -> Result<()> {
+
+        info!("Proxy session {} is connecting to {}", self.peer_id(), self.service_addr);
         if let Err(e) = self.connect().await {
             warn!("Proxy session {} failed to make its initial connection: {e}; retrying with backoff",
                 self.peer_id());
             self.schedule_reconnect();
         }
 
-        debug!("Proxy session {} started", self.peer_id());
         Ok(())
     }
 
@@ -286,10 +287,10 @@ impl ProxySession {
     }
 
     fn try_announce_peer(self: &Rc<Self>) {
-        let Some(node) = self.node.clone() else {
+        let Some(peer) = self.peer_info.borrow().clone() else {
             return;
         };
-        let Some(peer) = self.peer_info.borrow().clone() else {
+        let Some(handler) = self.cfg.announce_peer_handler.clone() else {
             return;
         };
         if elapsed_ms!(*self.last_announce_timestamp.borrow()) < RE_ANNOUNCE_INTERVAL {
@@ -301,7 +302,7 @@ impl ProxySession {
 
         let session = self.clone();
         task::spawn_local(async move {
-            match node.announce_peer(&peer, -1, false).await {
+            match handler.announce(peer).await {
                 Ok(_) => info!("Session {} peer info announced", session.peer_id()),
                 Err(e) => {
                     error!(
@@ -519,15 +520,28 @@ impl ProxySession {
         );
 
         if self.cfg.announce_peer_enabled {
-            let mut builder = PeerBuilder::new(advertised)
-                .with_key(self.device_identity.signature_keypair().clone());
-            if named_endpoint.is_some() {
-                builder = builder.with_extra(format!("altEndpoint={endpoint}").as_bytes());
-            }
+            if self.cfg.announce_peer_handler.is_none() {
+                error!(
+                    "Session {} cannot announce upstream peer: no announce handler configured",
+                    self.peer_id()
+                );
+            } else {
+                let mut builder = PeerBuilder::new(advertised)
+                    .with_key(self.device_identity.signature_keypair().clone());
+                if named_endpoint.is_some() {
+                    builder = builder.with_extra(format!("altEndpoint={endpoint}").as_bytes());
+                }
 
-            if let Ok(peer) = builder.build() {
-                *self.peer_info.borrow_mut() = Some(peer);
-                self.try_announce_peer();
+                match builder.build() {
+                    Ok(peer) => {
+                        *self.peer_info.borrow_mut() = Some(peer);
+                        self.try_announce_peer();
+                    }
+                    Err(e) => error!(
+                        "Session {} failed to build upstream peer info for announcement: {e}",
+                        self.peer_id()
+                    ),
+                }
             }
         }
 

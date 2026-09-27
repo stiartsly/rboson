@@ -2,13 +2,13 @@ use log::{debug, error, info};
 use std::{
     cell::Cell,
     net::{SocketAddr, ToSocketAddrs},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use crate::{
-    dht::Node,
+    core::logger,
     errors::{ArgumentError, NetworkError},
-    Id, PeerInfo, Result,
+    Id, Result,
 };
 
 use super::{
@@ -18,11 +18,8 @@ use super::{
 
 pub struct ActiveProxyClient {
     options: Options,
-    node: Option<Arc<Node>>,
-
     service_peerid: Id,
-    service_peer: Arc<Mutex<Option<PeerInfo>>>,
-    service_endpoint: Option<String>,
+    service_endpoint: String,
 
     upstream_endpoint: String,
     upstream_addr: SocketAddr,
@@ -32,9 +29,14 @@ pub struct ActiveProxyClient {
 }
 
 impl ActiveProxyClient {
-    pub fn new(node: Option<Arc<Node>>, options: Options) -> Result<Arc<Self>> {
+    pub fn new(options: Options) -> Result<Arc<Self>> {
         if log::max_level() == log::LevelFilter::Off {
-            crate::core::logger::setup(log::LevelFilter::Info, None);
+            logger::setup(options.log_level(), options.log_file());
+            if options.log_console() {
+                logger::enable_console_output();
+            } else {
+                logger::disable_console_output();
+            }
         }
 
         if options.service_host().trim().is_empty() {
@@ -71,16 +73,10 @@ impl ActiveProxyClient {
                 NetworkError::new(format!("No valid address found for '{rest}'!"))
             })?;
 
-        let endpoint = Some(format!(
-            "{}:{}",
-            options.service_host(),
-            options.service_port()
-        ));
+        let endpoint = format!("{}:{}", options.service_host(), options.service_port());
 
         Ok(Arc::new(Self {
-            node,
             service_peerid: options.service_peerid().clone(),
-            service_peer: Arc::new(Mutex::new(None)),
             service_endpoint: endpoint,
             upstream_endpoint,
             upstream_addr: upstream_sockaddr,
@@ -92,14 +88,6 @@ impl ActiveProxyClient {
 
     pub fn options(&self) -> &Options {
         &self.options
-    }
-
-    pub fn node(&self) -> Option<Arc<Node>> {
-        self.node.clone()
-    }
-
-    pub fn node_id(&self) -> Option<Id> {
-        self.node.as_ref().map(|n| n.id().clone())
     }
 
     pub fn upstream_host(&self) -> &str {
@@ -122,65 +110,39 @@ impl ActiveProxyClient {
         &self.service_peerid
     }
 
-    pub fn service_peer(&self) -> Option<PeerInfo> {
-        self.service_peer.lock().unwrap().clone()
-    }
-
     pub fn service_endpoint(&self) -> Option<String> {
-        if let Some(endpoint) = self.service_endpoint.clone() {
-            Some(endpoint)
-        } else if let Some(peer) = self.service_peer() {
-            Some(peer.endpoint().to_string())
-        } else {
-            None
-        }
+        Some(self.service_endpoint.clone())
     }
 
     pub async fn start(&self) -> Result<()> {
-        if self.service_endpoint().is_none() {
-            let node = self.node().ok_or_else(|| {
-                ArgumentError::new(
-                    "ActiveProxy requires a DHT node to lookup service peer information",
-                )
-            })?;
-            let peer = node
-                .find_peer(self.service_peerid(), -1, 4, None)
-                .await?
-                .into_iter()
-                .find(|peer| peer.id() == self.service_peerid() && peer.is_valid())
-                .ok_or_else(|| {
-                    NetworkError::new(format!(
-                        "No valid peer found for ActiveProxy service {}",
-                        self.service_peerid()
-                    ))
-                })?;
-            *self.service_peer.lock().unwrap() = Some(peer);
+        if self.running.get() {
+            return Err(ArgumentError::new(
+                "ActiveProxy instance is already running",
+            ));
         }
 
-        let service_endpoint = self.service_endpoint().ok_or_else(|| {
-            NetworkError::new(format!(
-                "No endpoint available for ActiveProxy service peer {}",
-                self.service_peerid()
-            ))
-        })?;
-
         let options = verticle::VerticleOptions::new(
-            self.node(),
             self.service_peerid().clone(),
-            service_endpoint,
+            self.service_endpoint.clone(),
             self.upstream_socketaddr().clone(),
             self.upstream_endpoint().to_string(),
             self.options.user_id().clone(),
             self.options.device_private_key().clone(),
             self.options.is_name_access_enabled(),
-            false,
+            self.options.is_announce_peer_enabled(),
+            self.options.announce_peer_handler(),
         );
 
-        let client = verticle::deploy(options).map_err(|e| {
+        let mut client = verticle::deploy(options).map_err(|e| {
             ArgumentError::new(format!("Failed to deploy ActiveProxy verticle: {e}"))
         })?;
 
-        client.start().await?;
+        if let Err(e) = client.start().await {
+            if let Err(stop_error) = client.stop().await {
+                error!("Failed to clean up ActiveProxy verticle after startup error: {stop_error}");
+            }
+            return Err(e);
+        }
 
         self.running.set(true);
         self.verticle.set(Some(client));
@@ -198,7 +160,9 @@ impl ActiveProxyClient {
         }
 
         if let Some(mut v) = self.verticle.replace(None) {
-            let _ = v.stop().await;
+            if let Err(e) = v.stop().await {
+                error!("Failed to stop ActiveProxy verticle cleanly: {e}");
+            }
         }
         self.running.set(false);
 

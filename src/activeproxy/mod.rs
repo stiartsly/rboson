@@ -18,7 +18,7 @@ pub mod options;
 
 pub use {
     client::ActiveProxyClient as Client,
-    options::Options,
+    options::{AnnouncePeerHandler, Options, OptionsBuilder},
 };
 
 /*

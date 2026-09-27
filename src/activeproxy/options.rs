@@ -1,14 +1,43 @@
-use crate::{
-    errors::{ArgumentError, Error, IOError, NotImplemented, Result},
-    signature::{KeyPair, PrivateKey},
-    Id,
+use std::{
+    env, fmt, fs,
+    future::Future,
+    path::Path,
+    pin::Pin,
+    sync::Arc
 };
-use core::convert::TryFrom;
 use serde::Deserialize;
-use std::{env, fs, path::Path};
+use crate::{
+    errors::{ArgumentError, Error, IOError, Result},
+    signature::{KeyPair, PrivateKey},
+    Id, PeerInfo,
+};
 
 pub const DEFAULT_SCHEME: &'static str = "tcp://";
 pub const DEFAULT_PORT: u16 = 9090;
+
+type AnnouncePeerFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+#[derive(Clone)]
+pub struct AnnouncePeerHandler(Arc<dyn Fn(PeerInfo) -> AnnouncePeerFuture + Send + Sync>);
+
+impl AnnouncePeerHandler {
+    pub fn new<F, Fut>(handler: F) -> Self
+    where
+        F: Fn(PeerInfo) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        Self(Arc::new(move |peer| Box::pin(handler(peer))))
+    }
+
+    pub(crate) async fn announce(&self, peer: PeerInfo) -> Result<()> {
+        (self.0)(peer).await
+    }
+}
+
+impl fmt::Debug for AnnouncePeerHandler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AnnouncePeerHandler(..)")
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct OptionsBuilder {
@@ -24,6 +53,11 @@ pub struct OptionsBuilder {
     upstream_scheme: String,
     name_access: bool,
     announce_peer: bool,
+
+    log_level: log::LevelFilter,
+    log_file: Option<String>,
+    log_console: bool,
+    announce_peer_handler: Option<AnnouncePeerHandler>,
 }
 
 impl OptionsBuilder {
@@ -37,10 +71,15 @@ impl OptionsBuilder {
             device_id: None,
             device_key: None,
             upstream_host: None,
-            upstream_port: 0,
+            upstream_port: 8080,
             upstream_scheme: DEFAULT_SCHEME.to_string(),
             name_access: false,
             announce_peer: false,
+
+            log_level: log::LevelFilter::Info,
+            log_file: None,
+            log_console: true,
+            announce_peer_handler: None,
         }
     }
 
@@ -112,15 +151,33 @@ impl OptionsBuilder {
         self
     }
 
+    pub fn with_announce_peer_handler(&mut self, handler: AnnouncePeerHandler) -> &mut Self {
+        self.announce_peer_handler = Some(handler);
+        self
+    }
+
+    pub fn with_log_level(&mut self, level: log::LevelFilter) -> &mut Self {
+        self.log_level = level;
+        self
+    }
+
+    pub fn with_log_file(&mut self, path: impl Into<String>) -> &mut Self {
+        self.log_file = Some(path.into());
+        self
+    }
+
+    pub fn with_log_console(&mut self, enabled: bool) -> &mut Self {
+        self.log_console = enabled;
+        self
+    }
+
     pub fn build(&self) -> Result<Options> {
         let service_host = self
             .service_host
             .as_deref()
             .filter(|host| !host.trim().is_empty())
             .ok_or_else(|| ArgumentError::new("service_host is required"))?;
-        if self.service_port == 0 {
-            return Err(ArgumentError::new("service_port must not be zero"));
-        }
+
         let user_id = self
             .user_id
             .as_ref()
@@ -133,6 +190,7 @@ impl OptionsBuilder {
             .device_key
             .as_ref()
             .ok_or_else(|| ArgumentError::new("device_key is required"))?;
+
         let upstream_host = self
             .upstream_host
             .as_deref()
@@ -143,11 +201,6 @@ impl OptionsBuilder {
         }
         if self.upstream_scheme.trim().is_empty() {
             return Err(ArgumentError::new("upstream_scheme is required"));
-        }
-        if self.announce_peer {
-            return Err(NotImplemented::new(
-                "announcePeer is not supported by the ActiveProxy Options type",
-            ));
         }
 
         Ok(Options {
@@ -161,6 +214,11 @@ impl OptionsBuilder {
             upstream_port: self.upstream_port,
             upstream_scheme: self.upstream_scheme.clone(),
             name_access: self.name_access,
+            announce_peer: self.announce_peer,
+            log_level: self.log_level,
+            log_file: self.log_file.clone(),
+            log_console: self.log_console,
+            announce_peer_handler: self.announce_peer_handler.clone(),
         })
     }
 }
@@ -187,11 +245,21 @@ pub struct Options {
     upstream_scheme: String,
 
     name_access: bool,
+    announce_peer: bool,
+    log_level: log::LevelFilter,
+    log_file: Option<String>,
+    log_console: bool,
+    announce_peer_handler: Option<AnnouncePeerHandler>,
 }
 
 impl Options {
     pub fn builder(peerid: Id) -> OptionsBuilder {
         OptionsBuilder::new(peerid)
+    }
+
+    pub fn with_announce_peer_handler(mut self, handler: AnnouncePeerHandler) -> Self {
+        self.announce_peer_handler = Some(handler);
+        self
     }
 
     pub fn parse(yaml: impl AsRef<str>) -> Result<Self> {
@@ -251,6 +319,26 @@ impl Options {
     pub fn is_name_access_enabled(&self) -> bool {
         self.name_access
     }
+
+    pub fn is_announce_peer_enabled(&self) -> bool {
+        self.announce_peer
+    }
+
+    pub fn log_level(&self) -> log::LevelFilter {
+        self.log_level
+    }
+
+    pub fn log_file(&self) -> Option<&str> {
+        self.log_file.as_deref()
+    }
+
+    pub fn log_console(&self) -> bool {
+        self.log_console
+    }
+
+    pub(crate) fn announce_peer_handler(&self) -> Option<AnnouncePeerHandler> {
+        self.announce_peer_handler.clone()
+    }
 }
 
 impl TryFrom<&str> for Options {
@@ -270,14 +358,20 @@ struct SerdeOptions {
     name_access: bool,
     #[serde(rename = "announcePeer", default)]
     announce_peer: bool,
+    #[serde(rename = "logLevel", default)]
+    log_level: Option<String>,
+    #[serde(rename = "logFile", default)]
+    log_file: Option<String>,
+    #[serde(rename = "logConsole", default)]
+    log_console: Option<bool>,
 }
 
 impl TryFrom<SerdeOptions> for Options {
     type Error = Error;
 
     fn try_from(sopts: SerdeOptions) -> Result<Self> {
-        let mut builder = Options::builder(sopts.service.peer_id);
-        builder.with_userid(sopts.client.user_id);
+        let mut b = Options::builder(sopts.service.peer_id);
+        b.with_userid(sopts.client.user_id);
 
         let user_key = sopts
             .client
@@ -291,7 +385,7 @@ impl TryFrom<SerdeOptions> for Options {
             if sopts.client.user_id != Id::from(key.public_key()) {
                 return Err(ArgumentError::new("userId does not match userPrivateKey"));
             }
-            builder.with_user_keypair(key);
+            b.with_user_keypair(key);
         }
 
         let device_sk = sopts
@@ -303,28 +397,38 @@ impl TryFrom<SerdeOptions> for Options {
             .map(KeyPair::from);
 
         if let Some(key) = device_sk {
-            builder.with_device_keypair(key);
+            b.with_device_keypair(key);
         }
 
         let service_host = sopts
             .service
             .host
             .ok_or_else(|| ArgumentError::new("service.host is required"))?;
-        builder.with_service_host(service_host);
-        builder.with_service_port(sopts.service.port.unwrap_or(DEFAULT_PORT));
+        b.with_service_host(service_host);
+        b.with_service_port(sopts.service.port.unwrap_or(DEFAULT_PORT));
 
-        builder.with_upstream_host(sopts.upstream.host);
-        builder.with_upstream_port(sopts.upstream.port);
-        builder.with_upstream_scheme(
+        b.with_upstream_host(sopts.upstream.host);
+        b.with_upstream_port(sopts.upstream.port);
+        b.with_upstream_scheme(
             sopts
                 .upstream
                 .scheme
                 .unwrap_or_else(|| DEFAULT_SCHEME.to_string()),
         );
-        builder.with_name_access(sopts.name_access);
-        builder.with_announce_peer(sopts.announce_peer);
+        b.with_name_access(sopts.name_access);
+        b.with_announce_peer(sopts.announce_peer);
 
-        builder.build()
+        let log_level = sopts.log_level.unwrap_or("info".to_string())
+            .parse::<log::LevelFilter>()
+            .map_err(|e| ArgumentError::new(format!("invalid logLevel: {}", e)))?;
+        b.with_log_level(log_level);
+
+        if let Some(log_file) = sopts.log_file {
+            b.with_log_file(log_file);
+        }
+        let log_console = sopts.log_console.unwrap_or(true);
+        b.with_log_console(log_console);
+        b.build()
     }
 }
 

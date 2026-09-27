@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
     rc::Rc,
     result::Result as StdResult,
-    sync::{mpsc as std_mpsc, Arc},
+    sync::mpsc as std_mpsc,
     thread::JoinHandle,
 };
 use tokio::{
@@ -13,11 +13,13 @@ use tokio::{
 };
 
 use super::{
-    session::ProxySession, LocalBoxTimerClient as TimerClient, LocalBoxTimerCmd as TimerCmd,
+    options::AnnouncePeerHandler,
+    session::ProxySession,
+    LocalBoxTimerClient as TimerClient,
+    LocalBoxTimerCmd as TimerCmd,
     LocalBoxTimerManager as TimerManager,
 };
 use crate::{
-    dht::Node,
     errors::{Result, StateError},
     signature, Id,
 };
@@ -76,7 +78,6 @@ impl VerticleClient {
 }
 
 pub(crate) struct VerticleOptions {
-    pub(super) node: Option<Arc<Node>>,
     pub(super) service_peerid: Id,
     pub(super) service_endpoint: String,
     pub(super) upstream_addr: SocketAddr,
@@ -85,11 +86,11 @@ pub(crate) struct VerticleOptions {
     pub(super) device_key: signature::PrivateKey,
     pub(super) name_access_enabled: bool,
     pub(super) announce_peer_enabled: bool,
+    pub(super) announce_peer_handler: Option<AnnouncePeerHandler>,
 }
 
 impl VerticleOptions {
     pub(crate) fn new(
-        node: Option<Arc<Node>>,
         service_peerid: Id,
         service_endpoint: String,
         upstream_addr: SocketAddr,
@@ -98,9 +99,9 @@ impl VerticleOptions {
         device_key: signature::PrivateKey,
         name_access_enabled: bool,
         announce_peer_enabled: bool,
+        announce_peer_handler: Option<AnnouncePeerHandler>,
     ) -> Self {
         Self {
-            node,
             service_peerid,
             service_endpoint,
             upstream_addr,
@@ -109,6 +110,7 @@ impl VerticleOptions {
             device_key,
             name_access_enabled,
             announce_peer_enabled,
+            announce_peer_handler,
         }
     }
 }
@@ -125,10 +127,10 @@ impl Verticle {
     fn new(options: VerticleOptions, event_rx: mpsc::UnboundedReceiver<Event>) -> Result<Self> {
         let (tmr_tx, tmr_rx) = mpsc::unbounded_channel::<TimerCmd>();
         let timer_client = TimerClient::new(tmr_tx);
-        let timer_manager = TimerManager::new();
+
         Ok(Self {
             session: ProxySession::new(options, timer_client)?,
-            timer_manager,
+            timer_manager: TimerManager::new(),
             event_rx,
             tmr_rx,
             quit: false,
@@ -212,6 +214,7 @@ pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
         rt.block_on(local.run_until(async move {
             match Verticle::new(options, event_rx) {
                 Ok(mut v) => {
+                    let _ = v.session.start0().await;
                     let _ = reply_tx.send(Ok(()));
                     v.run_loop().await;
                 }

@@ -6,7 +6,7 @@ use boson::activeproxy::{
     Options as ActiveProxyOptions
 };
 
-const DEFAULT_ACTIVEPROXY_CONFIG: &str = "apps/launcher/activeproxy.yaml";
+const DEFAULT_ACTIVEPROXY_CONFIG: &str = "apps/launcher/config.yaml";
 
 #[derive(Parser, Debug)]
 #[command(name = "launcher")]
@@ -36,7 +36,7 @@ async fn main() {
         }
     };
 
-    let ap = match ActiveProxyClient::new(None, ap_opts) {
+    let ap = match ActiveProxyClient::new(ap_opts) {
         Ok(ap) => ap,
         Err(e) => {
             eprintln!("Creating ActiveProxy client error: {e}");

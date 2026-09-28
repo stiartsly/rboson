@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex};
-
 use clap::{error, ArgMatches, Command};
-
 use boson::{messaging::Client, Id};
 
 macro_rules! println {
@@ -31,21 +29,17 @@ pub(crate) fn print_result(line: String) {
 }
 
 pub(crate) mod channel;
-pub(crate) mod device;
 pub(crate) mod friend;
-pub(crate) mod info;
 pub(crate) mod me;
 pub(crate) mod msg;
 
 pub(crate) fn build_cli() -> Command {
-    let mut command = Command::new("photon")
-        .about("Interactive messaging shell application")
+    let mut command = Command::new("chat")
+        .about("Interactive photon messaging shell application")
         .no_binary_name(true)
         .subcommand_required(true)
         .subcommand(channel::cli())
-        .subcommand(device::cli())
         .subcommand(friend::cli())
-        .subcommand(info::cli())
         .subcommand(me::cli())
         .subcommand(msg::cli())
         .help_template("{subcommands}");
@@ -59,9 +53,7 @@ pub(crate) fn build_cli() -> Command {
 pub(crate) async fn execute_command(matches: ArgMatches, client: &Arc<Client>) {
     match matches.subcommand() {
         Some(("channel", channel)) => channel::execute(channel, client).await,
-        Some(("device", device)) => device::execute(device, client).await,
         Some(("friend", friend)) => friend::execute(friend, client).await,
-        Some(("info", info)) => info::execute(info, client).await,
         Some(("me", me)) => me::execute(me, client).await,
         Some(("msg", msg)) => msg::execute(msg, client).await,
         _ => println!("Unknown command"),

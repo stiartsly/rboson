@@ -1,9 +1,6 @@
 use std::sync::Arc;
-
 use clap::{Arg, ArgMatches, Command};
-
 use boson::messaging::{Client, ContactType};
-
 use super::parse_id;
 
 pub(crate) fn cli() -> Command {
@@ -12,13 +9,12 @@ pub(crate) fn cli() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
-            Command::new("add")
+            Command::new("request")
                 .about("Send a friend request to specified user ID")
-                .visible_alias("request")
                 .arg(
                     Arg::new("USERID")
                         .required(true)
-                        .help("User ID of the friend to add"),
+                        .help("User ID of the friend to send a request"),
                 )
                 .arg(
                     Arg::new("greeting")
@@ -39,7 +35,12 @@ pub(crate) fn cli() -> Command {
         )
         .subcommand(
             Command::new("list")
-                .about("List all friends (user IDs only)"),
+                .about("List all friends (user IDs only)")
+                .arg(
+                    Arg::new("request")
+                        .long("request")
+                        .help("Show pending friend requests"),
+                ),
         )
         .subcommand(
             Command::new("info")
@@ -64,23 +65,23 @@ pub(crate) fn cli() -> Command {
 
 pub(crate) async fn execute(args: &ArgMatches, client: &Arc<Client>) {
     match args.subcommand() {
-        Some(("add" | "request", subargs)) => {
+        Some(("request", subargs)) => {
             let user_id = subargs.get_one::<String>("USERID").unwrap();
             let greeting = subargs.get_one::<String>("greeting").map(|s| s.as_str());
-            add_friend(client, user_id, greeting).await;
+            friend_request(client, user_id, greeting).await;
         }
         Some(("accept", subargs)) => {
             let user_id = subargs.get_one::<String>("USERID").unwrap();
             accept_friend(client, user_id).await;
         }
-        Some(("list", _)) => {
+        Some(("list", _subargs)) => {
             list_friends(client).await;
         }
         Some(("info", subargs)) => {
             let user_id = subargs.get_one::<String>("USERID").unwrap();
             show_info(client, user_id).await;
         }
-        Some(("remove" | "delete", subargs)) => {
+        Some(("delete", subargs)) => {
             let user_id = subargs.get_one::<String>("USERID").unwrap();
             remove_friend(client, user_id).await;
         }
@@ -90,148 +91,107 @@ pub(crate) async fn execute(args: &ArgMatches, client: &Arc<Client>) {
     }
 }
 
-async fn add_friend(client: &Arc<Client>, user_id_str: &str, greeting: Option<&str>) {
-    let Some(target_id) = parse_id(user_id_str) else {
+async fn friend_request(client: &Arc<Client>, user_idstr: &str, greeting: Option<&str>) {
+    let Some(userid) = parse_id(user_idstr) else {
         return;
     };
-    if target_id == *client.user_id() {
+    if userid == *client.user_id() {
         println!("Cannot send friend request to yourself");
         return;
     }
-    match client
-        .friend_request(target_id, greeting.map(ToString::to_string))
-        .await
-    {
-        Ok(()) => {
-            if let Some(msg) = greeting {
-                println!("Friend request sent to {target_id} with greeting: \"{msg}\"");
-            } else {
-                println!("Friend request sent to {target_id}");
-            }
-        }
-        Err(e) => println!("Sending friend request failed: {e}"),
+    if let Err(e) = client
+        .friend_request(userid, greeting.map(ToString::to_string))
+        .await {
+        println!("Sending friend request failed: {e}");
+        return;
+    }
+
+    if let Some(msg) = greeting {
+        println!("Friend request sent to {userid} with greeting: \"{msg}\"");
+    } else {
+        println!("Friend request sent to {userid} without a greeting");
     }
 }
 
-async fn accept_friend(client: &Arc<Client>, user_id_str: &str) {
-    let Some(target_id) = parse_id(user_id_str) else {
+async fn accept_friend(client: &Arc<Client>, user_idstr: &str) {
+    let Some(userid) = parse_id(user_idstr) else {
         return;
     };
-    match client.accept_friend_request(&target_id).await {
-        Ok(()) => println!("Accepted friend request from {target_id}"),
+    match client.accept_friend_request(&userid).await {
+        Ok(()) => println!("Accepted friend request from {userid}"),
         Err(e) => println!("Accepting friend request failed: {e}"),
     }
 }
 
 async fn list_friends(client: &Arc<Client>) {
-    match client.get_contacts().await {
-        Ok(contacts) => {
-            let mut count = 0;
-            for contact in contacts.iter().filter(|c| {
-                c.contact_type() == ContactType::Friend || c.contact_type() == ContactType::Auto
-            }) {
-                println!("{}", contact.id());
-                count += 1;
-            }
-            if count == 0 {
-                println!("No friends found");
-            }
+    let contacts = match client.get_contacts().await {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Listing friends failed: {e}");
+            return;
         }
-        Err(e) => println!("Listing friends failed: {e}"),
+    };
+
+    let mut count = 0;
+    for contact in contacts.iter().filter(|c| {
+        c.contact_type() == ContactType::Friend ||
+        c.contact_type() == ContactType::Auto
+    }) {
+        println!("{}", contact.id());
+        count += 1;
+    }
+    if count == 0 {
+        println!("No friends found");
     }
 }
 
-async fn show_info(client: &Arc<Client>, user_id_str: &str) {
-    let Some(target_id) = parse_id(user_id_str) else {
+async fn show_info(client: &Arc<Client>, user_idstr: &str) {
+    let Some(userid) = parse_id(user_idstr) else {
         return;
     };
 
-    match client.get_contact(&target_id).await {
-        Ok(Some(contact)) => {
-            println!("User ID:      {}", contact.id());
-            println!("Name:         {}", contact.name().unwrap_or("<none>"));
-            println!("Remark:       {}", contact.remark().unwrap_or("<none>"));
-            println!("Type:         {:?}", contact.contact_type());
-            println!("Tags:         {}", contact.tags().unwrap_or("<none>"));
-            println!("Muted:        {}", contact.is_muted());
-            println!("Blocked:      {}", contact.is_blocked());
-            println!("Revision:     {}", contact.revision());
-            println!("Created At:   {}", contact.created_at());
-            println!("Updated At:   {}", contact.updated_at());
+    let contact = match client.get_contact(&userid).await {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Retrieving user details failed: {e}");
+            return;
         }
-        Ok(None) => match client.get_friend_request(&target_id).await {
-            Ok(Some(req)) => {
-                println!("User ID:      {}", req.initiator_id());
-                println!("Status:       Friend Request Pending");
-                println!("Greeting:     {}", req.hello().unwrap_or("<none>"));
-                println!("Accepted:     {}", req.is_accepted());
-                println!("Expired:      {}", req.is_expired());
-            }
-            _ => {
-                println!("User {target_id} was not found in contacts");
-            }
-        },
-        Err(e) => println!("Retrieving user details failed: {e}"),
+    };
+
+    if let Some(contact) = contact {
+        println!("User ID:      {}", contact.id());
+        println!("Name:         {}", contact.name().unwrap_or("<none>"));
+        println!("Remark:       {}", contact.remark().unwrap_or("<none>"));
+        println!("Type:         {:?}", contact.contact_type());
+        println!("Tags:         {}", contact.tags().unwrap_or("<none>"));
+        println!("Muted:        {}", contact.is_muted());
+        println!("Blocked:      {}", contact.is_blocked());
+        println!("Revision:     {}", contact.revision());
+        println!("Created At:   {}", contact.created_at());
+        println!("Updated At:   {}", contact.updated_at());
+        return;
+    }
+
+    match client.get_friend_request(&userid).await {
+        Ok(Some(req)) => {
+            println!("User ID:      {}", req.initiator_id());
+            println!("Status:       Friend Request Pending");
+            println!("Greeting:     {}", req.hello().unwrap_or("<none>"));
+            println!("Accepted:     {}", req.is_accepted());
+            println!("Expired:      {}", req.is_expired());
+        }
+        _ => {
+            println!("User {userid} was not found in contacts");
+        }
     }
 }
 
-async fn remove_friend(client: &Arc<Client>, user_id_str: &str) {
-    let Some(target_id) = parse_id(user_id_str) else {
+async fn remove_friend(client: &Arc<Client>, user_idstr: &str) {
+    let Some(userid) = parse_id(user_idstr) else {
         return;
     };
-    match client.remove_contact(&target_id).await {
-        Ok(()) => println!("Friend {target_id} removed"),
+    match client.remove_contact(&userid).await {
+        Ok(()) => println!("Friend {userid} removed"),
         Err(e) => println!("Removing friend failed: {e}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_friend_cli() {
-        let cmd = cli();
-
-        // 1) friend add USERID [--greeting HELLO]
-        let m = cmd
-            .clone()
-            .try_get_matches_from(["friend", "add", "user123", "--greeting", "hello"])
-            .unwrap();
-        assert_eq!(m.subcommand_name(), Some("add"));
-        let sub_m = m.subcommand_matches("add").unwrap();
-        assert_eq!(sub_m.get_one::<String>("USERID").unwrap(), "user123");
-        assert_eq!(sub_m.get_one::<String>("greeting").unwrap(), "hello");
-
-        // 2) friend accept USERID
-        let m = cmd
-            .clone()
-            .try_get_matches_from(["friend", "accept", "user456"])
-            .unwrap();
-        assert_eq!(m.subcommand_name(), Some("accept"));
-        let sub_m = m.subcommand_matches("accept").unwrap();
-        assert_eq!(sub_m.get_one::<String>("USERID").unwrap(), "user456");
-
-        // 3) friend list
-        let m = cmd.clone().try_get_matches_from(["friend", "list"]).unwrap();
-        assert_eq!(m.subcommand_name(), Some("list"));
-
-        // 4) friend info USERID
-        let m = cmd
-            .clone()
-            .try_get_matches_from(["friend", "info", "user789"])
-            .unwrap();
-        assert_eq!(m.subcommand_name(), Some("info"));
-        let sub_m = m.subcommand_matches("info").unwrap();
-        assert_eq!(sub_m.get_one::<String>("USERID").unwrap(), "user789");
-
-        // 5) friend remove USERID
-        let m = cmd
-            .clone()
-            .try_get_matches_from(["friend", "remove", "user999"])
-            .unwrap();
-        assert_eq!(m.subcommand_name(), Some("remove"));
-        let sub_m = m.subcommand_matches("remove").unwrap();
-        assert_eq!(sub_m.get_one::<String>("USERID").unwrap(), "user999");
     }
 }

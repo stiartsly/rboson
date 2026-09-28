@@ -1,29 +1,22 @@
 use std::sync::Arc;
-
 use clap::{ArgMatches, Command};
-
 use boson::messaging::Client;
 
 pub(crate) fn cli() -> Command {
     Command::new("me")
-        .about("Show client information")
+        .about("Show user and client information")
         .help_template("{subcommands}")
 }
 
 pub(crate) async fn execute(_: &ArgMatches, client: &Arc<Client>) {
-    println!("user id:    {}", client.user_id());
-    println!("device id:  {}", client.device_id());
-    println!("service id: {}", client.service_peer_id());
+    println!("User Id:            {}", client.user_id());
+    println!("Device Id:          {}", client.device_id());
+    println!("Messaging Peer Id:  {}", client.service_peer_id());
     println!(
-        "endpoint:   {}",
+        "Messaging endpoint: {}",
         client
             .service_endpoint()
             .unwrap_or("<DHT discovery required>")
     );
-    println!(
-        "running={} connected={} ready={}",
-        client.is_running(),
-        client.is_connected(),
-        client.is_ready()
-    );
+    println!("Connection Status:  {}", client.connection_status());
 }

@@ -17,10 +17,9 @@ mod prompt;
 use prompt::MyPrompt;
 
 #[derive(Parser, Debug)]
-#[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
+#[command(name = "chat", version = "1.0", about = "Photon chat")]
 struct Options {
-    /// Messaging configuration file (e.g. apps/chat/bob.yaml).
-    #[arg(short = 'm', long = "config", value_name = "FILE")]
+    #[arg(short = 'c', long = "config", value_name = "FILE")]
     config: String,
 }
 
@@ -51,12 +50,24 @@ async fn run() -> Result<()> {
     use_reedline_log_output(&external_printer);
 
     let client: Arc<Client> = Arc::new(Client::new(chat_options));
-    client.add_connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())));
-    client.add_message_listener(Arc::new(ConsoleMessageListener::new(output.clone())));
-    client.add_channel_listener(Arc::new(ConsoleChannelListener::new(output.clone())));
-    client.add_contact_listener(Arc::new(ConsoleContactListener::new(output.clone())));
-    client.add_session_listener(Arc::new(ConsoleSessionListener::new(output.clone())));
-    client.add_friend_request_listener(Arc::new(ConsoleFriendRequestListener::new(output)));
+    client.add_connection_listener(Arc::new(
+        PhotonConnectionListener::new(output.clone()))
+    );
+    client.add_message_listener(
+        Arc::new(PhotonMessageListener::new(output.clone()))
+    );
+    client.add_channel_listener(
+        Arc::new(PhotonChannelListener::new(output.clone()))
+    );
+    client.add_contact_listener(
+        Arc::new(PhotonContactListener::new(output.clone()))
+    );
+    client.add_session_listener(
+        Arc::new(PhotonSessionListener::new(output.clone()))
+    );
+    client.add_friend_request_listener(
+        Arc::new(PhotonFriendRequestListener::new(output))
+    );
 
     client.start().await?;
 
@@ -80,7 +91,7 @@ async fn run() -> Result<()> {
                     if let Some(name) = args.get(1) {
                         match cli.find_subcommand_mut(name) {
                             Some(command) => command.write_long_help(&mut buf)?,
-                            None => cli.write_long_help(&mut buf)?,
+                            _ => cli.write_long_help(&mut buf)?,
                         }
                     } else {
                         cli.write_long_help(&mut buf)?;
@@ -151,17 +162,17 @@ impl ConsoleOutput {
     }
 }
 
-struct ConsoleConnectionListener {
+struct PhotonConnectionListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleConnectionListener {
+impl PhotonConnectionListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl ConnectionListener for ConsoleConnectionListener {
+impl ConnectionListener for PhotonConnectionListener {
     fn on_connecting(&self) {
         self.output.println("Connecting to messaging service...");
     }
@@ -179,17 +190,17 @@ impl ConnectionListener for ConsoleConnectionListener {
     }
 }
 
-struct ConsoleMessageListener {
+struct PhotonMessageListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleMessageListener {
+impl PhotonMessageListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl MessageListener for ConsoleMessageListener {
+impl MessageListener for PhotonMessageListener {
     fn on_message(&self, message: &dyn Message) {
         let from = message.from().map(ToString::to_string).unwrap_or_else(|| "unknown".into());
         let content = message
@@ -245,17 +256,17 @@ fn parse_command_line(line: &str) -> Vec<String> {
     args
 }
 
-struct ConsoleContactListener {
+struct PhotonContactListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleContactListener {
+impl PhotonContactListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl ContactListener for ConsoleContactListener {
+impl ContactListener for PhotonContactListener {
     fn on_contact_added(&self, contact: &dyn Contact) {
         self.output
             .println(format!("Contact added: {}", contact.id()));
@@ -276,17 +287,17 @@ impl ContactListener for ConsoleContactListener {
     }
 }
 
-struct ConsoleChannelListener {
+struct PhotonChannelListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleChannelListener {
+impl PhotonChannelListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl ChannelListener for ConsoleChannelListener {
+impl ChannelListener for PhotonChannelListener {
     fn on_channel_created(&self, channel: &dyn Channel) {
         self.output
             .println(format!("Channel created: {}", channel.id()));
@@ -308,34 +319,34 @@ impl ChannelListener for ConsoleChannelListener {
     }
 }
 
-struct ConsoleSessionListener {
+struct PhotonSessionListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleSessionListener {
+impl PhotonSessionListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl SessionListener for ConsoleSessionListener {
+impl SessionListener for PhotonSessionListener {
     fn on_new_session(&self, session: &SessionInfo) {
         self.output
             .println(format!("New device session: {}", session.device_id()));
     }
 }
 
-struct ConsoleFriendRequestListener {
+struct PhotonFriendRequestListener {
     output: ConsoleOutput,
 }
 
-impl ConsoleFriendRequestListener {
+impl PhotonFriendRequestListener {
     fn new(output: ConsoleOutput) -> Self {
         Self { output }
     }
 }
 
-impl FriendRequestListener for ConsoleFriendRequestListener {
+impl FriendRequestListener for PhotonFriendRequestListener {
     fn on_friend_request(&self, user_id: &Id, hello: Option<&str>) {
         self.output.println(format!(
             "Friend request from {}: {}",

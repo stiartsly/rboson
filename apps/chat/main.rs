@@ -1,86 +1,27 @@
-use clap::Parser;
-use reedline::{ExternalPrinter, Reedline, Signal};
-use std::env;
-use std::sync::{
-    atomic::{AtomicU8, Ordering},
-    Arc,
-};
-
 use boson::{
     core::logger,
-    dht::{ConnectionStatus, ConnectionStatusListener, Node, NodeOptions},
     errors::Result,
     messaging::{
         Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
         FriendRequestListener, Message, MessageListener, Options as MessagingOptions, SessionInfo,
         SessionListener,
     },
-    Id, Network,
+    Id,
 };
-use log::{debug, info, warn};
+use clap::Parser;
+use reedline::{ExternalPrinter, Reedline, Signal};
+use std::sync::Arc;
 
 mod cmds;
 mod prompt;
 use prompt::MyPrompt;
 
-const BOSON_PEER_ID: &str = "BOSON_MESSAGING_PEER_ID";
-const BOSON_ENDPOINT: &str = "BOSON_MESSAGING_PEER_ENDPOINT";
-const BOSON_USER_KEY: &str = "BOSON_USER_KEY";
-const BOSON_USER_PRIVATE_KEY: &str = "BOSON_USER_PRIVATE_KEY";
-const BOSON_DEV_KEY: &str = "BOSON_DEV_KEY";
-const BOSON_DEVICE_KEY: &str = "BOSON_DEVICE_KEY";
-const DEFAULT_NODE_CONFIG: &str = "apps/chat/node.yaml";
-
 #[derive(Parser, Debug)]
 #[command(name = "chat", version = "1.0", about = "Boson messaging chat")]
 struct Options {
-    /// Node configuration file used to start the chat Boson node.
-    #[arg(short, long, value_name = "FILE")]
-    config: Option<String>,
-
     /// Messaging configuration file (e.g. apps/chat/bob.yaml).
-    #[arg(short = 'm', long = "messaging-config", value_name = "FILE")]
-    messaging_config: Option<String>,
-
-    /// Messaging service peer id.
-    #[arg(long, value_name = "PEERID")]
-    peerid: Option<String>,
-
-    /// Messaging service endpoint, for example mqtt://127.0.0.1:1883.
-    #[arg(long, value_name = "ENDPOINT")]
-    endpoint: Option<String>,
-
-    /// Director service endpoint URL (or BOSON_DIRECTOR_URL).
-    #[arg(long, value_name = "URL")]
-    director_url: Option<String>,
-
-    /// Director node ID (or BOSON_DIRECTOR_NODEID).
-    #[arg(long, value_name = "NODEID")]
-    director_nodeid: Option<String>,
-
-    /// User private key alias (--userkey or --userid).
-    #[arg(long = "userkey", value_name = "PRIVATE_KEY")]
-    userkey: Option<String>,
-
-    /// User private key alias (--userid).
-    #[arg(long = "userid", value_name = "PRIVATE_KEY")]
-    userid: Option<String>,
-
-    /// Device private key. BOSON_DEV_KEY or BOSON_DEVICE_KEY is used as fallback.
-    #[arg(long = "dev-key", value_name = "PRIVATE_KEY")]
-    dev_key: Option<String>,
-
-    /// Device private key alias (--device).
-    #[arg(long = "device", value_name = "PRIVATE_KEY")]
-    device: Option<String>,
-
-    /// Override the DHT node UDP port from the node configuration.
-    #[arg(long, value_name = "PORT")]
-    port: Option<u16>,
-
-    /// Override the DHT node data directory from the node configuration.
-    #[arg(long, value_name = "DIR")]
-    datadir: Option<String>,
+    #[arg(short = 'm', long = "config", value_name = "FILE")]
+    config: String,
 }
 
 #[tokio::main]
@@ -93,7 +34,6 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let options = Options::parse();
-    let node_options = load_node_options(&options)?;
     let chat_options = load_chat_options(&options)?;
     let external_printer = ExternalPrinter::new(4_096);
     let output = ConsoleOutput::new(external_printer.clone());
@@ -108,14 +48,7 @@ async fn run() -> Result<()> {
         }
     });
 
-    let node = Node::new(node_options)?;
     use_reedline_log_output(&external_printer);
-    let readiness = Arc::new(ConnectionReadiness::new());
-    node.add_listener(DefaultConnectionStatusListener {
-        readiness: readiness.clone(),
-    });
-    node.start().await?;
-    cmds::print_result(format!("Boson DHT node {} is up and running.", node.id()));
 
     let client: Arc<Client> = Arc::new(Client::new(chat_options));
     client.add_connection_listener(Arc::new(ConsoleConnectionListener::new(output.clone())));
@@ -169,9 +102,7 @@ async fn run() -> Result<()> {
             }
         }
     }
-
     client.stop().await?;
-    node.stop().await?;
     Ok(())
 }
 
@@ -184,127 +115,20 @@ fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
     });
 }
 
-fn load_node_options(options: &Options) -> Result<NodeOptions> {
-    let path = options
-        .config
-        .as_deref()
-        .or(options.config.as_deref())
-        .unwrap_or(DEFAULT_NODE_CONFIG);
-
-    let mut opts = NodeOptions::load(path)?;
-    if let Some(port) = options.port {
-        opts = opts.with_port(port);
-    }
-    if let Some(datadir) = options.datadir.as_deref() {
-        opts = opts.with_data_dir(datadir);
-    }
-    Ok(opts)
-}
-
 fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
-    if let Some(path) = options.messaging_config.as_deref() {
-        let opts = MessagingOptions::load(path)?;
-        if options.peerid.is_none()
-            && options.endpoint.is_none()
-            && options.userkey.is_none()
-            && options.userid.is_none()
-            && options.dev_key.is_none()
-            && options.device.is_none()
-        {
-            return Ok(opts);
-        }
-        let mut b = MessagingOptions::builder();
-        b.with_service_peerid(*opts.service_peerid());
-        if let Some(endpoint) = opts.service_endpoint() {
-            b.with_service_endpoint_url(endpoint.clone())?;
-        }
-        if let Some(node_id) = opts.director_node_id() {
-            b.with_director_node_id(*node_id);
-        }
-        if let Some(endpoint) = opts.director_endpoint() {
-            b.with_director_endpoint_url(endpoint.clone());
-        }
-        b.with_user_keypair(opts.user_key().clone());
-        b.with_device_keypair(opts.device_key().clone());
-        b.with_data_dir(opts.data_dir());
-        b.with_database_uri(opts.database_uri())?;
-        b.with_database_pool_size(opts.database_pool_size());
-        b.with_database_schema_name(opts.database_schema());
-
-        if let Some(peerid_str) = &options.peerid {
-            b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
-        }
-        if let Some(endpoint) = &options.endpoint {
-            b.with_service_endpoint(endpoint)?;
-        }
-        if let Some(node_id_str) = &options.director_nodeid {
-            b.with_director_node_id(Id::try_from(node_id_str.as_str())?);
-        }
-        if let Some(director_url) = &options.director_url {
-            b.with_director_endpoint(director_url)?;
-        }
-        if let Some(user_key) = options.userkey.as_ref().or(options.userid.as_ref()) {
-            b.with_user_key_str(user_key)?;
-        }
-        if let Some(device_key) = options.dev_key.as_ref().or(options.device.as_ref()) {
-            b.with_device_key_str(device_key)?;
-        }
-        return b.build();
-    }
-
-    let peerid_arg = options
-        .peerid
-        .clone()
-        .or_else(|| env::var(BOSON_PEER_ID).ok());
-    let endpoint_arg = options
-        .endpoint
-        .clone()
-        .or_else(|| env::var(BOSON_ENDPOINT).ok());
-    let user_key_arg = options
-        .userkey
-        .clone()
-        .or_else(|| options.userid.clone())
-        .or_else(|| env::var(BOSON_USER_KEY).ok())
-        .or_else(|| env::var(BOSON_USER_PRIVATE_KEY).ok());
-    let device_key_arg = options
-        .dev_key
-        .clone()
-        .or_else(|| options.device.clone())
-        .or_else(|| env::var(BOSON_DEV_KEY).ok())
-        .or_else(|| env::var(BOSON_DEVICE_KEY).ok());
-
-    let director_nodeid_arg = options
-        .director_nodeid
-        .clone()
-        .or_else(|| env::var("BOSON_DIRECTOR_NODEID").ok());
-    let director_url_arg = options
-        .director_url
-        .clone()
-        .or_else(|| env::var("BOSON_DIRECTOR_URL").ok());
-
+    let path = options.config.clone();
+    let opts = MessagingOptions::load(path)?;
     let mut b = MessagingOptions::builder();
-    if let Some(peerid_str) = peerid_arg {
-        b.with_service_peerid(Id::try_from(peerid_str.as_str())?);
+    b.with_service_peerid(*opts.service_peerid());
+    if let Some(endpoint) = opts.service_endpoint() {
+        b.with_service_endpoint_url(endpoint.clone())?;
     }
-    if let Some(endpoint) = endpoint_arg {
-        b.with_service_endpoint(endpoint)?;
-    }
-    if let Some(node_id_str) = director_nodeid_arg {
-        b.with_director_node_id(Id::try_from(node_id_str.as_str())?);
-    }
-    if let Some(director_url) = director_url_arg {
-        b.with_director_endpoint(director_url)?;
-    }
-    if let Some(user_key) = user_key_arg {
-        b.with_user_key_str(&user_key)?;
-    } else {
-        b.with_generated_user_key();
-    }
-    if let Some(device_key) = device_key_arg {
-        b.with_device_key_str(&device_key)?;
-    } else {
-        b.with_generated_device_key();
-    }
+    b.with_user_keypair(opts.user_key().clone());
+    b.with_device_keypair(opts.device_key().clone());
+    b.with_data_dir(opts.data_dir());
+    b.with_database_uri(opts.database_uri())?;
+    b.with_database_pool_size(opts.database_pool_size());
+    b.with_database_schema_name(opts.database_schema());
 
     b.build()
 }
@@ -479,60 +303,5 @@ impl FriendRequestListener for ConsoleFriendRequestListener {
     fn on_friend_request_accepted(&self, user_id: &Id) {
         self.output
             .println(format!("Friend request accepted by {user_id}"));
-    }
-}
-
-struct ConnectionReadiness {
-    connected_networks: AtomicU8,
-}
-
-impl ConnectionReadiness {
-    fn new() -> Self {
-        Self {
-            connected_networks: AtomicU8::new(0),
-        }
-    }
-
-    fn set_network_connected(&self, network: Network, connected: bool) {
-        let network_mask = match network {
-            Network::IPv4 => 0b01,
-            Network::IPv6 => 0b10,
-        };
-        if connected {
-            self.connected_networks
-                .fetch_or(network_mask, Ordering::AcqRel);
-        } else {
-            self.connected_networks
-                .fetch_and(!network_mask, Ordering::AcqRel);
-        }
-    }
-}
-
-struct DefaultConnectionStatusListener {
-    readiness: Arc<ConnectionReadiness>,
-}
-
-impl ConnectionStatusListener for DefaultConnectionStatusListener {
-    fn status_changed(
-        &self,
-        network: Network,
-        new_status: ConnectionStatus,
-        old_status: ConnectionStatus,
-    ) {
-        debug!("DHT {network} status changed: {old_status}->{new_status}");
-    }
-
-    fn connecting(&self, network: Network) {
-        info!("Connecting to DHT network {network}...");
-    }
-
-    fn connected(&self, network: Network) {
-        info!("Connected to DHT network {network}");
-        self.readiness.set_network_connected(network, true);
-    }
-
-    fn disconnected(&self, network: Network) {
-        warn!("Disconnected from DHT network {network}");
-        self.readiness.set_network_connected(network, false);
     }
 }

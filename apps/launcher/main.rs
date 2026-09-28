@@ -12,7 +12,7 @@ const DEFAULT_CONFIG: &str = "apps/launcher/config.yaml";
 #[command(version = "1.0")]
 #[command(about = "Boson launcher service", long_about = None)]
 struct Options {
-    #[arg(long, value_name = "FILE")]
+    #[arg(short = 'c', long = "config", value_name = "FILE")]
     config: Option<String>,
 }
 

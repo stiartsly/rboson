@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use boson::{activeproxy::Options, signature::KeyPair, Id, PeerBuilder};
+use boson::{activeproxy::Options, signature::KeyPair, Id};
 use serial_test::serial;
 
 struct ConfigFile(PathBuf);
@@ -73,15 +73,10 @@ fn assert_loaded_options(
     upstream_host: &str,
 ) {
     assert_eq!(options.service_peerid(), service_peerid);
-    assert_eq!(options.service_peer(), None);
-    assert_eq!(options.service_host(), Some(service_host));
+    assert_eq!(options.service_host(), service_host);
     assert_eq!(options.service_port(), 9091);
-    assert_eq!(options.user_id(), Some(&Id::from(user_key.public_key())));
-    assert_eq!(options.user_private_key().unwrap(), user_key.private_key());
-    assert_eq!(
-        options.device_private_key().unwrap(),
-        device_key.private_key()
-    );
+    assert_eq!(options.user_id(), &Id::from(user_key.public_key()));
+    assert_eq!(options.device_private_key(), device_key.private_key());
     assert_eq!(options.upstream_host(), upstream_host);
     assert_eq!(options.upstream_port(), 8081);
     assert_eq!(options.upstream_scheme(), "http://");
@@ -92,15 +87,21 @@ fn assert_loaded_options(
 #[test]
 fn test_default_options() {
     let peerid = Id::random();
-    let options = Options::new(peerid);
+    let user_key = KeyPair::random();
+    let device_key = KeyPair::random();
+    let mut builder = Options::builder(peerid);
+    builder
+        .with_user_keypair(user_key.clone())
+        .with_device_keypair(device_key.clone())
+        .with_service_host("127.0.0.1")
+        .with_upstream_host("127.0.0.1");
+    let options = builder.build().unwrap();
 
     assert_eq!(options.service_peerid(), &peerid);
-    assert_eq!(options.service_peer(), None);
-    assert_eq!(options.service_host(), None);
+    assert_eq!(options.service_host(), "127.0.0.1");
     assert_eq!(options.service_port(), 9090);
-    assert_eq!(options.user_id(), None);
-    assert!(options.user_private_key().is_none());
-    assert!(options.device_private_key().is_none());
+    assert_eq!(options.user_id(), &Id::from(user_key.public_key()));
+    assert_eq!(options.device_private_key(), device_key.private_key());
     assert_eq!(options.upstream_host(), "127.0.0.1");
     assert_eq!(options.upstream_port(), 8080);
     assert_eq!(options.upstream_scheme(), "tcp://");
@@ -146,33 +147,11 @@ fn test_parse_options() {
 #[test]
 fn test_options_with_funs() {
     let peerid = Id::random();
-    let replacement_peerid = Id::random();
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
-    let peer = PeerBuilder::new("service.example:9092").build().unwrap();
 
-    let peerid_options = Options::new(peerid).with_peerid(replacement_peerid);
-    assert_eq!(peerid_options.service_peerid(), &replacement_peerid);
-    assert_eq!(peerid_options.service_peer(), None);
-
-    let generated_user_options = Options::new(peerid).with_generated_user_key();
-    let generated_user_key = generated_user_options.user_private_key().unwrap();
-    assert_eq!(
-        generated_user_options.user_id(),
-        Some(&Id::from(
-            KeyPair::from(generated_user_key.clone()).public_key()
-        ))
-    );
-
-    let generated_device_options = Options::new(peerid).with_generated_device_key();
-    assert!(!generated_device_options
-        .device_private_key()
-        .unwrap()
-        .to_string()
-        .is_empty());
-
-    let options = Options::new(peerid)
-        .with_peer(peer.clone())
+    let mut builder = Options::builder(peerid);
+    builder
         .with_service_host("198.51.100.1")
         .with_service_port(9093)
         .with_userid(Id::random())
@@ -183,17 +162,13 @@ fn test_options_with_funs() {
         .with_upstream_scheme("https://")
         .with_name_access(true)
         .with_announce_peer(true);
+    let options = builder.build().unwrap();
 
-    assert_eq!(options.service_peerid(), peer.id());
-    assert_eq!(options.service_peer(), Some(&peer));
-    assert_eq!(options.service_host(), Some("198.51.100.1"));
+    assert_eq!(options.service_peerid(), &peerid);
+    assert_eq!(options.service_host(), "198.51.100.1");
     assert_eq!(options.service_port(), 9093);
-    assert_eq!(options.user_id(), Some(&Id::from(user_key.public_key())));
-    assert_eq!(options.user_private_key().unwrap(), user_key.private_key());
-    assert_eq!(
-        options.device_private_key().unwrap(),
-        device_key.private_key()
-    );
+    assert_eq!(options.user_id(), &Id::from(user_key.public_key()));
+    assert_eq!(options.device_private_key(), device_key.private_key());
     assert_eq!(options.upstream_host(), "127.0.0.3");
     assert_eq!(options.upstream_port(), 8082);
     assert_eq!(options.upstream_scheme(), "https://");
@@ -202,7 +177,7 @@ fn test_options_with_funs() {
 }
 
 #[test]
-fn test_load_then_overriden() {
+fn test_load_options() {
     let loaded_peerid = Id::random();
     let loaded_user_key = KeyPair::random();
     let loaded_device_key = KeyPair::random();
@@ -214,46 +189,16 @@ fn test_load_then_overriden() {
         "192.0.2.1",
         "127.0.0.2",
     ));
-    let replacement_peer = PeerBuilder::new("replacement.example:9094")
-        .build()
-        .unwrap();
-    let replacement_user_key = KeyPair::random();
-    let replacement_device_key = KeyPair::random();
+    let options = Options::load(config.path()).unwrap();
 
-    let options = Options::load(config.path())
-        .unwrap()
-        .with_peer(replacement_peer.clone())
-        .with_service_host("203.0.113.1")
-        .with_service_port(9095)
-        .with_user_keypair(replacement_user_key.clone())
-        .with_device_keypair(replacement_device_key.clone())
-        .with_upstream_host("127.0.0.4")
-        .with_upstream_port(8083)
-        .with_upstream_scheme("tcp://")
-        .with_name_access(false)
-        .with_announce_peer(false);
-
-    assert_eq!(options.service_peerid(), replacement_peer.id());
-    assert_eq!(options.service_peer(), Some(&replacement_peer));
-    assert_eq!(options.service_host(), Some("203.0.113.1"));
-    assert_eq!(options.service_port(), 9095);
-    assert_eq!(
-        options.user_id(),
-        Some(&Id::from(replacement_user_key.public_key()))
+    assert_loaded_options(
+        &options,
+        &loaded_peerid,
+        &loaded_user_key,
+        &loaded_device_key,
+        "192.0.2.1",
+        "127.0.0.2",
     );
-    assert_eq!(
-        options.user_private_key().unwrap(),
-        replacement_user_key.private_key()
-    );
-    assert_eq!(
-        options.device_private_key().unwrap(),
-        replacement_device_key.private_key()
-    );
-    assert_eq!(options.upstream_host(), "127.0.0.4");
-    assert_eq!(options.upstream_port(), 8083);
-    assert_eq!(options.upstream_scheme(), "tcp://");
-    assert!(!options.is_name_access_enabled());
-    assert!(!options.is_announce_peer_enabled());
 }
 
 #[test]

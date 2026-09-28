@@ -1,5 +1,5 @@
 use boson::activeproxy::{Client, Options};
-use boson::{signature::KeyPair, Id, PeerBuilder};
+use boson::{signature::KeyPair, Id};
 
 #[cfg(test)]
 mod tests {
@@ -20,19 +20,13 @@ mod tests {
     }
 
     #[test]
-    fn supplied_peer_endpoint_takes_precedence_over_service_host() {
+    fn configured_service_host_is_used() {
         let service_peerid = Id::random();
-        let peer = PeerBuilder::new("peer.example:9090").build().unwrap();
-        let options =
-            options(&service_peerid, "  host: 192.0.2.1\n  port: 9091\n").with_peer(peer.clone());
+        let options = options(&service_peerid, "  host: 192.0.2.1\n  port: 9091\n");
 
-        let client = Client::new(None, options).unwrap();
+        let client = Client::new(options).unwrap();
 
-        assert_eq!(client.service_peer(), Some(peer));
-        assert_eq!(
-            client.service_endpoint().as_deref(),
-            Some("peer.example:9090")
-        );
+        assert_eq!(client.service_endpoint().as_deref(), Some("192.0.2.1:9091"));
     }
 
     #[test]
@@ -40,9 +34,8 @@ mod tests {
         let service_peerid = Id::random();
         let options = options(&service_peerid, "  host: 192.0.2.1\n  port: 9091\n");
 
-        let client = Client::new(None, options).unwrap();
+        let client = Client::new(options).unwrap();
 
-        assert!(client.service_peer().is_none());
         assert_eq!(client.service_endpoint().as_deref(), Some("192.0.2.1:9091"));
     }
 }

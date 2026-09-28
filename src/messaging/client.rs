@@ -476,11 +476,11 @@ impl Client {
     }
 
     pub async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
-        <Self as MessagingClient>::friend_request(self, user_id, hello).await
+        MessagingClient::friend_request(self, user_id, hello).await
     }
 
     pub async fn accept_friend_request(&self, user_id: &Id) -> Result<()> {
-        <Self as MessagingClient>::accept_friend_request(self, user_id).await
+        MessagingClient::accept_friend_request(self, user_id).await
     }
 
     pub async fn get_friend_request(&self, user_id: &Id) -> Result<Option<Box<dyn FriendRequest>>> {
@@ -701,125 +701,119 @@ impl MessagingClient for Client {
         self.unsupported("revoke_session")
     }
 
-    fn friend_request(&self, user_id: Id, hello: Option<String>) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            if user_id == *self.user_id() {
-                return Err(Error::Argument("Cannot send friend request to yourself".into()));
-            }
+    async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
+        if &user_id == self.user_id() {
+            return Err(Error::Argument("Cannot send friend request to yourself".into()));
+        }
 
-            let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-            if let Some(tx) = verticle_tx {
-                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                tx.send(verticle::VerticleEvent::FriendRequest {
-                    user_id,
-                    hello: hello.clone().unwrap_or_default(),
-                    complete: reply_tx,
-                })
-                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-                reply_rx
-                    .await
-                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                    .map_err(Error::State)?;
-            }
-
-            let now = SystemTime::now();
-            let req = PhotonFriendRequest {
+        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
+        if let Some(tx) = verticle_tx {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            tx.send(verticle::VerticleEvent::FriendRequest {
                 user_id,
-                initiator_id: *self.user_id(),
-                hello: hello.clone(),
-                accepted: false,
-                expired: false,
-                created_at: now,
-                accepted_at: None,
-                updated_at: now,
-            };
-            self.state
-                .write()
-                .unwrap()
-                .friend_requests
-                .insert(user_id, req);
+                hello: hello.clone().unwrap_or_default(),
+                complete: reply_tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+            reply_rx
+                .await
+                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                .map_err(Error::State)?;
+        }
 
-            Ok(())
-        })
+        let now = SystemTime::now();
+        let req = PhotonFriendRequest {
+            user_id,
+            initiator_id: *self.user_id(),
+            hello: hello.clone(),
+            accepted: false,
+            expired: false,
+            created_at: now,
+            accepted_at: None,
+            updated_at: now,
+        };
+        self.state
+            .write()
+            .unwrap()
+            .friend_requests
+            .insert(user_id, req);
+
+        Ok(())
     }
 
-    fn accept_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>> {
+    async fn accept_friend_request(&self, user_id: &Id) -> Result<()> {
         let user_id = *user_id;
-        Box::pin(async move {
-            {
-                let state = self.state.read().unwrap();
-                let req = state.friend_requests.get(&user_id).ok_or_else(|| {
-                    Error::Argument(format!("No friend request found for {user_id}"))
-                })?;
-                if req.initiator_id == *self.user_id() {
-                    return Err(Error::State(
-                        "Cannot accept your own friend request".into(),
-                    ));
-                }
-                if req.accepted {
-                    return Err(Error::State(
-                        "Friend request has already been accepted".into(),
-                    ));
-                }
-                if req.expired {
-                    return Err(Error::State("Friend request has expired".into()));
-                }
+        let state = self.state.read().unwrap();
+        let req = state.friend_requests.get(&user_id).ok_or_else(|| {
+            Error::Argument(format!("No friend request found for {user_id}"))
+        })?;
+        if req.initiator_id == *self.user_id() {
+            return Err(Error::State(
+                "Cannot accept your own friend request".into(),
+            ));
+        }
+        if req.accepted {
+            return Err(Error::State(
+                "Friend request has already been accepted".into(),
+            ));
+        }
+        if req.expired {
+            return Err(Error::State("Friend request has expired".into()));
+        }
+
+        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
+        if let Some(tx) = verticle_tx {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            tx.send(verticle::VerticleEvent::FriendAccept {
+                user_id,
+                complete: reply_tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+            reply_rx
+                .await
+                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                .map_err(Error::State)?;
+        }
+
+        let now = SystemTime::now();
+        let now_ms = now
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        let contact = PhotonContact {
+            id: user_id,
+            contact_type: ContactType::Friend,
+            name: None,
+            remark: None,
+            tags: None,
+            muted: false,
+            blocked: false,
+            created_at: now_ms,
+            updated_at: now_ms,
+            revision: 1,
+        };
+
+        {
+            let mut state = self.state.write().unwrap();
+            if let Some(req) = state.friend_requests.get_mut(&user_id) {
+                req.accepted = true;
+                req.accepted_at = Some(now);
+                req.updated_at = now;
             }
+            state.contacts.insert(user_id, contact.clone());
+        }
 
-            let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-            if let Some(tx) = verticle_tx {
-                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                tx.send(verticle::VerticleEvent::FriendAccept {
-                    user_id,
-                    complete: reply_tx,
-                })
-                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-                reply_rx
-                    .await
-                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                    .map_err(Error::State)?;
-            }
-
-            let now = SystemTime::now();
-            let now_ms = now
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-
-            let contact = PhotonContact {
-                id: user_id,
-                contact_type: ContactType::Friend,
-                name: None,
-                remark: None,
-                tags: None,
-                muted: false,
-                blocked: false,
-                created_at: now_ms,
-                updated_at: now_ms,
-                revision: 1,
-            };
-
-            {
-                let mut state = self.state.write().unwrap();
-                if let Some(req) = state.friend_requests.get_mut(&user_id) {
-                    req.accepted = true;
-                    req.accepted_at = Some(now);
-                    req.updated_at = now;
-                }
-                state.contacts.insert(user_id, contact.clone());
-            }
-
-            let contact_listeners = self
-                .listeners
-                .contact_listeners
-                .read()
-                .unwrap()
-                .clone();
-            for listener in contact_listeners {
-                listener.on_contact_added(&contact);
-            }
-            Ok(())
-        })
+        let contact_listeners = self
+            .listeners
+            .contact_listeners
+            .read()
+            .unwrap()
+            .clone();
+        for listener in contact_listeners {
+            listener.on_contact_added(&contact);
+        }
+        Ok(())
     }
 
     fn get_friend_request(

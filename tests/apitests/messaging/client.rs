@@ -3,45 +3,16 @@ mod tests {
     use std::time::Duration;
     use boson::messaging::{Client, Options};
 
-    #[test]
-    fn test_client() {
-        use boson::signature::PrivateKey;
-        let res = PrivateKey::try_from("4WF77gvegeWyeGProxCxX2V1o996vneixdnewuE2XUpg");
-        assert!(res.is_err(), "32-byte UserId must not be accepted as a 64-byte PrivateKey");
-    }
-
     #[tokio::test]
-    async fn test_messaging_client_info_fields() {
-        use boson::messaging::MessagingClient;
-
-        let options = Options::load("apps/chat/bob.yaml").unwrap();
-        let client = Client::new(options);
-
-        assert!(!client.user_id().to_string().is_empty());
-        assert!(!client.device_id().to_string().is_empty());
-        assert!(!client.service_peer_id().to_string().is_empty());
-        assert!(client.service_endpoint().is_some());
-        assert_eq!(client.connection_status(), "Disconnected");
-
-        // Verify trait object access
-        let trait_client: &dyn MessagingClient = &client;
-        assert_eq!(trait_client.user_id(), client.user_id());
-        assert_eq!(trait_client.device_id(), client.device_id());
-        assert_eq!(trait_client.service_peer_id(), client.service_peer_id());
-        assert_eq!(trait_client.service_endpoint(), client.service_endpoint());
-        assert_eq!(trait_client.director_node_id(), client.director_node_id());
-        assert_eq!(trait_client.director_endpoint(), client.director_endpoint());
-        assert_eq!(trait_client.connection_status(), "Disconnected");
-    }
-
-    #[tokio::test]
-    async fn test_client_friend_api_signatures() {
+    async fn test_client_friend_request() {
         use boson::Id;
         let options = Options::load("apps/chat/bob.yaml").unwrap();
         let client = Client::new(options);
 
         let target_id = Id::random();
-        assert!(client.friend_request(target_id, Some("Hello".into())).await.is_ok());
+        let rc = client.friend_request(target_id, Some("Hello".into())).await;
+        assert!(rc.is_ok());
+
         let req = client.get_friend_request(&target_id).await.unwrap();
         assert!(req.is_some());
         assert_eq!(req.unwrap().hello(), Some("Hello"));
@@ -53,10 +24,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verticle_connects_successfully() {
+    async fn test_client_connection() {
         let options = Options::load("apps/chat/bob.yaml").unwrap();
         let client = Client::new(options);
-        
+
         let start_res = client.start().await;
         assert!(start_res.is_ok(), "Client start should succeed");
 

@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::future::Future;
 
 use crate::messaging::{
     channel::{Channel, Permission, Role},
@@ -24,7 +25,7 @@ use crate::Id;
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
 
 /// The primary interface for the Boson Messaging Client.
-pub trait MessagingClient: Send + Sync {
+pub trait MessagingClient {
     /// Retrieves the identifier of the local user.
     fn user_id(&self) -> &Id;
 
@@ -181,10 +182,17 @@ pub trait MessagingClient: Send + Sync {
     // -----------------------------------------------------------------
 
     /// Sends a friend request to `user_id` with an optional greeting.
-    fn friend_request(&self, user_id: Id, hello: Option<String>) -> BoxFuture<'_, Result<()>>;
+    fn friend_request(
+        &self,
+        user_id: Id,
+        hello: Option<String>
+    ) -> impl Future<Output = Result<()>>;
 
     /// Accepts an incoming friend request from `user_id`.
-    fn accept_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>>;
+    fn accept_friend_request(
+        &self,
+        user_id: &Id
+    ) -> impl Future<Output = Result<()>>;
 
     /// Retrieves a specific friend request by the initiator's `Id`.
     fn get_friend_request(

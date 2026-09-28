@@ -1,0 +1,25 @@
+service:
+  peerId: 5MjQxzgK7awC4He1WX4b5d1cLbY14dm8hvHNkMBU8ELK
+  endpoint: mqtts://47.101.142.224:9083
+
+client:
+  #userId: 81K81E9rwgDnSwfBMminErD7kMxAJjwFt6etCh6zB5Pu
+  userPrivateKey: 0x2ba41d34732cfbc4b5e5509bbde97595b20f6c3055148370ce318164637cd8be68164c35661e0669252119856dd15b591fe9340432ef137054142240c7cf6280
+  #deviceId: BuGNYn5Lsanr1pJecXQWC1e6XRkmxJJ8TuJ8v5x7An2M
+  devicePrivateKey: 0xb6b04dc43a19854c55951f2c76e129f9698b52889348c55c7950d6a698f04134a1f873b3da36238f1a072cc2dba93ed164128de00f763fef9fe28ae01636454a
+
+dataDir: .chat_bob
+
+database:
+  uri: jdbc:sqlite:messaging.db
+  poolSize: 1
+
+# Logger configuration.
+# Log level can be one of: trace, debug, info, warn, error
+logLevel: debug
+
+# Log file path for storing logs.
+logFile: bob.log
+
+# Whether to log to the console.
+logConsole: true

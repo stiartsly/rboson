@@ -68,7 +68,7 @@ async fn run() -> Result<()> {
     loop {
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {
-                let args: Vec<String> = line.split_whitespace().map(ToString::to_string).collect();
+                let args = parse_command_line(&line);
                 if args.is_empty() {
                     continue;
                 }
@@ -191,14 +191,58 @@ impl ConsoleMessageListener {
 
 impl MessageListener for ConsoleMessageListener {
     fn on_message(&self, message: &dyn Message) {
-        self.output
-            .println(format!("Received message {}", message.id()));
+        let from = message.from().map(ToString::to_string).unwrap_or_else(|| "unknown".into());
+        let content = message
+            .payload_as_content()
+            .and_then(|content| content.as_text())
+            .unwrap_or("<binary message>");
+        self.output.println(format!("Message from {from}: {content}"));
     }
 
     fn on_sent(&self, message: &dyn Message) {
         self.output
             .println(format!("Sent message {}", message.id()));
     }
+}
+
+fn parse_command_line(line: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for character in line.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+        } else if character == '"' || character == '\'' {
+            quote = Some(character);
+        } else if character.is_whitespace() {
+            if !current.is_empty() {
+                args.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(character);
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
 }
 
 struct ConsoleContactListener {

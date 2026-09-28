@@ -35,6 +35,7 @@ pub(crate) mod device;
 pub(crate) mod friend;
 pub(crate) mod info;
 pub(crate) mod me;
+pub(crate) mod msg;
 
 pub(crate) fn build_cli() -> Command {
     let mut command = Command::new("photon")
@@ -46,6 +47,7 @@ pub(crate) fn build_cli() -> Command {
         .subcommand(friend::cli())
         .subcommand(info::cli())
         .subcommand(me::cli())
+        .subcommand(msg::cli())
         .help_template("{subcommands}");
     command.error(
         error::ErrorKind::InvalidSubcommand,
@@ -61,6 +63,7 @@ pub(crate) async fn execute_command(matches: ArgMatches, client: &Arc<Client>) {
         Some(("friend", friend)) => friend::execute(friend, client).await,
         Some(("info", info)) => info::execute(info, client).await,
         Some(("me", me)) => me::execute(me, client).await,
+        Some(("msg", msg)) => msg::execute(msg, client).await,
         _ => println!("Unknown command"),
     }
 }

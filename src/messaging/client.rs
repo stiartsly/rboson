@@ -32,7 +32,7 @@ use crate::messaging::{
     session_info::SessionInfo,
     session_listener::SessionListener,
 };
-use crate::Id;
+use crate::{core::logger, Id};
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -229,6 +229,15 @@ pub type PhotonMessagingClient = Client;
 
 impl Client {
     pub fn new(options: Options) -> Self {
+        if log::max_level() == log::LevelFilter::Off {
+            logger::setup(options.log_level(), options.log_file());
+            if options.log_console() {
+                logger::enable_console_output();
+            } else {
+                logger::disable_console_output();
+            }
+        }
+
         let state = ClientState {
             friend_requests: HashMap::new(),
             contacts: HashMap::new(),

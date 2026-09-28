@@ -11,7 +11,7 @@ use crate::Id;
 pub const SCHEME_MQTT: &str = "mqtt";
 pub const SCHEME_MQTTS: &str = "mqtts";
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct OptionsBuilder {
     peerid: Option<Id>,
     endpoint: Option<url::Url>,
@@ -25,6 +25,31 @@ pub struct OptionsBuilder {
     database_uri: Option<String>,
     database_pool_size: Option<usize>,
     database_schema: Option<String>,
+    log_level: log::LevelFilter,
+    log_file: Option<String>,
+    log_console: bool,
+}
+
+impl Default for OptionsBuilder {
+    fn default() -> Self {
+        Self {
+            peerid: None,
+            endpoint: None,
+            director_node_id: None,
+            director_endpoint: None,
+            user_key: None,
+            user_id: None,
+            device_key: None,
+            device_id: None,
+            data_dir: None,
+            database_uri: None,
+            database_pool_size: None,
+            database_schema: None,
+            log_level: log::LevelFilter::Info,
+            log_file: None,
+            log_console: true,
+        }
+    }
 }
 
 impl OptionsBuilder {
@@ -188,6 +213,21 @@ impl OptionsBuilder {
         self
     }
 
+    pub fn with_log_level(&mut self, level: log::LevelFilter) -> &mut Self {
+        self.log_level = level;
+        self
+    }
+
+    pub fn with_log_file(&mut self, path: impl Into<String>) -> &mut Self {
+        self.log_file = Some(path.into());
+        self
+    }
+
+    pub fn with_log_console(&mut self, enabled: bool) -> &mut Self {
+        self.log_console = enabled;
+        self
+    }
+
     /*
     pub fn with_database_path(&mut self, path: impl AsRef<Path>) -> &mut Self {
         self.database_path = Some(path.as_ref().to_path_buf());
@@ -242,6 +282,9 @@ impl OptionsBuilder {
             database_pool_size,
             database_schema,
             database_path,
+            log_level: self.log_level,
+            log_file: self.log_file.clone(),
+            log_console: self.log_console,
         })
     }
 }
@@ -266,6 +309,9 @@ pub struct Options {
     database_schema: String,
 
     database_path: PathBuf,
+    log_level: log::LevelFilter,
+    log_file: Option<String>,
+    log_console: bool,
 }
 
 impl Options {
@@ -348,6 +394,18 @@ impl Options {
     pub fn database_path(&self) -> &Path {
         self.database_path.as_path()
     }
+
+    pub fn log_level(&self) -> log::LevelFilter {
+        self.log_level
+    }
+
+    pub fn log_file(&self) -> Option<&str> {
+        self.log_file.as_deref()
+    }
+
+    pub fn log_console(&self) -> bool {
+        self.log_console
+    }
 }
 
 
@@ -371,6 +429,12 @@ struct SerdeOptions {
     data_dir: Option<String>,
     #[serde(default)]
     database: Option<SerdeDatabase>,
+    #[serde(rename = "logLevel", default)]
+    log_level: Option<String>,
+    #[serde(rename = "logFile", default)]
+    log_file: Option<String>,
+    #[serde(rename = "logConsole", default)]
+    log_console: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,6 +576,18 @@ impl TryFrom<SerdeOptions> for Options {
                 .with_database_pool_size(database.pool_size)
                 .with_database_schema_name(&database.schema);
         }
+
+        let log_level = sopts
+            .log_level
+            .unwrap_or_else(|| "info".to_string())
+            .parse::<log::LevelFilter>()
+            .map_err(|e| ArgumentError::new(format!("invalid logLevel: {e}")))?;
+        b.with_log_level(log_level);
+
+        if let Some(log_file) = sopts.log_file {
+            b.with_log_file(log_file);
+        }
+        b.with_log_console(sopts.log_console.unwrap_or(true));
 
         b.build()
     }

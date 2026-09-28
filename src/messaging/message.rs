@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::SystemTime;
 use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
@@ -421,6 +423,11 @@ pub trait MessageBuilder: Send + Sync {
 
     /// Add an arbitrary header.
     fn header(self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder>;
+
+    /// Builds and sends the message.
+    fn send(
+        self: Box<Self>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>>;
 }
 
 #[cfg(test)]

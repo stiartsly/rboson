@@ -26,7 +26,7 @@ use crate::messaging::{
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
-    message::{ContentDisposition, Message, MessageBuilder},
+    message::{Content, ContentDisposition, Message, MessageBuilder},
     message_listener::MessageListener,
     options::Options,
     session_info::SessionInfo,
@@ -77,6 +77,35 @@ pub struct PhotonFriendRequest {
     pub created_at: SystemTime,
     pub accepted_at: Option<SystemTime>,
     pub updated_at: SystemTime,
+}
+
+pub(crate) struct PhotonMessage {
+    pub(crate) id: Id,
+    pub(crate) recipient: Id,
+    pub(crate) from: Option<Id>,
+    pub(crate) created_at: SystemTime,
+    pub(crate) received_at: Option<SystemTime>,
+    pub(crate) sent_at: Option<SystemTime>,
+    pub(crate) payload: Vec<u8>,
+    pub(crate) content: Content,
+}
+
+impl Message for PhotonMessage {
+    fn id(&self) -> &Id { &self.id }
+    fn rid(&self) -> i64 { 0 }
+    fn conversation_id(&self) -> Option<&Id> {
+        self.from.as_ref().or(Some(&self.recipient))
+    }
+    fn recipient(&self) -> &Id { &self.recipient }
+    fn message_type(&self) -> crate::messaging::message::MessageType {
+        crate::messaging::message::MessageType::ContentMessage
+    }
+    fn from(&self) -> Option<&Id> { self.from.as_ref() }
+    fn created_at(&self) -> SystemTime { self.created_at }
+    fn received_at(&self) -> Option<SystemTime> { self.received_at }
+    fn sent_at(&self) -> Option<SystemTime> { self.sent_at }
+    fn payload_as_bytes(&self) -> &[u8] { &self.payload }
+    fn payload_as_content(&self) -> Option<&Content> { Some(&self.content) }
 }
 
 impl FriendRequest for PhotonFriendRequest {
@@ -212,9 +241,9 @@ impl ContactEditor for PhotonContactEditor {
     }
 }
 
-struct ClientState {
-    friend_requests: HashMap<Id, PhotonFriendRequest>,
-    contacts: HashMap<Id, PhotonContact>,
+pub(crate) struct ClientState {
+    pub(crate) friend_requests: HashMap<Id, PhotonFriendRequest>,
+    pub(crate) contacts: HashMap<Id, PhotonContact>,
 }
 
 /// The Boson Messaging Client implementation.
@@ -307,7 +336,11 @@ impl Client {
             return Ok(());
         }
 
-        let verticle_client = verticle::deploy(self.options.clone(), self.listeners.clone())?;
+        let verticle_client = verticle::deploy(
+            self.options.clone(),
+            self.listeners.clone(),
+            self.state.clone(),
+        )?;
         verticle_client.start().await?;
         *self.verticle.lock().unwrap() = Some(verticle_client);
         Ok(())
@@ -435,7 +468,11 @@ impl Client {
     }
 
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
-        Box::new(ComposedMessageBuilder::new(recipient))
+        Box::new(ComposedMessageBuilder::new(
+            recipient,
+            self.verticle.lock().unwrap().as_ref().map(|v| v.sender()),
+            self.listeners.clone(),
+        ))
     }
 
     pub async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
@@ -673,16 +710,16 @@ impl MessagingClient for Client {
             let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
             if let Some(tx) = verticle_tx {
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                if tx
-                    .send(verticle::VerticleEvent::FriendRequest {
-                        user_id,
-                        hello: hello.clone().unwrap_or_default(),
-                        complete: reply_tx,
-                    })
-                    .is_ok()
-                {
-                    let _ = reply_rx.await;
-                }
+                tx.send(verticle::VerticleEvent::FriendRequest {
+                    user_id,
+                    hello: hello.clone().unwrap_or_default(),
+                    complete: reply_tx,
+                })
+                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+                reply_rx
+                    .await
+                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                    .map_err(Error::State)?;
             }
 
             let now = SystemTime::now();
@@ -702,15 +739,6 @@ impl MessagingClient for Client {
                 .friend_requests
                 .insert(user_id, req);
 
-            let listeners = self
-                .listeners
-                .friend_request_listeners
-                .read()
-                .unwrap()
-                .clone();
-            for listener in listeners {
-                listener.on_friend_request(&user_id, hello.as_deref());
-            }
             Ok(())
         })
     }
@@ -741,15 +769,15 @@ impl MessagingClient for Client {
             let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
             if let Some(tx) = verticle_tx {
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                if tx
-                    .send(verticle::VerticleEvent::FriendAccept {
-                        user_id,
-                        complete: reply_tx,
-                    })
-                    .is_ok()
-                {
-                    let _ = reply_rx.await;
-                }
+                tx.send(verticle::VerticleEvent::FriendAccept {
+                    user_id,
+                    complete: reply_tx,
+                })
+                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+                reply_rx
+                    .await
+                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                    .map_err(Error::State)?;
             }
 
             let now = SystemTime::now();
@@ -779,16 +807,6 @@ impl MessagingClient for Client {
                     req.updated_at = now;
                 }
                 state.contacts.insert(user_id, contact.clone());
-            }
-
-            let req_listeners = self
-                .listeners
-                .friend_request_listeners
-                .read()
-                .unwrap()
-                .clone();
-            for listener in req_listeners {
-                listener.on_friend_request_accepted(&user_id);
             }
 
             let contact_listeners = self
@@ -860,10 +878,30 @@ impl MessagingClient for Client {
     fn add_friend(
         &self,
         user_id: Id,
-        _session_key: Vec<u8>,
+        session_key: Vec<u8>,
         remark: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
+            if session_key.len() != crate::signature::PrivateKey::BYTES {
+                return Err(Error::Argument(format!(
+                    "Invalid friend session key length: {}",
+                    session_key.len()
+                )));
+            }
+            let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
+            if let Some(tx) = verticle_tx {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                tx.send(verticle::VerticleEvent::RegisterFriendSession {
+                    user_id,
+                    session_key,
+                    complete: reply_tx,
+                })
+                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+                reply_rx
+                    .await
+                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                    .map_err(Error::State)?;
+            }
             let now = SystemTime::now();
             let now_ms = now
                 .duration_since(UNIX_EPOCH)
@@ -1083,20 +1121,30 @@ impl MessagingClient for Client {
 #[allow(dead_code)]
 struct ComposedMessageBuilder {
     recipient: Option<Id>,
+    verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::VerticleEvent>>,
+    listeners: Arc<SharedListeners>,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
+    text: bool,
 }
 
 impl ComposedMessageBuilder {
-    fn new(recipient: Option<Id>) -> Self {
+    fn new(
+        recipient: Option<Id>,
+        verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::VerticleEvent>>,
+        listeners: Arc<SharedListeners>,
+    ) -> Self {
         Self {
             recipient,
+            verticle_tx,
+            listeners,
             content_type: None,
             content_disposition: None,
             headers: Vec::new(),
             body: None,
+            text: false,
         }
     }
 }
@@ -1117,16 +1165,68 @@ impl MessageBuilder for ComposedMessageBuilder {
 
     fn text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilder> {
         self.body = Some(text.as_bytes().to_vec());
+        self.text = true;
         self
     }
 
     fn binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilder> {
         self.body = Some(data);
+        self.text = false;
         self
     }
 
     fn header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder> {
         self.headers.push((key.to_string(), value.to_string()));
         self
+    }
+
+    fn send(
+        self: Box<Self>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
+        Box::pin(async move {
+            let recipient = self.recipient
+                .ok_or_else(|| Error::Argument("Message recipient is required".into()))?;
+            let body = self.body
+                .ok_or_else(|| Error::Argument("Message content is required".into()))?;
+            let tx = self.verticle_tx
+                .ok_or_else(|| Error::State("Messaging client is not running".into()))?;
+            let mut headers = HashMap::new();
+            for (key, value) in self.headers {
+                headers.insert(key, serde_json::Value::String(value));
+            }
+            if let Some(content_type) = self.content_type {
+                headers.insert("Content-Type".into(), serde_json::Value::String(content_type));
+            } else if !self.text {
+                headers.insert(
+                    "Content-Type".into(),
+                    serde_json::Value::String(crate::messaging::message::content_type::BINARY.into()),
+                );
+            }
+            if let Some(disposition) = self.content_disposition {
+                headers.insert(
+                    crate::messaging::message::CONTENT_DISPOSITION_HEADER.into(),
+                    serde_json::Value::String(disposition.value()),
+                );
+            }
+
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            tx.send(verticle::VerticleEvent::ContentMessage {
+                recipient,
+                headers,
+                body,
+                text: self.text,
+                complete: reply_tx,
+            })
+            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+            let message = reply_rx
+                .await
+                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
+                .map_err(Error::State)?;
+            let listeners = self.listeners.message_listeners.read().unwrap().clone();
+            for listener in listeners {
+                listener.on_sent(&message);
+            }
+            Ok(Box::new(message) as Box<dyn Message>)
+        })
     }
 }

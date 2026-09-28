@@ -16,17 +16,17 @@ use tokio::{
 
 use crate::messaging::{
     channel_listener::ChannelListener,
-    client::SharedListeners,
+    client::{ClientState, PhotonContact, PhotonFriendRequest, PhotonMessage, SharedListeners},
     connection_listener::ConnectionListener,
     contact_listener::ContactListener,
     errors::{Error, Result},
-    friend_request_listener::FriendRequestListener,
     message_listener::MessageListener,
     options::Options,
-    session::Session,
+    session::{FriendProtocolListener, Session},
     session_listener::SessionListener,
 };
 use crate::Id;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) struct VerticleClient {
     event_tx: mpsc::UnboundedSender<VerticleEvent>,
@@ -48,6 +48,18 @@ pub(crate) enum VerticleEvent {
     },
     FriendAccept {
         user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    ContentMessage {
+        recipient: Id,
+        headers: std::collections::HashMap<String, serde_json::Value>,
+        body: Vec<u8>,
+        text: bool,
+        complete: oneshot::Sender<StdResult<PhotonMessage, String>>,
+    },
+    RegisterFriendSession {
+        user_id: Id,
+        session_key: Vec<u8>,
         complete: oneshot::Sender<StdResult<(), String>>,
     },
     FriendReject {
@@ -205,7 +217,7 @@ pub(crate) struct VerticleOptions {
     pub(crate) channel_listener: Arc<dyn ChannelListener>,
     pub(crate) contact_listener: Arc<dyn ContactListener>,
     pub(crate) session_listener: Arc<dyn SessionListener>,
-    pub(crate) friend_request_listener: Arc<dyn FriendRequestListener>,
+    pub(crate) friend_protocol_listener: Arc<dyn FriendProtocolListener>,
 }
 
 impl VerticleOptions {
@@ -288,6 +300,28 @@ impl Verticle {
                     let result = session.friend_accept(user_id).await;
                     let _ = complete.send(result.map_err(|e| e.to_string()));
                 });
+            }
+            VerticleEvent::ContentMessage {
+                recipient,
+                headers,
+                body,
+                text,
+                complete,
+            } => {
+                debug!("Verticle handling ContentMessage event for {recipient}");
+                let session = self.session.clone();
+                task::spawn_local(async move {
+                    let result = session.send_content(recipient, headers, body, text).await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                });
+            }
+            VerticleEvent::RegisterFriendSession {
+                user_id,
+                session_key,
+                complete,
+            } => {
+                let result = self.session.register_friend_session(user_id, &session_key);
+                let _ = complete.send(result.map_err(|error| error.to_string()));
             }
             VerticleEvent::FriendReject { user_id, complete } => {
                 debug!("Verticle handling FriendReject event for {user_id}");
@@ -448,23 +482,127 @@ impl SessionListener for CompositeSessionListener {
     }
 }
 
-struct CompositeFriendRequestListener(Arc<SharedListeners>);
-impl FriendRequestListener for CompositeFriendRequestListener {
-    fn on_friend_request(&self, user_id: &Id, hello: Option<&str>) {
-        let listeners = self.0.friend_request_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_friend_request(user_id, hello);
+struct CompositeFriendProtocolListener {
+    listeners: Arc<SharedListeners>,
+    state: Arc<std::sync::RwLock<ClientState>>,
+}
+
+impl CompositeFriendProtocolListener {
+    fn timestamp(timestamp: i64) -> SystemTime {
+        if timestamp < 0 {
+            return SystemTime::now();
+        }
+        UNIX_EPOCH + Duration::from_millis(timestamp as u64)
+    }
+}
+
+impl FriendProtocolListener for CompositeFriendProtocolListener {
+    fn on_friend_request(
+        &self,
+        user_id: Id,
+        initiator_id: Id,
+        hello: String,
+        timestamp: i64,
+        notify: bool,
+    ) {
+        let created_at = Self::timestamp(timestamp);
+        {
+            let mut state = self.state.write().unwrap();
+            if let Some(contact) = state.contacts.get(&user_id) {
+                if contact.contact_type == crate::messaging::contact::ContactType::Friend
+                    || contact.contact_type == crate::messaging::contact::ContactType::Channel
+                {
+                    return;
+                }
+            }
+            state.friend_requests.insert(user_id, PhotonFriendRequest {
+                user_id,
+                initiator_id,
+                hello: Some(hello.clone()),
+                accepted: false,
+                expired: false,
+                created_at,
+                accepted_at: None,
+                updated_at: SystemTime::now(),
+            });
+        }
+
+        if notify {
+            let listeners = self.listeners.friend_request_listeners.read().unwrap().clone();
+            for listener in listeners {
+                listener.on_friend_request(&user_id, Some(&hello));
+            }
         }
     }
-    fn on_friend_request_accepted(&self, user_id: &Id) {
-        let listeners = self.0.friend_request_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_friend_request_accepted(user_id);
+
+    fn on_friend_request_accepted(
+        &self,
+        user_id: Id,
+        timestamp: i64,
+        add_contact: bool,
+    ) {
+        let accepted_at = Self::timestamp(timestamp);
+        let contact = {
+            let mut state = self.state.write().unwrap();
+            let Some(request) = state.friend_requests.get_mut(&user_id) else {
+                return;
+            };
+            if request.accepted || request.expired {
+                return;
+            }
+            if add_contact && request.initiator_id == user_id {
+                return;
+            }
+            request.accepted = true;
+            request.accepted_at = Some(accepted_at);
+            request.updated_at = SystemTime::now();
+            if !add_contact {
+                return;
+            }
+
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0);
+            let contact = PhotonContact {
+                id: user_id,
+                contact_type: crate::messaging::contact::ContactType::Friend,
+                name: None,
+                remark: None,
+                tags: None,
+                muted: false,
+                blocked: false,
+                created_at: now_ms,
+                updated_at: now_ms,
+                revision: 1,
+            };
+            state.contacts.insert(user_id, contact.clone());
+            contact
+        };
+
+        let request_listeners = self.listeners.friend_request_listeners.read().unwrap().clone();
+        for listener in request_listeners {
+            listener.on_friend_request_accepted(&user_id);
+        }
+        let contact_listeners = self.listeners.contact_listeners.read().unwrap().clone();
+        for listener in contact_listeners {
+            listener.on_contact_added(&contact);
+        }
+    }
+
+    fn on_content_message(&self, message: PhotonMessage) {
+        let listeners = self.listeners.message_listeners.read().unwrap().clone();
+        for listener in listeners {
+            listener.on_message(&message);
         }
     }
 }
 
-pub(crate) fn deploy(options: Options, listeners: Arc<SharedListeners>) -> Result<VerticleClient> {
+pub(crate) fn deploy(
+    options: Options,
+    listeners: Arc<SharedListeners>,
+    state: Arc<std::sync::RwLock<ClientState>>,
+) -> Result<VerticleClient> {
     debug!("Deploying messaging verticle...");
     let (event_tx, event_rx) = mpsc::unbounded_channel::<VerticleEvent>();
     let (reply_tx, reply_rx) = std_mpsc::sync_channel::<StdResult<(), String>>(1);
@@ -480,7 +618,10 @@ pub(crate) fn deploy(options: Options, listeners: Arc<SharedListeners>) -> Resul
         channel_listener: Arc::new(CompositeChannelListener(listeners.clone())),
         contact_listener: Arc::new(CompositeContactListener(listeners.clone())),
         session_listener: Arc::new(CompositeSessionListener(listeners.clone())),
-        friend_request_listener: Arc::new(CompositeFriendRequestListener(listeners.clone())),
+        friend_protocol_listener: Arc::new(CompositeFriendProtocolListener {
+            listeners: listeners.clone(),
+            state,
+        }),
     };
 
     let handle = std::thread::spawn(move || {

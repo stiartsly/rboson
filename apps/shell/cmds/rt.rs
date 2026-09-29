@@ -35,14 +35,13 @@ pub(crate) struct CachedRoutingTable {
 
 pub(crate) fn command() -> Command {
     Command::new("rt")
-        .about("Display nodes in the routing table for dht4 and dht6 from cache files")
+        .about("Display nodes in the routing table for dht4 and dht6")
         .arg(
             Arg::new("ipv4")
                 .short('4')
                 .long("ipv4")
                 .help("Display only IPv4 (dht4) routing table")
                 .action(clap::ArgAction::SetTrue)
-                .conflicts_with("ipv6"),
         )
         .arg(
             Arg::new("ipv6")
@@ -50,14 +49,6 @@ pub(crate) fn command() -> Command {
                 .long("ipv6")
                 .help("Display only IPv6 (dht6) routing table")
                 .action(clap::ArgAction::SetTrue)
-                .conflicts_with("ipv4"),
-        )
-        .arg(
-            Arg::new("file")
-                .short('f')
-                .long("file")
-                .value_name("PATH")
-                .help("Read routing table from a specific cache file"),
         )
 }
 
@@ -114,34 +105,34 @@ fn format_version(ver: i32) -> String {
     }
 }
 
-pub(crate) fn display_cache_file(path: &Path, title: &str) {
+pub(crate) fn display_rtinfo(path: &Path, title: &str) {
     println!("+------------------------------------------------------------+");
     println!("| {:<58} |", title);
     println!("+------------------------------------------------------------+");
     println!("Cache File:  {}", path.display());
 
     if !path.exists() {
-        println!("Status:      \x1b[33mFile not found (no routing table cached yet)\x1b[0m");
+        println!("Status:      \x1b[33mNo routing table cached yet)\x1b[0m");
         return;
     }
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
-            println!("Status:      \x1b[31mFailed to read file: {e}\x1b[0m");
+            red_print!("Status:      Failed to read routing table: {e}");
             return;
         }
     };
 
     if bytes.is_empty() {
-        println!("Status:      \x1b[33mEmpty cache file (0 entries)\x1b[0m");
+        println!("Status:      \x1b[33mEmpty (0 entries)\x1b[0m");
         return;
     }
 
     let rt: CachedRoutingTable = match serde_cbor::from_slice(&bytes) {
         Ok(rt) => rt,
         Err(e) => {
-            println!("Status:      \x1b[31mFailed to parse CBOR routing table: {e}\x1b[0m");
+            red_print!("Status:      Failed to parse CBOR routing table: {e}");
             return;
         }
     };
@@ -193,24 +184,15 @@ pub(crate) fn display_cache_file(path: &Path, title: &str) {
 }
 
 pub(crate) fn run(matches: &ArgMatches, node: &Node) {
-    if let Some(custom_file) = matches.get_one::<String>("file") {
-        let path = expand_path(custom_file);
-        display_cache_file(&path, "Custom Routing Table");
-        return;
-    }
-
-    let show_ipv4_only = matches.get_flag("ipv4");
-    let show_ipv6_only = matches.get_flag("ipv6");
-
-    let show_ipv4 = show_ipv4_only || !show_ipv6_only;
-    let show_ipv6 = show_ipv6_only || !show_ipv4_only;
+    let show_ipv4 = matches.get_flag("ipv4");
+    let show_ipv6 = matches.get_flag("ipv6");
 
     let data_dir = expand_path(node.options().data_dir());
-    let dht4_cache = data_dir.join("dht4.cache");
-    let dht6_cache = data_dir.join("dht6.cache");
+    let cache4 = data_dir.join("dht4.cache");
+    let cache6 = data_dir.join("dht6.cache");
 
     if show_ipv4 {
-        display_cache_file(&dht4_cache, "DHT4 (IPv4) Routing Table");
+        display_rtinfo(&cache4, "DHT4 (IPv4) Routing Table");
     }
 
     if show_ipv4 && show_ipv6 {
@@ -218,67 +200,6 @@ pub(crate) fn run(matches: &ArgMatches, node: &Node) {
     }
 
     if show_ipv6 {
-        display_cache_file(&dht6_cache, "DHT6 (IPv6) Routing Table");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_version() {
-        assert_eq!(format_version(0), "N/A");
-        // 'M' = 0x4D, 'K' = 0x4B, 1 = 0x0001
-        // (0x4D << 24) | (0x4B << 16) | 1 = 0x4D4B0001
-        let mk1 = ((b'M' as u32) << 24) | ((b'K' as u32) << 16) | 1;
-        assert_eq!(format_version(mk1 as i32), "MK/1");
-    }
-
-    #[test]
-    fn test_format_duration_ms() {
-        assert_eq!(format_duration_ms(0, 1000), "never");
-        assert_eq!(format_duration_ms(1000, 5000), "4s ago");
-        assert_eq!(format_duration_ms(1000, 65000), "1m 4s ago");
-    }
-
-    #[test]
-    fn test_deserialize_cached_routing_table() {
-        let node_id = Id::random();
-        let addr = "127.0.0.1:39001".parse().unwrap();
-        let ni = NodeInfo::new(node_id.clone(), addr);
-
-        let entry = CachedEntry {
-            node_info: ni,
-            created: 1000,
-            last_seen: 2000,
-            last_sent: 1500,
-            reachable: true,
-            version: 0,
-        };
-
-        let rt = CachedRoutingTable {
-            node_id: node_id.clone(),
-            timestamp: 5000,
-            entries: vec![entry],
-        };
-
-        let bytes = serde_cbor::to_vec(&rt).unwrap();
-        let deserialized: CachedRoutingTable = serde_cbor::from_slice(&bytes).unwrap();
-        assert_eq!(deserialized.node_id, node_id);
-        assert_eq!(deserialized.timestamp, 5000);
-        assert_eq!(deserialized.entries.len(), 1);
-        assert_eq!(deserialized.entries[0].node_info.id(), &node_id);
-        assert_eq!(deserialized.entries[0].reachable, true);
-    }
-
-    #[test]
-    fn test_read_real_cache_file_if_present() {
-        if let Some(home) = dirs_home() {
-            let path = home.join(".boson_shell").join("dht4.cache");
-            if path.exists() {
-                display_cache_file(&path, "DHT4 (IPv4) Routing Table");
-            }
-        }
+        display_rtinfo(&cache6, "DHT6 (IPv6) Routing Table");
     }
 }

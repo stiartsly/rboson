@@ -3,7 +3,6 @@ use clap::{arg, value_parser, ArgMatches, Command};
 
 pub(crate) fn command() -> Command {
     Command::new("findpeer")
-        .visible_alias("find_peer")
         .about("Look up peers announced under an id")
         .arg(arg!(<ID> "Target peer id (base58)"))
         .arg(
@@ -16,23 +15,26 @@ pub(crate) fn command() -> Command {
 pub(crate) async fn run(matches: &ArgMatches, node: &Node) {
     let id_str = matches.get_one::<String>("ID").unwrap();
     let Ok(peerid) = id_str.parse() else {
-        println!("\x1b[31mInvalid id '{id_str}'\x1b[0m");
+        red_print!("Invalid id '{id_str}'");
         return;
     };
 
     let count = *matches.get_one::<usize>("count").unwrap();
     println!("Attempting to find peers with id: {peerid} ...");
-    match node.find_peer(&peerid, -1, count, None).await {
-        Ok(val) => {
-            if val.is_empty() {
-                println!("\x1b[32mFound no peers !!!\x1b[0m");
-            } else {
-                println!("\x1b[32mFound {} peers, listed below: \x1b[0m", val.len());
-                for (i, item) in val.iter().enumerate() {
-                    println!("\x1b[32mpeer [{}]: {}\x1b[0m", i, item);
-                }
-            }
+    let peer = match node.find_peer(&peerid, -1, count, None).await {
+        Ok(v) => v,
+        Err(e) => {
+            red_print!("error: {}", e);
+            return;
         }
-        Err(e) => println!("\x1b[31merror: {}\x1b[0m", e),
+    };
+
+    if peer.is_empty() {
+        green_println!("Found no peers !!!");
+    } else {
+        green_println!("Found {} peers, listed below: ", peer.len());
+        for (i, item) in peer.iter().enumerate() {
+            green_println!("peer [{}]: {}", i, item);
+        }
     }
 }

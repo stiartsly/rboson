@@ -1,9 +1,9 @@
+use clap::{arg, ArgMatches, Command};
 use boson::{
     dht::Node,
     signature::{KeyPair, PrivateKey},
     PeerInfo,
 };
-use clap::{arg, ArgMatches, Command};
 
 pub(crate) const DEFAULT_ENDPOINT: &str = "www.example.com";
 
@@ -28,18 +28,15 @@ pub(crate) async fn run(matches: &ArgMatches, node: &Node, node_key: &PrivateKey
         .map(String::as_str)
         .unwrap_or(DEFAULT_ENDPOINT);
 
-    let keypair = match matches.get_one::<String>("key") {
-        Some(s) => match PrivateKey::try_from(s.as_str()) {
-            Ok(sk) => KeyPair::from(sk),
-            Err(e) => {
-                println!("Invalid private key: {e}");
-                return;
-            }
-        },
-        _ => KeyPair::from(node_key.clone()),
+    let Ok(sk) = matches.get_one::<String>("key")
+        .map(|s| PrivateKey::try_from(s.as_str()))
+        .transpose() else {
+            red_print!("Invalid private key");
+            return;
     };
 
-    announce(node, endpoint, keypair).await;
+    let kp = KeyPair::from(sk.unwrap_or(node_key.clone()));
+    announce(node, endpoint, kp).await;
 }
 
 pub(crate) async fn announce(
@@ -50,7 +47,7 @@ pub(crate) async fn announce(
     let peer = match PeerInfo::builder(endpoint).with_key(keypair).build() {
         Ok(p) => p,
         Err(e) => {
-            println!("Building peer info failed: {e}");
+            red_print!("Building peer info failed: {e}");
             return;
         }
     };
@@ -62,9 +59,9 @@ pub(crate) async fn announce(
     );
 
     match node.announce_peer(&peer, -1, false).await {
-        Ok(_) => println!("\x1b[32mPeer {} announced successfully.\x1b[0m", peer.id()),
-        Err(e) => println!(
-            "\x1b[31mFailed to announce peer {}: {}\x1b[0m",
+        Ok(_) => green_println!("Peer {} announced successfully.", peer.id()),
+        Err(e) => red_print!(
+            "Failed to announce peer {}: {}",
             peer.id(),
             e
         ),

@@ -121,7 +121,7 @@ fn build_cli() -> Command {
         .subcommand(cmds::find_value::command())
         .subcommand(cmds::info::command())
         .subcommand(cmds::log::command())
-        .subcommand(cmds::routing_table::command())
+        .subcommand(cmds::rt::command())
 }
 
 fn use_ui_log_output(shell_ui: &ui::ShellUi) {
@@ -160,7 +160,7 @@ async fn execute_command(
             cmds::log::run(m);
         }
         Some(("routingtable", m)) | Some(("rt", m)) => {
-            cmds::routing_table::run(m, node);
+            cmds::rt::run(m, node);
         }
         _ => {}
     }

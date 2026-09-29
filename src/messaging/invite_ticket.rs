@@ -7,8 +7,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::messaging::errors::{Error, Result};
+use crate::errors::{Error, Result};
 use crate::{Id, Identity};
+use super::errors::{AuthenticationError, EncodingError};
 
 /// Default ticket lifetime: seven days in milliseconds.
 pub const DEFAULT_EXPIRATION_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -78,7 +79,7 @@ impl InviteTicket {
         );
         let signature = inviter
             .sign_into(&digest)
-            .map_err(|error| Error::Auth(error.to_string()))?;
+            .map_err(|error| AuthenticationError::new(error.to_string()))?;
         Self::new(
             channel_id,
             session_id,
@@ -175,12 +176,12 @@ impl InviteTicket {
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         serde_json::to_vec(self)
-            .map_err(|error| Error::Encoding(format!("Failed to encode invite ticket: {error}")))
+            .map_err(|e| EncodingError::new(format!("Failed to encode invite ticket: {e}")).into())
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         serde_json::from_slice(bytes)
-            .map_err(|error| Error::Encoding(format!("Failed to decode invite ticket: {error}")))
+            .map_err(|e| EncodingError::new(format!("Failed to decode invite ticket: {e}")).into())
     }
 }
 

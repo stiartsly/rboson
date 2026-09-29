@@ -1,10 +1,9 @@
-use crate::messaging::client::BoxFuture;
 use crate::messaging::contact::Contact;
-use crate::messaging::errors::Result;
 use crate::Id;
 use std::fmt;
-use std::result;
 use std::time::SystemTime;
+
+use crate::{Result, errors::ArgumentError};
 
 /// Controls who may invite new members to a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,15 +20,15 @@ pub enum Permission {
 }
 
 impl TryFrom<i32> for Permission {
-    type Error = &'static str;
+    type Error = crate::Error;
 
-    fn try_from(value: i32) -> result::Result<Self, Self::Error> {
+    fn try_from(value: i32) -> Result<Self> {
         match value {
             0 => Ok(Permission::Public),
             1 => Ok(Permission::MemberInvite),
             2 => Ok(Permission::ModeratorInvite),
             3 => Ok(Permission::OwnerInvite),
-            _ => Err("Invalid Permission value"),
+            _ => Err(ArgumentError::new("Invalid Permission value")),
         }
     }
 }
@@ -68,20 +67,20 @@ pub enum Role {
 impl Role {
     /// Returns `true` when this role is `Banned`.
     pub fn is_banned(&self) -> bool {
-        matches!(self, Role::Banned)
+        return matches!(self, Role::Banned)
     }
 }
 
 impl TryFrom<i32> for Role {
-    type Error = &'static str;
+    type Error = crate::Error;
 
-    fn try_from(value: i32) -> result::Result<Self, Self::Error> {
+    fn try_from(value: i32) -> Result<Self> {
         match value {
             0 => Ok(Role::Owner),
             1 => Ok(Role::Moderator),
             2 => Ok(Role::Member),
             -1 => Ok(Role::Banned),
-            _ => Err("Invalid Role value"),
+            _ => Err(ArgumentError::new("Invalid Role value")),
         }
     }
 }
@@ -117,16 +116,18 @@ pub trait ChannelMember: Send + Sync {
     // --- convenience helpers ---
 
     fn is_owner(&self) -> bool {
-        matches!(self.role(), Role::Owner)
+        return matches!(self.role(), Role::Owner)
     }
+
     fn is_moderator(&self) -> bool {
-        matches!(self.role(), Role::Moderator)
+        return matches!(self.role(), Role::Moderator)
     }
     fn is_member(&self) -> bool {
-        matches!(self.role(), Role::Member)
+        return matches!(self.role(), Role::Member)
     }
+
     fn is_banned(&self) -> bool {
-        self.role().is_banned()
+        return self.role().is_banned()
     }
 }
 
@@ -144,7 +145,7 @@ pub trait Channel: Contact {
     fn is_announced(&self) -> bool;
 
     /// Refresh members from the service.
-    fn load_members(&self) -> BoxFuture<'_, Result<()>>;
+    //fn load_members(&self) -> impl Future<Output = Result<()>>;
 
     /// Total number of tracked members, including banned members.
     fn size(&self) -> usize;

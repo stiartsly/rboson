@@ -1,11 +1,16 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::SystemTime;
-use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
+use std::{
+    fmt,
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    time::SystemTime,
+};
+use unicode_normalization::{
+    char::is_combining_mark,
+    UnicodeNormalization
+};
 
-use crate::messaging::errors::{Error, Result};
+use crate::errors::{Error, Result, ArgumentError};
 use crate::Id;
 
 // ---------------------------------------------------------------------------
@@ -47,7 +52,7 @@ impl ContentDispositionType {
         match value {
             "inline" => Ok(Self::Inline),
             "attachment" => Ok(Self::Attachment),
-            _ => Err(Error::Argument(format!(
+            _ => Err(ArgumentError::new(format!(
                 "Invalid content disposition type: {value}"
             ))),
         }
@@ -136,7 +141,7 @@ impl ContentDisposition {
 
         let filename = match rfc5987_filename.as_deref() {
             Some(value) => Some(decode_rfc5987(value)?),
-            None => ascii_filename.clone(),
+            _ => ascii_filename.clone(),
         };
 
         Ok(Self {
@@ -235,9 +240,9 @@ fn decode_rfc5987(value: &str) -> Result<String> {
     let (charset, encoded) = value
         .split_once('\'')
         .and_then(|(charset, rest)| rest.strip_prefix('\'').map(|encoded| (charset, encoded)))
-        .ok_or_else(|| Error::Argument(format!("Invalid RFC 5987 content disposition: {value}")))?;
+        .ok_or_else(|| ArgumentError::new(format!("Invalid RFC 5987 content disposition: {value}")))?;
     if !charset.eq_ignore_ascii_case("utf-8") {
-        return Err(Error::Argument(format!(
+        return Err(ArgumentError::new(format!(
             "Unsupported RFC 5987 charset: {charset}"
         )));
     }
@@ -248,14 +253,14 @@ fn decode_rfc5987(value: &str) -> Result<String> {
     while pos < bytes.len() {
         if bytes[pos] == b'%' {
             if pos + 2 >= bytes.len() {
-                return Err(Error::Argument(format!(
+                return Err(ArgumentError::new(format!(
                     "Invalid RFC 5987 content disposition: {value}"
                 )));
             }
             let hex = std::str::from_utf8(&bytes[pos + 1..pos + 3])
-                .map_err(|_| Error::Argument("Invalid RFC 5987 escape".into()))?;
+                .map_err(|_| ArgumentError::new("Invalid RFC 5987 escape"))?;
             decoded.push(u8::from_str_radix(hex, 16).map_err(|_| {
-                Error::Argument(format!("Invalid RFC 5987 content disposition: {value}"))
+                ArgumentError::new(format!("Invalid RFC 5987 content disposition: {value}"))
             })?);
             pos += 3;
         } else {
@@ -263,8 +268,9 @@ fn decode_rfc5987(value: &str) -> Result<String> {
             pos += 1;
         }
     }
-    String::from_utf8(decoded)
-        .map_err(|_| Error::Argument(format!("Invalid RFC 5987 content disposition: {value}")))
+    Ok(String::from_utf8(decoded).map_err(|_| {
+        ArgumentError::new(format!("Invalid RFC 5987 content disposition: {value}"))
+    })?)
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +300,7 @@ impl TryFrom<i32> for MessageType {
             1 => Ok(MessageType::ContentMessage),
             2 => Ok(MessageType::ControlMessage),
             3 => Ok(MessageType::StateMessage),
-            _ => Err(Error::Argument(format!(
+            _ => Err(ArgumentError::new(format!(
                 "Unknown MessageType value: {}",
                 value
             ))),
@@ -332,17 +338,13 @@ impl Content {
 
     /// The parsed content disposition, if the header is present and valid.
     pub fn content_disposition(&self) -> Result<Option<ContentDisposition>> {
-        self.headers
-            .get(CONTENT_DISPOSITION_HEADER)
-            .map(|value| {
-                value
-                    .as_str()
-                    .ok_or_else(|| {
-                        Error::Argument("Content-Disposition header must be a string".into())
-                    })
-                    .and_then(ContentDisposition::parse)
-            })
-            .transpose()
+        let Some(value) = self.headers.get(CONTENT_DISPOSITION_HEADER) else {
+            return Ok(None);
+        };
+        let value = value.as_str().ok_or_else(|| {
+            ArgumentError::new("Content-Disposition header must be a string")
+        })?;
+        Ok(Some(ContentDisposition::parse(value)?))
     }
 
     /// The raw body bytes.

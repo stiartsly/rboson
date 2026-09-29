@@ -21,12 +21,11 @@ pub mod verticle;
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
 pub use channel_listener::ChannelListener;
-pub use client::{BoxFuture, Client, MessagingClient, DEFAULT_MESSAGES_LIMIT};
+pub use client::{Client, MessagingClient, DEFAULT_MESSAGES_LIMIT};
 pub use connection_listener::ConnectionListener;
 pub use contact::{Contact, ContactEditor, ContactType};
 pub use contact_listener::ContactListener;
 pub use conversation::Conversation;
-pub use errors::{Error, Result};
 pub use friend_request::FriendRequest;
 pub use friend_request_listener::FriendRequestListener;
 pub use invite_ticket::InviteTicket;

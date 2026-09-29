@@ -21,14 +21,16 @@ use std::{
 };
 use tokio::task;
 
+use crate::{CryptoIdentity, Id, Identity};
+use crate::errors::{Result, Error, ArgumentError, StateError};
 use crate::messaging::{
     client::PhotonMessage,
-    errors::{Error, Result},
     options::Options,
     verticle::VerticleOptions,
     ChannelListener, ConnectionListener, ContactListener, MessageListener, SessionListener,
+    errors::{AuthenticationError, EncodingError, ProtocolError},
 };
-use crate::{CryptoIdentity, Id, Identity};
+
 
 const USER_INBOX: &str = "u/i";
 const USER_OUTBOX: &str = "u/o";
@@ -173,7 +175,7 @@ impl ServerCertVerifier for BosonServerCertVerifier {
 /// All fields are defined with RefCell since they are exclusively referenced within a
 /// single dedicated thread running in a LocalSet.
 pub(crate) struct Session {
-    options: Options,
+    options: Arc<Options>,
     user_id: Id,
     device_id: Id,
     #[allow(dead_code)]
@@ -263,7 +265,7 @@ impl Session {
         let dsign = device_key
             .private_key()
             .sign_into(&nonce)
-            .map_err(|error| Error::Auth(error.to_string()))?;
+            .map_err(|error| AuthenticationError::new(error.to_string()))?;
 
         let mut password = Vec::with_capacity(nonce.len() + dsign.len());
         password.extend_from_slice(&nonce);
@@ -287,25 +289,15 @@ impl Session {
             return Ok(());
         }
 
-        let endpoint = self
-            .options
-            .service_endpoint()
-            .cloned()
-            .ok_or_else(|| {
-                Error::State(
-                    "service.endpoint is required: DHT service discovery is not yet wired \
-                 into the updated Rust messaging Options"
-                        .into(),
-                )
-            })?;
+        let endpoint = self.options.peer_endpoint().clone();
         tokio::fs::create_dir_all(self.options.data_dir()).await?;
 
         let host = endpoint
             .host_str()
-            .ok_or_else(|| Error::Argument("service endpoint has no hostname".into()))?;
+            .ok_or_else(|| ArgumentError::new("service endpoint has no hostname"))?;
         let port = endpoint
             .port()
-            .ok_or_else(|| Error::Argument("service endpoint has no port".into()))?;
+            .ok_or_else(|| ArgumentError::new("service endpoint has no port"))?;
 
         self.notify_connection(|listener| listener.on_connecting());
 
@@ -318,7 +310,7 @@ impl Session {
         let is_tls = endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" || port == 9083;
         if is_tls {
             let verifier = BosonServerCertVerifier {
-                expected_peer_id: Some(*self.options.service_peerid()),
+                expected_peer_id: Some(*self.options.peer_id()),
             };
             let client_config = ClientConfig::builder()
                 .dangerous()
@@ -462,20 +454,20 @@ impl Session {
     fn handle_user_publish(&self, topic: &str, payload: &[u8]) -> Result<()> {
         let envelope = self
             .device_identity
-            .decrypt_into(self.options.service_peerid(), payload)
-            .map_err(|error| Error::Auth(format!("Decrypting message envelope failed: {error}")))?;
+            .decrypt_into(self.options.peer_id(), payload)
+            .map_err(|error| AuthenticationError::new(format!("Decrypting message envelope failed: {error}")))?;
         let message: WireMessage = serde_cbor::from_slice(&envelope)
-            .map_err(|error| Error::Encoding(format!("Malformed messaging envelope: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Malformed messaging envelope: {error}")))?;
 
         if message.version != MESSAGE_VERSION {
-            return Err(Error::Protocol {
-                code: message.version as i32,
-                message: "Unsupported message version".into(),
-            });
+            return Err(ProtocolError::new(
+                message.version as i32,
+                "Unsupported message version",
+            ));
         }
         let from = message
             .from
-            .ok_or_else(|| Error::Encoding("Incoming message has no sender".into()))?;
+            .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
         if message.message_type != HANDSHAKE_MESSAGE {
             if message.message_type == crate::messaging::message::MessageType::ContentMessage as u8 {
                 return self.handle_content_message(topic, message, from);
@@ -496,20 +488,20 @@ impl Session {
 
         let encrypted_handshake = match message.payload {
             Value::Bytes(bytes) => bytes,
-            _ => return Err(Error::Encoding("Handshake payload is not binary".into())),
+            _ => return Err(EncodingError::new("Handshake payload is not binary")),
         };
         let handshake_bytes = self
             .user_identity
             .decrypt_into(&from, &encrypted_handshake)
-            .map_err(|error| Error::Auth(format!("Decrypting handshake failed: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Decrypting handshake failed: {error}")))?;
         let handshake: Handshake = serde_cbor::from_slice(&handshake_bytes)
-            .map_err(|error| Error::Encoding(format!("Malformed handshake: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Malformed handshake: {error}")))?;
 
         match handshake.handshake_type {
             HandshakeType::FriendRequest => {
                 let hello = match handshake.body {
                     Value::Text(hello) => hello,
-                    _ => return Err(Error::Encoding("Friend request greeting is not text".into())),
+                    _ => return Err(EncodingError::new("Friend request greeting is not text")),
                 };
                 self.friend_protocol_listener
                     .on_friend_request(
@@ -524,19 +516,19 @@ impl Session {
                 let session_key = match handshake.body {
                     Value::Bytes(session_key) => session_key,
                     _ => {
-                        return Err(Error::Encoding(
-                            "Friend request acceptance session key is not binary".into(),
+                        return Err(EncodingError::new(
+                            "Friend request acceptance session key is not binary",
                         ))
                     }
                 };
                 if session_key.len() != crate::signature::PrivateKey::BYTES {
-                    return Err(Error::Encoding(format!(
+                    return Err(EncodingError::new(format!(
                         "Invalid friend session key length: {}",
                         session_key.len()
                     )));
                 }
                 let session_identity = CryptoIdentity::try_from(session_key.as_slice())
-                    .map_err(|error| Error::Auth(format!("Invalid friend session key: {error}")))?;
+                    .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
                 self.friend_sessions.borrow_mut().insert(friend_id, session_identity);
                 self.friend_protocol_listener
                     .on_friend_request_accepted(friend_id, handshake.timestamp, is_inbox);
@@ -551,28 +543,28 @@ impl Session {
         }
         let encrypted_content = match message.payload {
             Value::Bytes(bytes) => bytes,
-            _ => return Err(Error::Encoding("Content payload is not binary".into())),
+            _ => return Err(EncodingError::new("Content payload is not binary")),
         };
         let sessions = self.friend_sessions.borrow();
         let session = sessions
             .get(&from)
-            .ok_or_else(|| Error::State(format!("No friend session for {from}")))?;
+            .ok_or_else(|| StateError::new(format!("No friend session for {from}")))?;
         let content_bytes = session
             .decrypt_into(&from, &encrypted_content)
-            .map_err(|error| Error::Auth(format!("Decrypting content failed: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Decrypting content failed: {error}")))?;
         let wire: MessageContent = serde_cbor::from_slice(&content_bytes)
-            .map_err(|error| Error::Encoding(format!("Malformed message content: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Malformed message content: {error}")))?;
         let body = match (wire.format, wire.body) {
             (ContentFormat::Text, Value::Text(text)) => text.into_bytes(),
             (ContentFormat::Binary, Value::Bytes(bytes)) => bytes,
-            _ => return Err(Error::Encoding("Unsupported message content body".into())),
+            _ => return Err(EncodingError::new("Unsupported message content body")),
         };
         let mut headers = HashMap::new();
         for (key, value) in wire.headers {
             headers.insert(
                 key,
                 serde_json::to_value(value)
-                    .map_err(|error| Error::Encoding(format!("Malformed content header: {error}")))?,
+                    .map_err(|error| EncodingError::new(format!("Malformed content header: {error}")))?,
             );
         }
         let created_at = UNIX_EPOCH + Duration::from_millis(message.created_at.max(0) as u64);
@@ -599,10 +591,10 @@ impl Session {
             .mqtt
             .borrow()
             .clone()
-            .ok_or_else(|| Error::State("Messaging client is not running".into()))?;
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| Error::State(format!("System clock error: {error}")))?
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?
             .as_millis() as i64;
         let handshake = Handshake {
             timestamp,
@@ -610,11 +602,11 @@ impl Session {
             body,
         };
         let handshake_bytes = serde_cbor::to_vec(&handshake)
-            .map_err(|error| Error::Encoding(format!("Encoding handshake failed: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Encoding handshake failed: {error}")))?;
         let encrypted_handshake = self
             .user_identity
             .encrypt_into(&user_id, &handshake_bytes)
-            .map_err(|error| Error::Auth(format!("Encrypting handshake failed: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Encrypting handshake failed: {error}")))?;
 
         let message_id = Self::message_id(&self.device_id, timestamp)?;
         let message = WireMessage {
@@ -627,15 +619,15 @@ impl Session {
             payload: Value::Bytes(encrypted_handshake),
         };
         let message_bytes = serde_cbor::to_vec(&message)
-            .map_err(|error| Error::Encoding(format!("Encoding message failed: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Encoding message failed: {error}")))?;
         let mqtt_payload = self
             .device_identity
-            .encrypt_into(self.options.service_peerid(), &message_bytes)
-            .map_err(|error| Error::Auth(format!("Encrypting message envelope failed: {error}")))?;
+            .encrypt_into(self.options.peer_id(), &message_bytes)
+            .map_err(|error| AuthenticationError::new(format!("Encrypting message envelope failed: {error}")))?;
 
         mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, mqtt_payload)
             .await
-            .map_err(|error| Error::State(format!("Publishing handshake failed: {error}")))
+            .map_err(|error| StateError::new(format!("Publishing handshake failed: {error}")).into())
     }
 
     pub(crate) async fn send_content(
@@ -649,10 +641,10 @@ impl Session {
             .mqtt
             .borrow()
             .clone()
-            .ok_or_else(|| Error::State("Messaging client is not running".into()))?;
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|error| Error::State(format!("System clock error: {error}")))?
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?
             .as_millis() as i64;
         let content = MessageContent {
             headers: headers
@@ -660,27 +652,29 @@ impl Session {
                 .map(|(key, value)| {
                     serde_cbor::value::to_value(value)
                         .map(|value| (key.clone(), value))
-                        .map_err(|error| Error::Encoding(format!("Encoding header failed: {error}")))
+                        .map_err(|error| -> Error {
+                            EncodingError::new(format!("Encoding header failed: {error}"))
+                        })
                 })
                 .collect::<Result<HashMap<_, _>>>()?,
             format: if text { ContentFormat::Text } else { ContentFormat::Binary },
             body: if text {
                 Value::Text(String::from_utf8(body.clone())
-                    .map_err(|_| Error::Encoding("Text message is not UTF-8".into()))?)
+                    .map_err(|_| EncodingError::new("Text message is not UTF-8"))?)
             } else {
                 Value::Bytes(body.clone())
             },
         };
         let content_bytes = serde_cbor::to_vec(&content)
-            .map_err(|error| Error::Encoding(format!("Encoding message content failed: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Encoding message content failed: {error}")))?;
         let sessions = self.friend_sessions.borrow();
         let session = sessions
             .get(&recipient)
-            .ok_or_else(|| Error::State(format!("No friend session for {recipient}")))?;
+            .ok_or_else(|| StateError::new(format!("No friend session for {recipient}")))?;
         let encrypted_content = self
             .user_identity
             .encrypt_into(session.id(), &content_bytes)
-            .map_err(|error| Error::Auth(format!("Encrypting content failed: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Encrypting content failed: {error}")))?;
         drop(sessions);
         let message_id = Self::message_id(&self.device_id, timestamp)?;
         let wire = WireMessage {
@@ -693,14 +687,14 @@ impl Session {
             payload: Value::Bytes(encrypted_content),
         };
         let message_bytes = serde_cbor::to_vec(&wire)
-            .map_err(|error| Error::Encoding(format!("Encoding message failed: {error}")))?;
+            .map_err(|error| EncodingError::new(format!("Encoding message failed: {error}")))?;
         let mqtt_payload = self
             .device_identity
-            .encrypt_into(self.options.service_peerid(), &message_bytes)
-            .map_err(|error| Error::Auth(format!("Encrypting message envelope failed: {error}")))?;
+            .encrypt_into(self.options.peer_id(), &message_bytes)
+            .map_err(|error| AuthenticationError::new(format!("Encrypting message envelope failed: {error}")))?;
         mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, mqtt_payload)
             .await
-            .map_err(|error| Error::State(format!("Publishing message failed: {error}")))?;
+            .map_err(|error| StateError::new(format!("Publishing message failed: {error}")))?;
 
         Ok(PhotonMessage {
             id: message_id,
@@ -716,13 +710,13 @@ impl Session {
 
     pub(crate) fn register_friend_session(&self, user_id: Id, session_key: &[u8]) -> Result<()> {
         if session_key.len() != crate::signature::PrivateKey::BYTES {
-            return Err(Error::Argument(format!(
+            return Err(ArgumentError::new(format!(
                 "Invalid friend session key length: {}",
                 session_key.len()
             )));
         }
         let session_identity = CryptoIdentity::try_from(session_key)
-            .map_err(|error| Error::Auth(format!("Invalid friend session key: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
         self.friend_sessions.borrow_mut().insert(user_id, session_identity);
         Ok(())
     }
@@ -732,7 +726,7 @@ impl Session {
         digest.update(device_id.as_bytes());
         digest.update(timestamp.to_be_bytes());
         Id::try_from_bytes(digest.finalize().as_slice())
-            .map_err(|error| Error::Encoding(error.to_string()))
+            .map_err(|error| EncodingError::new(error.to_string()).into())
     }
 
     pub(crate) async fn stop(&self) {
@@ -749,8 +743,8 @@ impl Session {
 
     pub(crate) async fn friend_request(&self, user_id: Id, hello: String) -> Result<()> {
         if user_id == self.user_id {
-            return Err(Error::Argument(
-                "Cannot send friend request to yourself".into(),
+            return Err(ArgumentError::new(
+                "Cannot send friend request to yourself",
             ));
         }
         info!(
@@ -771,7 +765,7 @@ impl Session {
             .as_ref()
             .to_vec();
         let session_identity = CryptoIdentity::try_from(session_key.as_slice())
-            .map_err(|error| Error::Auth(format!("Invalid friend session key: {error}")))?;
+            .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
         self.send_handshake(
             user_id,
             HandshakeType::FriendRequestAccept,

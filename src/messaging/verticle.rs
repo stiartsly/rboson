@@ -14,12 +14,12 @@ use tokio::{
     task,
 };
 
+use crate::errors::{Result, StateError};
 use crate::messaging::{
     channel_listener::ChannelListener,
-    client::{ClientState, PhotonContact, PhotonFriendRequest, PhotonMessage, SharedListeners},
+    client::{ClientState, PhotonContact, PhotonFriendRequest, PhotonMessage},
     connection_listener::ConnectionListener,
     contact_listener::ContactListener,
-    errors::{Error, Result},
     message_listener::MessageListener,
     options::Options,
     session::{FriendProtocolListener, Session},
@@ -94,10 +94,9 @@ impl VerticleClient {
         let (tx, rx) = oneshot::channel();
         self.event_tx
             .send(VerticleEvent::Start { complete: tx })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle startup channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle startup channel closed"))?;
         debug!("VerticleClient: verticle started");
         Ok(())
     }
@@ -136,10 +135,9 @@ impl VerticleClient {
                 hello,
                 complete: tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         Ok(())
     }
 
@@ -151,10 +149,9 @@ impl VerticleClient {
                 user_id,
                 complete: tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         Ok(())
     }
 
@@ -166,10 +163,9 @@ impl VerticleClient {
                 user_id,
                 complete: tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         Ok(())
     }
 
@@ -181,10 +177,9 @@ impl VerticleClient {
                 user_id,
                 complete: tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         Ok(())
     }
 
@@ -196,21 +191,15 @@ impl VerticleClient {
                 user_id,
                 complete: tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-        rx.await
-            .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-            .map_err(Error::State)?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        let _ = rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         Ok(())
     }
 }
 
 pub(crate) struct VerticleOptions {
-    options: Options,
-
-    #[allow(dead_code)]
-    connected: AtomicBool,
-    #[allow(dead_code)]
-    ready: AtomicBool,
+    options: Arc<Options>,
 
     pub(crate) connection_listener: Arc<dyn ConnectionListener>,
     pub(crate) message_listener: Arc<dyn MessageListener>,
@@ -229,7 +218,7 @@ impl VerticleOptions {
         self.options.device_id()
     }
 
-    pub(crate) fn into_options(self) -> Options {
+    pub(crate) fn into_options(self) -> Arc<Options> {
         self.options
     }
 }
@@ -362,128 +351,35 @@ impl Verticle {
     }
 }
 
-struct CompositeConnectionListener(Arc<SharedListeners>);
-impl ConnectionListener for CompositeConnectionListener {
+struct ClientConnectionListener {
+    listener: Arc<dyn ConnectionListener>,
+    connected: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
+
+impl ConnectionListener for ClientConnectionListener {
     fn on_connecting(&self) {
-        let listeners = self.0.connection_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_connecting();
-        }
+        self.listener.on_connecting();
     }
     fn on_connected(&self) {
-        self.0.connected.store(true, Ordering::Release);
-        let listeners = self.0.connection_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_connected();
-        }
+        self.connected.store(true, Ordering::Release);
+        self.listener.on_connected();
     }
     fn on_ready(&self) {
-        self.0.ready.store(true, Ordering::Release);
-        let listeners = self.0.connection_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_ready();
-        }
+        self.ready.store(true, Ordering::Release);
+        self.listener.on_ready();
     }
     fn on_disconnected(&self) {
-        self.0.connected.store(false, Ordering::Release);
-        self.0.ready.store(false, Ordering::Release);
-        let listeners = self.0.connection_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_disconnected();
-        }
-    }
-}
-
-struct CompositeMessageListener(Arc<SharedListeners>);
-impl MessageListener for CompositeMessageListener {
-    fn on_message(&self, message: &dyn crate::messaging::message::Message) {
-        let listeners = self.0.message_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_message(message);
-        }
-    }
-    fn on_sent(&self, message: &dyn crate::messaging::message::Message) {
-        let listeners = self.0.message_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_sent(message);
-        }
-    }
-}
-
-struct CompositeChannelListener(Arc<SharedListeners>);
-impl ChannelListener for CompositeChannelListener {
-    fn on_channel_created(&self, channel: &dyn crate::messaging::channel::Channel) {
-        let listeners = self.0.channel_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_channel_created(channel);
-        }
-    }
-    fn on_channel_deleted(&self, channel: &dyn crate::messaging::channel::Channel) {
-        let listeners = self.0.channel_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_channel_deleted(channel);
-        }
-    }
-    fn on_joined_channel(&self, channel: &dyn crate::messaging::channel::Channel) {
-        let listeners = self.0.channel_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_joined_channel(channel);
-        }
-    }
-    fn on_left_channel(&self, channel: &dyn crate::messaging::channel::Channel) {
-        let listeners = self.0.channel_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_left_channel(channel);
-        }
-    }
-    fn on_channel_updated(&self, channel: &dyn crate::messaging::channel::Channel) {
-        let listeners = self.0.channel_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_channel_updated(channel);
-        }
-    }
-}
-
-struct CompositeContactListener(Arc<SharedListeners>);
-impl ContactListener for CompositeContactListener {
-    fn on_contact_added(&self, contact: &dyn crate::messaging::contact::Contact) {
-        let listeners = self.0.contact_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_contact_added(contact);
-        }
-    }
-    fn on_contacts_updated(&self, contacts: &[Box<dyn crate::messaging::contact::Contact>]) {
-        let listeners = self.0.contact_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_contacts_updated(contacts);
-        }
-    }
-    fn on_contacts_removed(&self, contact_ids: &[Id]) {
-        let listeners = self.0.contact_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_contacts_removed(contact_ids);
-        }
-    }
-    fn on_contacts_cleared(&self) {
-        let listeners = self.0.contact_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_contacts_cleared();
-        }
-    }
-}
-
-struct CompositeSessionListener(Arc<SharedListeners>);
-impl SessionListener for CompositeSessionListener {
-    fn on_new_session(&self, session_info: &crate::messaging::session_info::SessionInfo) {
-        let listeners = self.0.session_listeners.read().unwrap().clone();
-        for l in listeners {
-            l.on_new_session(session_info);
-        }
+        self.connected.store(false, Ordering::Release);
+        self.ready.store(false, Ordering::Release);
+        self.listener.on_disconnected();
     }
 }
 
 struct CompositeFriendProtocolListener {
-    listeners: Arc<SharedListeners>,
+    message_listener: Arc<dyn MessageListener>,
+    contact_listener: Arc<dyn ContactListener>,
+    friend_request_listener: Arc<dyn crate::messaging::FriendRequestListener>,
     state: Arc<std::sync::RwLock<ClientState>>,
 }
 
@@ -528,10 +424,8 @@ impl FriendProtocolListener for CompositeFriendProtocolListener {
         }
 
         if notify {
-            let listeners = self.listeners.friend_request_listeners.read().unwrap().clone();
-            for listener in listeners {
-                listener.on_friend_request(&user_id, Some(&hello));
-            }
+            self.friend_request_listener
+                .on_friend_request(&user_id, Some(&hello));
         }
     }
 
@@ -580,27 +474,26 @@ impl FriendProtocolListener for CompositeFriendProtocolListener {
             contact
         };
 
-        let request_listeners = self.listeners.friend_request_listeners.read().unwrap().clone();
-        for listener in request_listeners {
-            listener.on_friend_request_accepted(&user_id);
-        }
-        let contact_listeners = self.listeners.contact_listeners.read().unwrap().clone();
-        for listener in contact_listeners {
-            listener.on_contact_added(&contact);
-        }
+        self.friend_request_listener
+            .on_friend_request_accepted(&user_id);
+        self.contact_listener.on_contact_added(&contact);
     }
 
     fn on_content_message(&self, message: PhotonMessage) {
-        let listeners = self.listeners.message_listeners.read().unwrap().clone();
-        for listener in listeners {
-            listener.on_message(&message);
-        }
+        self.message_listener.on_message(&message);
     }
 }
 
 pub(crate) fn deploy(
-    options: Options,
-    listeners: Arc<SharedListeners>,
+    options: Arc<Options>,
+    connected: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+    connection_listener: Arc<dyn ConnectionListener>,
+    message_listener: Arc<dyn MessageListener>,
+    channel_listener: Arc<dyn ChannelListener>,
+    contact_listener: Arc<dyn ContactListener>,
+    session_listener: Arc<dyn SessionListener>,
+    friend_request_listener: Arc<dyn crate::messaging::FriendRequestListener>,
     state: Arc<std::sync::RwLock<ClientState>>,
 ) -> Result<VerticleClient> {
     debug!("Deploying messaging verticle...");
@@ -611,15 +504,19 @@ pub(crate) fn deploy(
 
     let verticle_options = VerticleOptions {
         options,
-        connected: AtomicBool::new(false),
-        ready: AtomicBool::new(false),
-        connection_listener: Arc::new(CompositeConnectionListener(listeners.clone())),
-        message_listener: Arc::new(CompositeMessageListener(listeners.clone())),
-        channel_listener: Arc::new(CompositeChannelListener(listeners.clone())),
-        contact_listener: Arc::new(CompositeContactListener(listeners.clone())),
-        session_listener: Arc::new(CompositeSessionListener(listeners.clone())),
+        connection_listener: Arc::new(ClientConnectionListener {
+            listener: connection_listener,
+            connected,
+            ready,
+        }),
+        message_listener: message_listener.clone(),
+        channel_listener,
+        contact_listener: contact_listener.clone(),
+        session_listener,
         friend_protocol_listener: Arc::new(CompositeFriendProtocolListener {
-            listeners: listeners.clone(),
+            message_listener,
+            contact_listener,
+            friend_request_listener,
             state,
         }),
     };
@@ -652,12 +549,12 @@ pub(crate) fn deploy(
         }
         Ok(Err(msg)) => {
             error!("Messaging verticle failed to deploy: {msg}");
-            Err(Error::State(msg))
+            Err(StateError::new(msg))
         }
         Err(_) => {
             error!("Messaging verticle startup channel closed unexpectedly");
-            Err(Error::State(
-                "Messaging verticle startup channel closed".into(),
+            Err(StateError::new(
+                "Messaging verticle startup channel closed",
             ))
         }
     }

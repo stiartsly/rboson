@@ -15,6 +15,7 @@ pub use messaging_client::MessagingClient;
 
 use super::verticle::{self, VerticleClient};
 
+use crate::errors::{Result, NotImplemented, StateError, ArgumentError};
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
@@ -22,7 +23,6 @@ use crate::messaging::{
     contact::{Contact, ContactEditor, ContactType},
     contact_listener::ContactListener,
     conversation::Conversation,
-    errors::{Error, Result},
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
@@ -36,35 +36,6 @@ use crate::{core::logger, Id};
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
-
-/// A boxed future returned by async methods on [`MessagingClient`].
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-pub(crate) struct SharedListeners {
-    pub(crate) connected: AtomicBool,
-    pub(crate) ready: AtomicBool,
-    pub(crate) connection_listeners: RwLock<Vec<Arc<dyn ConnectionListener>>>,
-    pub(crate) message_listeners: RwLock<Vec<Arc<dyn MessageListener>>>,
-    pub(crate) channel_listeners: RwLock<Vec<Arc<dyn ChannelListener>>>,
-    pub(crate) contact_listeners: RwLock<Vec<Arc<dyn ContactListener>>>,
-    pub(crate) session_listeners: RwLock<Vec<Arc<dyn SessionListener>>>,
-    pub(crate) friend_request_listeners: RwLock<Vec<Arc<dyn FriendRequestListener>>>,
-}
-
-impl SharedListeners {
-    pub(crate) fn new() -> Self {
-        Self {
-            connected: AtomicBool::new(false),
-            ready: AtomicBool::new(false),
-            connection_listeners: RwLock::new(Vec::new()),
-            message_listeners: RwLock::new(Vec::new()),
-            channel_listeners: RwLock::new(Vec::new()),
-            contact_listeners: RwLock::new(Vec::new()),
-            session_listeners: RwLock::new(Vec::new()),
-            friend_request_listeners: RwLock::new(Vec::new()),
-        }
-    }
-}
 
 /// Concrete implementation of a [`FriendRequest`].
 #[derive(Debug, Clone)]
@@ -248,13 +219,20 @@ pub(crate) struct ClientState {
 
 /// The Boson Messaging Client implementation.
 pub struct Client {
-    options: Options,
-    listeners: Arc<SharedListeners>,
+    options: Arc<Options>,
+
+    connected: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+
+    connection_listener: Arc<dyn ConnectionListener>,
+    message_listener: Arc<dyn MessageListener>,
+    channel_listener: Arc<dyn ChannelListener>,
+    contact_listener: Arc<dyn ContactListener>,
+    session_listener: Arc<dyn SessionListener>,
+    friend_request_listener: Arc<dyn FriendRequestListener>,
     verticle: Mutex<Option<VerticleClient>>,
     state: Arc<RwLock<ClientState>>,
 }
-
-pub type PhotonMessagingClient = Client;
 
 impl Client {
     pub fn new(options: Options) -> Self {
@@ -271,35 +249,31 @@ impl Client {
             friend_requests: HashMap::new(),
             contacts: HashMap::new(),
         };
+
+        let connection_listener = options.connection_listener();
+        let message_listener = options.message_listener();
+        let channel_listener = options.channel_listener();
+        let contact_listener = options.contact_listener();
+        let session_listener = options.session_listener();
+        let friend_request_listener = options.friend_request_listener();
+
         Self {
-            options,
-            listeners: Arc::new(SharedListeners::new()),
+            options: Arc::new(options),
+            connected: Arc::new(AtomicBool::new(false)),
+            ready: Arc::new(AtomicBool::new(false)),
+            connection_listener,
+            message_listener,
+            channel_listener,
+            contact_listener,
+            session_listener,
+            friend_request_listener,
             verticle: Mutex::new(None),
             state: Arc::new(RwLock::new(state)),
         }
     }
 
-    fn unavailable<T>(&self, operation: &str) -> Result<T> {
-        let state = if self.is_running() {
-            "the updated encrypted RPC/persistence runtime has not been ported"
-        } else {
-            "the messaging client is not running"
-        };
-        Err(Error::State(format!("{operation} is unavailable: {state}")))
-    }
-
-    fn remove_listener<T: ?Sized>(listeners: &RwLock<Vec<Arc<T>>>, target: &Arc<T>) {
-        listeners
-            .write()
-            .unwrap()
-            .retain(|listener| !Arc::ptr_eq(listener, target));
-    }
-
-    fn unsupported<'a, T: Send + 'a>(
-        &'a self,
-        operation: &'static str,
-    ) -> BoxFuture<'a, Result<T>> {
-        Box::pin(async move { self.unavailable(operation) })
+    pub fn options(&self) -> &Options {
+        &self.options
     }
 
     pub fn user_id(&self) -> &Id {
@@ -310,20 +284,20 @@ impl Client {
         self.options.device_id()
     }
 
-    pub fn director_node_id(&self) -> Option<&Id> {
-        self.options.director_node_id()
+    pub fn peer_id(&self) -> &Id {
+        self.options.peer_id()
     }
 
-    pub fn director_endpoint(&self) -> Option<&str> {
-        self.options.director_endpoint().map(url::Url::as_str)
+    pub fn peer_endpoint(&self) -> &url::Url {
+        self.options.peer_endpoint()
     }
 
     pub fn service_peer_id(&self) -> &Id {
-        self.options.service_peerid()
+        self.peer_id()
     }
 
     pub fn service_endpoint(&self) -> Option<&str> {
-        self.options.service_endpoint().map(url::Url::as_str)
+        Some(self.peer_endpoint().as_str())
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -338,7 +312,14 @@ impl Client {
 
         let verticle_client = verticle::deploy(
             self.options.clone(),
-            self.listeners.clone(),
+            self.connected.clone(),
+            self.ready.clone(),
+            self.connection_listener.clone(),
+            self.message_listener.clone(),
+            self.channel_listener.clone(),
+            self.contact_listener.clone(),
+            self.session_listener.clone(),
+            self.friend_request_listener.clone(),
             self.state.clone(),
         )?;
         verticle_client.start().await?;
@@ -363,11 +344,11 @@ impl Client {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.listeners.connected.load(Ordering::Acquire)
+        self.connected.load(Ordering::Acquire)
     }
 
     pub fn is_ready(&self) -> bool {
-        self.listeners.ready.load(Ordering::Acquire)
+        self.ready.load(Ordering::Acquire)
     }
 
     pub fn connection_status(&self) -> &str {
@@ -382,96 +363,11 @@ impl Client {
         }
     }
 
-    pub fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>) {
-        self.listeners
-            .connection_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_connection_listener(&self, listener: &Arc<dyn ConnectionListener>) {
-        Self::remove_listener(&self.listeners.connection_listeners, listener);
-    }
-
-    pub fn add_message_listener(&self, listener: Arc<dyn MessageListener>) {
-        self.listeners
-            .message_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_message_listener(&self, listener: &Arc<dyn MessageListener>) {
-        Self::remove_listener(&self.listeners.message_listeners, listener);
-    }
-
-    pub fn add_channel_listener(&self, listener: Arc<dyn ChannelListener>) {
-        self.listeners
-            .channel_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_channel_listener(&self, listener: &Arc<dyn ChannelListener>) {
-        Self::remove_listener(&self.listeners.channel_listeners, listener);
-    }
-
-    pub fn add_contact_listener(&self, listener: Arc<dyn ContactListener>) {
-        self.listeners
-            .contact_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_contact_listener(&self, listener: &Arc<dyn ContactListener>) {
-        Self::remove_listener(&self.listeners.contact_listeners, listener);
-    }
-
-    pub fn add_session_listener(&self, listener: Arc<dyn SessionListener>) {
-        self.listeners
-            .session_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_session_listener(&self, listener: &Arc<dyn SessionListener>) {
-        Self::remove_listener(&self.listeners.session_listeners, listener);
-    }
-
-    pub fn add_friend_request_listener(&self, listener: Arc<dyn FriendRequestListener>) {
-        self.listeners
-            .friend_request_listeners
-            .write()
-            .unwrap()
-            .push(listener);
-    }
-
-    pub fn remove_friend_request_listener(&self, listener: &Arc<dyn FriendRequestListener>) {
-        Self::remove_listener(&self.listeners.friend_request_listeners, listener);
-    }
-
-    pub fn remove_all_listeners(&self) {
-        self.listeners.connection_listeners.write().unwrap().clear();
-        self.listeners.message_listeners.write().unwrap().clear();
-        self.listeners.channel_listeners.write().unwrap().clear();
-        self.listeners.contact_listeners.write().unwrap().clear();
-        self.listeners.session_listeners.write().unwrap().clear();
-        self.listeners
-            .friend_request_listeners
-            .write()
-            .unwrap()
-            .clear();
-    }
-
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
         Box::new(ComposedMessageBuilder::new(
             recipient,
             self.verticle.lock().unwrap().as_ref().map(|v| v.sender()),
-            self.listeners.clone(),
+            self.message_listener.clone(),
         ))
     }
 
@@ -546,32 +442,24 @@ impl MessagingClient for Client {
         self.device_id()
     }
 
-    fn director_node_id(&self) -> Option<&Id> {
-        self.director_node_id()
-    }
-
-    fn director_endpoint(&self) -> Option<&str> {
-        self.director_endpoint()
-    }
-
     fn service_peer_id(&self) -> &Id {
-        self.service_peer_id()
+        self.peer_id()
     }
 
     fn service_endpoint(&self) -> Option<&str> {
-        self.service_endpoint()
+        Some(self.options.peer_endpoint().as_str())
     }
 
     fn data_dir(&self) -> &Path {
-        self.data_dir()
+        self.options.data_dir()
     }
 
-    fn start(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move { self.start().await })
+    async fn start(&self) -> Result<()> {
+        self.start().await
     }
 
-    fn stop(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move { self.stop().await })
+    async fn stop(&self) -> Result<()> {
+        self.stop().await
     }
 
     fn is_running(&self) -> bool {
@@ -590,120 +478,72 @@ impl MessagingClient for Client {
         self.connection_status()
     }
 
-    fn add_connection_listener(&self, listener: Arc<dyn ConnectionListener>) {
-        self.add_connection_listener(listener);
-    }
-
-    fn remove_connection_listener(&self, listener: &Arc<dyn ConnectionListener>) {
-        self.remove_connection_listener(listener);
-    }
-
-    fn add_message_listener(&self, listener: Arc<dyn MessageListener>) {
-        self.add_message_listener(listener);
-    }
-
-    fn remove_message_listener(&self, listener: &Arc<dyn MessageListener>) {
-        self.remove_message_listener(listener);
-    }
-
-    fn add_channel_listener(&self, listener: Arc<dyn ChannelListener>) {
-        self.add_channel_listener(listener);
-    }
-
-    fn remove_channel_listener(&self, listener: &Arc<dyn ChannelListener>) {
-        self.remove_channel_listener(listener);
-    }
-
-    fn add_contact_listener(&self, listener: Arc<dyn ContactListener>) {
-        self.add_contact_listener(listener);
-    }
-
-    fn remove_contact_listener(&self, listener: &Arc<dyn ContactListener>) {
-        self.remove_contact_listener(listener);
-    }
-
-    fn add_session_listener(&self, listener: Arc<dyn SessionListener>) {
-        self.add_session_listener(listener);
-    }
-
-    fn remove_session_listener(&self, listener: &Arc<dyn SessionListener>) {
-        self.remove_session_listener(listener);
-    }
-
-    fn add_friend_request_listener(&self, listener: Arc<dyn FriendRequestListener>) {
-        self.add_friend_request_listener(listener);
-    }
-
-    fn remove_friend_request_listener(&self, listener: &Arc<dyn FriendRequestListener>) {
-        self.remove_friend_request_listener(listener);
-    }
-
-    fn remove_all_listeners(&self) {
-        self.remove_all_listeners();
-    }
-
     fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
         self.message(recipient)
     }
 
-    fn get_conversation(&self, _id: &Id) -> BoxFuture<'_, Result<Option<Box<dyn Conversation>>>> {
-        self.unsupported("get_conversation")
+    async fn get_conversation(
+        &self,
+        _id: &Id
+    ) -> Result<Option<Box<dyn Conversation>>> {
+        Err(NotImplemented::new("get_conversation"))
     }
 
-    fn get_conversations(&self) -> BoxFuture<'_, Result<Vec<Box<dyn Conversation>>>> {
-        self.unsupported("get_conversations")
+    async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
+        //self.unsupported("get_conversations")
+        Err(NotImplemented::new("get_conversations"))
     }
 
-    fn remove_conversation(&self, _id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_conversation")
+    async fn remove_conversation(&self, _id: &Id) -> Result<()> {
+        Err(NotImplemented::new("remove_conversation"))
     }
 
-    fn remove_conversations(&self, _ids: &[Id]) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_conversations")
+    async fn remove_conversations(&self, _ids: &[Id]) -> Result<()> {
+        Err(NotImplemented::new("remove_conversations"))
     }
 
-    fn get_messages(
+    async fn get_messages(
         &self,
         _conversation_id: &Id,
         _until: Option<i64>,
         _limit: usize,
         _offset: usize,
-    ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>> {
-        self.unsupported("get_messages")
+    ) -> Result<Vec<Box<dyn Message>>> {
+        Err(NotImplemented::new("get_messages"))
     }
 
-    fn get_messages_in_range(
+    async fn get_messages_in_range(
         &self,
         _conversation_id: &Id,
         _begin: i64,
         _end: i64,
-    ) -> BoxFuture<'_, Result<Vec<Box<dyn Message>>>> {
-        self.unsupported("get_messages_in_range")
+    ) -> Result<Vec<Box<dyn Message>>> {
+        Err(NotImplemented::new("get_messages_in_range"))
     }
 
-    fn remove_message(&self, _message_id: i64) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_message")
+    async fn remove_message(&self, _message_id: i64) -> Result<()> {
+        Err(NotImplemented::new("remove_message"))
     }
 
-    fn remove_messages_by_ids(&self, _message_ids: &[i64]) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_messages_by_ids")
+    async fn remove_messages_by_ids(&self, _message_ids: &[i64]) -> Result<()> {
+        Err(NotImplemented::new("remove_messages_by_ids"))
     }
 
-    fn remove_messages_in_conversation(&self, _conversation_id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_messages_in_conversation")
+    async fn remove_messages_in_conversation(&self, _conversation_id: &Id) -> Result<()> {
+        Err(NotImplemented::new("remove_messages_in_conversation"))
     }
 
-    fn get_sessions(&self) -> BoxFuture<'_, Result<Vec<SessionInfo>>> {
-        self.unsupported("get_sessions")
+    async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
+        Err(NotImplemented::new("get_sessions"))
     }
 
-    fn revoke_session(&self, _device_id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("revoke_session")
+    async fn revoke_session(&self, _device_id: &Id) -> Result<()> {
+        Err(NotImplemented::new("revoke_session"))
     }
 
     async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
         if &user_id == self.user_id() {
-            return Err(Error::Argument("Cannot send friend request to yourself".into()));
+            return Err(ArgumentError::new("Cannot send friend request to yourself"));
         }
 
         let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
@@ -714,11 +554,10 @@ impl MessagingClient for Client {
                 hello: hello.clone().unwrap_or_default(),
                 complete: reply_tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-            reply_rx
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+            let _ = reply_rx
                 .await
-                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                .map_err(Error::State)?;
+                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         }
 
         let now = SystemTime::now();
@@ -745,20 +584,16 @@ impl MessagingClient for Client {
         let user_id = *user_id;
         let state = self.state.read().unwrap();
         let req = state.friend_requests.get(&user_id).ok_or_else(|| {
-            Error::Argument(format!("No friend request found for {user_id}"))
+            ArgumentError::new(format!("No friend request found for {user_id}"))
         })?;
         if req.initiator_id == *self.user_id() {
-            return Err(Error::State(
-                "Cannot accept your own friend request".into(),
-            ));
+            return Err(ArgumentError::new("Cannot accept your own friend request"));
         }
         if req.accepted {
-            return Err(Error::State(
-                "Friend request has already been accepted".into(),
-            ));
+            return Err(ArgumentError::new("Friend request has already been accepted"));
         }
         if req.expired {
-            return Err(Error::State("Friend request has expired".into()));
+            return Err(ArgumentError::new("Friend request has expired"));
         }
 
         let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
@@ -768,11 +603,10 @@ impl MessagingClient for Client {
                 user_id,
                 complete: reply_tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-            reply_rx
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+            let _ = reply_rx
                 .await
-                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                .map_err(Error::State)?;
+                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
         }
 
         let now = SystemTime::now();
@@ -804,230 +638,198 @@ impl MessagingClient for Client {
             state.contacts.insert(user_id, contact.clone());
         }
 
-        let contact_listeners = self
-            .listeners
-            .contact_listeners
-            .read()
-            .unwrap()
-            .clone();
-        for listener in contact_listeners {
-            listener.on_contact_added(&contact);
+        self.contact_listener.on_contact_added(&contact);
+        Ok(())
+    }
+
+    async fn get_friend_request(
+        &self,
+        user_id: &Id,
+    ) -> Result<Option<Box<dyn FriendRequest>>> {
+        let user_id = *user_id;
+        let state = self.state.read().unwrap();
+        Ok(state
+            .friend_requests
+            .get(&user_id)
+            .cloned()
+            .map(|r| Box::new(r) as Box<dyn FriendRequest>))
+    }
+
+    async fn get_friend_requests(&self) -> Result<Vec<Box<dyn FriendRequest>>> {
+        let state = self.state.read().unwrap();
+        Ok(state
+            .friend_requests
+            .values()
+            .cloned()
+            .map(|r| Box::new(r) as Box<dyn FriendRequest>)
+            .collect())
+    }
+
+    async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
+        let user_id = *user_id;
+        self.state.write().unwrap().friend_requests.remove(&user_id);
+        Ok(())
+    }
+
+    async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
+        let user_ids = user_ids.to_vec();
+        let mut state = self.state.write().unwrap();
+        for id in &user_ids {
+            state.friend_requests.remove(id);
         }
         Ok(())
     }
 
-    fn get_friend_request(
-        &self,
-        user_id: &Id,
-    ) -> BoxFuture<'_, Result<Option<Box<dyn FriendRequest>>>> {
-        let user_id = *user_id;
-        Box::pin(async move {
-            let state = self.state.read().unwrap();
-            Ok(state
-                .friend_requests
-                .get(&user_id)
-                .cloned()
-                .map(|r| Box::new(r) as Box<dyn FriendRequest>))
-        })
+    async fn clear_friend_requests(&self) -> Result<()> {
+        self.state.write().unwrap().friend_requests.clear();
+        Ok(())
     }
 
-    fn get_friend_requests(&self) -> BoxFuture<'_, Result<Vec<Box<dyn FriendRequest>>>> {
-        Box::pin(async move {
-            let state = self.state.read().unwrap();
-            Ok(state
-                .friend_requests
-                .values()
-                .cloned()
-                .map(|r| Box::new(r) as Box<dyn FriendRequest>)
-                .collect())
-        })
-    }
-
-    fn remove_friend_request(&self, user_id: &Id) -> BoxFuture<'_, Result<()>> {
-        let user_id = *user_id;
-        Box::pin(async move {
-            self.state.write().unwrap().friend_requests.remove(&user_id);
-            Ok(())
-        })
-    }
-
-    fn remove_friend_requests(&self, user_ids: &[Id]) -> BoxFuture<'_, Result<()>> {
-        let user_ids = user_ids.to_vec();
-        Box::pin(async move {
-            let mut state = self.state.write().unwrap();
-            for id in &user_ids {
-                state.friend_requests.remove(id);
-            }
-            Ok(())
-        })
-    }
-
-    fn clear_friend_requests(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            self.state.write().unwrap().friend_requests.clear();
-            Ok(())
-        })
-    }
-
-    fn add_friend(
+    async fn add_friend(
         &self,
         user_id: Id,
         session_key: Vec<u8>,
         remark: Option<String>,
-    ) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            if session_key.len() != crate::signature::PrivateKey::BYTES {
-                return Err(Error::Argument(format!(
-                    "Invalid friend session key length: {}",
-                    session_key.len()
-                )));
-            }
-            let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-            if let Some(tx) = verticle_tx {
-                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                tx.send(verticle::VerticleEvent::RegisterFriendSession {
-                    user_id,
-                    session_key,
-                    complete: reply_tx,
-                })
-                .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
-                reply_rx
-                    .await
-                    .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                    .map_err(Error::State)?;
-            }
-            let now = SystemTime::now();
-            let now_ms = now
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            let contact = PhotonContact {
-                id: user_id,
-                contact_type: ContactType::Friend,
-                name: None,
-                remark,
-                tags: None,
-                muted: false,
-                blocked: false,
-                created_at: now_ms,
-                updated_at: now_ms,
-                revision: 1,
-            };
-            self.state.write().unwrap().contacts.insert(user_id, contact.clone());
+    ) -> Result<()> {
+        if session_key.len() != crate::signature::PrivateKey::BYTES {
+            return Err(ArgumentError::new(format!(
+                "Invalid friend session key length: {}",
+                session_key.len()
+            )));
+        }
+        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
+        if let Some(tx) = verticle_tx {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            tx.send(verticle::VerticleEvent::RegisterFriendSession {
+                user_id,
+                session_key,
+                complete: reply_tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+            reply_rx
+                .await
+                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+                .map_err(StateError::new)?;
+        }
+        let now = SystemTime::now();
+        let now_ms = now
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let contact = PhotonContact {
+            id: user_id,
+            contact_type: ContactType::Friend,
+            name: None,
+            remark,
+            tags: None,
+            muted: false,
+            blocked: false,
+            created_at: now_ms,
+            updated_at: now_ms,
+            revision: 1,
+        };
+        self.state.write().unwrap().contacts.insert(user_id, contact.clone());
 
-            let listeners = self
-                .listeners
-                .contact_listeners
-                .read()
-                .unwrap()
-                .clone();
-            for listener in listeners {
-                listener.on_contact_added(&contact);
-            }
-            Ok(())
-        })
+        self.contact_listener.on_contact_added(&contact);
+        Ok(())
     }
 
-    fn create_channel(
+    async fn create_channel(
         &self,
         _permission: Permission,
         _name: String,
         _notice: Option<String>,
         _announcement: Option<String>,
-    ) -> BoxFuture<'_, Result<Box<dyn Channel>>> {
-        self.unsupported("create_channel")
+    ) -> Result<Box<dyn Channel>> {
+        Err(NotImplemented::new("create_channel"))
     }
 
-    fn remove_channel(&self, _channel_id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_channel")
+    async fn remove_channel(&self, _channel_id: &Id) -> Result<()> {
+        Err(NotImplemented::new("remove_channel"))
     }
 
-    fn join_channel(&self, _ticket: InviteTicket) -> BoxFuture<'_, Result<Box<dyn Channel>>> {
-        self.unsupported("join_channel")
+    async fn join_channel(&self, _ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+        Err(NotImplemented::new("join_channel"))
     }
 
-    fn leave_channel(&self, _channel_id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("leave_channel")
+    async fn leave_channel(&self, _channel_id: &Id) -> Result<()> {
+        Err(NotImplemented::new("leave_channel"))
     }
 
-    fn create_invite_ticket(
+    async fn create_invite_ticket(
         &self,
         _channel_id: &Id,
         _invitee: Option<Id>,
-    ) -> BoxFuture<'_, Result<InviteTicket>> {
-        self.unsupported("create_invite_ticket")
+    ) -> Result<InviteTicket> {
+        Err(NotImplemented::new("create_invite_ticket"))
     }
 
-    fn transfer_channel_ownership(
+    async fn transfer_channel_ownership(
         &self,
         _channel_id: &Id,
         _new_owner: Id,
-    ) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("transfer_channel_ownership")
+    ) -> Result<()> {
+        Err(NotImplemented::new("transfer_channel_ownership"))
     }
 
-    fn rotate_channel_session_key(&self, _channel_id: &Id) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("rotate_channel_session_key")
+    async fn rotate_channel_session_key(&self, _channel_id: &Id) -> Result<()> {
+        Err(NotImplemented::new("rotate_channel_session_key"))
     }
 
-    fn update_channel_info(&self, _channel: &dyn Channel) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("update_channel_info")
+    async fn update_channel_info(&self, _channel: &dyn Channel) -> Result<()> {
+        Err(NotImplemented::new("update_channel_info"))
     }
 
-    fn set_channel_members_role(
+    async fn set_channel_members_role(
         &self,
         _channel_id: &Id,
         _members: &[Id],
         _role: Role,
-    ) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("set_channel_members_role")
+    ) -> Result<()> {
+        Err(NotImplemented::new("set_channel_members_role"))
     }
 
-    fn ban_channel_members(&self, _channel_id: &Id, _members: &[Id]) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("ban_channel_members")
+    async fn ban_channel_members(&self, _channel_id: &Id, _members: &[Id]) -> Result<()> {
+        Err(NotImplemented::new("ban_channel_members"))
     }
 
-    fn unban_channel_members(
+    async fn unban_channel_members(
         &self,
         _channel_id: &Id,
         _members: &[Id],
-    ) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("unban_channel_members")
+    ) -> Result<()> {
+        Err(NotImplemented::new("unban_channel_members"))
     }
 
-    fn remove_channel_members(
+    async fn remove_channel_members(
         &self,
         _channel_id: &Id,
         _members: &[Id],
-    ) -> BoxFuture<'_, Result<()>> {
-        self.unsupported("remove_channel_members")
+    ) -> Result<()> {
+        Err(NotImplemented::new("remove_channel_members"))
     }
 
-    fn get_contact(&self, id: &Id) -> BoxFuture<'_, Result<Option<Box<dyn Contact>>>> {
+    async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
         let id = *id;
-        Box::pin(async move {
-            let state = self.state.read().unwrap();
-            Ok(state
-                .contacts
-                .get(&id)
-                .cloned()
-                .map(|c| Box::new(c) as Box<dyn Contact>))
-        })
+        let state = self.state.read().unwrap();
+        Ok(state
+            .contacts
+            .get(&id)
+            .cloned()
+            .map(|c| Box::new(c) as Box<dyn Contact>))
     }
 
-    fn get_contacts(&self) -> BoxFuture<'_, Result<Vec<Box<dyn Contact>>>> {
-        Box::pin(async move {
-            let state = self.state.read().unwrap();
-            Ok(state
-                .contacts
-                .values()
-                .cloned()
-                .map(|c| Box::new(c) as Box<dyn Contact>)
-                .collect())
-        })
+    async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
+        let state = self.state.read().unwrap();
+        Ok(state
+            .contacts
+            .values()
+            .cloned()
+            .map(|c| Box::new(c) as Box<dyn Contact>)
+            .collect())
     }
 
-    fn update_contact(&self, contact: &dyn Contact) -> BoxFuture<'_, Result<()>> {
+    async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
         let updated = PhotonContact {
             id: *contact.id(),
             contact_type: contact.contact_type(),
@@ -1043,72 +845,55 @@ impl MessagingClient for Client {
                 .unwrap_or(0),
             revision: contact.revision() + 1,
         };
-        Box::pin(async move {
+        {
             self.state
                 .write()
                 .unwrap()
                 .contacts
                 .insert(updated.id, updated.clone());
-            let listeners = self.listeners.contact_listeners.read().unwrap().clone();
-            for listener in listeners {
-                let boxed: Box<dyn Contact> = Box::new(updated.clone());
-                listener.on_contacts_updated(&[boxed]);
-            }
+            let boxed: Box<dyn Contact> = Box::new(updated.clone());
+            self.contact_listener
+                .on_contacts_updated(&[boxed]);
             Ok(())
-        })
+        }
     }
 
-    fn remove_contact(&self, id: &Id) -> BoxFuture<'_, Result<()>> {
+    async fn remove_contact(&self, id: &Id) -> Result<()> {
         let id = *id;
-        Box::pin(async move {
-            let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-            if let Some(tx) = verticle_tx {
-                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                if tx
-                    .send(verticle::VerticleEvent::FriendRemove {
-                        user_id: id,
-                        complete: reply_tx,
-                    })
-                    .is_ok()
-                {
-                    let _ = reply_rx.await;
-                }
+        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
+        if let Some(tx) = verticle_tx {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            if tx
+                .send(verticle::VerticleEvent::FriendRemove {
+                    user_id: id,
+                    complete: reply_tx,
+                })
+                .is_ok()
+            {
+                let _ = reply_rx.await;
             }
+        }
 
-            self.state.write().unwrap().contacts.remove(&id);
-            let listeners = self.listeners.contact_listeners.read().unwrap().clone();
-            for listener in listeners {
-                listener.on_contacts_removed(&[id]);
-            }
-            Ok(())
-        })
+        self.state.write().unwrap().contacts.remove(&id);
+        self.contact_listener.on_contacts_removed(&[id]);
+        Ok(())
     }
 
-    fn remove_contacts(&self, ids: &[Id]) -> BoxFuture<'_, Result<()>> {
+    async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
         let ids = ids.to_vec();
-        Box::pin(async move {
-            let mut state = self.state.write().unwrap();
-            for id in &ids {
-                state.contacts.remove(id);
-            }
-            drop(state);
-            let listeners = self.listeners.contact_listeners.read().unwrap().clone();
-            for listener in listeners {
-                listener.on_contacts_removed(&ids);
-            }
-            Ok(())
-        })
+        let mut state = self.state.write().unwrap();
+        for id in &ids {
+            state.contacts.remove(id);
+        }
+        drop(state);
+        self.contact_listener.on_contacts_removed(&ids);
+        Ok(())
     }
 
-    fn clear_contacts(&self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move {
-            self.state.write().unwrap().contacts.clear();
-            let listeners = self.listeners.contact_listeners.read().unwrap().clone();
-            for listener in listeners {
-                listener.on_contacts_cleared();
-            }
-            Ok(())
-        })
+    async fn clear_contacts(&self) -> Result<()> {
+        self.state.write().unwrap().contacts.clear();
+        self.contact_listener.on_contacts_cleared();
+        Ok(())
     }
 }
 
@@ -1116,7 +901,7 @@ impl MessagingClient for Client {
 struct ComposedMessageBuilder {
     recipient: Option<Id>,
     verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::VerticleEvent>>,
-    listeners: Arc<SharedListeners>,
+    message_listener: Arc<dyn MessageListener>,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
     headers: Vec<(String, String)>,
@@ -1128,12 +913,12 @@ impl ComposedMessageBuilder {
     fn new(
         recipient: Option<Id>,
         verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::VerticleEvent>>,
-        listeners: Arc<SharedListeners>,
+        message_listener: Arc<dyn MessageListener>,
     ) -> Self {
         Self {
             recipient,
             verticle_tx,
-            listeners,
+            message_listener,
             content_type: None,
             content_disposition: None,
             headers: Vec::new(),
@@ -1176,14 +961,14 @@ impl MessageBuilder for ComposedMessageBuilder {
 
     fn send(
         self: Box<Self>,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
         Box::pin(async move {
             let recipient = self.recipient
-                .ok_or_else(|| Error::Argument("Message recipient is required".into()))?;
+                .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
             let body = self.body
-                .ok_or_else(|| Error::Argument("Message content is required".into()))?;
+                .ok_or_else(|| ArgumentError::new("Message content is required"))?;
             let tx = self.verticle_tx
-                .ok_or_else(|| Error::State("Messaging client is not running".into()))?;
+                .ok_or_else(|| StateError::new("Messaging client is not running"))?;
             let mut headers = HashMap::new();
             for (key, value) in self.headers {
                 headers.insert(key, serde_json::Value::String(value));
@@ -1211,15 +996,12 @@ impl MessageBuilder for ComposedMessageBuilder {
                 text: self.text,
                 complete: reply_tx,
             })
-            .map_err(|_| Error::State("Messaging verticle event channel closed".into()))?;
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
             let message = reply_rx
                 .await
-                .map_err(|_| Error::State("Messaging verticle response channel closed".into()))?
-                .map_err(Error::State)?;
-            let listeners = self.listeners.message_listeners.read().unwrap().clone();
-            for listener in listeners {
-                listener.on_sent(&message);
-            }
+                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+                .map_err(StateError::new)?;
+            self.message_listener.on_sent(&message);
             Ok(Box::new(message) as Box<dyn Message>)
         })
     }

@@ -81,6 +81,7 @@ fn test_options_builder_completeness() {
 
     let mut complete = Options::builder();
     complete.with_service_peerid(peerid);
+    complete.with_service_endpoint("mqtts://10.0.0.1:8883").unwrap();
     complete.with_user_keypair(user_key.clone());
     complete.with_device_keypair(device_key.clone());
     assert!(complete.build().is_ok());

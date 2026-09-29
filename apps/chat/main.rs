@@ -3,8 +3,8 @@ use boson::{
     errors::Result,
     messaging::{
         Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
-        FriendRequestListener, Message, MessageListener, Options as MessagingOptions, SessionInfo,
-        SessionListener,
+        FriendRequestListener, Message, MessageListener, Options as MessagingOptions,
+        OptionsBuilder as MessagingOptionsBuilder, SessionInfo, SessionListener,
     },
     Id,
 };
@@ -33,7 +33,6 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let options = Options::parse();
-    let chat_options = load_chat_options(&options)?;
     let external_printer = ExternalPrinter::new(4_096);
     let output = ConsoleOutput::new(external_printer.clone());
 
@@ -49,25 +48,8 @@ async fn run() -> Result<()> {
 
     use_reedline_log_output(&external_printer);
 
+    let chat_options = load_chat_options(&options, &output)?;
     let client: Arc<Client> = Arc::new(Client::new(chat_options));
-    client.add_connection_listener(Arc::new(
-        PhotonConnectionListener::new(output.clone()))
-    );
-    client.add_message_listener(
-        Arc::new(PhotonMessageListener::new(output.clone()))
-    );
-    client.add_channel_listener(
-        Arc::new(PhotonChannelListener::new(output.clone()))
-    );
-    client.add_contact_listener(
-        Arc::new(PhotonContactListener::new(output.clone()))
-    );
-    client.add_session_listener(
-        Arc::new(PhotonSessionListener::new(output.clone()))
-    );
-    client.add_friend_request_listener(
-        Arc::new(PhotonFriendRequestListener::new(output))
-    );
 
     client.start().await?;
 
@@ -126,22 +108,16 @@ fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
     });
 }
 
-fn load_chat_options(options: &Options) -> Result<MessagingOptions> {
-    let path = options.config.clone();
-    let opts = MessagingOptions::load(path)?;
-    let mut b = MessagingOptions::builder();
-    b.with_service_peerid(*opts.service_peerid());
-    if let Some(endpoint) = opts.service_endpoint() {
-        b.with_service_endpoint_url(endpoint.clone())?;
-    }
-    b.with_user_keypair(opts.user_key().clone());
-    b.with_device_keypair(opts.device_key().clone());
-    b.with_data_dir(opts.data_dir());
-    b.with_database_uri(opts.database_uri())?;
-    b.with_database_pool_size(opts.database_pool_size());
-    b.with_database_schema_name(opts.database_schema());
-
-    b.build()
+fn load_chat_options(options: &Options, output: &ConsoleOutput) -> Result<MessagingOptions> {
+    let mut builder = MessagingOptionsBuilder::load(&options.config)?;
+    builder
+        .with_connection_listener(PhotonConnectionListener::new(output.clone()))
+        .with_message_listener(PhotonMessageListener::new(output.clone()))
+        .with_channel_listener(PhotonChannelListener::new(output.clone()))
+        .with_contact_listener(PhotonContactListener::new(output.clone()))
+        .with_session_listener(PhotonSessionListener::new(output.clone()))
+        .with_friend_request_listener(PhotonFriendRequestListener::new(output.clone()));
+    builder.build()
 }
 
 #[derive(Clone)]

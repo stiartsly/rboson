@@ -11,7 +11,7 @@ mod tests {
         info!("info: testing....");
         error!("debug: testing...");
         assert!(true);
-        logger::teardown();
+        logger::cleanup();
     }
 
     #[test]
@@ -21,6 +21,6 @@ mod tests {
         info!("info: testing....");
         debug!("debug: testing...");
         assert!(true);
-        logger::teardown();
+        logger::cleanup();
     }
 }

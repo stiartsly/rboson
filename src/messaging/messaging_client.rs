@@ -1,7 +1,9 @@
-use std::path::Path;
-use std::future::Future;
+use std::{
+    path::Path,
+    future::Future
+};
 
-use crate::errors::{Result};
+use crate::{Id, errors::{Result}};
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     contact::Contact,
@@ -11,7 +13,7 @@ use crate::messaging::{
     message::{Message, MessageBuilder},
     session_info::SessionInfo,
 };
-use crate::Id;
+
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -24,21 +26,11 @@ pub trait MessagingClient {
     /// Retrieves the identifier of the current device.
     fn device_id(&self) -> &Id;
 
-    /// Retrieves the identifier of the director node, if configured.
-    fn director_node_id(&self) -> Option<&Id> {
-        None
-    }
-
-    /// Retrieves the endpoint of the director service, if configured.
-    fn director_endpoint(&self) -> Option<&str> {
-        None
-    }
-
     /// Retrieves the identifier of the messaging service peer.
-    fn service_peer_id(&self) -> &Id;
+    fn peer_id(&self) -> &Id;
 
     /// Retrieves the endpoint of the messaging service.
-    fn service_endpoint(&self) -> Option<&str>;
+    fn peer_endpoint(&self) -> &str;
 
     /// Retrieves the data directory used by the client.
     fn data_dir(&self) -> &Path;
@@ -62,25 +54,15 @@ pub trait MessagingClient {
     /// Checks if the messaging client is ready to send and receive messages.
     fn is_ready(&self) -> bool;
 
-    /// Retrieves the current connection status of the messaging client.
-    fn connection_status(&self) -> &str {
-        if self.is_ready() {
-            "Connected (Ready)"
-        } else if self.is_connected() {
-            "Connected"
-        } else if self.is_running() {
-            "Connecting"
-        } else {
-            "Disconnected"
-        }
-    }
-
     // -----------------------------------------------------------------
     // Message and conversation APIs
     // -----------------------------------------------------------------
 
     /// Creates a message builder addressed to `recipient` (or broadcast if `None`).
-    fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder>;
+    fn message(
+        &self,
+        recipient: Option<Id>
+    ) -> Box<dyn MessageBuilder>;
 
     /// Retrieves a specific conversation by its identifier.
     fn get_conversation(
@@ -89,10 +71,15 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<Option<Box<dyn Conversation>>>>;
 
     /// Retrieves all conversations for the local user.
-    fn get_conversations(&self) -> impl Future<Output = Result<Vec<Box<dyn Conversation>>>>;
+    fn get_conversations(
+        &self
+    ) -> impl Future<Output = Result<Vec<Box<dyn Conversation>>>>;
 
     /// Removes a conversation and all its associated messages.
-    fn remove_conversation(&self, id: &Id) -> impl Future<Output = Result<()>>;
+    fn remove_conversation(
+        &self,
+        id: &Id
+    ) -> impl Future<Output = Result<()>>;
 
     /// Removes multiple conversations and all their associated messages.
     fn remove_conversations(
@@ -136,7 +123,7 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<()>>;
 
     // -----------------------------------------------------------------
-    // Sessions
+    // Sessions APIs
     // -----------------------------------------------------------------
 
     /// Lists all known device sessions for the authenticated user.
@@ -198,10 +185,16 @@ pub trait MessagingClient {
     /// Adds a contact as a friend once a shared session key has been established.
     fn add_friend(
         &self,
-        user_id: Id,
+        user_id: &Id,
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> impl Future<Output = Result<()>>;
+
+
+    fn block_user(
+        &self,
+        user_id: &Id
+    ) -> impl Future<Output = Result<Box<dyn Contact>>>;
 
     // -----------------------------------------------------------------
     // Channels
@@ -290,7 +283,7 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<()>>;
 
     // -----------------------------------------------------------------
-    // Contacts
+    // Generic Contact APIs
     // -----------------------------------------------------------------
 
     /// Looks up a contact by `Id`.
@@ -300,7 +293,9 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<Option<Box<dyn Contact>>>>;
 
     /// Retrieves all contacts.
-    fn get_contacts(&self) -> impl Future<Output = Result<Vec<Box<dyn Contact>>>>;
+    fn get_contacts(
+        &self
+    ) -> impl Future<Output = Result<Vec<Box<dyn Contact>>>>;
 
     /// Persists contact updates (remark, tags, muted, blocked …).
     fn update_contact(
@@ -309,11 +304,19 @@ pub trait MessagingClient {
     ) -> impl Future<Output = Result<()>>;
 
     /// Removes a contact by `Id`.
-    fn remove_contact(&self, id: &Id) -> impl Future<Output = Result<()>>;
+    fn remove_contact(
+        &self,
+        id: &Id
+    ) -> impl Future<Output = Result<()>>;
 
     /// Removes multiple contacts.
-    fn remove_contacts(&self, ids: &[Id]) -> impl Future<Output = Result<()>>;
+    fn remove_contacts(
+        &self,
+        ids: &[Id]
+    ) -> impl Future<Output = Result<()>>;
 
     /// Clears all contacts.
-    fn clear_contacts(&self) -> impl Future<Output = Result<()>>;
+    fn clear_contacts(
+        &self,
+    ) -> impl Future<Output = Result<()>>;
 }

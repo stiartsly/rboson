@@ -1,14 +1,13 @@
-use crate::Id;
 use std::time::SystemTime;
+use crate::Id;
 
 /// A pending or resolved friend request.
 ///
-/// Mirrors the Java `FriendRequest` interface.
 pub trait FriendRequest: Send + Sync {
-    /// The boson `Id` of the local user who owns this request record.
+    /// The Id of a user who owns this request record.
     fn user_id(&self) -> &Id;
 
-    /// The boson `Id` of the user who initiated the request.
+    /// The Id of the user who initiated the request.
     fn initiator_id(&self) -> &Id;
 
     /// The greeting / hello message attached to the request.

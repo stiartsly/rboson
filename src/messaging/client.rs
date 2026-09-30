@@ -20,7 +20,7 @@ use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,
-    contact::{Contact, ContactEditor, ContactType},
+    contact::{Contact, ContactType},
     contact_listener::ContactListener,
     conversation::Conversation,
     friend_request::FriendRequest,
@@ -31,6 +31,10 @@ use crate::messaging::{
     options::Options,
     session_info::SessionInfo,
     session_listener::SessionListener,
+};
+
+use super::internal::{
+    PhotonContact,
 };
 use crate::{core::logger, Id};
 
@@ -110,105 +114,6 @@ impl FriendRequest for PhotonFriendRequest {
 
     fn updated_at(&self) -> SystemTime {
         self.updated_at
-    }
-}
-
-/// Concrete implementation of a [`Contact`].
-#[derive(Debug, Clone)]
-pub struct PhotonContact {
-    pub id: Id,
-    pub contact_type: ContactType,
-    pub name: Option<String>,
-    pub remark: Option<String>,
-    pub tags: Option<String>,
-    pub muted: bool,
-    pub blocked: bool,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub revision: i32,
-}
-
-impl Contact for PhotonContact {
-    fn id(&self) -> &Id {
-        &self.id
-    }
-
-    fn contact_type(&self) -> ContactType {
-        self.contact_type
-    }
-
-    fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
-    fn remark(&self) -> Option<&str> {
-        self.remark.as_deref()
-    }
-
-    fn tags(&self) -> Option<&str> {
-        self.tags.as_deref()
-    }
-
-    fn is_muted(&self) -> bool {
-        self.muted
-    }
-
-    fn is_blocked(&self) -> bool {
-        self.blocked
-    }
-
-    fn created_at(&self) -> i64 {
-        self.created_at
-    }
-
-    fn updated_at(&self) -> i64 {
-        self.updated_at
-    }
-
-    fn revision(&self) -> i32 {
-        self.revision
-    }
-
-    fn edit(&self) -> Box<dyn ContactEditor> {
-        Box::new(PhotonContactEditor {
-            contact: self.clone(),
-        })
-    }
-}
-
-/// Builder for updating a [`PhotonContact`].
-pub struct PhotonContactEditor {
-    contact: PhotonContact,
-}
-
-impl ContactEditor for PhotonContactEditor {
-    fn remark(mut self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditor> {
-        self.contact.remark = remark;
-        self
-    }
-
-    fn tags(mut self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditor> {
-        self.contact.tags = tags;
-        self
-    }
-
-    fn muted(mut self: Box<Self>, muted: bool) -> Box<dyn ContactEditor> {
-        self.contact.muted = muted;
-        self
-    }
-
-    fn blocked(mut self: Box<Self>, blocked: bool) -> Box<dyn ContactEditor> {
-        self.contact.blocked = blocked;
-        self
-    }
-
-    fn build(mut self: Box<Self>) -> Box<dyn Contact> {
-        self.contact.updated_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        self.contact.revision += 1;
-        Box::new(self.contact)
     }
 }
 
@@ -413,7 +318,7 @@ impl Client {
 
     pub async fn add_friend(
         &self,
-        user_id: Id,
+        user_id: &Id,
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
@@ -442,12 +347,12 @@ impl MessagingClient for Client {
         self.device_id()
     }
 
-    fn service_peer_id(&self) -> &Id {
+    fn peer_id(&self) -> &Id {
         self.peer_id()
     }
 
-    fn service_endpoint(&self) -> Option<&str> {
-        Some(self.options.peer_endpoint().as_str())
+    fn peer_endpoint(&self) -> &str {
+        self.options.peer_endpoint().as_str()
     }
 
     fn data_dir(&self) -> &Path {
@@ -472,10 +377,6 @@ impl MessagingClient for Client {
 
     fn is_ready(&self) -> bool {
         self.is_ready()
-    }
-
-    fn connection_status(&self) -> &str {
-        self.connection_status()
     }
 
     fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
@@ -687,7 +588,7 @@ impl MessagingClient for Client {
 
     async fn add_friend(
         &self,
-        user_id: Id,
+        user_id: &Id,
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
@@ -701,7 +602,7 @@ impl MessagingClient for Client {
         if let Some(tx) = verticle_tx {
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             tx.send(verticle::VerticleEvent::RegisterFriendSession {
-                user_id,
+                user_id: *user_id,
                 session_key,
                 complete: reply_tx,
             })
@@ -717,7 +618,7 @@ impl MessagingClient for Client {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let contact = PhotonContact {
-            id: user_id,
+            id: *user_id,
             contact_type: ContactType::Friend,
             name: None,
             remark,
@@ -728,10 +629,17 @@ impl MessagingClient for Client {
             updated_at: now_ms,
             revision: 1,
         };
-        self.state.write().unwrap().contacts.insert(user_id, contact.clone());
+        self.state.write().unwrap().contacts.insert(*user_id, contact.clone());
 
         self.contact_listener.on_contact_added(&contact);
         Ok(())
+    }
+
+    async fn block_user(
+        &self,
+        _user_id: &Id
+    ) -> Result<Box<dyn Contact>> {
+        Err(NotImplemented::new("block_user"))
     }
 
     async fn create_channel(

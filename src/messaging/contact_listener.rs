@@ -1,7 +1,7 @@
-use crate::messaging::contact::Contact;
 use crate::Id;
+use crate::messaging::contact::Contact;
 
-/// Receives events about changes to the local contact list.
+/// The listener to handle events related to the contact list change events.
 pub trait ContactListener: Send + Sync {
     /// Called when a new contact has been added.
     fn on_contact_added(&self, _contact: &dyn Contact) {}

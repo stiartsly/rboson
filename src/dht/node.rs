@@ -435,7 +435,7 @@ impl Node {
         self.shutdown_components().await;
 
         info!("Kademlia node stopped.");
-        logger::teardown();
+        logger::cleanup();
 
         Ok(())
     }

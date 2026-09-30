@@ -8,7 +8,7 @@ service:
   # Peer ID of the remote messaging service.
   #
   # This is the unique identifier of the target service node in the network.
-  peerId: 3A3vvUyrzqVqzUusEsx4TzSnARSPnNYEg25faujaU1Vi
+  peerId: 5MjQxzgK7awC4He1WX4b5d1cLbY14dm8hvHNkMBU8ELK
 
   # Endpoint used to connect to the messaging service.
   #
@@ -17,7 +17,7 @@ service:
   #   - MQTT: mqtt://host:port
   #
   # Ensure the endpoint is reachable from the client environment.
-  endpoint: mqtts://192.168.8.80:8883
+  endpoint: mqtts://47.101.142.224:9083
 
 
 # Client identity and authentication configuration.
@@ -29,14 +29,14 @@ client:
   #
   # This key is shared across all devices owned by the same user.
   # Keep this value secret.
-  userPrivateKey: 3duCjCRTBNbA7UGqNkVAepPVcjbSGGJChHCqqZKdngyLjVfcLhj6P9XtkAJ57qbaEUHqQAD1iSM5k18EN5dgiyEG
+  userPrivateKey: $YOUR_USER_PRIVATE_KEY
 
   # Private key representing the device identity.
   #
   # Each device should have a unique key. This allows the system to
   # distinguish between multiple devices belonging to the same user.
   # Keep this value secret.
-  devicePrivateKey: 5W8GUHbjECnpdSaBJ1j5XzsuxBqSetEqtKRf42qhBxegsHx1i9jiEthD7nyc3uCTuEssAzNJevJDNNiLYvyzGnGd
+  devicePrivateKey: $YOUR_DEVICE_PRIVATE_KEY
 
 # Root directory for the messaging data storage.
 #
@@ -49,7 +49,7 @@ client:
 # Recommended locations for system-wide deployments:
 #   - Unix-like: /var/lib/boson/client/photon-messaging
 #   - Windows:   %ProgramData%\boson\client\photon-messaging
-dataDir: "~/.local/share/boson/client/photon-messaging"
+dataDir: $YOUR_DATA_DIR
 
 database:
   # Storage backend used by the messaging database.
@@ -61,7 +61,7 @@ database:
   # Recommendations:
   #   - SQLite: suitable for local, embedded, or low-throughput deployments
   #   - PostgreSQL: recommended for production or high-throughput environments
-  uri: jdbc:sqlite:photon-messaging.db
+  uri: jdbc:sqlite:messaging.db
 
   # Maximum number of connections in the database connection pool.
   #
@@ -77,3 +77,13 @@ database:
   # Only applicable when using PostgreSQL.
   # If not specified, the default schema (usually "public") is used.
   schema: photon
+
+# Logger configuration.
+# Log level can be one of: trace, debug, info, warn, error
+logLevel: debug
+
+# Log file path for storing logs.
+logFile: default.log
+
+# Whether to log to the console.
+logConsole: true

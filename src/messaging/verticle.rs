@@ -17,13 +17,15 @@ use tokio::{
 use crate::errors::{Result, StateError};
 use crate::messaging::{
     channel_listener::ChannelListener,
-    client::{ClientState, PhotonContact, PhotonFriendRequest, PhotonMessage},
+    client::{ClientState, PhotonFriendRequest, PhotonMessage},
     connection_listener::ConnectionListener,
     contact_listener::ContactListener,
     message_listener::MessageListener,
     options::Options,
     session::{FriendProtocolListener, Session},
     session_listener::SessionListener,
+
+    internal::PhotonContact,
 };
 use crate::Id;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

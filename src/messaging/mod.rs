@@ -1,3 +1,5 @@
+pub(crate) mod internal;
+
 pub mod channel;
 pub mod contact;
 pub mod conversation;
@@ -37,3 +39,4 @@ pub use message_listener::MessageListener;
 pub use options::{Options, OptionsBuilder};
 pub use session_info::SessionInfo;
 pub use session_listener::SessionListener;
+

@@ -1,10 +1,12 @@
-use log::{LevelFilter, Metadata, Record};
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex, Once,
+use std::{
+    fs::{File, OpenOptions},
+    io::{self, Write},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, Once,
+    },
 };
+use log::{LevelFilter, Metadata, Record};
 
 static LOGGER: Logger = Logger::new();
 static LOGGER_INIT: Once = Once::new();
@@ -29,10 +31,17 @@ impl log::Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let record_target = abbreviate(record.target().rsplit("::").next().unwrap_or("N/A"), 8);
-            let record_level = format!("{}", record.level());
-            let record_level = abbreviate(&record_level, 4);
-            let log = format!("[{record_target:<8}] [{record_level:^4}] {}", record.args());
+            let parts = record.target().split("::").collect::<Vec<_>>();
+            let module = parts.first().unwrap_or(&"N/A");
+            let target = parts.last().unwrap_or(&"N/A");
+            if module != &"boson" {
+                return;
+            }
+
+            let target = abbreviate(target, 8);
+            let level = format!("{}", record.level());
+            let level = abbreviate(&level, 4);
+            let log = format!("[{target:<8}] [{level:^4}] {}", record.args());
 
             {
                 let mut state = self.state.lock().unwrap();
@@ -41,19 +50,21 @@ impl log::Log for Logger {
                 }
             }
 
-            if self.console_output_enabled.load(Ordering::Acquire) {
-                let console_log = match record.level() {
-                    log::Level::Error => format!("\x1b[31m{log}\x1b[0m"),
-                    log::Level::Warn => format!("\x1b[33m{log}\x1b[0m"),
-                    log::Level::Info => format!("\x1b[32m{log}\x1b[0m"),
-                    _ => log,
-                };
-                let handler = self.console_output_handler.lock().unwrap().clone();
-                if let Some(handler) = handler {
-                    handler(console_log);
-                } else {
-                    println!("{console_log}");
-                }
+            if !self.console_output_enabled.load(Ordering::Acquire) {
+                return;
+            }
+
+            let console_log = match record.level() {
+                log::Level::Error => format!("\x1b[31m{log}\x1b[0m"),
+                log::Level::Warn => format!("\x1b[33m{log}\x1b[0m"),
+                log::Level::Info => format!("\x1b[32m{log}\x1b[0m"),
+                _ => log,
+            };
+            let handler = self.console_output_handler.lock().unwrap().clone();
+            if let Some(cb) = handler {
+                cb(console_log);
+            } else {
+                println!("{console_log}");
             }
         }
     }
@@ -79,7 +90,8 @@ impl Logger {
 
     fn configure(&self, max_level: LevelFilter, logfile: Option<&str>) {
         let fp = logfile.and_then(|file| {
-            match OpenOptions::new().append(true).create(true).open(file) {
+            let rc = OpenOptions::new().append(true).create(true).open(file);
+            match rc {
                 Ok(fp) => Some(fp),
                 Err(e) => {
                     println!("Failed to open log file {file}: {e}. Unable to log output to file.");
@@ -117,12 +129,11 @@ pub fn disable_console_output() {
         .store(false, Ordering::Release);
 }
 
-/// Sends console logs to `handler` rather than writing directly to stdout.
 pub fn set_console_output_handler(handler: impl Fn(String) + Send + Sync + 'static) {
     *LOGGER.console_output_handler.lock().unwrap() = Some(Arc::new(handler));
 }
 
-pub(crate) fn teardown() {
+pub(crate) fn cleanup() {
     log::set_max_level(LevelFilter::Off);
     LOGGER.configure(LevelFilter::Off, None);
     *LOGGER.console_output_handler.lock().unwrap() = None;

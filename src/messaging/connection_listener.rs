@@ -1,4 +1,4 @@
-/// Receives connection lifecycle events from the messaging client.
+/// The listener for connection lifecycle events.
 pub trait ConnectionListener: Send + Sync {
     /// Called when the client has started the connection attempt.
     fn on_connecting(&self) {}

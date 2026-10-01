@@ -24,12 +24,13 @@ use tokio::task;
 use crate::{CryptoIdentity, Id, Identity};
 use crate::errors::{Result, Error, ArgumentError, StateError};
 use crate::messaging::{
-    client::PhotonMessage,
     options::Options,
     verticle::VerticleOptions,
     ChannelListener, ConnectionListener, ContactListener, MessageListener, SessionListener,
     errors::{AuthenticationError, EncodingError, ProtocolError},
 };
+
+use super::internal::{PhotonMessage};
 
 
 const USER_INBOX: &str = "u/i";

@@ -1,21 +1,21 @@
-use std::collections::HashMap;
-use std::future::Future;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex, RwLock,
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::Path,
+    pin::Pin,
+    sync::{Arc, Mutex, RwLock},
+    sync::atomic::{AtomicBool, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[path = "messaging_client.rs"]
-pub mod messaging_client;
+use crate::{core::logger, Id};
+use crate::errors::{
+    Result,
+    NotImplemented,
+    StateError,
+    ArgumentError
+};
 
-pub use messaging_client::MessagingClient;
-
-use super::verticle::{self, VerticleClient};
-
-use crate::errors::{Result, NotImplemented, StateError, ArgumentError};
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
@@ -26,96 +26,22 @@ use crate::messaging::{
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
-    message::{Content, ContentDisposition, Message, MessageBuilder},
+    message::{ContentDisposition, Message, MessageBuilder},
     message_listener::MessageListener,
     options::Options,
     session_info::SessionInfo,
     session_listener::SessionListener,
+    MessagingClient,
+    verticle::{self, VerticleClient},
 };
 
 use super::internal::{
     PhotonContact,
+    PhotonFriendRequest,
 };
-use crate::{core::logger, Id};
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
-
-/// Concrete implementation of a [`FriendRequest`].
-#[derive(Debug, Clone)]
-pub struct PhotonFriendRequest {
-    pub user_id: Id,
-    pub initiator_id: Id,
-    pub hello: Option<String>,
-    pub accepted: bool,
-    pub expired: bool,
-    pub created_at: SystemTime,
-    pub accepted_at: Option<SystemTime>,
-    pub updated_at: SystemTime,
-}
-
-pub(crate) struct PhotonMessage {
-    pub(crate) id: Id,
-    pub(crate) recipient: Id,
-    pub(crate) from: Option<Id>,
-    pub(crate) created_at: SystemTime,
-    pub(crate) received_at: Option<SystemTime>,
-    pub(crate) sent_at: Option<SystemTime>,
-    pub(crate) payload: Vec<u8>,
-    pub(crate) content: Content,
-}
-
-impl Message for PhotonMessage {
-    fn id(&self) -> &Id { &self.id }
-    fn rid(&self) -> i64 { 0 }
-    fn conversation_id(&self) -> Option<&Id> {
-        self.from.as_ref().or(Some(&self.recipient))
-    }
-    fn recipient(&self) -> &Id { &self.recipient }
-    fn message_type(&self) -> crate::messaging::message::MessageType {
-        crate::messaging::message::MessageType::ContentMessage
-    }
-    fn from(&self) -> Option<&Id> { self.from.as_ref() }
-    fn created_at(&self) -> SystemTime { self.created_at }
-    fn received_at(&self) -> Option<SystemTime> { self.received_at }
-    fn sent_at(&self) -> Option<SystemTime> { self.sent_at }
-    fn payload_as_bytes(&self) -> &[u8] { &self.payload }
-    fn payload_as_content(&self) -> Option<&Content> { Some(&self.content) }
-}
-
-impl FriendRequest for PhotonFriendRequest {
-    fn user_id(&self) -> &Id {
-        &self.user_id
-    }
-
-    fn initiator_id(&self) -> &Id {
-        &self.initiator_id
-    }
-
-    fn hello(&self) -> Option<&str> {
-        self.hello.as_deref()
-    }
-
-    fn is_accepted(&self) -> bool {
-        self.accepted
-    }
-
-    fn is_expired(&self) -> bool {
-        self.expired
-    }
-
-    fn created_at(&self) -> SystemTime {
-        self.created_at
-    }
-
-    fn accepted_at(&self) -> Option<SystemTime> {
-        self.accepted_at
-    }
-
-    fn updated_at(&self) -> SystemTime {
-        self.updated_at
-    }
-}
 
 pub(crate) struct ClientState {
     pub(crate) friend_requests: HashMap<Id, PhotonFriendRequest>,
@@ -126,6 +52,7 @@ pub(crate) struct ClientState {
 pub struct Client {
     options: Arc<Options>,
 
+    running: AtomicBool,
     connected: Arc<AtomicBool>,
     ready: Arc<AtomicBool>,
 
@@ -135,6 +62,7 @@ pub struct Client {
     contact_listener: Arc<dyn ContactListener>,
     session_listener: Arc<dyn SessionListener>,
     friend_request_listener: Arc<dyn FriendRequestListener>,
+
     verticle: Mutex<Option<VerticleClient>>,
     state: Arc<RwLock<ClientState>>,
 }
@@ -164,6 +92,7 @@ impl Client {
 
         Self {
             options: Arc::new(options),
+            running: AtomicBool::new(false),
             connected: Arc::new(AtomicBool::new(false)),
             ready: Arc::new(AtomicBool::new(false)),
             connection_listener,
@@ -210,12 +139,11 @@ impl Client {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let is_running = self.verticle.lock().unwrap().is_some();
-        if is_running {
+        if self.running.swap(true, Ordering::Acquire) {
             return Ok(());
         }
 
-        let verticle_client = verticle::deploy(
+        let verticle = match verticle::deploy(
             self.options.clone(),
             self.connected.clone(),
             self.ready.clone(),
@@ -226,9 +154,14 @@ impl Client {
             self.session_listener.clone(),
             self.friend_request_listener.clone(),
             self.state.clone(),
-        )?;
-        verticle_client.start().await?;
-        *self.verticle.lock().unwrap() = Some(verticle_client);
+        ) {
+            Ok(verticle) => verticle,
+            Err(e) => return Err(StateError::new(&format!("{e}"))),
+        };
+
+        let _ = verticle.start().await?;
+        *self.verticle.lock().unwrap() = Some(verticle);
+
         Ok(())
     }
 
@@ -254,18 +187,6 @@ impl Client {
 
     pub fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Acquire)
-    }
-
-    pub fn connection_status(&self) -> &str {
-        if self.is_ready() {
-            "Connected (Ready)"
-        } else if self.is_connected() {
-            "Connected"
-        } else if self.is_running() {
-            "Connecting"
-        } else {
-            "Disconnected"
-        }
     }
 
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {

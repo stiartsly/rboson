@@ -9,6 +9,7 @@ pub mod invite_ticket;
 pub mod message;
 pub mod options;
 pub mod session_info;
+pub mod messaging_client;
 
 pub mod channel_listener;
 pub mod connection_listener;
@@ -36,6 +37,7 @@ pub use message::{
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
 pub use message_listener::MessageListener;
+pub use messaging_client::MessagingClient;
 pub use options::{Options, OptionsBuilder};
 pub use session_info::SessionInfo;
 pub use session_listener::SessionListener;

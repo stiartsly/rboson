@@ -7,6 +7,7 @@ use std::{
         mpsc as std_mpsc, Arc,
     },
     thread::JoinHandle,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     runtime,
@@ -14,21 +15,24 @@ use tokio::{
     task,
 };
 
+use crate::Id;
+
 use crate::errors::{Result, StateError};
 use crate::messaging::{
     channel_listener::ChannelListener,
-    client::{ClientState, PhotonFriendRequest, PhotonMessage},
+    client::{ClientState},
     connection_listener::ConnectionListener,
     contact_listener::ContactListener,
     message_listener::MessageListener,
     options::Options,
     session::{FriendProtocolListener, Session},
     session_listener::SessionListener,
-
-    internal::PhotonContact,
 };
-use crate::Id;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use super::internal::{
+    PhotonContact,
+    PhotonMessage,
+    PhotonFriendRequest,
+};
 
 pub(crate) struct VerticleClient {
     event_tx: mpsc::UnboundedSender<VerticleEvent>,

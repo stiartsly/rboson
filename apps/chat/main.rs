@@ -1,16 +1,19 @@
 use boson::{
     core::logger,
     errors::Result,
+    Id,
     messaging::{
         Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
         FriendRequestListener, Message, MessageListener, Options as MessagingOptions,
         OptionsBuilder as MessagingOptionsBuilder, SessionInfo, SessionListener,
     },
-    Id,
 };
 use clap::Parser;
 use reedline::{ExternalPrinter, Reedline, Signal};
-use std::sync::Arc;
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 
 mod cmds;
 mod prompt;
@@ -46,19 +49,18 @@ async fn run() -> Result<()> {
         }
     });
 
-    use_reedline_log_output(&external_printer);
-
     let chat_options = load_chat_options(&options, &output)?;
-    let client: Arc<Client> = Arc::new(Client::new(chat_options));
+    let client = create_client(chat_options, &external_printer);
 
     client.start().await?;
 
-    let mut cli = cmds::build_cli();
+    let mut cli = build_cli();
     let mut editor = Reedline::create().with_external_printer(external_printer);
     let prompt = MyPrompt;
     cmds::print_result("Welcome to the messaging shell. Type 'help' or 'exit'.".to_string());
 
     loop {
+        output.flush_pending(&mut io::stderr().lock())?;
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {
                 let args = parse_command_line(&line);
@@ -83,6 +85,10 @@ async fn run() -> Result<()> {
                     continue;
                 }
                 match cli.clone().try_get_matches_from(args) {
+                    Ok(matches) if matches.subcommand_name() == Some("clear") => {
+                        output.flush_pending(&mut io::stderr().lock())?;
+                        editor.clear_screen()?;
+                    }
                     Ok(matches) => cmds::execute_command(matches, &client).await,
                     Err(error) => cmds::print_result(error.to_string()),
                 }
@@ -99,25 +105,36 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-fn use_reedline_log_output(external_printer: &ExternalPrinter<String>) {
+fn build_cli() -> clap::Command {
+    cmds::build_cli().subcommand(
+        clap::Command::new("clear")
+            .about("Clear the terminal screen and redraw the prompt"),
+    )
+}
+
+fn create_client(
+    options: MessagingOptions,
+    external_printer: &ExternalPrinter<String>,
+) -> Arc<Client> {
+    let client = Arc::new(Client::new(options));
     let log_sender = external_printer.sender();
     logger::set_console_output_handler(move |line| {
         for l in line.lines() {
-            _ = log_sender.send(l.to_string());
+            _ = log_sender.send(l.trim_start_matches([' ', '\t', '\r']).to_string());
         }
     });
+    client
 }
 
 fn load_chat_options(options: &Options, output: &ConsoleOutput) -> Result<MessagingOptions> {
-    let mut builder = MessagingOptionsBuilder::load(&options.config)?;
-    builder
+    MessagingOptionsBuilder::load(&options.config)?
         .with_connection_listener(PhotonConnectionListener::new(output.clone()))
         .with_message_listener(PhotonMessageListener::new(output.clone()))
         .with_channel_listener(PhotonChannelListener::new(output.clone()))
         .with_contact_listener(PhotonContactListener::new(output.clone()))
         .with_session_listener(PhotonSessionListener::new(output.clone()))
-        .with_friend_request_listener(PhotonFriendRequestListener::new(output.clone()));
-    builder.build()
+        .with_friend_request_listener(PhotonFriendRequestListener::new(output.clone()))
+        .build()
 }
 
 #[derive(Clone)]
@@ -135,6 +152,15 @@ impl ConsoleOutput {
         for l in text.lines() {
             let _ = self.printer.sender().send(l.to_string());
         }
+    }
+
+    fn flush_pending(&self, writer: &mut impl Write) -> io::Result<()> {
+        // Between read_line calls, flush output before Reedline measures the cursor.
+        // Its external printer can otherwise detect a reset from unflushed lines.
+        for line in self.printer.receiver().try_iter() {
+            writeln!(writer, "{line}")?;
+        }
+        writer.flush()
     }
 }
 

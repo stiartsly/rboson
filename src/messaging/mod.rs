@@ -24,7 +24,7 @@ pub mod verticle;
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
 pub use channel_listener::ChannelListener;
-pub use client::{Client, MessagingClient, DEFAULT_MESSAGES_LIMIT};
+pub use client::{Client, DEFAULT_MESSAGES_LIMIT};
 pub use connection_listener::ConnectionListener;
 pub use contact::{Contact, ContactEditor, ContactType};
 pub use contact_listener::ContactListener;

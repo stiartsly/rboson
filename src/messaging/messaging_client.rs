@@ -144,7 +144,7 @@ pub trait MessagingClient {
     /// Sends a friend request to `user_id` with an optional greeting.
     fn friend_request(
         &self,
-        user_id: Id,
+        user_id: &Id,
         hello: Option<String>
     ) -> impl Future<Output = Result<()>>;
 
@@ -158,12 +158,12 @@ pub trait MessagingClient {
     fn get_friend_request(
         &self,
         user_id: &Id,
-    ) -> impl Future<Output = Result<Option<Box<dyn FriendRequest>>>>;
+    ) -> impl Future<Output = Result<Option<FriendRequest>>>;
 
     /// Retrieves all pending / received friend requests.
     fn get_friend_requests(
         &self
-    ) -> impl Future<Output = Result<Vec<Box<dyn FriendRequest>>>>;
+    ) -> impl Future<Output = Result<Vec<FriendRequest>>>;
 
     /// Removes a friend request by user `Id`.
     fn remove_friend_request(
@@ -189,7 +189,6 @@ pub trait MessagingClient {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> impl Future<Output = Result<()>>;
-
 
     fn block_user(
         &self,

@@ -4,10 +4,9 @@ use std::{
     result::Result as StdResult,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc as std_mpsc, Arc,
+        mpsc as std_mpsc, Arc, Mutex,
     },
     thread::JoinHandle,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     runtime,
@@ -20,23 +19,40 @@ use crate::Id;
 use crate::errors::{Result, StateError};
 use crate::messaging::{
     channel_listener::ChannelListener,
-    client::{ClientState},
     connection_listener::ConnectionListener,
+    contact::Contact,
     contact_listener::ContactListener,
+    message::Message,
     message_listener::MessageListener,
     options::Options,
-    session::{FriendProtocolListener, Session},
+    session::{Session, SessionAgent},
     session_listener::SessionListener,
+    MessagingClient,
+    FriendRequest,
 };
 use super::internal::{
     PhotonContact,
-    PhotonMessage,
-    PhotonFriendRequest,
 };
 
+fn contact_snapshot(contact: &dyn Contact) -> PhotonContact {
+    PhotonContact {
+        id: *contact.id(),
+        contact_type: contact.contact_type(),
+        name: contact.name().map(ToString::to_string),
+        remark: contact.remark().map(ToString::to_string),
+        tags: contact.tags().map(ToString::to_string),
+        muted: contact.is_muted(),
+        blocked: contact.is_blocked(),
+        created_at: contact.created_at(),
+        updated_at: contact.updated_at(),
+        revision: contact.revision(),
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct VerticleClient {
     event_tx: mpsc::UnboundedSender<VerticleEvent>,
-    handle: Option<JoinHandle<()>>,
+    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -49,11 +65,29 @@ pub(crate) enum VerticleEvent {
     },
     FriendRequest {
         user_id: Id,
-        hello: String,
+        hello: Option<String>,
         complete: oneshot::Sender<StdResult<(), String>>,
     },
     FriendAccept {
         user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    GetFriendRequest {
+        user_id: Id,
+        complete: oneshot::Sender<StdResult<Option<FriendRequest>, String>>,
+    },
+    GetFriendRequests {
+        complete: oneshot::Sender<StdResult<Vec<FriendRequest>, String>>,
+    },
+    RemoveFriendRequest {
+        user_id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    RemoveFriendRequests {
+        user_ids: Vec<Id>,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    ClearFriendRequests {
         complete: oneshot::Sender<StdResult<(), String>>,
     },
     ContentMessage {
@@ -61,11 +95,34 @@ pub(crate) enum VerticleEvent {
         headers: std::collections::HashMap<String, serde_json::Value>,
         body: Vec<u8>,
         text: bool,
-        complete: oneshot::Sender<StdResult<PhotonMessage, String>>,
+        complete: oneshot::Sender<StdResult<Box<dyn Message>, String>>,
     },
     RegisterFriendSession {
         user_id: Id,
         session_key: Vec<u8>,
+        remark: Option<String>,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    GetContact {
+        id: Id,
+        complete: oneshot::Sender<StdResult<Option<PhotonContact>, String>>,
+    },
+    GetContacts {
+        complete: oneshot::Sender<StdResult<Vec<PhotonContact>, String>>,
+    },
+    UpdateContact {
+        contact: PhotonContact,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    RemoveContact {
+        id: Id,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    RemoveContacts {
+        ids: Vec<Id>,
+        complete: oneshot::Sender<StdResult<(), String>>,
+    },
+    ClearContacts {
         complete: oneshot::Sender<StdResult<(), String>>,
     },
     FriendReject {
@@ -90,7 +147,7 @@ impl VerticleClient {
     ) -> Self {
         Self {
             event_tx,
-            handle: Some(handle),
+            handle: Arc::new(Mutex::new(Some(handle))),
             running,
         }
     }
@@ -101,27 +158,38 @@ impl VerticleClient {
         self.event_tx
             .send(VerticleEvent::Start { complete: tx })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle startup channel closed"))?;
+        rx.await
+            .map_err(|_| StateError::new("Messaging verticle startup channel closed"))?
+            .map_err(StateError::new)?;
         debug!("VerticleClient: verticle started");
         Ok(())
     }
 
-    pub(crate) async fn stop(&mut self) -> Result<()> {
+    pub(crate) async fn stop(&self) -> Result<()> {
         debug!("VerticleClient: sending Stop event to verticle");
         let (tx, rx) = oneshot::channel();
-        if self
+        let result = if self
             .event_tx
             .send(VerticleEvent::Stop { complete: tx })
             .is_ok()
         {
-            let _ = rx.await;
-        }
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            rx.await
+                .map_err(|_| -> crate::errors::Error {
+                    StateError::new("Messaging verticle shutdown channel closed")
+                })
+                .and_then(|result| result.map_err(|error| -> crate::errors::Error {
+                    StateError::new(error)
+                }))
+        } else {
+            Err(StateError::new("Messaging verticle event channel closed").into())
+        };
+        let handle = self.handle.lock().unwrap().take();
+        if let Some(handle) = handle {
+            handle.join()
+                .map_err(|_| StateError::new("Messaging verticle thread panicked"))?;
         }
         debug!("VerticleClient: verticle stopped");
-        Ok(())
+        result
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -132,8 +200,11 @@ impl VerticleClient {
         self.event_tx.clone()
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn friend_request(&self, user_id: Id, hello: String) -> Result<()> {
+    pub(crate) async fn friend_request(
+        &self,
+        user_id: Id,
+        hello: Option<String>
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.event_tx
             .send(VerticleEvent::FriendRequest {
@@ -142,13 +213,15 @@ impl VerticleClient {
                 complete: tx,
             })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
-        Ok(())
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn friend_accept(&self, user_id: Id) -> Result<()> {
+    pub(crate) async fn friend_accept(
+        &self,
+        user_id: Id
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.event_tx
             .send(VerticleEvent::FriendAccept {
@@ -156,9 +229,160 @@ impl VerticleClient {
                 complete: tx,
             })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
-        Ok(())
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn get_friend_request(
+        &self,
+        user_id: Id
+    ) -> Result<Option<FriendRequest>> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::GetFriendRequest {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::GetFriendRequests { complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn remove_friend_request(
+        &self,
+        user_id: Id
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::RemoveFriendRequest {
+                user_id,
+                complete: tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn remove_friend_requests(
+        &self,
+        user_ids: Vec<Id>
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::RemoveFriendRequests {
+                user_ids,
+                complete: tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::ClearFriendRequests { complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn add_friend(
+        &self,
+        user_id: Id,
+        session_key: Vec<u8>,
+        remark: Option<String>,
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::RegisterFriendSession {
+                user_id,
+                session_key,
+                remark,
+                complete: tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<PhotonContact>> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::GetContact { id, complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn get_contacts(&self) -> Result<Vec<PhotonContact>> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::GetContacts { complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn update_contact(&self, contact: PhotonContact) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::UpdateContact {
+                contact,
+                complete: tx,
+            })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn remove_contact(&self, id: Id) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::RemoveContact { id, complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn remove_contacts(&self, ids: Vec<Id>) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::RemoveContacts { ids, complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
+    }
+
+    pub(crate) async fn clear_contacts(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.event_tx
+            .send(VerticleEvent::ClearContacts { complete: tx })
+            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+        Ok(rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?)
     }
 
     #[allow(dead_code)]
@@ -170,8 +394,9 @@ impl VerticleClient {
                 complete: tx,
             })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
+        rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?;
         Ok(())
     }
 
@@ -184,8 +409,9 @@ impl VerticleClient {
                 complete: tx,
             })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
+        rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?;
         Ok(())
     }
 
@@ -198,21 +424,22 @@ impl VerticleClient {
                 complete: tx,
             })
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-        let _ = rx.await
-            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
+        rx.await
+            .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
+            .map_err(StateError::new)?;
         Ok(())
     }
 }
 
 pub(crate) struct VerticleOptions {
-    options: Arc<Options>,
+    pub(crate) options: Arc<Options>,
 
     pub(crate) connection_listener: Arc<dyn ConnectionListener>,
     pub(crate) message_listener: Arc<dyn MessageListener>,
     pub(crate) channel_listener: Arc<dyn ChannelListener>,
     pub(crate) contact_listener: Arc<dyn ContactListener>,
     pub(crate) session_listener: Arc<dyn SessionListener>,
-    pub(crate) friend_protocol_listener: Arc<dyn FriendProtocolListener>,
+    pub(crate) friend_request_listener: Arc<dyn crate::messaging::FriendRequestListener>,
 }
 
 impl VerticleOptions {
@@ -230,7 +457,7 @@ impl VerticleOptions {
 }
 
 pub(crate) struct Verticle {
-    session: Rc<Session>,
+    session: Rc<SessionAgent>,
     event_rx: mpsc::UnboundedReceiver<VerticleEvent>,
     running_flag: Arc<AtomicBool>,
     quit: bool,
@@ -242,7 +469,7 @@ impl Verticle {
         event_rx: mpsc::UnboundedReceiver<VerticleEvent>,
         running_flag: Arc<AtomicBool>,
     ) -> Result<Self> {
-        let session = Rc::new(Session::new(options)?);
+        let session = Session::new(options)?;
         Ok(Self {
             session,
             event_rx,
@@ -251,30 +478,39 @@ impl Verticle {
         })
     }
 
-    fn handle_event(&mut self, event: VerticleEvent) {
+    /*
+    fn handle_events1(
+        &mut self,
+        event: VerticleEvent,
+        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
+    ) {
+    }
+    */
+
+    async fn handle_event(&mut self, event: VerticleEvent) {
         match event {
             VerticleEvent::Start { complete } => {
                 debug!("Verticle handling Start event");
                 let session = self.session.clone();
                 let running_flag = self.running_flag.clone();
-                task::spawn_local(async move {
-                    let result = session.start().await;
+                {
+                    let result = MessagingClient::start(session.as_ref()).await;
                     if result.is_ok() {
                         running_flag.store(true, Ordering::Release);
                     }
                     let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                }
             }
             VerticleEvent::Stop { complete } => {
                 debug!("Verticle handling Stop event");
                 self.quit = true;
                 let session = self.session.clone();
                 let running_flag = self.running_flag.clone();
-                task::spawn_local(async move {
-                    session.stop().await;
+                {
+                    let result = MessagingClient::stop(session.as_ref()).await;
                     running_flag.store(false, Ordering::Release);
-                    let _ = complete.send(Ok(()));
-                });
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                }
             }
             VerticleEvent::FriendRequest {
                 user_id,
@@ -282,19 +518,40 @@ impl Verticle {
                 complete,
             } => {
                 debug!("Verticle handling FriendRequest event for {user_id}");
-                let session = self.session.clone();
-                task::spawn_local(async move {
-                    let result = session.friend_request(user_id, hello).await;
-                    let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                let result = self.session.friend_request(
+                    &user_id,
+                    hello,
+                ).await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
             }
             VerticleEvent::FriendAccept { user_id, complete } => {
                 debug!("Verticle handling FriendAccept event for {user_id}");
-                let session = self.session.clone();
-                task::spawn_local(async move {
-                    let result = session.friend_accept(user_id).await;
-                    let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                let result = self.session.accept_friend_request(
+                    &user_id,
+                ).await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
+
+            }
+            VerticleEvent::GetFriendRequest { user_id, complete } => {
+                let result = self.session.get_friend_request(&user_id).await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
+            }
+            VerticleEvent::GetFriendRequests { complete } => {
+                let result = self.session.get_friend_requests()
+                    .await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
+            }
+            VerticleEvent::RemoveFriendRequest { user_id, complete } => {
+                let result = self.session.remove_friend_request(&user_id).await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
+            }
+            VerticleEvent::RemoveFriendRequests { user_ids, complete } => {
+                let result = self.session.remove_friend_requests(&user_ids).await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
+            }
+            VerticleEvent::ClearFriendRequests { complete } => {
+                let result = self.session.clear_friend_requests().await;
+                let _ = complete.send(result.map_err(|e| e.to_string()));
             }
             VerticleEvent::ContentMessage {
                 recipient,
@@ -305,42 +562,118 @@ impl Verticle {
             } => {
                 debug!("Verticle handling ContentMessage event for {recipient}");
                 let session = self.session.clone();
-                task::spawn_local(async move {
-                    let result = session.send_content(recipient, headers, body, text).await;
+                {
+                    let mut builder = MessagingClient::message(session.as_ref(), Some(recipient));
+                    for (key, value) in headers {
+                        let Some(value) = value.as_str() else {
+                            let _ = complete.send(Err(format!("Message header '{key}' is not text")));
+                            return;
+                        };
+                        builder = builder.header(&key, value);
+                    }
+                    builder = if text {
+                        match String::from_utf8(body) {
+                            Ok(body) => builder.text_body(&body),
+                            Err(error) => {
+                                let _ = complete.send(Err(error.to_string()));
+                                return;
+                            }
+                        }
+                    } else {
+                        builder.binary_body(body)
+                    };
+                    let result = builder.send().await;
                     let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                }
             }
             VerticleEvent::RegisterFriendSession {
                 user_id,
                 session_key,
+                remark,
                 complete,
             } => {
-                let result = self.session.register_friend_session(user_id, &session_key);
-                let _ = complete.send(result.map_err(|error| error.to_string()));
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::add_friend(
+                        session.as_ref(),
+                        &user_id,
+                        session_key,
+                        remark,
+                    ).await;
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::GetContact { id, complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::get_contact(session.as_ref(), &id)
+                        .await
+                        .map(|contact| contact.map(|contact| contact_snapshot(contact.as_ref())));
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::GetContacts { complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::get_contacts(session.as_ref())
+                        .await
+                        .map(|contacts| contacts.into_iter()
+                            .map(|contact| contact_snapshot(contact.as_ref()))
+                            .collect());
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::UpdateContact { contact, complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::update_contact(session.as_ref(), &contact).await;
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::RemoveContact { id, complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::remove_contact(session.as_ref(), &id).await;
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::RemoveContacts { ids, complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::remove_contacts(session.as_ref(), &ids).await;
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
+            }
+            VerticleEvent::ClearContacts { complete } => {
+                let session = self.session.clone();
+                {
+                    let result = MessagingClient::clear_contacts(session.as_ref()).await;
+                    let _ = complete.send(result.map_err(|error| error.to_string()));
+                }
             }
             VerticleEvent::FriendReject { user_id, complete } => {
                 debug!("Verticle handling FriendReject event for {user_id}");
                 let session = self.session.clone();
-                task::spawn_local(async move {
+                {
                     let result = session.friend_reject(user_id).await;
                     let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                }
             }
             VerticleEvent::FriendRemove { user_id, complete } => {
                 debug!("Verticle handling FriendRemove event for {user_id}");
                 let session = self.session.clone();
-                task::spawn_local(async move {
+                {
                     let result = session.friend_remove(user_id).await;
                     let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                }
             }
             VerticleEvent::FriendInfo { user_id, complete } => {
                 debug!("Verticle handling FriendInfo event for {user_id}");
                 let session = self.session.clone();
-                task::spawn_local(async move {
+                {
                     let result = session.friend_info(user_id).await;
                     let _ = complete.send(result.map_err(|e| e.to_string()));
-                });
+                }
             }
         }
     }
@@ -348,11 +681,17 @@ impl Verticle {
     async fn run_loop(&mut self) {
         debug!("Verticle run loop entering event wait loop");
         while let Some(event) = self.event_rx.recv().await {
-            self.handle_event(event);
+            self.handle_event(event).await;
             if self.quit {
                 break;
             }
         }
+        if !self.quit {
+            if let Err(error) = MessagingClient::stop(self.session.as_ref()).await {
+                error!("Failed to stop messaging session: {error}");
+            }
+        }
+        self.running_flag.store(false, Ordering::Release);
         debug!("Verticle run loop finished");
     }
 }
@@ -382,114 +721,6 @@ impl ConnectionListener for ClientConnectionListener {
     }
 }
 
-struct CompositeFriendProtocolListener {
-    message_listener: Arc<dyn MessageListener>,
-    contact_listener: Arc<dyn ContactListener>,
-    friend_request_listener: Arc<dyn crate::messaging::FriendRequestListener>,
-    state: Arc<std::sync::RwLock<ClientState>>,
-}
-
-impl CompositeFriendProtocolListener {
-    fn timestamp(timestamp: i64) -> SystemTime {
-        if timestamp < 0 {
-            return SystemTime::now();
-        }
-        UNIX_EPOCH + Duration::from_millis(timestamp as u64)
-    }
-}
-
-impl FriendProtocolListener for CompositeFriendProtocolListener {
-    fn on_friend_request(
-        &self,
-        user_id: Id,
-        initiator_id: Id,
-        hello: String,
-        timestamp: i64,
-        notify: bool,
-    ) {
-        let created_at = Self::timestamp(timestamp);
-        {
-            let mut state = self.state.write().unwrap();
-            if let Some(contact) = state.contacts.get(&user_id) {
-                if contact.contact_type == crate::messaging::contact::ContactType::Friend
-                    || contact.contact_type == crate::messaging::contact::ContactType::Channel
-                {
-                    return;
-                }
-            }
-            state.friend_requests.insert(user_id, PhotonFriendRequest {
-                user_id,
-                initiator_id,
-                hello: Some(hello.clone()),
-                accepted: false,
-                expired: false,
-                created_at,
-                accepted_at: None,
-                updated_at: SystemTime::now(),
-            });
-        }
-
-        if notify {
-            self.friend_request_listener
-                .on_friend_request(&user_id, Some(&hello));
-        }
-    }
-
-    fn on_friend_request_accepted(
-        &self,
-        user_id: Id,
-        timestamp: i64,
-        add_contact: bool,
-    ) {
-        let accepted_at = Self::timestamp(timestamp);
-        let contact = {
-            let mut state = self.state.write().unwrap();
-            let Some(request) = state.friend_requests.get_mut(&user_id) else {
-                return;
-            };
-            if request.accepted || request.expired {
-                return;
-            }
-            if add_contact && request.initiator_id == user_id {
-                return;
-            }
-            request.accepted = true;
-            request.accepted_at = Some(accepted_at);
-            request.updated_at = SystemTime::now();
-            if !add_contact {
-                return;
-            }
-
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_millis() as i64)
-                .unwrap_or(0);
-            let contact = PhotonContact {
-                id: user_id,
-                contact_type: crate::messaging::contact::ContactType::Friend,
-                name: None,
-                remark: None,
-                tags: None,
-                muted: false,
-                blocked: false,
-                created_at: now_ms,
-                updated_at: now_ms,
-                revision: 1,
-            };
-            state.contacts.insert(user_id, contact.clone());
-            contact
-        };
-
-        self.friend_request_listener
-            .on_friend_request_accepted(&user_id);
-        self.contact_listener.on_contact_added(&contact);
-    }
-
-    fn on_content_message(&self, message: PhotonMessage) {
-        self.message_listener.on_message(&message);
-    }
-}
-
 pub(crate) fn deploy(
     options: Arc<Options>,
     connected: Arc<AtomicBool>,
@@ -500,7 +731,6 @@ pub(crate) fn deploy(
     contact_listener: Arc<dyn ContactListener>,
     session_listener: Arc<dyn SessionListener>,
     friend_request_listener: Arc<dyn crate::messaging::FriendRequestListener>,
-    state: Arc<std::sync::RwLock<ClientState>>,
 ) -> Result<VerticleClient> {
     debug!("Deploying messaging verticle...");
     let (event_tx, event_rx) = mpsc::unbounded_channel::<VerticleEvent>();
@@ -517,14 +747,9 @@ pub(crate) fn deploy(
         }),
         message_listener: message_listener.clone(),
         channel_listener,
-        contact_listener: contact_listener.clone(),
+        contact_listener,
         session_listener,
-        friend_protocol_listener: Arc::new(CompositeFriendProtocolListener {
-            message_listener,
-            contact_listener,
-            friend_request_listener,
-            state,
-        }),
+        friend_request_listener,
     };
 
     let handle = std::thread::spawn(move || {

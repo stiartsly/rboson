@@ -41,4 +41,3 @@ pub use messaging_client::MessagingClient;
 pub use options::{Options, OptionsBuilder};
 pub use session_info::SessionInfo;
 pub use session_listener::SessionListener;
-

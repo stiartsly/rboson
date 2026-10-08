@@ -3,12 +3,11 @@ use std::{
     future::Future,
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     sync::atomic::{AtomicBool, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{core::logger, Id};
+use crate::{Id, core::logger};
 use crate::errors::{
     Result,
     NotImplemented,
@@ -20,7 +19,7 @@ use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,
-    contact::{Contact, ContactType},
+    contact::Contact,
     contact_listener::ContactListener,
     conversation::Conversation,
     friend_request::FriendRequest,
@@ -35,18 +34,10 @@ use crate::messaging::{
     verticle::{self, VerticleClient},
 };
 
-use super::internal::{
-    PhotonContact,
-    PhotonFriendRequest,
-};
+use super::internal::PhotonContact;
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
-
-pub(crate) struct ClientState {
-    pub(crate) friend_requests: HashMap<Id, PhotonFriendRequest>,
-    pub(crate) contacts: HashMap<Id, PhotonContact>,
-}
 
 /// The Boson Messaging Client implementation.
 pub struct Client {
@@ -62,9 +53,7 @@ pub struct Client {
     contact_listener: Arc<dyn ContactListener>,
     session_listener: Arc<dyn SessionListener>,
     friend_request_listener: Arc<dyn FriendRequestListener>,
-
-    verticle: Mutex<Option<VerticleClient>>,
-    state: Arc<RwLock<ClientState>>,
+    verticle: Mutex<Option<Arc<VerticleClient>>>,
 }
 
 impl Client {
@@ -77,11 +66,6 @@ impl Client {
                 logger::disable_console_output();
             }
         }
-
-        let state = ClientState {
-            friend_requests: HashMap::new(),
-            contacts: HashMap::new(),
-        };
 
         let connection_listener = options.connection_listener();
         let message_listener = options.message_listener();
@@ -102,7 +86,6 @@ impl Client {
             session_listener,
             friend_request_listener,
             verticle: Mutex::new(None),
-            state: Arc::new(RwLock::new(state)),
         }
     }
 
@@ -138,6 +121,10 @@ impl Client {
         self.options.data_dir()
     }
 
+    fn verticle(&self) -> Option<Arc<VerticleClient>>  {
+        self.verticle.lock().unwrap().clone()
+    }
+
     pub async fn start(&self) -> Result<()> {
         if self.running.swap(true, Ordering::Acquire) {
             return Ok(());
@@ -153,14 +140,13 @@ impl Client {
             self.contact_listener.clone(),
             self.session_listener.clone(),
             self.friend_request_listener.clone(),
-            self.state.clone(),
         ) {
             Ok(verticle) => verticle,
             Err(e) => return Err(StateError::new(&format!("{e}"))),
         };
 
         let _ = verticle.start().await?;
-        *self.verticle.lock().unwrap() = Some(verticle);
+        *self.verticle.lock().unwrap() = Some(Arc::new(verticle));
 
         Ok(())
     }
@@ -197,20 +183,107 @@ impl Client {
         ))
     }
 
-    pub async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
-        MessagingClient::friend_request(self, user_id, hello).await
+    pub async fn friend_request(
+        &self,
+        user_id: Id,
+        hello: Option<String>
+    ) -> Result<()> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.friend_request(user_id, hello).await
     }
 
-    pub async fn accept_friend_request(&self, user_id: &Id) -> Result<()> {
-        MessagingClient::accept_friend_request(self, user_id).await
+    pub async fn accept_friend_request(
+        &self,
+        user_id: Id,
+    ) -> Result<()> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.friend_accept(user_id).await
     }
 
-    pub async fn get_friend_request(&self, user_id: &Id) -> Result<Option<Box<dyn FriendRequest>>> {
-        <Self as MessagingClient>::get_friend_request(self, user_id).await
+    pub async fn get_friend_request(
+        &self,
+        user_id: Id,
+    ) -> Result<Option<FriendRequest>> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.get_friend_request(user_id).await
     }
 
-    pub async fn get_friend_requests(&self) -> Result<Vec<Box<dyn FriendRequest>>> {
-        <Self as MessagingClient>::get_friend_requests(self).await
+    pub async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.get_friend_requests().await
+    }
+
+    pub async fn remove_friend_request(
+        &self,
+        user_id: Id
+    ) -> Result<()> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.remove_friend_request(user_id).await
+    }
+
+    pub async fn remove_friend_requests(
+        &self,
+        user_ids: &[Id]
+    ) -> Result<()> {
+
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.remove_friend_requests(user_ids.to_vec()).await
+    }
+
+    pub async fn clear_friend_requests(&self) -> Result<()> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.clear_friend_requests().await
+    }
+
+    pub async fn add_friend(
+        &self,
+        user_id: Id,
+        session_key: Vec<u8>,
+        remark: Option<String>,
+    ) -> Result<()> {
+
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
+        let Some(v) = self.verticle() else {
+            return Err(StateError::new("Messaging client is not connected").into());
+        };
+        v.add_friend(user_id, session_key, remark).await
     }
 
     pub async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
@@ -223,27 +296,6 @@ impl Client {
 
     pub async fn remove_contact(&self, id: &Id) -> Result<()> {
         <Self as MessagingClient>::remove_contact(self, id).await
-    }
-
-    pub async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
-        <Self as MessagingClient>::remove_friend_request(self, user_id).await
-    }
-
-    pub async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
-        <Self as MessagingClient>::remove_friend_requests(self, user_ids).await
-    }
-
-    pub async fn clear_friend_requests(&self) -> Result<()> {
-        <Self as MessagingClient>::clear_friend_requests(self).await
-    }
-
-    pub async fn add_friend(
-        &self,
-        user_id: &Id,
-        session_key: Vec<u8>,
-        remark: Option<String>,
-    ) -> Result<()> {
-        <Self as MessagingClient>::add_friend(self, user_id, session_key, remark).await
     }
 
     pub async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
@@ -312,7 +364,6 @@ impl MessagingClient for Client {
     }
 
     async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
-        //self.unsupported("get_conversations")
         Err(NotImplemented::new("get_conversations"))
     }
 
@@ -363,148 +414,34 @@ impl MessagingClient for Client {
         Err(NotImplemented::new("revoke_session"))
     }
 
-    async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
-        if &user_id == self.user_id() {
-            return Err(ArgumentError::new("Cannot send friend request to yourself"));
-        }
-
-        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-        if let Some(tx) = verticle_tx {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            tx.send(verticle::VerticleEvent::FriendRequest {
-                user_id,
-                hello: hello.clone().unwrap_or_default(),
-                complete: reply_tx,
-            })
-            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-            let _ = reply_rx
-                .await
-                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
-        }
-
-        let now = SystemTime::now();
-        let req = PhotonFriendRequest {
-            user_id,
-            initiator_id: *self.user_id(),
-            hello: hello.clone(),
-            accepted: false,
-            expired: false,
-            created_at: now,
-            accepted_at: None,
-            updated_at: now,
-        };
-        self.state
-            .write()
-            .unwrap()
-            .friend_requests
-            .insert(user_id, req);
-
-        Ok(())
+    async fn friend_request(&self, userid: &Id, hello: Option<String>) -> Result<()> {
+        self.friend_request(*userid, hello).await
     }
 
-    async fn accept_friend_request(&self, user_id: &Id) -> Result<()> {
-        let user_id = *user_id;
-        let state = self.state.read().unwrap();
-        let req = state.friend_requests.get(&user_id).ok_or_else(|| {
-            ArgumentError::new(format!("No friend request found for {user_id}"))
-        })?;
-        if req.initiator_id == *self.user_id() {
-            return Err(ArgumentError::new("Cannot accept your own friend request"));
-        }
-        if req.accepted {
-            return Err(ArgumentError::new("Friend request has already been accepted"));
-        }
-        if req.expired {
-            return Err(ArgumentError::new("Friend request has expired"));
-        }
-
-        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-        if let Some(tx) = verticle_tx {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            tx.send(verticle::VerticleEvent::FriendAccept {
-                user_id,
-                complete: reply_tx,
-            })
-            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-            let _ = reply_rx
-                .await
-                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?;
-        }
-
-        let now = SystemTime::now();
-        let now_ms = now
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-
-        let contact = PhotonContact {
-            id: user_id,
-            contact_type: ContactType::Friend,
-            name: None,
-            remark: None,
-            tags: None,
-            muted: false,
-            blocked: false,
-            created_at: now_ms,
-            updated_at: now_ms,
-            revision: 1,
-        };
-
-        {
-            let mut state = self.state.write().unwrap();
-            if let Some(req) = state.friend_requests.get_mut(&user_id) {
-                req.accepted = true;
-                req.accepted_at = Some(now);
-                req.updated_at = now;
-            }
-            state.contacts.insert(user_id, contact.clone());
-        }
-
-        self.contact_listener.on_contact_added(&contact);
-        Ok(())
+    async fn accept_friend_request(&self, userid: &Id) -> Result<()> {
+        self.accept_friend_request(*userid).await
     }
 
-    async fn get_friend_request(
-        &self,
+    async fn get_friend_request(&self,
         user_id: &Id,
-    ) -> Result<Option<Box<dyn FriendRequest>>> {
-        let user_id = *user_id;
-        let state = self.state.read().unwrap();
-        Ok(state
-            .friend_requests
-            .get(&user_id)
-            .cloned()
-            .map(|r| Box::new(r) as Box<dyn FriendRequest>))
+    ) -> Result<Option<FriendRequest>> {
+        self.get_friend_request(*user_id).await
     }
 
-    async fn get_friend_requests(&self) -> Result<Vec<Box<dyn FriendRequest>>> {
-        let state = self.state.read().unwrap();
-        Ok(state
-            .friend_requests
-            .values()
-            .cloned()
-            .map(|r| Box::new(r) as Box<dyn FriendRequest>)
-            .collect())
+    async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
+        self.get_friend_requests().await
     }
 
     async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
-        let user_id = *user_id;
-        self.state.write().unwrap().friend_requests.remove(&user_id);
-        Ok(())
+        self.remove_friend_request(*user_id).await
     }
 
     async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
-        let user_ids = user_ids.to_vec();
-        let mut state = self.state.write().unwrap();
-        for id in &user_ids {
-            state.friend_requests.remove(id);
-        }
-        Ok(())
+        self.remove_friend_requests(user_ids).await
     }
 
     async fn clear_friend_requests(&self) -> Result<()> {
-        self.state.write().unwrap().friend_requests.clear();
-        Ok(())
+        self.clear_friend_requests().await
     }
 
     async fn add_friend(
@@ -513,47 +450,7 @@ impl MessagingClient for Client {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
-        if session_key.len() != crate::signature::PrivateKey::BYTES {
-            return Err(ArgumentError::new(format!(
-                "Invalid friend session key length: {}",
-                session_key.len()
-            )));
-        }
-        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-        if let Some(tx) = verticle_tx {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            tx.send(verticle::VerticleEvent::RegisterFriendSession {
-                user_id: *user_id,
-                session_key,
-                complete: reply_tx,
-            })
-            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-            reply_rx
-                .await
-                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
-                .map_err(StateError::new)?;
-        }
-        let now = SystemTime::now();
-        let now_ms = now
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let contact = PhotonContact {
-            id: *user_id,
-            contact_type: ContactType::Friend,
-            name: None,
-            remark,
-            tags: None,
-            muted: false,
-            blocked: false,
-            created_at: now_ms,
-            updated_at: now_ms,
-            revision: 1,
-        };
-        self.state.write().unwrap().contacts.insert(*user_id, contact.clone());
-
-        self.contact_listener.on_contact_added(&contact);
-        Ok(())
+        self.add_friend(*user_id, session_key, remark).await
     }
 
     async fn block_user(
@@ -639,22 +536,26 @@ impl MessagingClient for Client {
     }
 
     async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
-        let id = *id;
-        let state = self.state.read().unwrap();
-        Ok(state
-            .contacts
-            .get(&id)
-            .cloned()
-            .map(|c| Box::new(c) as Box<dyn Contact>))
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        Ok(verticle
+            .get_contact(*id)
+            .await?
+            .map(|contact| Box::new(contact) as Box<dyn Contact>))
     }
 
     async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
-        let state = self.state.read().unwrap();
-        Ok(state
-            .contacts
-            .values()
-            .cloned()
-            .map(|c| Box::new(c) as Box<dyn Contact>)
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        Ok(verticle
+            .get_contacts()
+            .await?
+            .into_iter()
+            .map(|contact| Box::new(contact) as Box<dyn Contact>)
             .collect())
     }
 
@@ -668,61 +569,38 @@ impl MessagingClient for Client {
             muted: contact.is_muted(),
             blocked: contact.is_blocked(),
             created_at: contact.created_at(),
-            updated_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
-            revision: contact.revision() + 1,
+            updated_at: contact.updated_at(),
+            revision: contact.revision(),
         };
-        {
-            self.state
-                .write()
-                .unwrap()
-                .contacts
-                .insert(updated.id, updated.clone());
-            let boxed: Box<dyn Contact> = Box::new(updated.clone());
-            self.contact_listener
-                .on_contacts_updated(&[boxed]);
-            Ok(())
-        }
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        verticle.update_contact(updated).await
     }
 
     async fn remove_contact(&self, id: &Id) -> Result<()> {
-        let id = *id;
-        let verticle_tx = self.verticle.lock().unwrap().as_ref().map(|v| v.sender());
-        if let Some(tx) = verticle_tx {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            if tx
-                .send(verticle::VerticleEvent::FriendRemove {
-                    user_id: id,
-                    complete: reply_tx,
-                })
-                .is_ok()
-            {
-                let _ = reply_rx.await;
-            }
-        }
-
-        self.state.write().unwrap().contacts.remove(&id);
-        self.contact_listener.on_contacts_removed(&[id]);
-        Ok(())
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        verticle.remove_contact(*id).await
     }
 
     async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
-        let ids = ids.to_vec();
-        let mut state = self.state.write().unwrap();
-        for id in &ids {
-            state.contacts.remove(id);
-        }
-        drop(state);
-        self.contact_listener.on_contacts_removed(&ids);
-        Ok(())
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        verticle.remove_contacts(ids.to_vec()).await
     }
 
     async fn clear_contacts(&self) -> Result<()> {
-        self.state.write().unwrap().contacts.clear();
-        self.contact_listener.on_contacts_cleared();
-        Ok(())
+        let verticle = self.verticle.lock().unwrap();
+        let verticle = verticle
+            .as_ref()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        verticle.clear_contacts().await
     }
 }
 
@@ -830,8 +708,8 @@ impl MessageBuilder for ComposedMessageBuilder {
                 .await
                 .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
                 .map_err(StateError::new)?;
-            self.message_listener.on_sent(&message);
-            Ok(Box::new(message) as Box<dyn Message>)
+            self.message_listener.on_sent(message.as_ref());
+            Ok(message)
         })
     }
 }

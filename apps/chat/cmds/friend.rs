@@ -117,7 +117,7 @@ async fn accept_friend(client: &Arc<Client>, user_idstr: &str) {
     let Some(userid) = parse_id(user_idstr) else {
         return;
     };
-    match client.accept_friend_request(&userid).await {
+    match client.accept_friend_request(userid).await {
         Ok(()) => println!("Accepted friend request from {userid}"),
         Err(e) => println!("Accepting friend request failed: {e}"),
     }
@@ -172,7 +172,7 @@ async fn show_info(client: &Arc<Client>, user_idstr: &str) {
         return;
     }
 
-    match client.get_friend_request(&userid).await {
+    match client.get_friend_request(userid).await {
         Ok(Some(req)) => {
             println!("User ID:      {}", req.initiator_id());
             println!("Status:       Friend Request Pending");

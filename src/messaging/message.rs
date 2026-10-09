@@ -431,3 +431,6 @@ pub trait MessageBuilder: Send + Sync {
         self: Box<Self>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>>;
 }
+
+#[cfg(test)]
+include!("unitests/test_message.rs");

@@ -31,7 +31,7 @@ use crate::messaging::{
     session_info::SessionInfo,
     session_listener::SessionListener,
     MessagingClient,
-    verticle::{self, VerticleClient},
+    verticle::{self, VerticleClient, VerticleOptions},
 };
 
 use super::internal::PhotonContact;
@@ -130,22 +130,35 @@ impl Client {
             return Ok(());
         }
 
-        let verticle = match verticle::deploy(
-            self.options.clone(),
-            self.connected.clone(),
-            self.ready.clone(),
-            self.connection_listener.clone(),
-            self.message_listener.clone(),
-            self.channel_listener.clone(),
-            self.contact_listener.clone(),
-            self.session_listener.clone(),
-            self.friend_request_listener.clone(),
-        ) {
-            Ok(verticle) => verticle,
-            Err(e) => return Err(StateError::new(&format!("{e}"))),
+        let options = VerticleOptions {
+            options: self.options.clone(),
+            connection_listener: Arc::new(verticle::ClientConnectionListener::new(
+                self.connection_listener.clone(),
+                self.connected.clone(),
+                self.ready.clone(),
+            )),
+            message_listener: self.message_listener.clone(),
+            channel_listener: self.channel_listener.clone(),
+            contact_listener: self.contact_listener.clone(),
+            session_listener: self.session_listener.clone(),
+            friend_request_listener: self.friend_request_listener.clone(),
         };
 
-        let _ = verticle.start().await?;
+        let verticle = match verticle::deploy(options) {
+            Ok(verticle) => verticle,
+            Err(e) => {
+                self.running.store(false, Ordering::Release);
+                return Err(StateError::new(&format!("{e}")));
+            }
+        };
+
+        if let Err(error) = verticle.start().await {
+            if let Err(stop_error) = verticle.stop().await {
+                log::error!("Failed to stop messaging verticle after startup failure: {stop_error}");
+            }
+            self.running.store(false, Ordering::Release);
+            return Err(error);
+        }
         *self.verticle.lock().unwrap() = Some(Arc::new(verticle));
 
         Ok(())
@@ -153,18 +166,19 @@ impl Client {
 
     pub async fn stop(&self) -> Result<()> {
         let verticle = self.verticle.lock().unwrap().take();
-        if let Some(mut v) = verticle {
-            v.stop().await?;
-        }
-        Ok(())
+        let result = if let Some(v) = verticle {
+            v.stop().await
+        } else {
+            Ok(())
+        };
+        self.running.store(false, Ordering::Release);
+        self.connected.store(false, Ordering::Release);
+        self.ready.store(false, Ordering::Release);
+        result
     }
 
     pub fn is_running(&self) -> bool {
-        self.verticle
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map_or(false, |v| v.is_running())
+        self.running.load(Ordering::Acquire)
     }
 
     pub fn is_connected(&self) -> bool {

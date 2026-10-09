@@ -19,13 +19,26 @@ use tokio::{
 };
 
 use crate::dht::{
-    dht::DHT, lookup_option::LookupOption, rpc::rpc_server::RpcServer,
-    storage::data_storage::DataStorage, token_manager::TokenManager, ConnectionStatusListener,
+    dht::DHT,
+    lookup_option::LookupOption,
+    rpc::rpc_server::RpcServer,
+    storage::data_storage::DataStorage,
+    token_manager::TokenManager,
+    ConnectionStatusListener,
 };
 use crate::{
-    errors::StateError, CryptoIdentity, Id, LocalBoxTimerClient as TimerClient,
-    LocalBoxTimerCmd as TimerCmd, LocalBoxTimerManager as TimerManager, Network, NodeInfo,
-    PeerInfo, Promise, Result, Value,
+    Id,
+    errors::StateError,
+    CryptoIdentity,
+    LocalBoxTimerClient as TimerClient,
+    LocalBoxTimerCmd as TimerCmd,
+    LocalBoxTimerManager as TimerManager,
+    Network,
+    NodeInfo,
+    PeerInfo,
+    Promise,
+    Result,
+    Value,
 };
 
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
@@ -94,16 +107,12 @@ impl VerticleClient {
 
     pub(crate) async fn bootstrap(&self, nodes: Vec<NodeInfo>) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::Bootstrap {
                 nodes,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
@@ -113,17 +122,13 @@ impl VerticleClient {
         option: LookupOption,
     ) -> Result<Option<NodeInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::FindNode {
                 target,
                 option,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
@@ -134,34 +139,26 @@ impl VerticleClient {
         option: LookupOption,
     ) -> Result<Option<Value>> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::FindValue {
                 target,
                 expected_seq,
                 option,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
     pub(crate) async fn store_value(&self, value: Value, expected_seq: i32) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::StoreValue {
                 value,
                 expected_seq,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
@@ -173,8 +170,7 @@ impl VerticleClient {
         option: LookupOption,
     ) -> Result<Vec<PeerInfo>> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::FindPeer {
                 target,
                 expected_seq,
@@ -182,38 +178,27 @@ impl VerticleClient {
                 option,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
     pub(crate) async fn announce_peer(&self, peer: PeerInfo, expected_seq: i32) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::AnnouncePeer {
                 peer,
                 expected_seq,
                 complete: tx,
             })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 
     async fn start(&mut self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if self
-            .event_tx
+        self.event_tx
             .send(CallEvent::Start { complete: tx })
-            .is_err()
-        {
-            return Err(StateError::new(CHANNEL_REQ_CLOSED));
-        }
+            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
         self.rx_result(rx).await
     }
 

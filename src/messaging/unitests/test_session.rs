@@ -1,6 +1,6 @@
 
 #[cfg(test)]
-mod tests {
+mod session_tests {
     use super::*;
 
     fn agent() -> Rc<SessionAgent> {
@@ -12,9 +12,8 @@ mod tests {
         let agent = agent();
         let friend = *CryptoIdentity::new().id();
         {
-            let mut session = agent.session.lock().await;
-            session.on_friend_request(friend, *agent.user_id(), "hello".into(), 1234, false);
-            session.on_friend_request_accepted(friend, 1235, true);
+            agent.on_friend_request(friend, *agent.user_id(), "hello".into(), 1234, false);
+            agent.on_friend_request_accepted(friend, 1235, true);
         }
         let request = agent.get_friend_request(&friend).await.unwrap().unwrap();
         assert_eq!(request.user_id(), &friend);
@@ -35,19 +34,19 @@ mod tests {
     async fn agent_delegates_outgoing_requests_acceptance_and_messages() {
         let agent = agent();
         let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("test", "localhost", 1883), 8);
-        agent.session.lock().await.mqtt = Some(mqtt);
+        *agent.mqtt.lock().unwrap() = Some(mqtt);
         let friend = *CryptoIdentity::new().id();
         agent.friend_request(&friend, None).await.unwrap();
         let request = agent.get_friend_request(&friend).await.unwrap().unwrap();
         assert_eq!(request.hello(), None);
         assert!(agent.accept_friend_request(&friend).await.is_err());
+        agent.remove_friend_request(&friend).await.unwrap();
         {
-            let mut session = agent.session.lock().await;
-            session.on_friend_request(friend, friend, "hello".into(), 1234, false);
+            agent.on_friend_request(friend, friend, "hello".into(), 1234, false);
         }
         agent.accept_friend_request(&friend).await.unwrap();
         assert!(agent.get_friend_request(&friend).await.unwrap().unwrap().is_accepted());
-        assert!(agent.session.lock().await.friend_sessions.contains_key(&friend));
+        assert!(agent.friend_sessions.lock().unwrap().contains_key(&friend));
         assert!(agent.accept_friend_request(&friend).await.is_err());
 
         let message = agent.message(Some(friend))
@@ -60,7 +59,7 @@ mod tests {
         let wire: MessageContent = serde_cbor::from_slice(message.payload_as_bytes()).unwrap();
         assert_eq!(wire.body, Value::Bytes(vec![0, 1, 2]));
         agent.clear_contacts().await.unwrap();
-        assert!(agent.session.lock().await.friend_sessions.is_empty());
+        assert!(agent.friend_sessions.lock().unwrap().is_empty());
         assert!(agent.message(Some(friend)).text_body("hello").send().await.is_err());
         agent.clear_friend_requests().await.unwrap();
         assert!(agent.get_friend_requests().await.unwrap().is_empty());
@@ -76,9 +75,8 @@ mod tests {
         assert!(agent.accept_friend_request(&friend).await.is_err());
         assert!(agent.get_friend_requests().await.unwrap().is_empty());
         assert!(agent.get_contacts().await.unwrap().is_empty());
-        let session = agent.session.lock().await;
-        assert!(session.mqtt.is_none());
-        assert!(session.friend_sessions.is_empty());
+        assert!(agent.mqtt.lock().unwrap().is_none());
+        assert!(agent.friend_sessions.lock().unwrap().is_empty());
         assert!(!agent.is_running());
         assert!(!agent.is_connected());
         assert!(!agent.is_ready());

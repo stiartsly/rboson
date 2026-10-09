@@ -25,24 +25,14 @@ pub(super) mod tests {
         }
     }
 
-    fn client(options: Arc<Options>) -> VerticleClient {
-        deploy(
-            options.clone(),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(AtomicBool::new(false)),
-            options.connection_listener(),
-            options.message_listener(),
-            options.channel_listener(),
-            options.contact_listener(),
-            options.session_listener(),
-            options.friend_request_listener(),
-        ).unwrap()
+    fn client(options: VerticleOptions) -> VerticleClient {
+        deploy(options).unwrap()
     }
 
     #[tokio::test]
     async fn events_execute_in_order_and_return_session_errors() {
         tokio::time::timeout(Duration::from_secs(5), async {
-            let client = client(options().into_options());
+            let client = client(options());
             let friend = *CryptoIdentity::new().id();
             let (add_tx, add_rx) = oneshot::channel();
             let (get_tx, get_rx) = oneshot::channel();
@@ -82,7 +72,6 @@ pub(super) mod tests {
             client.remove_contacts(vec![friend]).await.unwrap();
             client.clear_contacts().await.unwrap();
             client.stop().await.unwrap();
-            assert!(!client.is_running());
             assert!(client.handle.lock().unwrap().is_none());
             assert!(client.get_contacts().await.is_err());
         }).await.unwrap();
@@ -91,7 +80,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn message_events_reject_invalid_input_without_stopping_verticle() {
         tokio::time::timeout(Duration::from_secs(5), async {
-            let client = client(options().into_options());
+            let client = client(options());
             let friend = *CryptoIdentity::new().id();
             for (headers, body, text) in [
                 (HashMap::from([("X-Test".into(), serde_json::Value::Bool(true))]), vec![0], false),
@@ -124,9 +113,10 @@ pub(super) mod tests {
             builder.with_device_keypair(options.options.device_key().clone());
             builder.with_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
             options.options = Arc::new(builder.build().unwrap());
-            let client = client(options.into_options());
+            let client = client(options);
             assert!(client.start().await.is_err());
-            assert!(!client.is_running());
+            let error = client.friend_request(*CryptoIdentity::new().id(), None).await.unwrap_err();
+            assert!(error.to_string().contains("not running"));
             client.stop().await.unwrap();
             assert!(client.handle.lock().unwrap().is_none());
         }).await.unwrap();
@@ -175,7 +165,7 @@ pub(super) mod tests {
                 }
             });
 
-            let options = options().into_options();
+            let options = options().options;
             let mut builder = OptionsBuilder::new();
             builder.with_peer_id(*options.peer_id());
             builder.with_peer_endpoint(endpoint).unwrap();

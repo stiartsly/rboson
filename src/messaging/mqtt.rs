@@ -25,8 +25,18 @@ use std::{
 };
 use tokio::task;
 
-use crate::{CryptoIdentity, Id, Identity};
-use crate::errors::{Result, Error, ArgumentError, NotImplemented, StateError};
+use crate::{
+    CryptoIdentity,
+    Id,
+    Identity,
+};
+use crate::errors::{
+    Result,
+    Error,
+    ArgumentError,
+    NotImplemented,
+    StateError
+};
 use crate::messaging::{
     options::Options,
     verticle::VerticleOptions,
@@ -1112,19 +1122,6 @@ impl MqttSession {
         Ok(timestamp)
     }
 
-    pub(crate) fn register_friend_session(&self, user_id: Id, session_key: &[u8]) -> Result<()> {
-        if session_key.len() != crate::signature::PrivateKey::BYTES {
-            return Err(ArgumentError::new(format!(
-                "Invalid friend session key length: {}",
-                session_key.len()
-            )));
-        }
-        let session_identity = CryptoIdentity::try_from(session_key)
-            .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
-        self.friend_sessions.lock().unwrap().insert(user_id, session_identity);
-        Ok(())
-    }
-
     fn message_id(device_id: &Id, timestamp: i64) -> Result<Id> {
         let mut digest = Sha256::new();
         digest.update(device_id.as_bytes());
@@ -1346,11 +1343,11 @@ impl MqttSession {
         remark: Option<String>,
     ) -> Result<()> {
         let _ = self.requests.lock().await;
-        self.register_friend_session(*user_id, &session_key)?;
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as i64)
-            .unwrap_or(0);
+
+        let session_identity = CryptoIdentity::try_from(session_key.as_slice())?;
+        self.friend_sessions.lock().unwrap().insert(*user_id, session_identity);
+
+        let now_ms = SystemTime::now();
         let contact = PhotonContact {
             id: *user_id,
             contact_type: ContactType::Friend,
@@ -1359,10 +1356,11 @@ impl MqttSession {
             tags: None,
             muted: false,
             blocked: false,
-            created_at: now_ms,
-            updated_at: now_ms,
+            created_at: crate::as_ms!(now_ms) as i64,
+            updated_at: crate::as_ms!(now_ms) as i64,
             revision: 1,
         };
+
         self.contacts.borrow_mut().insert(*user_id, contact.clone());
         self.contact_listener.on_contact_added(&contact);
         Ok(())

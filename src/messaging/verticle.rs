@@ -1,5 +1,4 @@
-use log::{info, debug, error};
-use core::{f32::consts::E, ops::Not};
+use log::{debug, error};
 use std::{
     rc::Rc,
     thread::JoinHandle,
@@ -7,8 +6,9 @@ use std::{
     pin::Pin,
     result::Result as StdResult,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc as std_mpsc, Arc, Mutex,
+        mpsc as std_mpsc,
+        Arc,
+        Mutex,
     },
 };
 use futures::{

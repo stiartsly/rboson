@@ -11,9 +11,8 @@ use crate::{Id, core::logger};
 use crate::errors::{
     Result,
     StateError,
-    ArgumentError
+    ArgumentError,
 };
-
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,

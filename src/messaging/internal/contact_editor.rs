@@ -20,6 +20,23 @@ pub struct PhotonContact {
     pub revision: i32,
 }
 
+impl From<&dyn Contact> for PhotonContact {
+    fn from(contact: &dyn Contact) -> Self {
+        Self {
+            id: contact.id().clone(),
+            contact_type: contact.contact_type(),
+            name: contact.name().map(|s| s.to_string()),
+            remark: contact.remark().map(|s| s.to_string()),
+            tags: contact.tags().map(|s| s.to_string()),
+            muted: contact.is_muted(),
+            blocked: contact.is_blocked(),
+            created_at: contact.created_at(),
+            updated_at: contact.updated_at(),
+            revision: contact.revision(),
+        }
+    }
+}
+
 impl Contact for PhotonContact {
     fn id(&self) -> &Id {
         &self.id

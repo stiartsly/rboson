@@ -47,6 +47,13 @@ pub use message::{
 };
 pub use session_info::SessionInfo;
 
+pub(crate) use {
+    internal::{
+        PhotonContact,
+        client_connection_listener::ClientConnectionListener
+    },
+};
+
 #[cfg(test)]
 mod unitests {
     mod test_message;

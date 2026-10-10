@@ -188,6 +188,17 @@ impl Client {
         self.ready.load(Ordering::Acquire)
     }
 
+    fn verticle(&self) -> Result<Arc<VerticleClient>> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected"));
+        }
+        let verticle_guard = self.verticle.lock().unwrap();
+        let Some(v) = verticle_guard.as_ref() else {
+            return Err(StateError::new("Messaging verticle is not deployed"));
+        };
+        Ok(v.clone())
+    }
+
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
         Box::new(ComposedMessageBuilder::new(
             recipient,
@@ -255,17 +266,6 @@ impl Client {
 
     pub async fn revoke_session(&self, device_id: &Id) -> Result<()> {
         self.verticle()?.revoke_session(*device_id).await
-    }
-
-    fn verticle(&self) -> Result<Arc<VerticleClient>> {
-        if !self.is_connected() {
-            return Err(StateError::new("Messaging client is not connected"));
-        }
-        let verticle_guard = self.verticle.lock().unwrap();
-        let Some(v) = verticle_guard.as_ref() else {
-            return Err(StateError::new("Messaging verticle is not deployed"));
-        };
-        Ok(v.clone())
     }
 
     pub async fn friend_request(

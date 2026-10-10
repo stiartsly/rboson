@@ -1260,7 +1260,7 @@ impl MqttSession {
         user_id: &Id,
         hello: Option<String>,
     ) -> Result<()> {
-        let _request = self.requests.lock().await;
+        let _ = self.requests.lock().await;
         if user_id == self.user_identity.id() {
             return Err(ArgumentError::new(
                 "Cannot send friend request to yourself",
@@ -1290,7 +1290,7 @@ impl MqttSession {
         &self,
         user_id: &Id
     ) -> Result<()> {
-        let _request = self.requests.lock().await;
+        let _ = self.requests.lock().await;
         self.pending_friend_request(user_id, user_id)?;
 
         let (timestamp, session_identity) = self.friend_accept(self.options.peer_id(), *user_id).await?;
@@ -1307,34 +1307,34 @@ impl MqttSession {
         &self,
         user_id: &Id,
     ) -> Result<Option<FriendRequest>> {
-        let requests = self.friend_requests.borrow();
-        let request = requests.get(user_id).cloned();
+        let borrowed = self.friend_requests.borrow();
+        let request = borrowed.get(user_id).cloned();
         Ok(request)
     }
 
     pub(crate) async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
-        let requests = self.friend_requests.borrow();
-        let requests = requests.values().cloned().collect::<Vec<_>>();
+        let borrowed = self.friend_requests.borrow();
+        let requests = borrowed.values().cloned().collect::<Vec<_>>();
         Ok(requests)
     }
 
     pub(crate) async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
-        let _request = self.requests.lock().await;
+        let _ = self.requests.lock().await;
         self.friend_requests.borrow_mut().remove(user_id);
         Ok(())
     }
 
     pub(crate) async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
-        let _request = self.requests.lock().await;
-        let mut requests = self.friend_requests.borrow_mut();
+        let _ = self.requests.lock().await;
+        let mut borrowed_mut = self.friend_requests.borrow_mut();
         for user_id in user_ids {
-            requests.remove(user_id);
+            borrowed_mut.remove(user_id);
         }
         Ok(())
     }
 
     pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
-        let _request = self.requests.lock().await;
+        let _ = self.requests.lock().await;
         self.friend_requests.borrow_mut().clear();
         Ok(())
     }
@@ -1345,7 +1345,7 @@ impl MqttSession {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
-        let _request = self.requests.lock().await;
+        let _ = self.requests.lock().await;
         self.register_friend_session(*user_id, &session_key)?;
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)

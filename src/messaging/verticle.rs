@@ -759,23 +759,19 @@ impl Verticle {
         let engine = self.engine.clone();
         match event {
             Event::Start { complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.start().await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.start().await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::Stop { complete } => {
                 self.quit = true;
-                pending.push(
-                    async move {
-                        let rc = engine.stop().await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.stop().await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::GetConversation { id, complete } => {
                 pending.push(async move {
@@ -859,67 +855,52 @@ impl Verticle {
                 hello,
                 complete,
             } => {
-                pending.push(
-                    async move {
-                        let rc = engine.friend_request(&user_id, hello).await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.friend_request(&user_id, hello).await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::FriendAccept { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.accept_friend_request(&user_id).await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.accept_friend_request(&user_id).await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::GetFriendRequest { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.get_friend_request(&user_id).await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.get_friend_request(&user_id).await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::GetFriendRequests { complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.get_friend_requests().await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.get_friend_requests().await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::RemoveFriendRequest { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_friend_request(&user_id).await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_friend_request(&user_id).await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::RemoveFriendRequests { user_ids, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_friend_requests(&user_ids).await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_friend_requests(&user_ids).await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }
+                .boxed_local());
             }
             Event::ClearFriendRequests { complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.clear_friend_requests().await;
-                        let _ = complete.send(rc.map_err(|e|e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.clear_friend_requests().await;
+                    let _ = complete.send(rc.map_err(|e|e.to_string()));
+                }.boxed_local());
             }
             Event::ContentMessage {
                 recipient,
@@ -928,33 +909,30 @@ impl Verticle {
                 text,
                 complete,
             } => {
-                debug!("Verticle handling ContentMessage event for {recipient}");
-                pending.push(
-                    async move {
-                        let mut builder = engine.message(Some(recipient));
-                        for (key, value) in headers {
-                            let Some(value) = value.as_str() else {
-                                let _ = complete.send(Err(format!("Message header '{key}' is not text")));
-                                return;
-                            };
-                            builder = builder.header(&key, value);
-                        }
-                        builder = if text {
-                            match String::from_utf8(body) {
-                                Ok(body) => builder.text_body(&body),
-                                Err(error) => {
-                                    let _ = complete.send(Err(error.to_string()));
-                                    return;
-                                }
-                            }
-                        } else {
-                            builder.binary_body(body)
+                pending.push(async move {
+                    let mut builder = engine.message(Some(recipient));
+                    for (key, value) in headers {
+                        let Some(value) = value.as_str() else {
+                            let _ = complete.send(Err(format!("Message header '{key}' is not text")));
+                            return;
                         };
-                        let result = builder.send().await;
-                        let _ = complete.send(result.map_err(|e| e.to_string()));
+                        builder = builder.header(&key, value);
                     }
-                    .boxed_local(),
-                );
+                    builder = if text {
+                        match String::from_utf8(body) {
+                            Ok(body) => builder.text_body(&body),
+                            Err(error) => {
+                                let _ = complete.send(Err(error.to_string()));
+                                return;
+                            }
+                        }
+                    } else {
+                        builder.binary_body(body)
+                    };
+                    let result = builder.send().await;
+                    let _ = complete.send(result.map_err(|e| e.to_string()));
+                }
+                .boxed_local());
             }
             Event::RegisterFriendSession {
                 user_id,
@@ -962,13 +940,10 @@ impl Verticle {
                 remark,
                 complete,
             } => {
-                pending.push(
-                    async move {
-                        let rc = engine.add_friend(&user_id, session_key, remark).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.add_friend(&user_id, session_key, remark).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::BlockUser { user_id, complete } => {
                 pending.push(async move {
@@ -984,82 +959,58 @@ impl Verticle {
                 announcement,
                 complete
             } => {
-                pending.push(
-                    async move {
-                        let rc = engine.create_channel(permission, name, notice, announcement).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.create_channel(permission, name, notice, announcement).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::RemoveChannel { channel_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_channel(&channel_id).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_channel(&channel_id).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::JoinChannel { ticket, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.join_channel(ticket).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.join_channel(ticket).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::LeaveChannel { channel_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.leave_channel(&channel_id).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.leave_channel(&channel_id).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::CreateInviteTicket { channel_id, invitee, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.create_invite_ticket(&channel_id, invitee).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.create_invite_ticket(&channel_id, invitee).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::TransferChannelOwnership { channel_id, new_owner, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.transfer_channel_ownership(&channel_id, new_owner).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.transfer_channel_ownership(&channel_id, new_owner).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::RotateChannelSessionKey { channel_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.rotate_channel_session_key(&channel_id).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.rotate_channel_session_key(&channel_id).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::UpdateChannelInfo { channel, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.update_channel_info(channel.as_ref()).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.update_channel_info(channel.as_ref()).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::SetChannelMemberRole { channel_id, member_ids, role, complete } => {
@@ -1070,119 +1021,82 @@ impl Verticle {
             }
 
             Event::BanChannelMembers { channel_id, member_ids, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.ban_channel_members(&channel_id, &member_ids).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.ban_channel_members(&channel_id, &member_ids).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::UnbanChannelMembers { channel_id, member_ids, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.unban_channel_members(&channel_id, &member_ids).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.unban_channel_members(&channel_id, &member_ids).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::RemoveChannelMembers { channel_id, members, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_channel_members(&channel_id, &members).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_channel_members(&channel_id, &members).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
 
             Event::GetContact { id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.get_contact(&id).await
-                            .map(|contact| contact.map(|contact| contact_snapshot(contact.as_ref())));
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.get_contact(&id).await
+                        .map(|contact| contact.map(|contact| contact_snapshot(contact.as_ref())));
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::GetContacts { complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.get_contacts().await
-                            .map(|contacts| contacts.into_iter()
-                                .map(|contact| contact_snapshot(contact.as_ref()))
-                                .collect());
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.get_contacts().await
+                        .map(|contacts| contacts.into_iter()
+                        .map(|contact| contact_snapshot(contact.as_ref()))
+                        .collect());
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::UpdateContact { contact, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.update_contact(&contact).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.update_contact(&contact).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::RemoveContact { id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_contact(&id).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_contact(&id).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::RemoveContacts { ids, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.remove_contacts(&ids).await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.remove_contacts(&ids).await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::ClearContacts { complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.clear_contacts().await;
-                        let _ = complete.send(rc.map_err(|error| error.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.clear_contacts().await;
+                    let _ = complete.send(rc.map_err(|error| error.to_string()));
+                }.boxed_local());
             }
             Event::FriendReject { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.friend_reject(user_id).await;
-                        let _ = complete.send(rc.map_err(|e| e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.friend_reject(user_id).await;
+                    let _ = complete.send(rc.map_err(|e| e.to_string()));
+                }.boxed_local());
             }
             Event::FriendRemove { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.friend_remove(user_id).await;
-                        let _ = complete.send(rc.map_err(|e| e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.friend_remove(user_id).await;
+                    let _ = complete.send(rc.map_err(|e| e.to_string()));
+                }.boxed_local());
             }
             Event::FriendInfo { user_id, complete } => {
-                pending.push(
-                    async move {
-                        let rc = engine.friend_info(user_id).await;
-                        let _ = complete.send(rc.map_err(|e| e.to_string()));
-                    }
-                    .boxed_local(),
-                );
+                pending.push(async move {
+                    let rc = engine.friend_info(user_id).await;
+                    let _ = complete.send(rc.map_err(|e| e.to_string()));
+                }.boxed_local());
             }
-
         }
     }
 

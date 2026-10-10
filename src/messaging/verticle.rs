@@ -285,27 +285,32 @@ impl VerticleClient {
         }
     }
 
-    pub(crate) async fn start(&self) -> Result<()> {
+    pub(crate) fn sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.event_tx.clone()
+    }
+
+    async fn call<T>(
+        &self,
+        make_event: impl FnOnce(oneshot::Sender<CmdResult<T>>) -> Event,
+    ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
         self.event_tx
-            .send(Event::Start { complete: tx })
+            .send(make_event(tx))
             .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
 
-        rx.await
-            .map_err(|_| StateError::new(CHANNEL_RSP_CLOSED))?
-            .map_err(StateError::new)?;
-        Ok(())
+        match rx.await {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(msg)) => Err(StateError::new(msg)),
+            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED)),
+        }
+    }
+
+    pub(crate) async fn start(&self) -> Result<()> {
+        self.call(|complete| Event::Start { complete }).await
     }
 
     pub(crate) async fn stop(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx
-            .send(Event::Stop { complete: tx })
-            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
-
-        rx.await
-            .map_err(|_| StateError::new(CHANNEL_RSP_CLOSED))?
-            .map_err(StateError::new)?;
+        self.call(|complete| Event::Stop { complete }).await?;
 
         let handle = self.handle.lock().unwrap().take();
         if let Some(handle) = handle {
@@ -314,52 +319,36 @@ impl VerticleClient {
         Ok(())
     }
 
-    #[inline]
-    async fn result<T>(
-        &self,
-        rx: oneshot::Receiver<CmdResult<T>>
-    ) -> Result<T> {
-        match rx.await {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(msg)) => Err(StateError::new(msg)),
-            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED)),
-        }
-    }
-
-    async fn request<T>(
-        &self,
-        make_event: impl FnOnce(oneshot::Sender<CmdResult<T>>) -> Event,
-    ) -> Result<T> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx
-            .send(make_event(tx))
-            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
-        self.result(rx).await
-    }
-
-    pub(crate) fn sender(&self) -> mpsc::UnboundedSender<Event> {
-        self.event_tx.clone()
-    }
-
     pub(crate) async fn get_conversation(
         &self,
         id: Id,
     ) -> Result<Option<Box<dyn super::conversation::Conversation>>> {
-        self.request(|complete| Event::GetConversation { id, complete }).await
+        self.call(|complete| Event::GetConversation {
+            id,
+            complete
+        }).await
     }
 
     pub(crate) async fn get_conversations(
         &self,
     ) -> Result<Vec<Box<dyn super::conversation::Conversation>>> {
-        self.request(|complete| Event::GetConversations { complete }).await
+        self.call(|complete| Event::GetConversations {
+            complete
+        }).await
     }
 
     pub(crate) async fn remove_conversation(&self, id: Id) -> Result<()> {
-        self.request(|complete| Event::RemoveConversation { id, complete }).await
+        self.call(|complete| Event::RemoveConversation {
+            id,
+            complete
+        }).await
     }
 
     pub(crate) async fn remove_conversations(&self, ids: Vec<Id>) -> Result<()> {
-        self.request(|complete| Event::RemoveConversations { ids, complete }).await
+        self.call(|complete| Event::RemoveConversations {
+            ids,
+            complete
+        }).await
     }
 
     pub(crate) async fn get_messages(
@@ -369,7 +358,7 @@ impl VerticleClient {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.request(|complete| Event::GetMessages {
+        self.call(|complete| Event::GetMessages {
             conversation_id,
             until,
             limit,
@@ -384,7 +373,7 @@ impl VerticleClient {
         begin: i64,
         end: i64,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.request(|complete| Event::GetMessagesInRange {
+        self.call(|complete| Event::GetMessagesInRange {
             conversation_id,
             begin,
             end,
@@ -392,30 +381,50 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn remove_message(&self, message_id: i64) -> Result<()> {
-        self.request(|complete| Event::RemoveMessage { message_id, complete }).await
+    pub(crate) async fn remove_message(
+        &self,
+        message_id: i64
+    ) -> Result<()> {
+        self.call(|complete| Event::RemoveMessage {
+            message_id, complete }).await
     }
 
-    pub(crate) async fn remove_messages_by_ids(&self, message_ids: Vec<i64>) -> Result<()> {
-        self.request(|complete| Event::RemoveMessagesByIds { message_ids, complete }).await
+    pub(crate) async fn remove_messages_by_ids(
+        &self,
+        message_ids: Vec<i64>
+    ) -> Result<()> {
+        self.call(|complete| Event::RemoveMessagesByIds {
+            message_ids,
+            complete
+        }).await
     }
 
     pub(crate) async fn remove_messages_in_conversation(
         &self,
         conversation_id: Id,
     ) -> Result<()> {
-        self.request(|complete| Event::RemoveMessagesInConversation {
+        self.call(|complete| Event::RemoveMessagesInConversation {
             conversation_id,
             complete,
         }).await
     }
 
-    pub(crate) async fn get_sessions(&self) -> Result<Vec<super::session_info::SessionInfo>> {
-        self.request(|complete| Event::GetSessions { complete }).await
+    pub(crate) async fn get_sessions(
+        &self
+    ) -> Result<Vec<super::session_info::SessionInfo>> {
+        self.call(|complete| Event::GetSessions {
+            complete
+        }).await
     }
 
-    pub(crate) async fn revoke_session(&self, device_id: Id) -> Result<()> {
-        self.request(|complete| Event::RevokeSession { device_id, complete }).await
+    pub(crate) async fn revoke_session(
+        &self,
+        device_id: Id
+    ) -> Result<()> {
+        self.call(|complete| Event::RevokeSession {
+            device_id,
+            complete
+        }).await
     }
 
     pub(crate) async fn friend_request(
@@ -423,98 +432,65 @@ impl VerticleClient {
         user_id: Id,
         hello: Option<String>
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::FriendRequest {
+        self.call(|complete| Event::FriendRequest {
             user_id,
             hello,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn friend_accept(
         &self,
         user_id: Id
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::FriendAccept {
+        self.call(|complete| Event::FriendAccept {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete
+        }).await
     }
 
     pub(crate) async fn get_friend_request(
         &self,
         user_id: Id
     ) -> Result<Option<FriendRequest>> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::GetFriendRequest {
+        self.call(|complete| Event::GetFriendRequest {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
-    pub(crate) async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::GetFriendRequests {
-            complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+    pub(crate) async fn get_friend_requests(
+        &self
+    ) -> Result<Vec<FriendRequest>> {
+        self.call(|complete| Event::GetFriendRequests {
+            complete,
+        }).await
     }
 
     pub(crate) async fn remove_friend_request(
         &self,
         user_id: Id
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveFriendRequest {
+        self.call(|complete| Event::RemoveFriendRequest {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn remove_friend_requests(
         &self,
         user_ids: Vec<Id>
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveFriendRequests {
+        self.call(|complete| Event::RemoveFriendRequests {
             user_ids,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::ClearFriendRequests {
-            complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+        self.call(|complete| Event::ClearFriendRequests {
+            complete,
+        }).await
     }
 
     pub(crate) async fn add_friend(
@@ -523,21 +499,22 @@ impl VerticleClient {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RegisterFriendSession {
+        self.call(|complete| Event::RegisterFriendSession {
             user_id,
             session_key,
             remark,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
-    pub(crate) async fn block_user(&self, user_id: Id) -> Result<Box<dyn Contact>> {
-        self.request(|complete| Event::BlockUser { user_id, complete }).await
+    pub(crate) async fn block_user(
+        &self,
+        user_id: Id
+    ) -> Result<Box<dyn Contact>> {
+        self.call(|complete| Event::BlockUser {
+            user_id,
+            complete
+        }).await
     }
 
     pub(crate) async fn create_channel(
@@ -547,7 +524,7 @@ impl VerticleClient {
         notice: Option<String>,
         announcement: Option<String>,
     ) -> Result<Box<dyn Channel>> {
-        self.request(|complete| Event::CreateChannel {
+        self.call(|complete| Event::CreateChannel {
             permission,
             name,
             notice,
@@ -560,29 +537,29 @@ impl VerticleClient {
         &self,
         channel_id: Id
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveChannel {
+        self.call(|complete| Event::RemoveChannel {
             channel_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn join_channel(
         &self,
         ticket: InviteTicket,
     ) -> Result<Box<dyn Channel>> {
-        self.request(|complete| Event::JoinChannel { ticket, complete }).await
+        self.call(|complete| Event::JoinChannel {
+            ticket, complete
+        }).await
     }
 
     pub(crate) async fn leave_channel(
         &self,
         channel_id: Id
     ) -> Result<()> {
-        self.request(|complete| Event::LeaveChannel { channel_id, complete }).await
+        self.call(|complete| Event::LeaveChannel {
+            channel_id,
+            complete
+        }).await
     }
 
     pub(crate) async fn create_invite_ticket(
@@ -590,7 +567,7 @@ impl VerticleClient {
         channel_id: Id,
         invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        self.request(|complete| Event::CreateInviteTicket {
+        self.call(|complete| Event::CreateInviteTicket {
             channel_id,
             invitee,
             complete,
@@ -602,7 +579,7 @@ impl VerticleClient {
         channel_id: Id,
         new_owner: Id
     ) -> Result<()> {
-        self.request(|complete| Event::TransferChannelOwnership {
+        self.call(|complete| Event::TransferChannelOwnership {
             channel_id,
             new_owner,
             complete,
@@ -613,14 +590,20 @@ impl VerticleClient {
         &self,
         channel_id: Id
     ) -> Result<()> {
-        self.request(|complete| Event::RotateChannelSessionKey { channel_id, complete }).await
+        self.call(|complete| Event::RotateChannelSessionKey {
+            channel_id,
+            complete
+        }).await
     }
 
     pub(crate) async fn update_channel_info(
         &self,
         channel: Box<dyn Channel>
     ) -> Result<()> {
-        self.request(|complete| Event::UpdateChannelInfo { channel, complete }).await
+        self.call(|complete| Event::UpdateChannelInfo {
+            channel,
+            complete
+        }).await
     }
 
     pub(crate) async fn set_channel_members_role(
@@ -629,7 +612,7 @@ impl VerticleClient {
         member_ids: Vec<Id>,
         role: Role
     ) -> Result<()> {
-        self.request(|complete| Event::SetChannelMemberRole {
+        self.call(|complete| Event::SetChannelMemberRole {
             channel_id,
             member_ids,
             role,
@@ -642,7 +625,7 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>
     ) -> Result<()> {
-        self.request(|complete| Event::BanChannelMembers {
+        self.call(|complete| Event::BanChannelMembers {
             channel_id,
             member_ids,
             complete,
@@ -654,7 +637,7 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>
     ) -> Result<()> {
-        self.request(|complete| Event::UnbanChannelMembers {
+        self.call(|complete| Event::UnbanChannelMembers {
             channel_id,
             member_ids,
             complete,
@@ -666,123 +649,75 @@ impl VerticleClient {
         channel_id: Id,
         members: Vec<Id>
     ) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveChannelMembers {
+        self.call(|complete| Event::RemoveChannelMembers {
             channel_id,
             members,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<PhotonContact>> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::GetContact {
+        self.call(|complete| Event::GetContact {
             id,
-            complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete
+        }).await
     }
 
     pub(crate) async fn get_contacts(&self) -> Result<Vec<PhotonContact>> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::GetContacts {
-            complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+        self.call(|complete| Event::GetContacts {
+            complete
+        }).await
     }
 
     pub(crate) async fn update_contact(&self, contact: PhotonContact) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::UpdateContact {
+        self.call(|complete| Event::UpdateContact {
             contact,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     pub(crate) async fn remove_contact(&self, id: Id) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveContact {
-            id, complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+        self.call(|complete| Event::RemoveContact {
+            id,
+            complete,
+        }).await
     }
 
     pub(crate) async fn remove_contacts(&self, ids: Vec<Id>) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::RemoveContacts {
-            ids, complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+        self.call(|complete| Event::RemoveContacts {
+            ids,
+            complete,
+        }).await
     }
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::ClearContacts {
-            complete: tx
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+        self.call(|complete| Event::ClearContacts {
+            complete,
+        }).await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn friend_reject(&self, user_id: Id) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::FriendReject {
+        self.call(|complete| Event::FriendReject {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn friend_remove(&self, user_id: Id) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::FriendRemove {
+        self.call(|complete| Event::FriendRemove {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn friend_info(&self, user_id: Id) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.event_tx.send(Event::FriendInfo {
+        self.call(|complete| Event::FriendInfo {
             user_id,
-            complete: tx,
-        })
-        .map_err(|_|
-            StateError::new(CHANNEL_REQ_CLOSED)
-        )?;
-        self.result(rx).await
+            complete,
+        }).await
     }
 }
 

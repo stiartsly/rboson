@@ -1,3 +1,5 @@
+use crate::messaging::message::ContentDisposition;
+
 #[cfg(test)]
 mod tests {
     use super::ContentDisposition;

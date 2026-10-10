@@ -413,3 +413,475 @@ mod tests {
         assert!(session.get_contacts().await.unwrap().is_empty());
     }
 }
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[derive(Clone, Default)]
+    struct Observed {
+        events: Arc<Mutex<Vec<(&'static str, Id)>>>,
+        messages: Arc<Mutex<Vec<(bool, Vec<u8>)>>>,
+    }
+
+    impl MessageListener for Observed {
+        fn on_message(&self, message: &dyn Message) {
+            self.messages.lock().unwrap().push((false, message.payload_as_bytes().to_vec()));
+        }
+        fn on_sent(&self, message: &dyn Message) {
+            self.messages.lock().unwrap().push((true, message.payload_as_bytes().to_vec()));
+        }
+    }
+
+    impl ContactListener for Observed {
+        fn on_contact_added(&self, contact: &dyn Contact) {
+            self.events.lock().unwrap().push(("add", *contact.id()));
+        }
+        fn on_contacts_updated(&self, contacts: &[Box<dyn Contact>]) {
+            self.events.lock().unwrap().extend(contacts.iter().map(|contact| ("update", *contact.id())));
+        }
+        fn on_contacts_removed(&self, ids: &[Id]) {
+            self.events.lock().unwrap().extend(ids.iter().map(|id| ("remove", *id)));
+        }
+    }
+
+    impl SessionListener for Observed {
+        fn on_new_session(&self, session: &SessionInfo) {
+            self.events.lock().unwrap().push(("session", *session.device_id()));
+        }
+    }
+
+    fn session(observed: &Observed) -> Rc<MqttSession> {
+        let mut options = crate::messaging::verticle::tests::options();
+        options.message_listener = Arc::new(observed.clone());
+        options.contact_listener = Arc::new(observed.clone());
+        options.session_listener = Arc::new(observed.clone());
+        MqttSession::new(options).unwrap()
+    }
+
+    fn opaque(session: &MqttSession, id: Id, revision: i32, key: &crate::signature::KeyPair, blocked: bool) -> OpaqueContact {
+        let encrypted_key = session.user_identity.encrypt_into(session.user_id(), key.private_key().as_ref()).unwrap();
+        let data = ContactData {
+            id,
+            kind: 1,
+            session_key: Some(Value::Bytes(encrypted_key)),
+            name: Some("friend".into()),
+            remark: None,
+            tags: None,
+            muted: false,
+            blocked,
+            created_at: 100,
+            updated_at: 100 + i64::from(revision),
+        };
+        let data = serde_cbor::to_vec(&data).unwrap();
+        OpaqueContact {
+            id,
+            revision,
+            data: Value::Bytes(session.user_identity.encrypt_into(session.user_id(), &data).unwrap()),
+        }
+    }
+
+    #[test]
+    fn origin_timestamps_are_unique_and_packet_limit_includes_mqtt_headers() {
+        let clock = Mutex::new(0);
+        let first = MqttSession::origin_timestamp(&clock).unwrap();
+        let second = MqttSession::origin_timestamp(&clock).unwrap();
+        assert!(second > first);
+        assert!(MqttSession::validate_outbox_packet(MAX_MESSAGE_SIZE - 11).is_ok());
+        assert!(MqttSession::validate_outbox_packet(MAX_MESSAGE_SIZE - 10).is_err());
+        assert!(MqttSession::validate_outbox_packet(usize::MAX).is_err());
+    }
+
+    #[tokio::test]
+    async fn home_peer_notifications_are_routed_and_untrusted_control_is_rejected() {
+        let observed = Observed::default();
+        let session = session(&observed);
+        let peer = CryptoIdentity::new();
+        let other = Id::random();
+        let info: SessionInfo = serde_cbor::value::from_value(Value::Map([
+            (Value::Text("id".into()), serde_cbor::value::to_value(other).unwrap()),
+            (Value::Text("o".into()), Value::Bool(true)),
+        ].into_iter().collect())).unwrap();
+        let notification = Notification {
+            id: Id::random(), source: other, timestamp: 1234, event: "sn".into(),
+            body: Some(serde_cbor::value::to_value(info).unwrap()),
+        };
+        let mut wire = WireMessage {
+            version: MESSAGE_VERSION, id: Id::random(), recipient: *session.user_id(),
+            from: Some(*peer.id()), created_at: 1234,
+            message_type: crate::messaging::message::MessageType::StateMessage as u8,
+            payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
+        };
+        let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
+        session.handle_user_publish(peer.id(), USER_INBOX, &envelope).unwrap();
+        assert_eq!(*observed.events.lock().unwrap(), vec![("session", other)]);
+        let sync = Notification {
+            id: Id::random(), source: other, timestamp: 1234, event: "cs".into(),
+            body: Some(serde_cbor::value::to_value(ContactSync {
+                revision: 1, kind: 2, mutations: vec![], contacts: vec![],
+            }).unwrap()),
+        };
+        wire.payload = Value::Bytes(serde_cbor::to_vec(&sync).unwrap());
+        let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
+        session.handle_user_publish(peer.id(), USER_INBOX, &envelope).unwrap();
+        assert_eq!(session.contacts_revision.get(), 1);
+        wire.from = Some(*CryptoIdentity::new().id());
+        wire.message_type = crate::messaging::message::MessageType::ControlMessage as u8;
+        let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
+        assert!(session.handle_user_publish(peer.id(), DEVICE_INBOX, &envelope).is_err());
+        assert_eq!(*observed.events.lock().unwrap(), vec![("session", other)]);
+    }
+
+    #[tokio::test]
+    async fn rejected_subscription_does_not_mark_the_session_ready() {
+        task::LocalSet::new().run_until(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let session = session(&Observed::default());
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let (mqtt, eventloop) = AsyncClient::new(MqttOptions::new(
+                    "rejected", "127.0.0.1", listener.local_addr().unwrap().port(),
+                ), 8);
+                *session.mqtt.lock().unwrap() = Some(mqtt.clone());
+                session.running.set(true);
+                let agent = session.clone();
+                let runner = task::spawn_local(agent.run_mqtt(mqtt, eventloop));
+                let broker = task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    assert_eq!(read_packet(&mut stream).await.0 >> 4, 1);
+                    stream.write_all(&[0x20, 2, 0, 0]).await.unwrap();
+                    let (header, body) = read_packet(&mut stream).await;
+                    assert_eq!(header >> 4, 8);
+                    stream.write_all(&[0x90, 5, body[0], body[1], 1, 128, 1]).await.unwrap();
+                    let mut buffer = [0; 1];
+                    if let Err(error) = stream.read(&mut buffer).await {
+                        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+                    }
+                });
+                runner.await.unwrap();
+                broker.await.unwrap();
+                assert!(!session.is_ready());
+                assert!(!session.is_connected());
+                assert!(!session.is_running());
+                assert!(session.mqtt.lock().unwrap().is_none());
+                session.stop().await.unwrap();
+            }).await.unwrap();
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn encrypted_contact_sync_is_atomic_and_revision_checked() {
+        let observed = Observed::default();
+        let session = session(&observed);
+        let friend = *CryptoIdentity::new().id();
+        let key = crate::signature::KeyPair::random();
+        session.apply_contact_sync(ContactSync {
+            revision: 1, kind: 2, mutations: vec![],
+            contacts: vec![opaque(&session, friend, 1, &key, false)],
+        }).unwrap();
+        assert_eq!(session.contacts_revision.get(), 1);
+        assert_eq!(session.friend_sessions.lock().unwrap().get(&friend).unwrap().id(), &Id::from(key.public_key()));
+        let other = *CryptoIdentity::new().id();
+        session.apply_contact_sync(ContactSync {
+            revision: 2, kind: 1, contacts: vec![],
+            mutations: vec![ContactMutation {
+                revision: 1, op: "a".into(),
+                data: Some(serde_cbor::value::to_value(opaque(&session, other, 2, &key, false)).unwrap()),
+            }],
+        }).unwrap();
+        let replay = ContactSync {
+            revision: 2, kind: 1, contacts: vec![],
+            mutations: vec![ContactMutation { revision: 1, op: "c".into(), data: None }],
+        };
+        session.apply_contact_sync(replay).unwrap();
+        assert_eq!(session.get_contacts().await.unwrap().len(), 2);
+        assert_eq!(observed.events.lock().unwrap().len(), 2);
+        let invalid = OpaqueContact { id: friend, revision: 3, data: Value::Bytes(vec![0]) };
+        assert!(session.apply_contact_sync(ContactSync {
+            revision: 3, kind: 2, mutations: vec![],
+            contacts: vec![opaque(&session, other, 3, &key, false), invalid],
+        }).is_err());
+        assert_eq!(session.contacts_revision.get(), 2);
+        assert_eq!(session.get_contacts().await.unwrap().len(), 2);
+        assert_eq!(observed.events.lock().unwrap().len(), 2);
+        assert!(session.apply_contact_sync(ContactSync {
+            revision: 4, kind: 1, contacts: vec![],
+            mutations: vec![ContactMutation { revision: 3, op: "c".into(), data: None }],
+        }).is_err());
+        assert!(session.contact_sync_needed.get());
+        assert_eq!(session.contacts_revision.get(), 2);
+        session.apply_contact_sync(ContactSync {
+            revision: 3, kind: 1, contacts: vec![],
+            mutations: vec![ContactMutation {
+                revision: 2, op: "r".into(),
+                data: Some(serde_cbor::value::to_value(vec![friend]).unwrap()),
+            }],
+        }).unwrap();
+        assert!(!session.friend_sessions.lock().unwrap().contains_key(&friend));
+        assert!(observed.events.lock().unwrap().contains(&("remove", friend)));
+        assert!(session.password().unwrap().ends_with("?contactsRevision=3"));
+    }
+
+    #[tokio::test]
+    async fn synced_blocking_applies_to_live_builders_and_friend_acceptance() {
+        let session = session(&Observed::default());
+        let friend = *CryptoIdentity::new().id();
+        let key = crate::signature::KeyPair::random();
+        let builder = session.message(Some(friend)).text_body("hello");
+        session.apply_contact_sync(ContactSync {
+            revision: 1, kind: 2, mutations: vec![],
+            contacts: vec![opaque(&session, friend, 1, &key, true)],
+        }).unwrap();
+        assert!(builder.send().await.err().expect("Blocked send must fail").to_string().contains("blocked"));
+        session.on_friend_request(friend, friend, "hello".into(), 100, true);
+        assert!(session.get_friend_requests().await.unwrap().is_empty());
+        assert!(session.accept_friend_request(&friend).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn inbox_and_other_device_outbox_content_use_the_correct_keys() {
+        let observed = Observed::default();
+        let session = session(&observed);
+        let peer = CryptoIdentity::new();
+        let friend = CryptoIdentity::new();
+        let key = crate::signature::KeyPair::random();
+        session.register_friend_session(*friend.id(), key.private_key().as_ref()).unwrap();
+        let content = MessageContent { headers: HashMap::new(), format: ContentFormat::Binary, body: Value::Bytes(vec![0, 255]) };
+        let plaintext = serde_cbor::to_vec(&content).unwrap();
+        for outbox in [false, true] {
+            let from = if outbox { *session.user_id() } else { *friend.id() };
+            let payload = if outbox {
+                session.user_identity.encrypt_into(&Id::from(key.public_key()), &plaintext).unwrap()
+            } else {
+                friend.encrypt_into(&Id::from(key.public_key()), &plaintext).unwrap()
+            };
+            let message = WireMessage {
+                version: MESSAGE_VERSION, id: Id::random(),
+                recipient: if outbox { *friend.id() } else { *session.user_id() },
+                from: Some(from), created_at: 1234,
+                message_type: crate::messaging::message::MessageType::ContentMessage as u8,
+                payload: Value::Bytes(payload),
+            };
+            let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&message).unwrap()).unwrap();
+            session.handle_user_publish(peer.id(), if outbox { USER_OUTBOX } else { USER_INBOX }, &envelope).unwrap();
+        }
+        let messages = observed.messages.lock().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(!messages[0].0 && messages[1].0);
+        for (_, payload) in messages.iter() {
+            assert_eq!(serde_cbor::from_slice::<MessageContent>(payload).unwrap().body, Value::Bytes(vec![0, 255]));
+        }
+    }
+
+    #[tokio::test]
+    async fn rpc_errors_cancellation_and_shutdown_clean_pending_calls() {
+        let session = session(&Observed::default());
+        let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("rpc", "localhost", 1883), 8);
+        *session.mqtt.lock().unwrap() = Some(mqtt);
+        session.connected.set(true);
+        let call = session.get_sessions();
+        tokio::pin!(call);
+        tokio::select! {
+            _ = &mut call => panic!("RPC completed without a response"),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {},
+        }
+        let id = *session.pending_rpc.borrow().keys().next().unwrap();
+        let response = RpcResponse {
+            id, method: "sl".into(), result: None,
+            error: Some(RpcError { code: 401, message: "denied".into() }),
+        };
+        session.handle_rpc_response(Value::Bytes(serde_cbor::to_vec(&response).unwrap())).unwrap();
+        assert!(call.await.unwrap_err().to_string().contains("401"));
+        assert!(session.pending_rpc.borrow().is_empty());
+        assert!(tokio::time::timeout(Duration::from_millis(10), session.get_sessions()).await.is_err());
+        assert!(session.pending_rpc.borrow().is_empty());
+        let call = session.get_sessions();
+        tokio::pin!(call);
+        tokio::select! {
+            _ = &mut call => panic!("RPC completed without a response"),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {},
+        }
+        session.stop().await.unwrap();
+        assert!(call.await.unwrap_err().to_string().contains("stopped"));
+        assert!(session.pending_rpc.borrow().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rpc_timeout_is_bounded_and_removes_the_registration() {
+        let session = session(&Observed::default());
+        let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("timeout", "localhost", 1883), 8);
+        *session.mqtt.lock().unwrap() = Some(mqtt);
+        session.connected.set(true);
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(RPC_TIMEOUT + Duration::from_secs(2), session.get_sessions()).await.unwrap();
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+        assert!(started.elapsed() >= RPC_TIMEOUT);
+        assert!(session.pending_rpc.borrow().is_empty());
+    }
+
+    async fn read_packet(stream: &mut tokio::net::TcpStream) -> (u8, Vec<u8>) {
+        let header = stream.read_u8().await.unwrap();
+        let mut length = 0usize;
+        let mut shift = 0;
+        loop {
+            let byte = stream.read_u8().await.unwrap();
+            length |= usize::from(byte & 127) << shift;
+            if byte & 128 == 0 {
+                break;
+            }
+            shift += 7;
+            assert!(shift < 28);
+        }
+        let mut body = vec![0; length];
+        stream.read_exact(&mut body).await.unwrap();
+        (header, body)
+    }
+
+    async fn publish(stream: &mut tokio::net::TcpStream, topic: &str, payload: &[u8]) {
+        let mut body = (topic.len() as u16).to_be_bytes().to_vec();
+        body.extend_from_slice(topic.as_bytes());
+        body.extend_from_slice(payload);
+        let mut packet = vec![0x30];
+        let mut length = body.len();
+        loop {
+            let mut byte = (length % 128) as u8;
+            length /= 128;
+            if length > 0 {
+                byte |= 128;
+            }
+            packet.push(byte);
+            if length == 0 {
+                break;
+            }
+        }
+        packet.extend_from_slice(&body);
+        stream.write_all(&packet).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_rpc_and_contact_sync_round_trip_through_device_inbox() {
+        task::LocalSet::new().run_until(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let peer = CryptoIdentity::new();
+                let observed = Observed::default();
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let mut builder = Options::builder();
+                builder.with_peer_id(*peer.id());
+                builder.with_peer_endpoint(format!("mqtt://{}", listener.local_addr().unwrap())).unwrap();
+                builder.with_user_keypair(crate::signature::KeyPair::random());
+                builder.with_device_keypair(crate::signature::KeyPair::random());
+                builder.with_data_dir(std::env::temp_dir());
+                let mut options = crate::messaging::verticle::tests::options();
+                options.options = Arc::new(builder.build().unwrap());
+                options.contact_listener = Arc::new(observed.clone());
+                let session = MqttSession::new(options).unwrap();
+                let device = *session.device_id();
+                let user = *session.user_id();
+                let other_device = Id::random();
+                let friend = *CryptoIdentity::new().id();
+                let key = crate::signature::KeyPair::random();
+                let sync = ContactSync {
+                    revision: 2, kind: 2, mutations: vec![],
+                    contacts: vec![opaque(&session, friend, 2, &key, false)],
+                };
+                let expected_session: SessionInfo = serde_cbor::value::from_value(Value::Map([
+                    (Value::Text("id".into()), serde_cbor::value::to_value(other_device).unwrap()),
+                    (Value::Text("o".into()), Value::Bool(true)),
+                    (Value::Text("lt".into()), Value::Integer(1234)),
+                    (Value::Text("la".into()), Value::Text("127.0.0.1:1883".into())),
+                ].into_iter().collect())).unwrap();
+                let expected = expected_session.clone();
+                let broker = task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    assert_eq!(read_packet(&mut stream).await.0 >> 4, 1);
+                    stream.write_all(&[0x20, 2, 0, 0]).await.unwrap();
+                    let (header, body) = read_packet(&mut stream).await;
+                    assert_eq!(header >> 4, 8);
+                    stream.write_all(&[0x90, 5, body[0], body[1], 1, 1, 1]).await.unwrap();
+                    let mut last_id = 0;
+                    for method in ["sl", "sr", "cs"] {
+                        let (header, body) = read_packet(&mut stream).await;
+                        assert_eq!(header, 0x32);
+                        let topic_length = usize::from(u16::from_be_bytes([body[0], body[1]]));
+                        assert_eq!(&body[2..2 + topic_length], DEVICE_OUTBOX.as_bytes());
+                        let offset = 2 + topic_length;
+                        let packet_id = &body[offset..offset + 2];
+                        stream.write_all(&[0x40, 2, packet_id[0], packet_id[1]]).await.unwrap();
+                        let envelope = peer.decrypt_into(&device, &body[offset + 2..]).unwrap();
+                        let message: WireMessage = serde_cbor::from_slice(&envelope).unwrap();
+                        assert_eq!(message.recipient, *peer.id());
+                        assert_eq!(message.message_type, crate::messaging::message::MessageType::ControlMessage as u8);
+                        assert!(message.from.is_none());
+                        let Value::Bytes(payload) = message.payload else { panic!("RPC payload should be binary") };
+                        let request: RpcRequest = serde_cbor::from_slice(&payload).unwrap();
+                        assert_eq!(request.method, method);
+                        assert!(request.id > last_id);
+                        last_id = request.id;
+                        let result = match method {
+                            "sl" => {
+                                assert!(request.params.is_none());
+                                Some(serde_cbor::value::to_value(vec![expected.clone()]).unwrap())
+                            }
+                            "sr" => {
+                                assert_eq!(request.params, Some(serde_cbor::value::to_value(other_device).unwrap()));
+                                None
+                            }
+                            "cs" => {
+                                assert_eq!(request.params, Some(Value::Integer(0)));
+                                Some(serde_cbor::value::to_value(&sync).unwrap())
+                            }
+                            _ => unreachable!(),
+                        };
+                        let response = RpcResponse { id: request.id, method: method.into(), result, error: None };
+                        let wire = WireMessage {
+                            version: MESSAGE_VERSION, id: Id::random(), recipient: user,
+                            from: Some(*peer.id()), created_at: request.id,
+                            message_type: crate::messaging::message::MessageType::ControlMessage as u8,
+                            payload: Value::Bytes(serde_cbor::to_vec(&response).unwrap()),
+                        };
+                        let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();
+                        publish(&mut stream, DEVICE_INBOX, &payload).await;
+                        if method == "sr" {
+                            let notification = Notification {
+                                id: Id::random(), source: other_device, timestamp: request.id, event: "cs".into(),
+                                body: Some(serde_cbor::value::to_value(ContactSync {
+                                    revision: 2, kind: 1, contacts: vec![],
+                                    mutations: vec![ContactMutation { revision: 1, op: "c".into(), data: None }],
+                                }).unwrap()),
+                            };
+                            let wire = WireMessage {
+                                version: MESSAGE_VERSION, id: Id::random(), recipient: user,
+                                from: Some(*peer.id()), created_at: request.id,
+                                message_type: crate::messaging::message::MessageType::StateMessage as u8,
+                                payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
+                            };
+                            let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();
+                            publish(&mut stream, USER_INBOX, &payload).await;
+                        }
+                    }
+                    let mut buffer = [0; 1];
+                    if let Err(error) = stream.read(&mut buffer).await {
+                        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+                    }
+                });
+                session.start().await.unwrap();
+                while !session.is_ready() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                assert_eq!(session.get_sessions().await.unwrap(), vec![expected_session]);
+                assert!(session.revoke_session(session.device_id()).await.is_err());
+                session.revoke_session(&other_device).await.unwrap();
+                while session.contacts_revision.get() != 2 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                assert_eq!(session.contacts_revision.get(), 2);
+                assert_eq!(session.friend_sessions.lock().unwrap().get(&friend).unwrap().id(), &Id::from(key.public_key()));
+                assert!(observed.events.lock().unwrap().contains(&("add", friend)));
+                session.stop().await.unwrap();
+                broker.await.unwrap();
+                assert!(session.pending_rpc.borrow().is_empty());
+            }).await.unwrap();
+        }).await;
+    }
+}

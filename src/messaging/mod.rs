@@ -46,3 +46,11 @@ pub use message::{
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
 pub use session_info::SessionInfo;
+
+#[cfg(test)]
+mod unitests {
+    mod test_message;
+   // mod test_mqtt;
+   // mod test_session;
+   // mod test_verticle;
+}

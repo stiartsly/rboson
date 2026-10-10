@@ -1,4 +1,5 @@
 use log::{debug, error, info, trace, warn};
+use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use rumqttc::{
     tokio_rustls::rustls::{
         client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -13,7 +14,7 @@ use serde_cbor::Value;
 use sha2::{Digest, Sha256};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::Path,
     pin::Pin,
     rc::Rc,
@@ -51,6 +52,117 @@ const DEVICE_OUTBOX: &str = "d/o";
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 const MESSAGE_VERSION: u8 = 2;
 const HANDSHAKE_MESSAGE: u8 = 0;
+const RPC_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RpcRequest {
+    id: i64,
+    #[serde(rename = "m")]
+    method: String,
+    #[serde(rename = "p", skip_serializing_if = "Option::is_none")]
+    params: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RpcResponse {
+    id: i64,
+    #[serde(rename = "m")]
+    method: String,
+    #[serde(rename = "r", default, skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(rename = "e", default, skip_serializing_if = "Option::is_none")]
+    error: Option<RpcError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RpcError {
+    #[serde(rename = "c")]
+    code: i32,
+    #[serde(rename = "m")]
+    message: String,
+}
+
+struct PendingRpc {
+    method: String,
+    complete: tokio::sync::oneshot::Sender<StdResult<Value, String>>,
+}
+
+struct RpcRegistration<'a> {
+    pending: &'a RefCell<HashMap<i64, PendingRpc>>,
+    id: i64,
+}
+
+impl Drop for RpcRegistration<'_> {
+    fn drop(&mut self) {
+        self.pending.borrow_mut().remove(&self.id);
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Notification {
+    id: Id,
+    #[serde(rename = "s")]
+    source: Id,
+    #[serde(rename = "t")]
+    timestamp: i64,
+    #[serde(rename = "e")]
+    event: String,
+    #[serde(rename = "b", default, skip_serializing_if = "Option::is_none")]
+    body: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ContactSync {
+    #[serde(rename = "v")]
+    revision: i32,
+    #[serde(rename = "t")]
+    kind: u8,
+    #[serde(rename = "d", default)]
+    mutations: Vec<ContactMutation>,
+    #[serde(rename = "s", default)]
+    contacts: Vec<OpaqueContact>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ContactMutation {
+    #[serde(rename = "v")]
+    revision: i32,
+    op: String,
+    #[serde(rename = "d", default, skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpaqueContact {
+    id: Id,
+    #[serde(rename = "v")]
+    revision: i32,
+    #[serde(rename = "d")]
+    data: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ContactData {
+    id: Id,
+    #[serde(rename = "t")]
+    kind: u8,
+    #[serde(rename = "sk", default)]
+    session_key: Option<Value>,
+    #[serde(rename = "n", default)]
+    name: Option<String>,
+    #[serde(rename = "r", default)]
+    remark: Option<String>,
+    #[serde(rename = "ts", default)]
+    tags: Option<String>,
+    #[serde(rename = "m", default)]
+    muted: bool,
+    #[serde(rename = "b", default)]
+    blocked: bool,
+    #[serde(rename = "c")]
+    created_at: i64,
+    #[serde(rename = "u")]
+    updated_at: i64,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WireMessage {
@@ -174,11 +286,16 @@ pub(crate) struct MqttSession {
     mqtt_task: RefCell<Option<task::JoinHandle<()>>>,
     lifecycle: tokio::sync::Mutex<()>,
     requests: tokio::sync::Mutex<()>,
+    origin_clock: Arc<std::sync::Mutex<i64>>,
+    pending_rpc: RefCell<HashMap<i64, PendingRpc>>,
+    contacts_revision: Cell<i32>,
+    contact_sync_needed: Cell<bool>,
 
     user_identity: CryptoIdentity,
     device_identity: CryptoIdentity,
 
     friend_sessions: Arc<std::sync::Mutex<HashMap<Id, CryptoIdentity>>>,
+    blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
 
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, PhotonContact>>,
@@ -212,9 +329,14 @@ impl MqttSession {
             mqtt_task: RefCell::new(None),
             lifecycle: tokio::sync::Mutex::new(()),
             requests: tokio::sync::Mutex::new(()),
+            origin_clock: Arc::new(std::sync::Mutex::new(0)),
+            pending_rpc: RefCell::new(HashMap::new()),
+            contacts_revision: Cell::new(0),
+            contact_sync_needed: Cell::new(false),
             user_identity,
             device_identity,
             friend_sessions: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            blocked_contacts: Arc::new(std::sync::Mutex::new(HashSet::new())),
             friend_requests: RefCell::new(HashMap::new()),
             contacts: RefCell::new(HashMap::new()),
 
@@ -225,6 +347,307 @@ impl MqttSession {
             session_listener: options.session_listener.clone(),
             friend_request_listener: options.friend_request_listener.clone(),
         }))
+    }
+
+    fn origin_timestamp(clock: &std::sync::Mutex<i64>) -> Result<i64> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?;
+        let now = i64::try_from(now.as_millis())
+            .map_err(|_| StateError::new("System clock timestamp is out of range"))?;
+        let mut previous = clock.lock().unwrap();
+        let next = previous.checked_add(1)
+            .ok_or_else(|| StateError::new("Message timestamp is exhausted"))?;
+        *previous = now.max(next);
+        Ok(*previous)
+    }
+
+    fn validate_outbox_packet(payload_len: usize) -> Result<()> {
+        let remaining = payload_len.checked_add(2 + DEVICE_OUTBOX.len() + 2)
+            .ok_or_else(|| ArgumentError::new("MQTT packet size is out of range"))?;
+        let mut value = remaining;
+        let mut header = 1;
+        loop {
+            header += 1;
+            if value < 128 {
+                break;
+            }
+            value /= 128;
+        }
+        if remaining > MAX_MESSAGE_SIZE.saturating_sub(header) {
+            return Err(ArgumentError::new("Message exceeds the MQTT packet size limit"));
+        }
+        Ok(())
+    }
+
+    async fn rpc_call(&self, method: &str, params: Option<Value>) -> Result<Value> {
+        if !self.connected.get() {
+            return Err(StateError::new("Messaging client is not connected"));
+        }
+        let mqtt = self.mqtt.lock().unwrap().clone()
+            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
+        let timestamp = Self::origin_timestamp(&self.origin_clock)?;
+        let request = RpcRequest { id: timestamp, method: method.into(), params };
+        let request = serde_cbor::to_vec(&request)
+            .map_err(|error| EncodingError::new(format!("Encoding RPC request failed: {error}")))?;
+        let message = WireMessage {
+            version: MESSAGE_VERSION,
+            id: Self::message_id(self.device_id(), timestamp)?,
+            recipient: *self.peer_id(),
+            message_type: crate::messaging::message::MessageType::ControlMessage as u8,
+            from: None,
+            created_at: timestamp,
+            payload: Value::Bytes(request),
+        };
+        let message = serde_cbor::to_vec(&message)
+            .map_err(|error| EncodingError::new(format!("Encoding RPC envelope failed: {error}")))?;
+        let payload = self.device_identity.encrypt_into(self.peer_id(), &message)
+            .map_err(|error| AuthenticationError::new(format!("Encrypting RPC envelope failed: {error}")))?;
+        Self::validate_outbox_packet(payload.len())?;
+        let (complete, response) = tokio::sync::oneshot::channel();
+        self.pending_rpc.borrow_mut().insert(timestamp, PendingRpc { method: method.into(), complete });
+        let _registration = RpcRegistration { pending: &self.pending_rpc, id: timestamp };
+        tokio::time::timeout(RPC_TIMEOUT, async {
+            mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, payload).await
+                .map_err(|error| StateError::new(format!("Publishing RPC request failed: {error}")))?;
+            response.await
+                .map_err(|_| StateError::new("RPC response channel closed"))?
+                .map_err(|error| StateError::new(error).into())
+        }).await.map_err(|_| StateError::new(format!("RPC '{method}' timed out")))?
+    }
+
+    fn fail_pending_rpc(&self, reason: &str) {
+        let pending = std::mem::take(&mut *self.pending_rpc.borrow_mut());
+        for (_, call) in pending {
+            let _ = call.complete.send(Err(reason.into()));
+        }
+    }
+
+    fn handle_rpc_response(&self, payload: Value) -> Result<()> {
+        let Value::Bytes(payload) = payload else {
+            return Err(EncodingError::new("RPC response payload is not binary"));
+        };
+        let response: RpcResponse = serde_cbor::from_slice(&payload)
+            .map_err(|error| EncodingError::new(format!("Malformed RPC response: {error}")))?;
+        let Some(call) = self.pending_rpc.borrow_mut().remove(&response.id) else {
+            debug!("Ignoring RPC response {} without a pending call", response.id);
+            return Ok(());
+        };
+        let result = if call.method != response.method {
+            Err(format!("RPC response method '{}' does not match '{}'", response.method, call.method))
+        } else if response.result.is_some() && response.error.is_some() {
+            Err("RPC response contains both a result and an error".into())
+        } else if let Some(error) = response.error {
+            Err(format!("RPC '{}' failed ({}): {}", call.method, error.code, error.message))
+        } else {
+            Ok(response.result.unwrap_or(Value::Null))
+        };
+        if let Err(error) = &result {
+            warn!("{error}");
+        }
+        let _ = call.complete.send(result);
+        Ok(())
+    }
+
+    fn handle_notification(&self, payload: Value) -> Result<()> {
+        let Value::Bytes(payload) = payload else {
+            return Err(EncodingError::new("Notification payload is not binary"));
+        };
+        let notification: Notification = serde_cbor::from_slice(&payload)
+            .map_err(|error| EncodingError::new(format!("Malformed notification: {error}")))?;
+        if notification.timestamp < 0 {
+            return Err(EncodingError::new("Notification timestamp is negative"));
+        }
+        let body = notification.body
+            .ok_or_else(|| EncodingError::new("Notification body is missing"))?;
+        match notification.event.as_str() {
+            "sn" => {
+                let session: SessionInfo = serde_cbor::value::from_value(body)
+                    .map_err(|error| EncodingError::new(format!("Malformed session notification: {error}")))?;
+                self.session_listener.on_new_session(&session);
+            }
+            "cs" => {
+                let sync: ContactSync = serde_cbor::value::from_value(body)
+                    .map_err(|error| EncodingError::new(format!("Malformed contact sync: {error}")))?;
+                self.apply_contact_sync(sync)?;
+            }
+            event => return Err(EncodingError::new(format!("Unsupported home-peer notification '{event}'"))),
+        }
+        Ok(())
+    }
+
+    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(PhotonContact, Option<CryptoIdentity>)> {
+        if opaque.revision < 0 {
+            return Err(EncodingError::new("Contact revision is negative"));
+        }
+        let Value::Bytes(encrypted) = opaque.data else {
+            return Err(EncodingError::new("Opaque contact data is not binary"));
+        };
+        let plaintext = self.user_identity.decrypt_into(self.user_id(), &encrypted)
+            .map_err(|error| AuthenticationError::new(format!("Decrypting contact failed: {error}")))?;
+        let data: ContactData = serde_cbor::from_slice(&plaintext)
+            .map_err(|error| EncodingError::new(format!("Malformed contact data: {error}")))?;
+        if data.id != opaque.id || data.created_at < 0 || data.updated_at < data.created_at {
+            return Err(EncodingError::new("Invalid contact identity or timestamps"));
+        }
+        let contact_type = match data.kind {
+            0 => ContactType::Auto,
+            1 => ContactType::Friend,
+            2 => ContactType::Channel,
+            _ => return Err(EncodingError::new("Unknown contact type")),
+        };
+        let session = match data.session_key {
+            Some(Value::Bytes(encrypted)) => {
+                let key = self.user_identity.decrypt_into(self.user_id(), &encrypted)
+                    .map_err(|error| AuthenticationError::new(format!("Decrypting contact session key failed: {error}")))?;
+                Some(CryptoIdentity::try_from(key.as_slice())
+                    .map_err(|error| AuthenticationError::new(format!("Invalid contact session key: {error}")))?)
+            }
+            None if contact_type == ContactType::Auto => None,
+            _ => return Err(EncodingError::new("Contact session key is missing or malformed")),
+        };
+        Ok((PhotonContact {
+            id: data.id,
+            contact_type,
+            name: data.name,
+            remark: data.remark,
+            tags: data.tags,
+            muted: data.muted,
+            blocked: data.blocked,
+            created_at: data.created_at,
+            updated_at: data.updated_at,
+            revision: opaque.revision,
+        }, session))
+    }
+
+    fn apply_contact_sync(&self, sync: ContactSync) -> Result<()> {
+        let original_revision = self.contacts_revision.get();
+        if sync.revision < 0 {
+            return Err(EncodingError::new("Contact sync revision is negative"));
+        }
+        let previous = self.contacts.borrow().clone();
+        let mut contacts = previous.clone();
+        let mut sessions = self.friend_sessions.lock().unwrap().clone();
+        let mut revision = original_revision;
+        match sync.kind {
+            0 => {
+                if !sync.contacts.is_empty() || !sync.mutations.is_empty() {
+                    return Err(EncodingError::new("Up-to-date sync contains changes"));
+                }
+                if sync.revision != revision {
+                    self.contact_sync_needed.set(sync.revision > revision);
+                    return Err(StateError::new("Contact sync revision does not match local state"));
+                }
+                return Ok(());
+            }
+            2 => {
+                if !sync.mutations.is_empty() || sync.revision < revision {
+                    return Err(StateError::new("Invalid or outdated contact snapshot"));
+                }
+                contacts.clear();
+                sessions.clear();
+                for opaque in sync.contacts {
+                    if opaque.revision > sync.revision {
+                        return Err(EncodingError::new("Contact revision exceeds snapshot revision"));
+                    }
+                    let (contact, session) = self.decode_contact(opaque)?;
+                    if contacts.contains_key(&contact.id) {
+                        return Err(EncodingError::new("Snapshot contains duplicate contacts"));
+                    }
+                    if let Some(session) = session {
+                        sessions.insert(contact.id, session);
+                    }
+                    contacts.insert(contact.id, contact);
+                }
+                revision = sync.revision;
+            }
+            1 => {
+                if !sync.contacts.is_empty() || sync.mutations.is_empty() {
+                    return Err(EncodingError::new("Invalid contact delta"));
+                }
+                for mutation in sync.mutations {
+                    if mutation.revision < 0 {
+                        return Err(EncodingError::new("Contact mutation revision is negative"));
+                    }
+                    if mutation.revision < revision {
+                        continue;
+                    }
+                    if mutation.revision > revision {
+                        self.contact_sync_needed.set(true);
+                        return Err(StateError::new("Contact delta has a revision gap"));
+                    }
+                    let next = revision.checked_add(1)
+                        .ok_or_else(|| EncodingError::new("Contact revision is exhausted"))?;
+                    match mutation.op.as_str() {
+                        "a" | "u" => {
+                            let opaque: OpaqueContact = serde_cbor::value::from_value(mutation.data
+                                .ok_or_else(|| EncodingError::new("Contact mutation data is missing"))?)
+                                .map_err(|error| EncodingError::new(format!("Malformed contact mutation: {error}")))?;
+                            if opaque.revision != next {
+                                return Err(EncodingError::new("Contact mutation revision is inconsistent"));
+                            }
+                            let (contact, session) = self.decode_contact(opaque)?;
+                            sessions.remove(&contact.id);
+                            if let Some(session) = session {
+                                sessions.insert(contact.id, session);
+                            }
+                            contacts.insert(contact.id, contact);
+                        }
+                        "r" => {
+                            let ids: Vec<Id> = serde_cbor::value::from_value(mutation.data
+                                .ok_or_else(|| EncodingError::new("Contact removal IDs are missing"))?)
+                                .map_err(|error| EncodingError::new(format!("Malformed contact removal: {error}")))?;
+                            for id in ids {
+                                contacts.remove(&id);
+                                sessions.remove(&id);
+                            }
+                        }
+                        "c" => {
+                            if mutation.data.is_some_and(|data| data != Value::Null) {
+                                return Err(EncodingError::new("Contact clear contains unexpected data"));
+                            }
+                            contacts.clear();
+                            sessions.clear();
+                        }
+                        _ => return Err(EncodingError::new("Unknown contact mutation operation")),
+                    }
+                    revision = next;
+                }
+                if revision < sync.revision || (revision > sync.revision && revision > original_revision) {
+                    return Err(EncodingError::new("Contact delta final revision is inconsistent"));
+                }
+            }
+            _ => return Err(EncodingError::new("Unknown contact sync type")),
+        }
+        let removed: Vec<_> = previous.keys().filter(|id| !contacts.contains_key(id)).copied().collect();
+        let added: Vec<_> = contacts.values().filter(|contact| !previous.contains_key(&contact.id)).cloned().collect();
+        let updated: Vec<Box<dyn Contact>> = contacts.values().filter(|contact| {
+            previous.get(&contact.id).is_some_and(|old| old.revision != contact.revision
+                || old.updated_at != contact.updated_at || old.blocked != contact.blocked
+                || old.muted != contact.muted || old.name != contact.name || old.remark != contact.remark
+                || old.tags != contact.tags || old.contact_type != contact.contact_type)
+        }).cloned().map(|contact| Box::new(contact) as Box<dyn Contact>).collect();
+        *self.blocked_contacts.lock().unwrap() = contacts.values()
+            .filter(|contact| contact.blocked).map(|contact| contact.id).collect();
+        *self.contacts.borrow_mut() = contacts;
+        *self.friend_sessions.lock().unwrap() = sessions;
+        self.contacts_revision.set(revision);
+        if !removed.is_empty() {
+            self.contact_listener.on_contacts_removed(&removed);
+        }
+        for contact in added {
+            self.contact_listener.on_contact_added(&contact);
+        }
+        if !updated.is_empty() {
+            self.contact_listener.on_contacts_updated(&updated);
+        }
+        Ok(())
+    }
+
+    async fn sync_contacts(&self) -> Result<()> {
+        let result = self.rpc_call("cs", Some(Value::Integer(self.contacts_revision.get().into()))).await?;
+        let sync: ContactSync = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Malformed contact sync response: {error}")))?;
+        self.apply_contact_sync(sync)
     }
 
     fn password(&self) -> Result<String> {
@@ -246,7 +669,7 @@ impl MqttSession {
             "Generated MQTT auth password for device {}",
             self.device_identity.id()
         );
-        Ok(format!("{base_password}?contactsRevision=0"))
+        Ok(format!("{base_password}?contactsRevision={}", self.contacts_revision.get()))
     }
 
     fn notify_connection(&self, callback: impl Fn(&dyn ConnectionListener)) {
@@ -312,7 +735,12 @@ impl MqttSession {
             publish.topic,
             publish.payload.len()
         );
-        if publish.topic != USER_INBOX && publish.topic != USER_OUTBOX {
+        if publish.payload.len() > MAX_MESSAGE_SIZE {
+            warn!("Ignoring oversized MQTT message on '{}'", publish.topic);
+            return;
+        }
+        if publish.topic != USER_INBOX && publish.topic != USER_OUTBOX && publish.topic != DEVICE_INBOX {
+            warn!("Ignoring MQTT message on unexpected topic '{}'", publish.topic);
             return;
         }
 
@@ -338,11 +766,29 @@ impl MqttSession {
         let from = message
             .from
             .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
+        if message.created_at < 0 {
+            return Err(EncodingError::new("Message timestamp is negative"));
+        }
+        if topic == DEVICE_INBOX {
+            if message.message_type != crate::messaging::message::MessageType::ControlMessage as u8
+                || from != *peer_id
+                || (message.recipient != *self.user_id() && message.recipient != *self.device_id())
+            {
+                return Err(EncodingError::new("Invalid device RPC response"));
+            }
+            return self.handle_rpc_response(message.payload);
+        }
+        if message.message_type == crate::messaging::message::MessageType::StateMessage as u8 {
+            if topic != USER_INBOX || from != *peer_id || message.recipient != *self.user_id() {
+                return Err(EncodingError::new("Invalid home-peer notification"));
+            }
+            return self.handle_notification(message.payload);
+        }
         if message.message_type != HANDSHAKE_MESSAGE {
             if message.message_type == crate::messaging::message::MessageType::ContentMessage as u8 {
                 return self.handle_content_message(topic, message, from);
             }
-            return Ok(());
+            return Err(EncodingError::new("Unsupported user message type"));
         }
 
         let originated_here = message.id == Self::message_id(self.device_identity.id(), message.created_at)?;
@@ -417,7 +863,7 @@ impl MqttSession {
                 }
                 let session_identity = CryptoIdentity::try_from(session_key.as_slice())
                     .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
-                self.friend_sessions.lock().unwrap().insert(friend_id, session_identity);
+                self.friend_sessions.lock().unwrap().entry(friend_id).or_insert(session_identity);
                 self.on_friend_request_accepted(friend_id, handshake.timestamp, is_inbox);
             }
         }
@@ -425,8 +871,18 @@ impl MqttSession {
     }
 
     fn handle_content_message(&self, topic: &str, message: WireMessage, from: Id) -> Result<()> {
-        if topic != USER_INBOX {
-            return Ok(());
+        let outbox = topic == USER_OUTBOX;
+        if outbox && from != *self.user_id() {
+            return Err(EncodingError::new("Outbox message has an unexpected sender"));
+        }
+        let contact_id = if outbox || message.recipient != *self.user_id() { message.recipient } else { from };
+        if self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.blocked) {
+            return Err(StateError::new("Message is from a blocked contact"));
+        }
+        if !outbox && message.recipient != *self.user_id()
+            && !self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.contact_type == ContactType::Channel)
+        {
+            return Err(EncodingError::new("Content message has an unexpected recipient"));
         }
         let encrypted_content = match message.payload {
             Value::Bytes(bytes) => bytes,
@@ -434,10 +890,13 @@ impl MqttSession {
         };
         let sessions = self.friend_sessions.lock().unwrap();
         let session = sessions
-            .get(&from)
-            .ok_or_else(|| StateError::new(format!("No friend session for {from}")))?;
-        let content_bytes = session
-            .decrypt_into(&from, &encrypted_content)
+            .get(&contact_id)
+            .ok_or_else(|| StateError::new(format!("No friend session for {contact_id}")))?;
+        let content_bytes = if outbox {
+            self.user_identity.decrypt_into(session.id(), &encrypted_content)
+        } else {
+            session.decrypt_into(&from, &encrypted_content)
+        }
             .map_err(|error| AuthenticationError::new(format!("Decrypting content failed: {error}")))?;
         let wire: MessageContent = serde_cbor::from_slice(&content_bytes)
             .map_err(|error| EncodingError::new(format!("Malformed message content: {error}")))?;
@@ -456,16 +915,25 @@ impl MqttSession {
         }
         let created_at = UNIX_EPOCH + Duration::from_millis(message.created_at.max(0) as u64);
         drop(sessions);
-        self.message_listener.on_message(&PhotonMessage {
+        let message = PhotonMessage {
             id: message.id,
             recipient: message.recipient,
             from: Some(from),
             created_at,
-            received_at: Some(SystemTime::now()),
-            sent_at: None,
+            received_at: if outbox { None } else { Some(SystemTime::now()) },
+            sent_at: if outbox { Some(SystemTime::now()) } else { None },
             payload: content_bytes,
             content: crate::messaging::message::Content::_new(headers, body),
-        });
+        };
+        if outbox {
+            if message.id != Self::message_id(self.device_id(), message.created_at.duration_since(UNIX_EPOCH)
+                .map_err(|error| EncodingError::new(format!("Invalid message timestamp: {error}")))?.as_millis() as i64)?
+            {
+                self.message_listener.on_sent(&message);
+            }
+        } else {
+            self.message_listener.on_message(&message);
+        }
         Ok(())
     }
 
@@ -489,7 +957,7 @@ impl MqttSession {
             return;
         }
         if let Some(contact) = self.contacts.borrow().get(&user_id) {
-            if contact.contact_type == ContactType::Friend
+            if contact.blocked || contact.contact_type == ContactType::Friend
                 || contact.contact_type == ContactType::Channel
             {
                 return;
@@ -543,6 +1011,12 @@ impl MqttSession {
             request.accept(accepted_at);
         }
 
+        if self.contacts.borrow().get(&user_id).is_some_and(|contact| contact.contact_type == ContactType::Friend) {
+            if notify {
+                self.friend_request_listener.on_friend_request_accepted(&user_id);
+            }
+            return;
+        }
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
@@ -572,6 +1046,11 @@ impl MqttSession {
         let request = requests.get(user_id).ok_or_else(|| {
             ArgumentError::new(format!("No friend request found for {user_id}"))
         })?;
+        if self.contacts.borrow().get(user_id)
+            .is_some_and(|contact| contact.blocked || contact.contact_type == ContactType::Channel)
+        {
+            return Err(ArgumentError::new("Cannot accept a friend request from a blocked user or channel"));
+        }
         if request.initiator_id() != initiator_id {
             return Err(ArgumentError::new("Friend request has an unexpected initiator"));
         }
@@ -596,10 +1075,7 @@ impl MqttSession {
             .lock().unwrap()
             .clone()
             .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| StateError::new(format!("System clock error: {error}")))?
-            .as_millis() as i64;
+        let timestamp = Self::origin_timestamp(&self.origin_clock)?;
         let handshake = Handshake {
             timestamp,
             handshake_type,
@@ -628,6 +1104,7 @@ impl MqttSession {
             .device_identity
             .encrypt_into(peer_id, &message_bytes)
             .map_err(|error| AuthenticationError::new(format!("Encrypting message envelope failed: {error}")))?;
+        Self::validate_outbox_packet(mqtt_payload.len())?;
 
         mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, mqtt_payload)
             .await
@@ -760,11 +1237,22 @@ impl MqttSession {
     }
 
     pub(crate) async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
-        Err(NotImplemented::new("get_sessions"))
+        let result = self.rpc_call("sl", None).await?;
+        serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Malformed session list response: {error}")).into())
     }
 
-    pub(crate) async fn revoke_session(&self, _device_id: &Id) -> Result<()> {
-        Err(NotImplemented::new("revoke_session"))
+    pub(crate) async fn revoke_session(&self, device_id: &Id) -> Result<()> {
+        if device_id == self.device_id() {
+            return Err(ArgumentError::new("Cannot revoke the current session"));
+        }
+        let params = serde_cbor::value::to_value(device_id)
+            .map_err(|error| EncodingError::new(format!("Encoding session ID failed: {error}")))?;
+        let result = self.rpc_call("sr", Some(params)).await?;
+        if result != Value::Null {
+            return Err(EncodingError::new("Session revoke response contains an unexpected result"));
+        }
+        Ok(())
     }
 
     pub(crate) async fn friend_request(
@@ -997,6 +1485,11 @@ impl MqttSession {
             revision: contact.revision() + 1,
         };
         self.contacts.borrow_mut().insert(updated.id, updated.clone());
+        if updated.blocked {
+            self.blocked_contacts.lock().unwrap().insert(updated.id);
+        } else {
+            self.blocked_contacts.lock().unwrap().remove(&updated.id);
+        }
         self.contact_listener
             .on_contacts_updated(&[Box::new(updated) as Box<dyn Contact>]);
         Ok(())
@@ -1005,6 +1498,7 @@ impl MqttSession {
     pub(crate) async fn remove_contact(&self, id: &Id) -> Result<()> {
         let _request = self.requests.lock().await;
         self.friend_sessions.lock().unwrap().remove(id);
+        self.blocked_contacts.lock().unwrap().remove(id);
         self.contacts.borrow_mut().remove(id);
         self.contact_listener.on_contacts_removed(&[*id]);
         Ok(())
@@ -1014,6 +1508,7 @@ impl MqttSession {
         let _request = self.requests.lock().await;
         for id in ids {
             self.friend_sessions.lock().unwrap().remove(id);
+            self.blocked_contacts.lock().unwrap().remove(id);
             self.contacts.borrow_mut().remove(id);
         }
         self.contact_listener.on_contacts_removed(ids);
@@ -1023,6 +1518,7 @@ impl MqttSession {
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
         let _request = self.requests.lock().await;
         self.friend_sessions.lock().unwrap().clear();
+        self.blocked_contacts.lock().unwrap().clear();
         self.contacts.borrow_mut().clear();
         self.contact_listener.on_contacts_cleared();
         Ok(())
@@ -1032,10 +1528,24 @@ impl MqttSession {
 impl MqttSession {
     async fn run_mqtt(self: Rc<Self>, mqtt: AsyncClient, mut eventloop: EventLoop) {
         debug!("MQTT event loop started");
+        let mut syncs = FuturesUnordered::new();
         while self.running.get() {
-            match eventloop.poll().await {
+            if syncs.is_empty() && self.contact_sync_needed.replace(false) {
+                let session = self.clone();
+                syncs.push(async move {
+                    if let Err(error) = session.sync_contacts().await {
+                        warn!("Contact resynchronization failed: {error}");
+                    }
+                }.boxed_local());
+            }
+            let event = tokio::select! {
+                event = eventloop.poll() => event,
+                Some(_) = syncs.next(), if !syncs.is_empty() => continue,
+            };
+            match event {
                 Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
                     if connack.code == rumqttc::ConnectReturnCode::Success {
+                        self.ready.set(false);
                         info!(
                             "Connected to messaging server (session_present: {})",
                             connack.session_present
@@ -1061,6 +1571,7 @@ impl MqttSession {
                         }
                     } else {
                         error!("Messaging MQTT ConnAck error code: {:?}", connack.code);
+                        self.running.set(false);
                     }
                 }
                 Ok(Event::Incoming(Incoming::SubAck(suback))) => {
@@ -1068,6 +1579,14 @@ impl MqttSession {
                         "Received SubAck for packet {:?}, return codes: {:?}",
                         suback.pkid, suback.return_codes
                     );
+                    if suback.return_codes.len() != 3 || suback.return_codes.iter()
+                        .any(|code| !matches!(code, rumqttc::SubscribeReasonCode::Success(_)))
+                    {
+                        error!("Messaging MQTT topic subscription was rejected");
+                        self.running.set(false);
+                        self.ready.set(false);
+                        continue;
+                    }
                     if !self.connected.replace(true) {
                         self.notify_connection(|l| l.on_connected());
                     }
@@ -1099,10 +1618,21 @@ impl MqttSession {
                 }
                 Err(error) => {
                     self.ready.set(false);
+                    self.fail_pending_rpc(&format!("Messaging MQTT connection failed: {error}"));
                     if self.connected.replace(false) {
                         self.notify_connection(|l| l.on_disconnected());
                     }
                     if self.running.get() {
+                        match self.password() {
+                            Ok(password) => {
+                                eventloop.mqtt_options.set_credentials(self.user_id().to_base58(), password);
+                            }
+                            Err(error) => {
+                                error!("Failed to refresh MQTT credentials: {error}");
+                                self.running.set(false);
+                                continue;
+                            }
+                        }
                         warn!("Messaging MQTT connection error: {error}");
                         debug!("Waiting 2s before reconnecting...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -1111,6 +1641,8 @@ impl MqttSession {
             }
         }
         debug!("MQTT event loop exited");
+        self.fail_pending_rpc("Messaging MQTT event loop stopped");
+        self.mqtt.lock().unwrap().take();
         self.ready.set(false);
         if self.connected.replace(false) {
             self.notify_connection(|l| l.on_disconnected());
@@ -1150,6 +1682,7 @@ impl MqttSession {
 
     pub(crate) async fn stop(&self) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
+        self.fail_pending_rpc("Messaging session stopped");
         let _request = self.requests.lock().await;
         let result = self.stop_mqtt().await;
         self.running.set(false);
@@ -1186,6 +1719,8 @@ impl MqttSession {
             user_identity: self.user_identity.clone(),
             device_identity: self.device_identity.clone(),
             friend_sessions: self.friend_sessions.clone(),
+            blocked_contacts: self.blocked_contacts.clone(),
+            origin_clock: self.origin_clock.clone(),
             peer_id: *self.peer_id(),
             content_type: None,
             content_disposition: None,
@@ -1205,6 +1740,8 @@ struct SessionMessageBuilder {
     user_identity: CryptoIdentity,
     device_identity: CryptoIdentity,
     friend_sessions: Arc<std::sync::Mutex<HashMap<Id, CryptoIdentity>>>,
+    blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
+    origin_clock: Arc<std::sync::Mutex<i64>>,
     peer_id: Id,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
@@ -1250,6 +1787,9 @@ impl MessageBuilder for SessionMessageBuilder {
         Box::pin(async move {
             let recipient = self.recipient
                 .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
+            if self.blocked_contacts.lock().unwrap().contains(&recipient) {
+                return Err(StateError::new("Cannot send a message to a blocked contact").into());
+            }
             let mqtt = self.mqtt.lock().unwrap().clone()
                 .ok_or_else(|| StateError::new("Messaging client is not running"))?;
             let friend_identity = self.friend_sessions.lock().unwrap().get(&recipient).cloned()
@@ -1276,10 +1816,7 @@ impl MessageBuilder for SessionMessageBuilder {
                     serde_json::Value::String(disposition.value()),
                 );
             }
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|error| StateError::new(format!("System clock error: {error}")))?
-                .as_millis() as i64;
+            let timestamp = MqttSession::origin_timestamp(&self.origin_clock)?;
             let content = MessageContent {
                 headers: headers
                     .iter()
@@ -1319,6 +1856,7 @@ impl MessageBuilder for SessionMessageBuilder {
             let mqtt_payload = device_identity
                 .encrypt_into(&self.peer_id, &message_bytes)
                 .map_err(|error| AuthenticationError::new(format!("Encrypting message envelope failed: {error}")))?;
+            MqttSession::validate_outbox_packet(mqtt_payload.len())?;
             mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, mqtt_payload)
                 .await
                 .map_err(|error| StateError::new(format!("Publishing message failed: {error}")))?;
@@ -1336,9 +1874,3 @@ impl MessageBuilder for SessionMessageBuilder {
         })
     }
 }
-
-#[cfg(test)]
-include!("unitests/test_mqtt.rs");
-
-#[cfg(test)]
-include!("unitests/test_session.rs");

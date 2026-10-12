@@ -338,12 +338,17 @@ impl Client {
     pub async fn create_channel(
         &self,
         permission: Permission,
-        name: String,
-        notice: Option<String>,
-        announcement: Option<String>,
+        name: impl Into<String>,
+        notice: Option<impl Into<String>>,
+        announcement: Option<impl Into<String>>,
     ) -> Result<Box<dyn Channel>> {
         self.verticle()?
-            .create_channel(permission, name, notice, announcement)
+            .create_channel(
+                permission,
+                name.into(),
+                notice.map(Into::into),
+                announcement.map(Into::into)
+            )
             .await
     }
 

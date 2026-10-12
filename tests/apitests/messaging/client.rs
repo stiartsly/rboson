@@ -65,7 +65,7 @@ mod tests {
         }
     }
 
-    fn with_message_listener(
+    fn build_options_with_message_listener(
         options: Options,
         listener: impl MessageListener + 'static,
     ) -> Options {
@@ -356,12 +356,12 @@ mod tests {
         let sender = Client::new(options);
         let sender_id = sender.user_id().clone();
 
-        let options = Options::load(ALICE_YAML).unwrap();
         let (received_tx, mut received_rx) = mpsc::unbounded_channel();
-        let recipient = Client::new(with_message_listener(
-            options,
+        let options = build_options_with_message_listener(
+            Options::load(ALICE_YAML).unwrap(),
             MessageCapture { received: received_tx },
-        ));
+        );
+        let recipient = Client::new(options);
         let recipient_id = *recipient.user_id();
 
         assert_ne!(sender_id, recipient_id);
@@ -434,82 +434,180 @@ mod tests {
     #[serial]
     async fn test_channel_message() {
         let (received_tx, mut received_rx) = mpsc::unbounded_channel();
-        let bob = Client::new(with_message_listener(
-            Options::load(BOB_YAML).unwrap(),
-            ChannelMessageCapture { received: received_tx },
-        ));
-        let alice = Client::new(Options::load(ALICE_YAML).unwrap());
-        let bob_id = *bob.user_id();
-        let alice_id = *alice.user_id();
+        let options = build_options_with_message_listener(
+             Options::load(BOB_YAML).unwrap(),
+            ChannelMessageCapture { received: received_tx }
+        );
+        let bob = Client::new(options);
+        let bob_id = bob.user_id().clone();
+
+        let options = Options::load(ALICE_YAML).unwrap();
+        let alice = Client::new(options);
+        let alice_id = alice.user_id().clone();
+
         assert_ne!(bob_id, alice_id);
-        let (bob_start, alice_start) = tokio::join!(bob.start(), alice.start());
-        assert!(bob_start.is_ok(), "{:?}", bob_start.err());
-        assert!(alice_start.is_ok(), "{:?}", alice_start.err());
-        tokio::join!(wait_until_ready(&bob), wait_until_ready(&alice));
+        let (bob_start, alice_start) = tokio::join!(
+            bob.start(),
+            alice.start()
+        );
+        assert!(bob_start.is_ok());
+        assert!(alice_start.is_ok());
 
+        tokio::join!(
+            wait_until_ready(&bob),
+            wait_until_ready(&alice)
+        );
+
+        let mut created_channel_id = None;
+        let mut alice_joined = false;
         let routine = async {
-            bob.clear_contacts().await.unwrap();
-            alice.clear_contacts().await.unwrap();
-            bob.clear_friend_requests().await.unwrap();
-            alice.clear_friend_requests().await.unwrap();
-            let rc = bob.friend_request(alice_id, Some("channel test")).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            let request = bob.get_friend_request(alice_id).await.unwrap().unwrap();
-            wait_for_friend_request(&alice, bob_id, request.created_at(), false).await;
-            let rc = alice.accept_friend_request(bob_id).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            wait_for_friend_request(&bob, alice_id, request.created_at(), true).await;
-            assert!(bob.get_contact(&alice_id).await.unwrap().is_some());
-            assert!(alice.get_contact(&bob_id).await.unwrap().is_some());
+        let rc = bob.get_contacts().await;
+        assert!(rc.is_ok());
+        for contact in rc.unwrap() {
+            if contact.contact_type() == ContactType::Channel && contact.name() == Some("API channel test") {
+                let rc = bob.remove_channel(contact.id()).await;
+                assert!(rc.is_ok(), "Removing leftover testcase channel failed: {:?}", rc.err());
+            }
+        }
 
-            let rc = bob.create_channel(Permission::OwnerInvite, "API channel test".into(), None, None).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            let channel = rc.unwrap();
-            let channel_id = *channel.id();
-            assert!(channel.has_member(&bob_id));
-            let rc = bob.create_invite_ticket(&channel_id, Some(alice_id)).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            let rc = alice.join_channel(rc.unwrap()).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            let joined = rc.unwrap();
-            assert_eq!(joined.id(), &channel_id);
-            assert!(joined.has_member(&alice_id));
+        bob.clear_contacts().await.unwrap();
+        alice.clear_contacts().await.unwrap();
+        bob.clear_friend_requests().await.unwrap();
+        alice.clear_friend_requests().await.unwrap();
 
-            let body = "Alice channel message to Bob";
-            let rc = alice.message(Some(channel_id)).text_body(body).send().await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            let sent = rc.unwrap();
-            assert_eq!(sent.from(), Some(&alice_id));
-            assert_eq!(sent.recipient(), &channel_id);
-            let received = time::timeout(Duration::from_secs(15), received_rx.recv()).await;
-            assert!(received.is_ok(), "Bob should receive Alice's channel message");
-            let received = received.unwrap();
-            assert!(received.is_some(), "Message listener should remain open");
-            let (id, from, recipient, body_bytes) = received.unwrap();
-            assert_eq!(&id, sent.id());
-            assert_eq!(from, Some(alice_id));
-            assert_eq!(recipient, channel_id);
-            assert_eq!(body_bytes, sent.payload_as_content().map(|content| content.body().to_vec()));
-            assert_eq!(sent.payload_as_content().unwrap().as_text(), Some(body));
+        let rc = bob.friend_request(alice_id, Some("channel test")).await;
+        assert!(rc.is_ok());
+        let rc = bob.get_friend_request(alice_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.as_ref().unwrap().is_some());
 
-            let rc = alice.leave_channel(&channel_id).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            assert!(alice.get_contact(&channel_id).await.unwrap().is_none());
-            let rc = bob.remove_channel(&channel_id).await;
-            assert!(rc.is_ok(), "{:?}", rc.err());
-            assert!(bob.get_contact(&channel_id).await.unwrap().is_none());
-            bob.clear_contacts().await.unwrap();
-            alice.clear_contacts().await.unwrap();
-            bob.clear_friend_requests().await.unwrap();
-            alice.clear_friend_requests().await.unwrap();
+        let request = rc.unwrap().unwrap();
+        wait_for_friend_request(
+            &alice,
+            bob_id,
+            request.created_at(),
+            false
+        ).await;
+
+        let rc = alice.accept_friend_request(bob_id).await;
+        assert!(rc.is_ok());
+
+        wait_for_friend_request(
+            &bob,
+            alice_id,
+            request.created_at(),
+            true
+        ).await;
+
+        let rc = bob.get_contact(&alice_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_some());
+
+        let rc = alice.get_contact(&bob_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_some());
+
+        let rc = bob.create_channel(
+            Permission::OwnerInvite,
+            "API channel test",
+            None::<String>,
+            None::<String>,
+        ).await;
+        assert!(rc.is_ok(), "Creating testcase channel failed: {:?}", rc.err());
+
+        let channel = rc.unwrap();
+        let channel_id = channel.id().clone();
+        created_channel_id = Some(channel_id);
+
+        assert!(channel.has_member(&bob_id));
+
+        let rc = bob.create_invite_ticket(&channel_id, Some(alice_id)).await;
+        assert!(rc.is_ok());
+        let invite_ticket = rc.unwrap();
+
+        let rc = alice.join_channel(invite_ticket).await;
+        assert!(rc.is_ok());
+        alice_joined = true;
+
+        let joined = rc.unwrap();
+        assert_eq!(joined.id(), &channel_id);
+        assert!(joined.has_member(&alice_id));
+        assert!(joined.has_member(&bob_id));
+
+        let body = "Alice channel message to Bob";
+        let rc = alice
+            .message(Some(channel_id))
+            .text_body(body)
+            .send()
+            .await;
+
+        assert!(rc.is_ok());
+        let sent = rc.unwrap();
+        assert_eq!(sent.from(), Some(&alice_id));
+        assert_eq!(sent.recipient(), &channel_id);
+
+        let received = time::timeout(
+            Duration::from_secs(15),
+            received_rx.recv()
+        ).await;
+        assert!(received.is_ok());
+        let received = received.unwrap();
+        assert!(received.is_some());
+
+        let (id, from, recipient, body_bytes) = received.unwrap();
+        assert_eq!(&id, sent.id());
+        assert_eq!(from, Some(alice_id));
+        assert_eq!(recipient, channel_id);
+        assert_eq!(body_bytes, sent.payload_as_content().map(|content| content.body().to_vec()));
+        assert_eq!(sent.payload_as_content().unwrap().as_text(), Some(body));
+
+        let rc = alice.leave_channel(&channel_id).await;
+        assert!(rc.is_ok());
+        alice_joined = false;
+        let rc = alice.get_contact(&channel_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+
+        let rc = bob.remove_channel(&channel_id).await;
+        assert!(rc.is_ok());
+        created_channel_id = None;
+        let rc = bob.get_contact(&channel_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+
+        bob.clear_contacts().await.unwrap();
+        alice.clear_contacts().await.unwrap();
+        bob.clear_friend_requests().await.unwrap();
+        alice.clear_friend_requests().await.unwrap();
+
         };
         use futures::FutureExt;
         let result = std::panic::AssertUnwindSafe(routine).catch_unwind().await;
-        let (bob_stop, alice_stop) = tokio::join!(bob.stop(), alice.stop());
-        assert!(bob_stop.is_ok(), "{:?}", bob_stop.err());
-        assert!(alice_stop.is_ok(), "{:?}", alice_stop.err());
+        if let Some(channel_id) = created_channel_id {
+            if alice_joined {
+                if let Err(error) = alice.leave_channel(&channel_id).await {
+                    eprintln!("Leaving testcase channel during cleanup failed: {error}");
+                }
+            }
+            if let Err(error) = bob.remove_channel(&channel_id).await {
+                eprintln!("Removing testcase channel during cleanup failed: {error}");
+            }
+        }
+
+        let (bob_stop, alice_stop) = tokio::join!(
+            bob.stop(),
+            alice.stop()
+        );
         if let Err(panic) = result {
+            if let Err(error) = &bob_stop {
+                eprintln!("Stopping Bob during cleanup failed: {error}");
+            }
+            if let Err(error) = &alice_stop {
+                eprintln!("Stopping Alice during cleanup failed: {error}");
+            }
             std::panic::resume_unwind(panic);
         }
+        assert!(bob_stop.is_ok());
+        assert!(alice_stop.is_ok());
     }
 }

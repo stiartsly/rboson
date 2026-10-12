@@ -270,9 +270,9 @@ impl Client {
     pub async fn friend_request(
         &self,
         user_id: Id,
-        hello: Option<String>
+        hello: Option<impl Into<String>>,
     ) -> Result<()> {
-        self.verticle()?.friend_request(user_id, hello).await
+        self.verticle()?.friend_request(user_id, hello.map(Into::into)).await
     }
 
     pub async fn accept_friend_request(

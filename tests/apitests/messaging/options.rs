@@ -69,7 +69,9 @@ fn yaml(
 fn test_options_builder_completeness() {
     let peerid = Id::random();
     let user_key = KeyPair::random();
+    let user_id = Id::from(user_key.public_key());
     let device_key = KeyPair::random();
+    let device_id = Id::from(device_key.public_key());
 
     let incomplete = Options::builder();
     assert!(incomplete.build().is_err());
@@ -88,40 +90,48 @@ fn test_options_builder_completeness() {
 
     let options = complete.build().unwrap();
     assert_eq!(options.service_peerid(), &peerid);
-    assert_eq!(options.user_id(), &Id::from(user_key.public_key()));
-    assert_eq!(options.device_id(), &Id::from(device_key.public_key()));
+    assert_eq!(options.user_id(), &user_id);
+    assert_eq!(options.device_id(), &device_id);
 }
 
 #[test]
 fn test_options_with_builders() {
     let peerid = Id::random();
     let user_key = KeyPair::random();
+    let user_id = Id::from(user_key.public_key());
     let device_key = KeyPair::random();
+    let device_id = Id::from(device_key.public_key());
+    let data_dir = "/tmp/photon-messaging-test";
+    let database_uri = "postgresql://localhost:5432/test";
+    let database_schema = "photon";
 
     let mut b = Options::builder();
     b.with_service_peerid(peerid);
     b.with_service_endpoint("mqtts://10.0.0.1:8883").unwrap();
     b.with_user_keypair(user_key.clone());
     b.with_device_keypair(device_key.clone());
-    b.with_data_dir("/tmp/photon-messaging-test");
-    b.with_database("postgresql://localhost:5432/test", 4)
-        .unwrap();
-    b.with_database_schema_name("photon");
-    let options = b.build().unwrap();
+    b.with_data_dir(data_dir);
+    b.with_database(database_uri, 4).unwrap();
+    b.with_database_schema_name(database_schema);
+
+    let rc = b.build();
+    assert!(rc.is_ok());
+
+    let options = rc.unwrap();
 
     assert_eq!(options.service_peerid(), &peerid);
     assert_eq!(
         options.service_endpoint().map(url::Url::as_str),
         Some("mqtts://10.0.0.1:8883")
     );
-    assert_eq!(options.user_id(), &Id::from(user_key.public_key()));
+    assert_eq!(options.user_id(), &user_id);
     assert_eq!(options.user_private_key(), user_key.private_key());
-    assert_eq!(options.device_id(), &Id::from(device_key.public_key()));
+    assert_eq!(options.device_id(), &device_id);
     assert_eq!(options.device_private_key(), device_key.private_key());
-    assert_eq!(options.data_dir(), Path::new("/tmp/photon-messaging-test"));
-    assert_eq!(options.database_uri(), "postgresql://localhost:5432/test");
+    assert_eq!(options.data_dir(), Path::new(data_dir));
+    assert_eq!(options.database_uri(), database_uri);
     assert_eq!(options.database_pool_size(), 4);
-    assert_eq!(options.database_schema(), "photon");
+    assert_eq!(options.database_schema(), database_schema);
 }
 
 #[test]
@@ -157,7 +167,7 @@ fn test_parse_options() {
 }
 
 #[test]
-fn test_load_options_from_file() {
+fn test_load_options() {
     let service_peerid = Id::random();
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
@@ -218,7 +228,7 @@ fn test_env_var_expansion_in_yaml() {
 }
 
 #[test]
-fn test_rejects_invalid_service_endpoint() {
+fn test_service_endpoint_invalid() {
     let mut b = Options::builder();
     let result = b.with_service_endpoint("tcp://10.0.0.1:8883");
 

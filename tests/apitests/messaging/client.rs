@@ -3,13 +3,14 @@ mod tests {
     use std::time::Duration;
     use serial_test::serial;
     use tokio::time;
+    use tokio::sync::mpsc;
 
     use boson::{Id, signature::KeyPair};
-    use boson::messaging::{Client, Message, MessageListener, Options};
+    use boson::messaging::{Client, Message, MessageListener, Options, Permission};
     use boson::messaging::ContactType;
 
-    const RECIPIENT_YAML: &str = "tests/apitests/messaging/recipient.yaml";
-    const SENDER_YAML: &str = "tests/apitests/messaging/sender.yaml";
+    const BOB_YAML: &str = "tests/apitests/messaging/bob.yaml";
+    const ALICE_YAML: &str = "tests/apitests/messaging/alice.yaml";
 
     async fn wait_until_ready(client: &Client) {
         time::timeout(Duration::from_secs(10), async {
@@ -52,6 +53,18 @@ mod tests {
         }
     }
 
+    struct ChannelMessageCapture {
+        received: tokio::sync::mpsc::UnboundedSender<(Id, Option<Id>, Id, Option<Vec<u8>>)>,
+    }
+
+    impl MessageListener for ChannelMessageCapture {
+        fn on_message(&self, message: &dyn Message) {
+            let body = message.payload_as_content().map(|content| content.body().to_vec());
+            self.received.send((*message.id(), message.from().copied(), *message.recipient(), body))
+                .expect("Channel testcase receiver should remain open");
+        }
+    }
+
     fn with_message_listener(
         options: Options,
         listener: impl MessageListener + 'static,
@@ -76,7 +89,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_client_connection() {
-        let options = Options::load(RECIPIENT_YAML).unwrap();
+        let options = Options::load(ALICE_YAML).unwrap();
         let client = Client::new(options);
 
         let rc = client.start().await;
@@ -115,7 +128,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_friend_request() {
-        let options = Options::load(SENDER_YAML).unwrap();
+        let options = Options::load(BOB_YAML).unwrap();
         let client = Client::new(options);
 
         let rc = client.start().await;
@@ -193,12 +206,12 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_accept_friend_request() {
-        let rc = Options::load(SENDER_YAML);
+        let rc = Options::load(BOB_YAML);
         assert!(rc.is_ok());
         let sender = Client::new(rc.unwrap());
         let sender_id = sender.user_id().clone();
 
-        let rc = Options::load(RECIPIENT_YAML);
+        let rc = Options::load(ALICE_YAML);
         assert!(rc.is_ok());
         let recipient = Client::new(rc.unwrap());
         let recipient_id = recipient.user_id().clone();
@@ -339,12 +352,12 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_message() {
-        let options = Options::load(SENDER_YAML).unwrap();
+        let options = Options::load(BOB_YAML).unwrap();
         let sender = Client::new(options);
         let sender_id = sender.user_id().clone();
 
-        let options = Options::load(RECIPIENT_YAML).unwrap();
-        let (received_tx, mut received_rx) = tokio::sync::mpsc::unbounded_channel();
+        let options = Options::load(ALICE_YAML).unwrap();
+        let (received_tx, mut received_rx) = mpsc::unbounded_channel();
         let recipient = Client::new(with_message_listener(
             options,
             MessageCapture { received: received_tx },
@@ -415,5 +428,88 @@ mod tests {
         );
         assert!(sender_stop.is_ok());
         assert!(recipient_stop.is_ok());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_channel_message() {
+        let (received_tx, mut received_rx) = mpsc::unbounded_channel();
+        let bob = Client::new(with_message_listener(
+            Options::load(BOB_YAML).unwrap(),
+            ChannelMessageCapture { received: received_tx },
+        ));
+        let alice = Client::new(Options::load(ALICE_YAML).unwrap());
+        let bob_id = *bob.user_id();
+        let alice_id = *alice.user_id();
+        assert_ne!(bob_id, alice_id);
+        let (bob_start, alice_start) = tokio::join!(bob.start(), alice.start());
+        assert!(bob_start.is_ok(), "{:?}", bob_start.err());
+        assert!(alice_start.is_ok(), "{:?}", alice_start.err());
+        tokio::join!(wait_until_ready(&bob), wait_until_ready(&alice));
+
+        let routine = async {
+            bob.clear_contacts().await.unwrap();
+            alice.clear_contacts().await.unwrap();
+            bob.clear_friend_requests().await.unwrap();
+            alice.clear_friend_requests().await.unwrap();
+            let rc = bob.friend_request(alice_id, Some("channel test")).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            let request = bob.get_friend_request(alice_id).await.unwrap().unwrap();
+            wait_for_friend_request(&alice, bob_id, request.created_at(), false).await;
+            let rc = alice.accept_friend_request(bob_id).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            wait_for_friend_request(&bob, alice_id, request.created_at(), true).await;
+            assert!(bob.get_contact(&alice_id).await.unwrap().is_some());
+            assert!(alice.get_contact(&bob_id).await.unwrap().is_some());
+
+            let rc = bob.create_channel(Permission::OwnerInvite, "API channel test".into(), None, None).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            let channel = rc.unwrap();
+            let channel_id = *channel.id();
+            assert!(channel.has_member(&bob_id));
+            let rc = bob.create_invite_ticket(&channel_id, Some(alice_id)).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            let rc = alice.join_channel(rc.unwrap()).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            let joined = rc.unwrap();
+            assert_eq!(joined.id(), &channel_id);
+            assert!(joined.has_member(&alice_id));
+
+            let body = "Alice channel message to Bob";
+            let rc = alice.message(Some(channel_id)).text_body(body).send().await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            let sent = rc.unwrap();
+            assert_eq!(sent.from(), Some(&alice_id));
+            assert_eq!(sent.recipient(), &channel_id);
+            let received = time::timeout(Duration::from_secs(15), received_rx.recv()).await;
+            assert!(received.is_ok(), "Bob should receive Alice's channel message");
+            let received = received.unwrap();
+            assert!(received.is_some(), "Message listener should remain open");
+            let (id, from, recipient, body_bytes) = received.unwrap();
+            assert_eq!(&id, sent.id());
+            assert_eq!(from, Some(alice_id));
+            assert_eq!(recipient, channel_id);
+            assert_eq!(body_bytes, sent.payload_as_content().map(|content| content.body().to_vec()));
+            assert_eq!(sent.payload_as_content().unwrap().as_text(), Some(body));
+
+            let rc = alice.leave_channel(&channel_id).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            assert!(alice.get_contact(&channel_id).await.unwrap().is_none());
+            let rc = bob.remove_channel(&channel_id).await;
+            assert!(rc.is_ok(), "{:?}", rc.err());
+            assert!(bob.get_contact(&channel_id).await.unwrap().is_none());
+            bob.clear_contacts().await.unwrap();
+            alice.clear_contacts().await.unwrap();
+            bob.clear_friend_requests().await.unwrap();
+            alice.clear_friend_requests().await.unwrap();
+        };
+        use futures::FutureExt;
+        let result = std::panic::AssertUnwindSafe(routine).catch_unwind().await;
+        let (bob_stop, alice_stop) = tokio::join!(bob.stop(), alice.stop());
+        assert!(bob_stop.is_ok(), "{:?}", bob_stop.err());
+        assert!(alice_stop.is_ok(), "{:?}", alice_stop.err());
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 }

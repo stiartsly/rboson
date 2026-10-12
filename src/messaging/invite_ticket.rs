@@ -123,6 +123,10 @@ impl InviteTicket {
         &self.session_key
     }
 
+    pub(crate) fn signature(&self) -> &[u8] {
+        &self.signature
+    }
+
     pub fn is_expired(&self) -> bool {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

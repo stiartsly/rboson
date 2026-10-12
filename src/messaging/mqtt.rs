@@ -52,7 +52,7 @@ use crate::messaging::{
     errors::{AuthenticationError, EncodingError, ProtocolError},
 };
 
-use super::internal::{PhotonContact, PhotonMessage};
+use super::internal::{PhotonChannel, PhotonChannelMember, PhotonContact, PhotonMessage};
 
 
 const USER_INBOX: &str = "u/i";
@@ -94,6 +94,7 @@ struct RpcError {
 
 struct PendingRpc {
     method: String,
+    recipient: Id,
     complete: tokio::sync::oneshot::Sender<StdResult<Value, String>>,
 }
 
@@ -172,6 +173,42 @@ struct ContactData {
     created_at: i64,
     #[serde(rename = "u")]
     updated_at: i64,
+}
+
+#[derive(Deserialize)]
+struct ChannelInfo {
+    id: Id,
+    #[serde(rename = "o")]
+    owner: Id,
+    sid: Id,
+    #[serde(rename = "sk", default)]
+    session_key: Option<Value>,
+    #[serde(rename = "p")]
+    permission: i32,
+    #[serde(rename = "n", default)]
+    name: Option<String>,
+    #[serde(rename = "nt", default)]
+    notice: Option<String>,
+    #[serde(rename = "a", default)]
+    announced: bool,
+    #[serde(rename = "c")]
+    created_at: i64,
+    #[serde(rename = "u")]
+    updated_at: i64,
+    #[serde(rename = "m", default)]
+    members: Vec<PhotonChannelMember>,
+}
+
+#[derive(Deserialize)]
+struct ChannelContactInfo {
+    #[serde(rename = "o")]
+    owner: Id,
+    #[serde(rename = "p")]
+    permission: i32,
+    #[serde(rename = "nt", default)]
+    notice: Option<String>,
+    #[serde(rename = "a", default)]
+    announced: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -309,6 +346,7 @@ pub(crate) struct MqttSession {
 
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, PhotonContact>>,
+    channels: RefCell<HashMap<Id, PhotonChannel>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
     message_listener: Arc<dyn MessageListener>,
@@ -349,6 +387,7 @@ impl MqttSession {
             blocked_contacts: Arc::new(std::sync::Mutex::new(HashSet::new())),
             friend_requests: RefCell::new(HashMap::new()),
             contacts: RefCell::new(HashMap::new()),
+            channels: RefCell::new(HashMap::new()),
 
             connection_listener: options.connection_listener.clone(),
             message_listener: options.message_listener.clone(),
@@ -390,6 +429,10 @@ impl MqttSession {
     }
 
     async fn rpc_call(&self, method: &str, params: Option<Value>) -> Result<Value> {
+        self.rpc_call_to(self.peer_id(), method, params).await
+    }
+
+    async fn rpc_call_to(&self, recipient: &Id, method: &str, params: Option<Value>) -> Result<Value> {
         if !self.connected.get() {
             return Err(StateError::new("Messaging client is not connected"));
         }
@@ -399,10 +442,16 @@ impl MqttSession {
         let request = RpcRequest { id: timestamp, method: method.into(), params };
         let request = serde_cbor::to_vec(&request)
             .map_err(|error| EncodingError::new(format!("Encoding RPC request failed: {error}")))?;
+        let request = if recipient == self.peer_id() {
+            request
+        } else {
+            self.user_identity.encrypt_into(recipient, &request)
+                .map_err(|error| AuthenticationError::new(format!("Encrypting channel RPC failed: {error}")))?
+        };
         let message = WireMessage {
             version: MESSAGE_VERSION,
             id: Self::message_id(self.device_id(), timestamp)?,
-            recipient: *self.peer_id(),
+            recipient: *recipient,
             message_type: crate::messaging::message::MessageType::ControlMessage as u8,
             from: None,
             created_at: timestamp,
@@ -414,7 +463,7 @@ impl MqttSession {
             .map_err(|error| AuthenticationError::new(format!("Encrypting RPC envelope failed: {error}")))?;
         Self::validate_outbox_packet(payload.len())?;
         let (complete, response) = tokio::sync::oneshot::channel();
-        self.pending_rpc.borrow_mut().insert(timestamp, PendingRpc { method: method.into(), complete });
+        self.pending_rpc.borrow_mut().insert(timestamp, PendingRpc { method: method.into(), recipient: *recipient, complete });
         let _registration = RpcRegistration { pending: &self.pending_rpc, id: timestamp };
         tokio::time::timeout(RPC_TIMEOUT, async {
             mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, payload).await
@@ -432,12 +481,15 @@ impl MqttSession {
         }
     }
 
-    fn handle_rpc_response(&self, payload: Value) -> Result<()> {
+    fn handle_rpc_response(&self, payload: Value, sender: &Id) -> Result<()> {
         let Value::Bytes(payload) = payload else {
             return Err(EncodingError::new("RPC response payload is not binary"));
         };
         let response: RpcResponse = serde_cbor::from_slice(&payload)
             .map_err(|error| EncodingError::new(format!("Malformed RPC response: {error}")))?;
+        if self.pending_rpc.borrow().get(&response.id).is_some_and(|call| &call.recipient != sender) {
+            return Err(AuthenticationError::new("RPC response sender does not match request recipient"));
+        }
         let Some(call) = self.pending_rpc.borrow_mut().remove(&response.id) else {
             debug!("Ignoring RPC response {} without a pending call", response.id);
             return Ok(());
@@ -458,7 +510,7 @@ impl MqttSession {
         Ok(())
     }
 
-    fn handle_notification(&self, payload: Value) -> Result<()> {
+    fn handle_notification(&self, payload: Value, sender: &Id) -> Result<()> {
         let Value::Bytes(payload) = payload else {
             return Err(EncodingError::new("Notification payload is not binary"));
         };
@@ -467,8 +519,13 @@ impl MqttSession {
         if notification.timestamp < 0 {
             return Err(EncodingError::new("Notification timestamp is negative"));
         }
-        let body = notification.body
-            .ok_or_else(|| EncodingError::new("Notification body is missing"))?;
+        if matches!(notification.event.as_str(), "cc" | "cj" | "cd" | "cl" | "cmj" | "cml")
+            && notification.source == *self.user_id()
+            && notification.id == Self::message_id(self.device_id(), notification.timestamp)?
+        {
+            return Ok(());
+        }
+        let body = notification.body.unwrap_or(Value::Null);
         match notification.event.as_str() {
             "sn" => {
                 let session: SessionInfo = serde_cbor::value::from_value(body)
@@ -480,12 +537,66 @@ impl MqttSession {
                     .map_err(|error| EncodingError::new(format!("Malformed contact sync: {error}")))?;
                 self.apply_contact_sync(sync)?;
             }
+            "cc" | "cj" => {
+                let (channel, session) = self.decode_channel_info(body)?;
+                if (notification.event == "cc" && sender != self.peer_id())
+                    || (notification.event == "cj" && channel.id() != sender)
+                {
+                    return Err(EncodingError::new("Channel notification has an unexpected source"));
+                }
+                let new = !self.channels.borrow().contains_key(channel.id());
+                self.friend_sessions.lock().unwrap().insert(*channel.id(), session);
+                self.contacts.borrow_mut().entry(*channel.id()).or_insert(channel.contact.clone());
+                self.channels.borrow_mut().entry(*channel.id()).or_insert(channel.clone());
+                if !new {
+                    return Ok(());
+                }
+                if notification.event == "cc" {
+                    self.channel_listener.on_channel_created(&channel);
+                } else {
+                    self.channel_listener.on_joined_channel(&channel);
+                }
+            }
+            "cd" | "cl" => {
+                if let Some(channel) = self.channels.borrow_mut().remove(sender) {
+                    self.contacts.borrow_mut().remove(sender);
+                    self.friend_sessions.lock().unwrap().remove(sender);
+                    if notification.event == "cd" {
+                        self.channel_listener.on_channel_deleted(&channel);
+                    } else {
+                        self.channel_listener.on_left_channel(&channel);
+                    }
+                }
+            }
+            "cmj" => {
+                let member: PhotonChannelMember = serde_cbor::value::from_value(body)
+                    .map_err(|error| EncodingError::new(format!("Malformed channel member: {error}")))?;
+                Role::try_from(member.role)?;
+                UNIX_EPOCH.checked_add(Duration::from_millis(member.joined))
+                    .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range"))?;
+                let mut channel = self.channel_snapshot(sender)?;
+                channel.members.retain(|existing| existing.id != member.id);
+                channel.members.push(member.clone());
+                self.channels.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener.on_channel_member_joined(&channel, &member);
+            }
+            "cml" => {
+                let id: Id = serde_cbor::value::from_value(body)
+                    .map_err(|error| EncodingError::new(format!("Malformed leaving member: {error}")))?;
+                let mut channel = self.channel_snapshot(sender)?;
+                let member = channel.members.iter().find(|member| member.id == id).cloned();
+                channel.members.retain(|member| member.id != id);
+                self.channels.borrow_mut().insert(*sender, channel.clone());
+                if let Some(member) = member {
+                    self.channel_listener.on_channel_member_left(&channel, &member);
+                }
+            }
             event => return Err(EncodingError::new(format!("Unsupported home-peer notification '{event}'"))),
         }
         Ok(())
     }
 
-    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(PhotonContact, Option<CryptoIdentity>)> {
+    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(PhotonContact, Option<CryptoIdentity>, Option<PhotonChannel>)> {
         if opaque.revision < 0 {
             return Err(EncodingError::new("Contact revision is negative"));
         }
@@ -515,7 +626,7 @@ impl MqttSession {
             None if contact_type == ContactType::Auto => None,
             _ => return Err(EncodingError::new("Contact session key is missing or malformed")),
         };
-        Ok((PhotonContact {
+        let contact = PhotonContact {
             id: data.id,
             contact_type,
             name: data.name,
@@ -526,7 +637,24 @@ impl MqttSession {
             created_at: data.created_at,
             updated_at: data.updated_at,
             revision: opaque.revision,
-        }, session))
+        };
+        let channel = if contact_type == ContactType::Channel {
+            let info: ChannelContactInfo = serde_cbor::from_slice(&plaintext)
+                .map_err(|error| EncodingError::new(format!("Malformed channel contact: {error}")))?;
+            let session_id = *session.as_ref()
+                .ok_or_else(|| EncodingError::new("Channel session is missing"))?.id();
+            let members = self.channels.borrow().get(&contact.id)
+                .filter(|channel| channel.session_id == session_id)
+                .map(|channel| channel.members.clone()).unwrap_or_default();
+            Some(PhotonChannel {
+                contact: contact.clone(), owner: info.owner, session_id,
+                permission: Permission::try_from(info.permission)?,
+                notice: info.notice, announced: info.announced, members,
+            })
+        } else {
+            None
+        };
+        Ok((contact, session, channel))
     }
 
     fn apply_contact_sync(&self, sync: ContactSync) -> Result<()> {
@@ -537,6 +665,7 @@ impl MqttSession {
         let previous = self.contacts.borrow().clone();
         let mut contacts = previous.clone();
         let mut sessions = self.friend_sessions.lock().unwrap().clone();
+        let mut channels = self.channels.borrow().clone();
         let mut revision = original_revision;
         match sync.kind {
             0 => {
@@ -555,16 +684,20 @@ impl MqttSession {
                 }
                 contacts.clear();
                 sessions.clear();
+                channels.clear();
                 for opaque in sync.contacts {
                     if opaque.revision > sync.revision {
                         return Err(EncodingError::new("Contact revision exceeds snapshot revision"));
                     }
-                    let (contact, session) = self.decode_contact(opaque)?;
+                    let (contact, session, channel) = self.decode_contact(opaque)?;
                     if contacts.contains_key(&contact.id) {
                         return Err(EncodingError::new("Snapshot contains duplicate contacts"));
                     }
                     if let Some(session) = session {
                         sessions.insert(contact.id, session);
+                    }
+                    if let Some(channel) = channel {
+                        channels.insert(contact.id, channel);
                     }
                     contacts.insert(contact.id, contact);
                 }
@@ -595,10 +728,14 @@ impl MqttSession {
                             if opaque.revision != next {
                                 return Err(EncodingError::new("Contact mutation revision is inconsistent"));
                             }
-                            let (contact, session) = self.decode_contact(opaque)?;
+                            let (contact, session, channel) = self.decode_contact(opaque)?;
                             sessions.remove(&contact.id);
                             if let Some(session) = session {
                                 sessions.insert(contact.id, session);
+                            }
+                            channels.remove(&contact.id);
+                            if let Some(channel) = channel {
+                                channels.insert(contact.id, channel);
                             }
                             contacts.insert(contact.id, contact);
                         }
@@ -609,6 +746,7 @@ impl MqttSession {
                             for id in ids {
                                 contacts.remove(&id);
                                 sessions.remove(&id);
+                                channels.remove(&id);
                             }
                         }
                         "c" => {
@@ -617,6 +755,7 @@ impl MqttSession {
                             }
                             contacts.clear();
                             sessions.clear();
+                            channels.clear();
                         }
                         _ => return Err(EncodingError::new("Unknown contact mutation operation")),
                     }
@@ -640,6 +779,7 @@ impl MqttSession {
             .filter(|contact| contact.blocked).map(|contact| contact.id).collect();
         *self.contacts.borrow_mut() = contacts;
         *self.friend_sessions.lock().unwrap() = sessions;
+        *self.channels.borrow_mut() = channels;
         self.contacts_revision.set(revision);
         if !removed.is_empty() {
             self.contact_listener.on_contacts_removed(&removed);
@@ -781,18 +921,40 @@ impl MqttSession {
         }
         if topic == DEVICE_INBOX {
             if message.message_type != crate::messaging::message::MessageType::ControlMessage as u8
-                || from != *peer_id
                 || (message.recipient != *self.user_id() && message.recipient != *self.device_id())
             {
                 return Err(EncodingError::new("Invalid device RPC response"));
             }
-            return self.handle_rpc_response(message.payload);
+            if from != *peer_id {
+                let Value::Bytes(payload) = message.payload else {
+                    return Err(EncodingError::new("Channel RPC response is not binary"));
+                };
+                let payload = self.user_identity.decrypt_into(&from, &payload)
+                    .map_err(|error| AuthenticationError::new(format!("Decrypting channel RPC failed: {error}")))?;
+                return self.handle_rpc_response(Value::Bytes(payload), &from);
+            }
+            return self.handle_rpc_response(message.payload, &from);
         }
         if message.message_type == crate::messaging::message::MessageType::StateMessage as u8 {
-            if topic != USER_INBOX || from != *peer_id || message.recipient != *self.user_id() {
+            if topic != USER_INBOX {
                 return Err(EncodingError::new("Invalid home-peer notification"));
             }
-            return self.handle_notification(message.payload);
+            if from == *peer_id && message.recipient == *self.user_id() {
+                return self.handle_notification(message.payload, &from);
+            }
+            let Value::Bytes(payload) = message.payload else {
+                return Err(EncodingError::new("Channel notification is not binary"));
+            };
+            let plaintext = if message.recipient == *self.user_id() {
+                self.user_identity.decrypt_into(&from, &payload)?
+            } else if message.recipient == from {
+                let session = self.friend_sessions.lock().unwrap().get(&from).cloned()
+                    .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
+                session.decrypt_into(&from, &payload)?
+            } else {
+                return Err(EncodingError::new("Invalid channel notification recipient"));
+            };
+            return self.handle_notification(Value::Bytes(plaintext), &from);
         }
         if message.message_type != HANDSHAKE_MESSAGE {
             if message.message_type == crate::messaging::message::MessageType::ContentMessage as u8 {
@@ -1375,32 +1537,254 @@ impl MqttSession {
 
     pub(crate) async fn create_channel(
         &self,
-        _permission: Permission,
-        _name: String,
-        _notice: Option<String>,
-        _announcement: Option<String>,
+        permission: Permission,
+        name: String,
+        notice: Option<String>,
+        announcement: Option<String>,
     ) -> Result<Box<dyn Channel>> {
-        Err(NotImplemented::new("create_channel"))
+        let _request = self.requests.lock().await;
+        if name.trim().is_empty() {
+            return Err(ArgumentError::new("Channel name is required"));
+        }
+        let announced = announcement.as_deref().map(str::parse::<bool>).transpose()
+            .map_err(|_| ArgumentError::new("Channel announcement must be true or false"))?
+            .unwrap_or(true);
+        let session = CryptoIdentity::new();
+        let key = self.user_identity.encrypt_into(self.user_id(), session.signature_keypair().private_key().as_ref())?;
+        let params = Value::Map([
+            (Value::Text("sid".into()), Value::Bytes(session.id().as_bytes().to_vec())),
+            (Value::Text("sk".into()), Value::Bytes(key)),
+            (Value::Text("p".into()), Value::Integer((permission as i32).into())),
+            (Value::Text("n".into()), Value::Text(name)),
+            (Value::Text("nt".into()), notice.map(Value::Text).unwrap_or(Value::Null)),
+            (Value::Text("a".into()), Value::Bool(announced)),
+        ].into_iter().collect());
+        let result = self.rpc_call("cc", Some(params)).await?;
+        let (channel, returned_session) = self.decode_channel_info(result)?;
+        if channel.owner != *self.user_id() || channel.session_id != *session.id() {
+            return Err(EncodingError::new("Created channel owner or session does not match"));
+        }
+        self.store_channel(channel.clone(), returned_session).await?;
+        self.channel_listener.on_channel_created(&channel);
+        Ok(Box::new(channel))
     }
 
-    pub(crate) async fn remove_channel(&self, _channel_id: &Id) -> Result<()> {
-        Err(NotImplemented::new("remove_channel"))
+    pub(crate) async fn remove_channel(&self, channel_id: &Id) -> Result<()> {
+        let _request = self.requests.lock().await;
+        let channel = self.channel_snapshot(channel_id)?;
+        if channel.owner != *self.user_id() {
+            return Err(StateError::new("Only the owner can delete the channel"));
+        }
+        self.rpc_call_to(channel_id, "cd", None).await?;
+        self.remove_channel_contact(channel_id).await?;
+        self.channel_listener.on_channel_deleted(&channel);
+        Ok(())
     }
 
-    pub(crate) async fn join_channel(&self, _ticket: InviteTicket) -> Result<Box<dyn Channel>> {
-        Err(NotImplemented::new("join_channel"))
+    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+        let _request = self.requests.lock().await;
+        if !ticket.is_genuine() || ticket.is_expired()
+            || ticket.invitee().is_some_and(|id| id != self.user_id())
+        {
+            return Err(ArgumentError::new("Invalid, expired or incorrectly addressed channel ticket"));
+        }
+        if self.channels.borrow().get(ticket.channel_id()).is_some_and(|channel| channel.has_member(self.user_id())) {
+            return Err(StateError::new("Already joined the channel"));
+        }
+        let key = if ticket.is_named_ticket() {
+            self.user_identity.decrypt_into(ticket.inviter(), ticket.session_key())?
+        } else {
+            ticket.session_key().to_vec()
+        };
+        let session = CryptoIdentity::try_from(key.as_slice())?;
+        if session.id() != ticket.session_id() {
+            return Err(ArgumentError::new("Invitation session key does not match session ID"));
+        }
+        let key = self.user_identity.encrypt_into(self.user_id(), &key)?;
+        let params = Value::Map([
+            (Value::Text("c".into()), Value::Bytes(ticket.channel_id().as_bytes().to_vec())),
+            (Value::Text("sid".into()), Value::Bytes(ticket.session_id().as_bytes().to_vec())),
+            (Value::Text("i".into()), Value::Bytes(ticket.inviter().as_bytes().to_vec())),
+            (Value::Text("e".into()), Value::Integer(ticket.expiration_ms().into())),
+            (Value::Text("sig".into()), Value::Bytes(ticket.signature().to_vec())),
+            (Value::Text("sk".into()), Value::Bytes(key)),
+        ].into_iter().chain(ticket.invitee().map(|id|
+            (Value::Text("ie".into()), Value::Bytes(id.as_bytes().to_vec()))
+        )).collect());
+        let result = self.rpc_call_to(ticket.channel_id(), "cj", Some(params)).await?;
+        let (channel, returned_session) = self.decode_channel_info(result)?;
+        if channel.contact.id != *ticket.channel_id() || channel.session_id != *session.id()
+            || !channel.has_member(self.user_id())
+        {
+            return Err(EncodingError::new("Joined channel does not match invitation or membership"));
+        }
+        self.store_channel(channel.clone(), returned_session).await?;
+        self.channel_listener.on_joined_channel(&channel);
+        Ok(Box::new(channel))
     }
 
-    pub(crate) async fn leave_channel(&self, _channel_id: &Id) -> Result<()> {
-        Err(NotImplemented::new("leave_channel"))
+    pub(crate) async fn leave_channel(&self, channel_id: &Id) -> Result<()> {
+        let _request = self.requests.lock().await;
+        let channel = self.channel_snapshot(channel_id)?;
+        if channel.owner == *self.user_id() {
+            return Err(StateError::new("The owner cannot leave the channel"));
+        }
+        self.rpc_call_to(channel_id, "cl", None).await?;
+        self.remove_channel_contact(channel_id).await?;
+        self.channel_listener.on_left_channel(&channel);
+        Ok(())
     }
 
     pub(crate) async fn create_invite_ticket(
         &self,
-        _channel_id: &Id,
-        _invitee: Option<Id>,
+        channel_id: &Id,
+        invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        Err(NotImplemented::new("create_invite_ticket"))
+        let _request = self.requests.lock().await;
+        self.channel_snapshot(channel_id)?;
+        let info = self.rpc_call_to(channel_id, "ci", None).await?;
+        let (channel, _) = self.decode_channel_info(info)?;
+        if channel.id() != channel_id {
+            return Err(EncodingError::new("Channel info has an unexpected ID"));
+        }
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        let member = channel.member(self.user_id())
+            .ok_or_else(|| StateError::new("Not a member of the channel"))?;
+        let allowed = match channel.permission {
+            Permission::Public | Permission::MemberInvite => !member.is_banned(),
+            Permission::ModeratorInvite => member.is_owner() || member.is_moderator(),
+            Permission::OwnerInvite => member.is_owner(),
+        };
+        if !allowed {
+            return Err(StateError::new("Insufficient permission to invite channel members"));
+        }
+        if invitee.is_some_and(|id| channel.has_member(&id)) {
+            return Err(ArgumentError::new("The invitee is already a channel member"));
+        }
+        let session = self.friend_sessions.lock().unwrap().get(channel_id).cloned()
+            .ok_or_else(|| StateError::new("Channel session key is missing"))?;
+        let key = session.signature_keypair().private_key().as_ref().to_vec();
+        let key = match invitee {
+            Some(id) => self.user_identity.encrypt_into(&id, &key)?,
+            None => key,
+        };
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?;
+        let expiration = u64::try_from(now.as_millis()).ok()
+            .and_then(|now| now.checked_add(InviteTicket::DEFAULT_EXPIRATION_MS))
+            .ok_or_else(|| StateError::new("Invitation expiration is out of range"))?;
+        InviteTicket::create(&self.user_identity, *channel_id, channel.session_id, invitee, expiration, key)
+    }
+
+    fn channel_snapshot(&self, id: &Id) -> Result<PhotonChannel> {
+        Ok(self.channels.borrow().get(id).cloned()
+            .ok_or_else(|| StateError::new(format!("Channel {id} does not exist")))?)
+    }
+
+    fn decode_channel_info(&self, value: Value) -> Result<(PhotonChannel, CryptoIdentity)> {
+        let info: ChannelInfo = serde_cbor::value::from_value(value)
+            .map_err(|error| EncodingError::new(format!("Malformed channel info: {error}")))?;
+        if info.created_at < 0 || info.updated_at < info.created_at {
+            return Err(EncodingError::new("Invalid channel timestamps"));
+        }
+        for member in &info.members {
+            Role::try_from(member.role)?;
+            UNIX_EPOCH.checked_add(Duration::from_millis(member.joined))
+                .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range"))?;
+        }
+        let session = match info.session_key {
+            Some(Value::Bytes(key)) => {
+                let key = self.user_identity.decrypt_into(self.user_id(), &key)?;
+                CryptoIdentity::try_from(key.as_slice())?
+            }
+            None | Some(Value::Null) => self.friend_sessions.lock().unwrap().get(&info.id).cloned()
+                .ok_or_else(|| StateError::new("Channel session key is missing"))?,
+            _ => return Err(EncodingError::new("Channel session key is not binary")),
+        };
+        if session.id() != &info.sid {
+            return Err(EncodingError::new("Channel session key does not match session ID"));
+        }
+        let channel = PhotonChannel {
+            contact: PhotonContact {
+                id: info.id, contact_type: ContactType::Channel, name: info.name,
+                remark: None, tags: None, muted: false, blocked: false,
+                created_at: info.created_at, updated_at: info.updated_at, revision: 0,
+            },
+            owner: info.owner, session_id: info.sid, permission: Permission::try_from(info.permission)?,
+            notice: info.notice, announced: info.announced, members: info.members,
+        };
+        let mut ids = HashSet::new();
+        if channel.members.iter().any(|member| !ids.insert(member.id))
+            || !channel.member(&channel.owner).is_some_and(|member| member.is_owner())
+        {
+            return Err(EncodingError::new("Channel members or owner are inconsistent"));
+        }
+        Ok((channel, session))
+    }
+
+    async fn store_channel(&self, mut channel: PhotonChannel, session: CryptoIdentity) -> Result<()> {
+        let key = self.user_identity.encrypt_into(self.user_id(), session.signature_keypair().private_key().as_ref())?;
+        let data = ContactData {
+            id: *channel.id(), kind: 2, session_key: Some(Value::Bytes(key)),
+            name: channel.contact.name.clone(), remark: None, tags: None, muted: false, blocked: false,
+            created_at: channel.contact.created_at, updated_at: channel.contact.updated_at,
+        };
+        let Value::Map(mut data) = serde_cbor::value::to_value(data)
+            .map_err(|error| EncodingError::new(format!("Encoding channel contact failed: {error}")))? else {
+            return Err(EncodingError::new("Channel contact is not a map"));
+        };
+        data.extend([
+            (Value::Text("o".into()), Value::Bytes(channel.owner.as_bytes().to_vec())),
+            (Value::Text("p".into()), Value::Integer((channel.permission as i32).into())),
+            (Value::Text("nt".into()), channel.notice.clone().map(Value::Text).unwrap_or(Value::Null)),
+            (Value::Text("a".into()), Value::Bool(channel.announced)),
+        ]);
+        let data = serde_cbor::to_vec(&Value::Map(data))
+            .map_err(|error| EncodingError::new(format!("Encoding channel contact failed: {error}")))?;
+        let data = self.user_identity.encrypt_into(self.user_id(), &data)?;
+        let revision = self.contacts_revision.get();
+        let params = Value::Map([
+            (Value::Text("v".into()), Value::Integer(revision.into())),
+            (Value::Text("op".into()), Value::Text("a".into())),
+            (Value::Text("d".into()), Value::Map([
+                (Value::Text("id".into()), Value::Bytes(channel.id().as_bytes().to_vec())),
+                (Value::Text("v".into()), Value::Integer(revision.into())),
+                (Value::Text("d".into()), Value::Bytes(data)),
+            ].into_iter().collect())),
+        ].into_iter().collect());
+        let result = self.rpc_call("cm", Some(params)).await?;
+        let revision: i32 = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid contact revision: {error}")))?;
+        if revision < self.contacts_revision.get() {
+            return Err(StateError::new("Channel contact revision is outdated"));
+        }
+        channel.contact.revision = revision;
+        self.contacts_revision.set(revision);
+        self.friend_sessions.lock().unwrap().insert(*channel.id(), session);
+        self.contacts.borrow_mut().insert(*channel.id(), channel.contact.clone());
+        self.contact_listener.on_contact_added(&channel);
+        self.channels.borrow_mut().insert(*channel.id(), channel);
+        Ok(())
+    }
+
+    async fn remove_channel_contact(&self, id: &Id) -> Result<()> {
+        let params = Value::Map([
+            (Value::Text("v".into()), Value::Integer(self.contacts_revision.get().into())),
+            (Value::Text("op".into()), Value::Text("r".into())),
+            (Value::Text("d".into()), Value::Array(vec![Value::Bytes(id.as_bytes().to_vec())])),
+        ].into_iter().collect());
+        let result = self.rpc_call("cm", Some(params)).await?;
+        let revision: i32 = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid contact revision: {error}")))?;
+        if revision < self.contacts_revision.get() {
+            return Err(StateError::new("Channel contact revision is outdated"));
+        }
+        self.contacts_revision.set(revision);
+        self.channels.borrow_mut().remove(id);
+        self.contacts.borrow_mut().remove(id);
+        self.friend_sessions.lock().unwrap().remove(id);
+        self.contact_listener.on_contacts_removed(&[*id]);
+        Ok(())
     }
 
     pub(crate) async fn transfer_channel_ownership(
@@ -1498,6 +1882,7 @@ impl MqttSession {
         self.friend_sessions.lock().unwrap().remove(id);
         self.blocked_contacts.lock().unwrap().remove(id);
         self.contacts.borrow_mut().remove(id);
+        self.channels.borrow_mut().remove(id);
         self.contact_listener.on_contacts_removed(&[*id]);
         Ok(())
     }
@@ -1508,6 +1893,7 @@ impl MqttSession {
             self.friend_sessions.lock().unwrap().remove(id);
             self.blocked_contacts.lock().unwrap().remove(id);
             self.contacts.borrow_mut().remove(id);
+            self.channels.borrow_mut().remove(id);
         }
         self.contact_listener.on_contacts_removed(ids);
         Ok(())
@@ -1518,6 +1904,7 @@ impl MqttSession {
         self.friend_sessions.lock().unwrap().clear();
         self.blocked_contacts.lock().unwrap().clear();
         self.contacts.borrow_mut().clear();
+        self.channels.borrow_mut().clear();
         self.contact_listener.on_contacts_cleared();
         Ok(())
     }

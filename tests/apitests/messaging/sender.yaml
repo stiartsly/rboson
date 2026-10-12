@@ -1,0 +1,11 @@
+service:
+  peerId: 5MjQxzgK7awC4He1WX4b5d1cLbY14dm8hvHNkMBU8ELK
+  endpoint: mqtts://47.101.142.224:9083
+
+client:
+  #userId: 7aTkVTBf1QKH5PxHtZjF6LE4uNUd5penYozZPVngmZwC
+  userPrivateKey: 0x69a742f28a2c6d8715191f3b809b02b7822de4419c25b33e96b605efb73e7b3961b888ce16422322620f169accdecbd86b269f93b148486a10fe0af865aa9a37
+  #deviceId: 3K9JDgqfQzKLTqaXU11fSBRySgr5deRk6g14C8yKozvd
+  devicePrivateKey: 0xb5bf200c01cadcb0c209ead75c82d487517cf8d4a9cc779d6aaee38adc18f063225d35b05c9edad030ac2dd6da91720f5fda3faaae7f8f73a9589380ff91c8ba
+
+dataDir: /tmp/tests_sender

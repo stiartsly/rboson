@@ -5,9 +5,11 @@ mod tests {
     use tokio::time;
 
     use boson::{Id, signature::KeyPair};
-    use boson::messaging::{Client, Options};
+    use boson::messaging::{Client, Message, MessageListener, Options};
     use boson::messaging::ContactType;
 
+    const RECIPIENT_YAML: &str = "tests/apitests/messaging/recipient.yaml";
+    const SENDER_YAML: &str = "tests/apitests/messaging/sender.yaml";
 
     async fn wait_until_ready(client: &Client) {
         time::timeout(Duration::from_secs(10), async {
@@ -37,10 +39,44 @@ mod tests {
         .expect("The matching friend request should arrive within 15 seconds")
     }
 
+    struct MessageCapture {
+        received: tokio::sync::mpsc::UnboundedSender<Option<Vec<u8>>>,
+    }
+
+    impl MessageListener for MessageCapture {
+        fn on_message(&self, message: &dyn Message) {
+            let body = message
+                .payload_as_content()
+                .map(|content| content.body().to_vec());
+            let _ = self.received.send(body);
+        }
+    }
+
+    fn with_message_listener(
+        options: Options,
+        listener: impl MessageListener + 'static,
+    ) -> Options {
+        let mut builder = Options::builder();
+        builder.with_peer_id(*options.peer_id());
+        builder.with_peer_endpoint(options.peer_endpoint().as_str()).unwrap();
+        builder.with_user_keypair(options.user_key().clone());
+        builder.with_device_keypair(options.device_key().clone());
+        builder.with_data_dir(options.data_dir());
+        builder.with_database(options.database_uri(), options.database_pool_size()).unwrap();
+        builder.with_database_schema(options.database_schema());
+        builder.with_log_level(options.log_level());
+        builder.with_log_console(options.log_console());
+        if let Some(log_file) = options.log_file() {
+            builder.with_log_file(log_file);
+        }
+        builder.with_message_listener(listener);
+        builder.build().unwrap()
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_client_connection() {
-        let options = Options::load("apps/chat/bob.yaml").unwrap();
+        let options = Options::load(RECIPIENT_YAML).unwrap();
         let client = Client::new(options);
 
         let rc = client.start().await;
@@ -79,7 +115,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_friend_request() {
-        let options = Options::load("apps/chat/bob.yaml").unwrap();
+        let options = Options::load(SENDER_YAML).unwrap();
         let client = Client::new(options);
 
         let rc = client.start().await;
@@ -157,12 +193,12 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_accept_friend_request() {
-        let rc = Options::load("apps/chat/alice.yaml");
+        let rc = Options::load(SENDER_YAML);
         assert!(rc.is_ok());
         let sender = Client::new(rc.unwrap());
         let sender_id = sender.user_id().clone();
 
-        let rc = Options::load("apps/chat/bob.yaml");
+        let rc = Options::load(RECIPIENT_YAML);
         assert!(rc.is_ok());
         let recipient = Client::new(rc.unwrap());
         let recipient_id = recipient.user_id().clone();
@@ -179,14 +215,10 @@ mod tests {
         );
 
         // clear all friend requests and contacts before starting friend request
-        let rc = sender.clear_contacts().await;
-        assert!(rc.is_ok());
-        let rc = recipient.clear_contacts().await;
-        assert!(rc.is_ok());
-        let rc = sender.clear_friend_requests().await;
-        assert!(rc.is_ok());
-        let rc = recipient.clear_friend_requests().await;
-        assert!(rc.is_ok());
+        sender.clear_contacts().await.unwrap();
+        recipient.clear_contacts().await.unwrap();
+        sender.clear_friend_requests().await.unwrap();
+        recipient.clear_friend_requests().await.unwrap();
 
         let rc = recipient.accept_friend_request(sender_id).await;
         assert!(rc.is_err());
@@ -302,5 +334,86 @@ mod tests {
         assert!(!recipient.is_running());
         assert!(!recipient.is_connected());
         assert!(!recipient.is_ready());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_message() {
+        let options = Options::load(SENDER_YAML).unwrap();
+        let sender = Client::new(options);
+        let sender_id = sender.user_id().clone();
+
+        let options = Options::load(RECIPIENT_YAML).unwrap();
+        let (received_tx, mut received_rx) = tokio::sync::mpsc::unbounded_channel();
+        let recipient = Client::new(with_message_listener(
+            options,
+            MessageCapture { received: received_tx },
+        ));
+        let recipient_id = *recipient.user_id();
+
+        assert_ne!(sender_id, recipient_id);
+        let (sender_start, recipient_start) = tokio::join!(
+            sender.start(),
+            recipient.start()
+        );
+        assert!(sender_start.is_ok());
+        assert!(recipient_start.is_ok());
+
+        tokio::join!(
+            wait_until_ready(&sender),
+            wait_until_ready(&recipient)
+        );
+
+        sender.clear_contacts().await.unwrap();
+        recipient.clear_contacts().await.unwrap();
+        sender.clear_friend_requests().await.unwrap();
+        recipient.clear_friend_requests().await.unwrap();
+
+        sender.friend_request(
+            recipient_id,
+            Some("message test")
+        ).await.unwrap();
+        let request = wait_for_friend_request(
+            &recipient,
+            sender_id,
+            sender.get_friend_request(recipient_id).await.unwrap().unwrap().created_at(),
+            false,
+        ).await;
+        recipient.accept_friend_request(sender_id).await.unwrap();
+        wait_for_friend_request(
+            &sender,
+            recipient_id,
+            request.created_at(),
+            true,
+        ).await;
+
+        let body = "message delivery verification";
+        let rc = sender.message(Some(recipient_id)).text_body(body).send().await;
+        assert!(rc.is_ok());
+
+        let sent = rc.unwrap();
+        assert_eq!(sent.from(), Some(&sender_id));
+        assert_eq!(sent.recipient(), &recipient_id);
+        assert_eq!(
+            sent.payload_as_content().and_then(|content| content.as_text()),
+            Some(body)
+        );
+        let received = time::timeout(Duration::from_secs(15), received_rx.recv())
+            .await
+            .expect("The message should arrive within 15 seconds")
+            .expect("The receiver should capture the inbound message");
+        assert_eq!(received, Some(body.as_bytes().to_vec()));
+
+        sender.clear_contacts().await.unwrap();
+        recipient.clear_contacts().await.unwrap();
+        sender.clear_friend_requests().await.unwrap();
+        recipient.clear_friend_requests().await.unwrap();
+
+        let (sender_stop, recipient_stop) = tokio::join!(
+            sender.stop(),
+            recipient.stop()
+        );
+        assert!(sender_stop.is_ok());
+        assert!(recipient_stop.is_ok());
     }
 }

@@ -310,13 +310,15 @@ impl VerticleClient {
     }
 
     pub(crate) async fn stop(&self) -> Result<()> {
-        self.call(|complete| Event::Stop { complete }).await?;
+        let result = self.call(|complete| Event::Stop { complete }).await;
 
         let handle = self.handle.lock().unwrap().take();
         if let Some(handle) = handle {
-            let _ = handle.join();
+            handle
+                .join()
+                .map_err(|_| StateError::new("Messaging verticle thread panicked"))?;
         }
-        Ok(())
+        result
     }
 
     pub(crate) async fn get_conversation(

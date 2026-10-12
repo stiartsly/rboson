@@ -55,6 +55,7 @@ pub struct Client {
     session_listener: Arc<dyn SessionListener>,
     friend_request_listener: Arc<dyn FriendRequestListener>,
     verticle: Mutex<Option<Arc<VerticleClient>>>,
+    lifecycle: tokio::sync::Mutex<()>,
 }
 
 impl Client {
@@ -87,6 +88,7 @@ impl Client {
             session_listener,
             friend_request_listener,
             verticle: Mutex::new(None),
+            lifecycle: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -123,7 +125,8 @@ impl Client {
     }
 
     pub async fn start(&self) -> Result<()> {
-        if self.running.swap(true, Ordering::Acquire) {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.running.load(Ordering::Acquire) {
             return Ok(());
         }
 
@@ -155,15 +158,18 @@ impl Client {
             if let Err(stop_error) = verticle.stop().await {
                 log::error!("Stopping messaging verticle failed: {stop_error}");
             }
-            self.running.store(false, Ordering::Release);
+            self.connected.store(false, Ordering::Release);
+            self.ready.store(false, Ordering::Release);
             return Err(error);
         }
         *self.verticle.lock().unwrap() = Some(Arc::new(verticle));
+        self.running.store(true, Ordering::Release);
 
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
         let verticle = self.verticle.lock().unwrap().take();
         let result = match verticle {
             Some(v) => v.stop().await,

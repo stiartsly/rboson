@@ -44,6 +44,7 @@ mod director {
 #[cfg(test)]
 mod messaging {
     mod client;
+    mod message_builder;
     mod options;
 }
 

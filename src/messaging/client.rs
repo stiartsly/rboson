@@ -340,15 +340,15 @@ impl Client {
         permission: Permission,
         name: impl Into<String>,
         notice: Option<impl Into<String>>,
-        announcement: Option<impl Into<String>>,
+        announce: bool,
     ) -> Result<Box<dyn Channel>> {
+        let name = name.into().trim().to_string();
+        if name.is_empty() {
+            return Err(ArgumentError::new("Channel name is required"));
+        }
+
         self.verticle()?
-            .create_channel(
-                permission,
-                name.into(),
-                notice.map(Into::into),
-                announcement.map(Into::into)
-            )
+            .create_channel(permission, name, notice.map(Into::into), announce)
             .await
     }
 
@@ -647,15 +647,8 @@ impl MessagingClient for Client {
         self.block_user(*user_id).await
     }
 
-    async fn create_channel(
-        &self,
-        permission: Permission,
-        name: String,
-        notice: Option<String>,
-        announcement: Option<String>,
-    ) -> Result<Box<dyn Channel>> {
-        self.create_channel(permission, name, notice, announcement)
-            .await
+    async fn create_channel(&self, perms: Permission, name: String, notice: Option<String>, announce: bool) -> Result<Box<dyn Channel>> {
+        self.create_channel(perms, name, notice, announce).await
     }
 
     async fn remove_channel(&self, channel_id: &Id) -> Result<()> {

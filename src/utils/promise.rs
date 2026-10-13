@@ -63,12 +63,13 @@ impl<T> Future for PromiseFuture<T> {
     type Output = Result<T>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.0.lock().unwrap().is_completed() {
-            return Poll::Ready(self.0.lock().unwrap().result());
+        let mut data = self.0.lock().unwrap();
+        if data.is_completed() {
+            Poll::Ready(data.result())
+        } else {
+            data.set_waker(cx.waker().clone());
+            Poll::Pending
         }
-
-        self.0.lock().unwrap().set_waker(cx.waker().clone());
-        Poll::Pending
     }
 }
 

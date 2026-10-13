@@ -25,7 +25,7 @@ pub(crate) struct RPCError {
     #[serde(rename = "m")]
     message: String,
 
-    #[serde(rename = "d", skip_serializing_if = "crate::is_none_or_empty")]
+    #[serde(rename = "d", skip_serializing_if = "Option::is_none")]
     data: Option<String>,
 }
 

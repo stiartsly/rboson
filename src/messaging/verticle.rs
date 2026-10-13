@@ -173,7 +173,7 @@ pub(crate) enum Event {
         permission: Permission,
         name: String,
         notice: Option<String>,
-        announcement: Option<String>,
+        announcement: bool,
         complete: oneshot::Sender<CmdResult<Box<dyn Channel>>>,
     },
 
@@ -524,7 +524,7 @@ impl VerticleClient {
         permission: Permission,
         name: String,
         notice: Option<String>,
-        announcement: Option<String>,
+        announcement: bool,
     ) -> Result<Box<dyn Channel>> {
         self.call(|complete| Event::CreateChannel {
             permission,
@@ -1105,14 +1105,29 @@ impl Verticle {
     async fn run_loop(&mut self) {
         let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output = ()>>>>::new();
         loop {
+            if !self.quit {
+                self.engine.schedule_contact_sync(&mut pendings);
+            }
+            let engine = self.engine.clone();
             tokio::select! {
                 event = self.event_rx.recv(), if !self.quit => {
                     match event {
                         Some(event) => self.handle_events(event, &mut pendings),
-                        None => self.quit = true,
+                        None => {
+                            self.quit = true;
+                            let engine = self.engine.clone();
+                            pendings.push(async move {
+                                if let Err(error) = engine.stop().await {
+                                    error!("Stopping closed messaging verticle failed: {error}");
+                                }
+                            }.boxed_local());
+                        },
                     }
                 }
                 Some(_) = pendings.next(), if !pendings.is_empty() => {},
+                event = engine.receive_event(), if engine.is_running() => {
+                    engine.handle_mqtt_event(event, &mut pendings);
+                }
                 else => break,
             }
 

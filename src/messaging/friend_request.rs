@@ -9,13 +9,15 @@ pub struct FriendRequest {
     initiator_id: Id,
     hello: Option<String>,
     accepted: bool,
-    expired: bool,
+
     created_at: SystemTime,
     accepted_at: Option<SystemTime>,
     updated_at: SystemTime
 }
 
 impl FriendRequest {
+    const EXPIRATION_SECS: u128 = 60 * 60 * 24 * 7; // 1 week in seconds
+
     pub(crate) fn new(
         user_id: Id,
         initiator_id: Id,
@@ -27,55 +29,67 @@ impl FriendRequest {
             initiator_id,
             hello,
             accepted: false,
-            expired: false,
             created_at,
             accepted_at: None,
             updated_at: created_at,
         }
     }
 
-    /// The Id of a user who owns this request record.
     pub fn user_id(&self) -> &Id {
         &self.user_id
     }
 
-    /// The Id of the user who initiated the request.
     pub fn initiator_id(&self) -> &Id {
         &self.initiator_id
     }
 
-    /// The greeting / hello message attached to the request.
     pub fn hello(&self) -> Option<&str> {
         self.hello.as_deref()
     }
 
-    /// Whether the request has been accepted.
     pub fn is_accepted(&self) -> bool {
         self.accepted
     }
 
-    /// Whether the request has expired without being acted upon.
-    pub fn is_expired(&self) -> bool {
-        self.expired
+    pub(crate) fn accept(&mut self) {
+        self.accept_at(SystemTime::now());
     }
 
-    pub(crate) fn accept(&mut self, accepted_at: SystemTime) {
+    pub(crate) fn accept_at(&mut self, accepted_at: SystemTime) {
         self.accepted = true;
         self.accepted_at = Some(accepted_at);
         self.updated_at = SystemTime::now();
     }
 
-    /// When this request was first created.
+    pub fn is_expired(&self) -> bool {
+        self.is_expired_at(SystemTime::now())
+    }
+
+	/**
+	 * Checks whether the request had expired at the given time, e.g. when the other side acted on it.
+	 * <p>
+	 * The week counts from the creation time, the moment the request was sent, which both sides agree
+	 * on; the update time is local (when this device received or changed the record) and would let the
+	 * two sides expire at different times. A new request replaces the record with a new creation time,
+	 * so resending starts a new week.
+	 * </p>
+	 *
+	 * @param time the time to check, in milliseconds since the epoch.
+	 * @return {@code true} if the request was still pending and past its expiry at {@code time}.
+	 */
+	pub(crate) fn is_expired_at(&self, time: SystemTime) -> bool {
+        !self.accepted &&
+            crate::elapsed_ms!(time) >= Self::EXPIRATION_SECS * 1000
+    }
+
     pub fn created_at(&self) -> SystemTime {
         self.created_at
     }
 
-    /// When this request was accepted (`None` if not yet accepted).
     pub fn accepted_at(&self) -> Option<SystemTime> {
         self.accepted_at
     }
 
-    /// When this record was last modified.
     pub fn updated_at(&self) -> SystemTime {
         self.updated_at
     }

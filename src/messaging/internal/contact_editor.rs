@@ -1,93 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::Id;
 use crate::messaging::contact::{
     Contact,
     ContactEditor,
-    ContactType
 };
-
-#[derive(Debug, Clone)]
-pub struct PhotonContact {
-    pub id: Id,
-    pub contact_type: ContactType,
-    pub name: Option<String>,
-    pub remark: Option<String>,
-    pub tags: Option<String>,
-    pub muted: bool,
-    pub blocked: bool,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub revision: i32,
-}
-
-impl From<&dyn Contact> for PhotonContact {
-    fn from(contact: &dyn Contact) -> Self {
-        Self {
-            id: contact.id().clone(),
-            contact_type: contact.contact_type(),
-            name: contact.name().map(|s| s.to_string()),
-            remark: contact.remark().map(|s| s.to_string()),
-            tags: contact.tags().map(|s| s.to_string()),
-            muted: contact.is_muted(),
-            blocked: contact.is_blocked(),
-            created_at: contact.created_at(),
-            updated_at: contact.updated_at(),
-            revision: contact.revision(),
-        }
-    }
-}
-
-impl Contact for PhotonContact {
-    fn id(&self) -> &Id {
-        &self.id
-    }
-
-    fn contact_type(&self) -> ContactType {
-        self.contact_type
-    }
-
-    fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
-    fn remark(&self) -> Option<&str> {
-        self.remark.as_deref()
-    }
-
-    fn tags(&self) -> Option<&str> {
-        self.tags.as_deref()
-    }
-
-    fn is_muted(&self) -> bool {
-        self.muted
-    }
-
-    fn is_blocked(&self) -> bool {
-        self.blocked
-    }
-
-    fn created_at(&self) -> i64 {
-        self.created_at
-    }
-
-    fn updated_at(&self) -> i64 {
-        self.updated_at
-    }
-
-    fn revision(&self) -> i32 {
-        self.revision
-    }
-
-    fn edit(&self) -> Box<dyn ContactEditor> {
-        Box::new(PhotonContactEditor {
-            contact: self.clone(),
-        })
-    }
-}
+use super::photon_contact::PhotonContact;
 
 /// Builder for updating a [`PhotonContact`].
 pub struct PhotonContactEditor {
-    contact: PhotonContact,
+    pub(crate) contact: PhotonContact,
 }
 
 impl ContactEditor for PhotonContactEditor {

@@ -87,7 +87,7 @@ async fn create(args: &ArgMatches, client: &Arc<Client>) {
     };
     let name = args.get_one::<String>("NAME").unwrap().clone();
     let notice = args.get_one::<String>("notice").cloned();
-    match client.create_channel(permission, name, notice, None::<String>).await {
+    match client.create_channel(permission, name, notice, false).await {
         Ok(channel) => println!("Channel created: {}", channel.id()),
         Err(error) => println!("Creating channel failed: {error}"),
     }

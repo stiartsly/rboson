@@ -1,33 +1,114 @@
-
-use std::time::SystemTime;
-use crate::Id;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
+use serde_cbor::Value;
+use crate::{Id, utils};
 use crate::messaging::message::{Message, Content};
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct PhotonMessage {
+    #[serde(rename = "v")]
+    pub(crate) version: u8,
+    #[serde(rename = "id")]
     pub(crate) id: Id,
+    #[serde(rename = "r")]
     pub(crate) recipient: Id,
+    #[serde(rename = "y")]
+    pub(crate) message_type: u8,
+    #[serde(
+        rename = "f",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) from: Option<Id>,
-    pub(crate) created_at: SystemTime,
+    #[serde(
+        rename = "c",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
+    pub(crate) created_at: u64,
+    #[serde(rename = "p")]
+    pub(crate) payload: Value,
+
+    #[serde(skip)]
     pub(crate) received_at: Option<SystemTime>,
+    #[serde(skip)]
     pub(crate) sent_at: Option<SystemTime>,
-    pub(crate) payload: Vec<u8>,
-    pub(crate) content: Content,
+    #[serde(skip)]
+    pub(crate) payload_bytes: Vec<u8>,
+    #[serde(skip)]
+    pub(crate) content: Option<Content>,
+}
+
+impl PhotonMessage {
+    pub(crate) fn new(
+        version: u8,
+        id: Id,
+        recipient: Id,
+        message_type: u8,
+        from: Option<Id>,
+        created_at: u64,
+        payload: Value,
+    ) -> Self {
+        Self {
+            version,
+            id,
+            recipient,
+            message_type,
+            from,
+            created_at,
+            payload,
+            received_at: None,
+            sent_at: None,
+            payload_bytes: Vec::new(),
+            content: None,
+        }
+    }
 }
 
 impl Message for PhotonMessage {
-    fn id(&self) -> &Id { &self.id }
-    fn rid(&self) -> i64 { 0 }
-    fn conversation_id(&self) -> Option<&Id> {
-        self.from.as_ref().or(Some(&self.recipient))
+    fn id(&self) -> &Id {
+        &self.id
     }
-    fn recipient(&self) -> &Id { &self.recipient }
+
+    fn rid(&self) -> i64 {
+        0
+    }
+
+    fn conversation_id(&self) -> Option<&Id> {
+        self.from.as_ref().or(
+            Some(&self.recipient)
+        )
+    }
+
+    fn recipient(&self) -> &Id {
+        &self.recipient
+    }
+
     fn message_type(&self) -> crate::messaging::message::MessageType {
         crate::messaging::message::MessageType::ContentMessage
     }
-    fn from(&self) -> Option<&Id> { self.from.as_ref() }
-    fn created_at(&self) -> SystemTime { self.created_at }
-    fn received_at(&self) -> Option<SystemTime> { self.received_at }
-    fn sent_at(&self) -> Option<SystemTime> { self.sent_at }
-    fn payload_as_bytes(&self) -> &[u8] { &self.payload }
-    fn payload_as_content(&self) -> Option<&Content> { Some(&self.content) }
+
+    fn from(&self) -> Option<&Id> {
+        self.from.as_ref()
+    }
+
+    fn created_at(&self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_millis(self.created_at.max(0) as u64)
+    }
+
+    fn received_at(&self) -> Option<SystemTime> {
+        self.received_at
+    }
+
+    fn sent_at(&self) -> Option<SystemTime> {
+        self.sent_at
+    }
+
+    fn payload_as_bytes(&self) -> &[u8] {
+        &self.payload_bytes
+    }
+
+    fn payload_as_content(&self) -> Option<&Content> {
+        self.content.as_ref()
+    }
 }

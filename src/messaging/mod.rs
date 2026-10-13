@@ -1,4 +1,5 @@
 pub(crate) mod internal;
+pub(crate) mod dto;
 
 pub mod channel;
 pub mod contact;
@@ -8,6 +9,7 @@ pub mod friend_request;
 pub mod invite_ticket;
 pub mod message;
 pub mod options;
+pub(crate) mod rpc;
 pub mod session_info;
 pub mod messaging_client;
 

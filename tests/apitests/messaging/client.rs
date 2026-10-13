@@ -511,7 +511,7 @@ mod tests {
             Permission::OwnerInvite,
             "API channel test",
             None::<String>,
-            None::<String>,
+            false,
         ).await;
         assert!(rc.is_ok(), "Creating testcase channel failed: {:?}", rc.err());
 

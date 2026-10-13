@@ -205,7 +205,7 @@ pub trait MessagingClient {
         permission: Permission,
         name: String,
         notice: Option<String>,
-        announcement: Option<String>,
+        announce: bool,
     ) -> impl Future<Output = Result<Box<dyn Channel>>>;
 
     /// Removes a channel (owner only).

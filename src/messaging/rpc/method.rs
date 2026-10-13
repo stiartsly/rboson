@@ -1,65 +1,65 @@
-use serde_repr::{Serialize_repr, Deserialize_repr};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub(crate) enum RPCMethod {
-    UserProfile     = 0x01,
-
-    DeviceList      = 0x11,
-    DeviceRevoke    = 0x12,
-
-    ContactPush     = 0x21,
-    ContactClear    = 0x23,
-
-    ChannelCreate   = 0x31,
-    ChannelDelete   = 0x32,
-    ChannelJoin     = 0x33,
-    ChannelLeave    = 0x34,
-    ChannelInfo     = 0x35,
-    ChannelMembers  = 0x36,
-    ChannelOwner    = 0x37,
-    ChannelPermission = 0x38,
-    ChannelName     = 0x39,
-    ChannelNotice   = 0x3A,
-    ChannelRole     = 0x3B,
-    ChannelBan      = 0x3C,
-    ChannelUnban    = 0x3D,
-    ChannelRemove   = 0x3E,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(i32)]
+pub(crate) enum Method {
+    #[serde(rename = "sl")] SessionList = 1,
+    #[serde(rename = "sr")] SessionRevoke,
+    #[serde(rename = "cm")] ContactMutate,
+    #[serde(rename = "cs")] ContactSync,
+    #[serde(rename = "cc")] ChannelCreate,
+    #[serde(rename = "cd")] ChannelDelete,
+    #[serde(rename = "cot")] ChannelOwnershipTransfer,
+    #[serde(rename = "csr")] ChannelSessionKeyRotate,
+    #[serde(rename = "ciu")] ChannelInfoUpdate,
+    #[serde(rename = "cru")] ChannelMembersRoleUpdate,
+    #[serde(rename = "cmb")] ChannelMembersBan,
+    #[serde(rename = "cmu")] ChannelMembersUnban,
+    #[serde(rename = "cmr")] ChannelMembersRemove,
+    #[serde(rename = "cj")] ChannelJoin,
+    #[serde(rename = "cl")] ChannelLeave,
+    #[serde(rename = "ci")] ChannelInfo,
 }
 
-impl TryFrom<u8> for RPCMethod {
-    type Error = String;
+impl Method {
+    pub(crate) fn value(self) -> i32 {
+        self as i32
+    }
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x01 => Ok(RPCMethod::UserProfile),
-            0x11 => Ok(RPCMethod::DeviceList),
-            0x12 => Ok(RPCMethod::DeviceRevoke),
-            0x21 => Ok(RPCMethod::ContactPush),
-            0x23 => Ok(RPCMethod::ContactClear),
-            0x31 => Ok(RPCMethod::ChannelCreate),
-            0x32 => Ok(RPCMethod::ChannelDelete),
-            0x33 => Ok(RPCMethod::ChannelJoin),
-            0x34 => Ok(RPCMethod::ChannelLeave),
-            0x35 => Ok(RPCMethod::ChannelInfo),
-            0x36 => Ok(RPCMethod::ChannelMembers),
-            0x37 => Ok(RPCMethod::ChannelOwner),
-            0x38 => Ok(RPCMethod::ChannelPermission),
-            0x39 => Ok(RPCMethod::ChannelName),
-            0x3A => Ok(RPCMethod::ChannelNotice),
-            0x3B => Ok(RPCMethod::ChannelRole),
-            0x3C => Ok(RPCMethod::ChannelBan),
-            0x3D => Ok(RPCMethod::ChannelUnban),
-            0x3E => Ok(RPCMethod::ChannelRemove),
+    pub(crate) fn is_service_rpc(self) -> bool {
+        self.value() <= Self::ChannelCreate.value()
+    }
 
-            _    => Err(format!("Invalid method: {:#X}", value)),
-        }
+    pub(crate) fn is_channel_rpc(self) -> bool {
+        (Self::ChannelDelete.value()..=Self::ChannelInfo.value()).contains(&self.value())
+    }
+
+    pub(crate) fn is_owner_privileged_channel_rpc(self) -> bool {
+        (Self::ChannelDelete.value()..=Self::ChannelInfoUpdate.value()).contains(&self.value())
+    }
+
+    pub(crate) fn is_moderator_privileged_channel_rpc(self) -> bool {
+        (Self::ChannelMembersRoleUpdate.value()..=Self::ChannelMembersRemove.value()).contains(&self.value())
+    }
+
+    pub(crate) fn is_unprivileged_channel_rpc(self) -> bool {
+        (Self::ChannelJoin.value()..=Self::ChannelInfo.value()).contains(&self.value())
     }
 }
 
-impl From<RPCMethod> for i32 {
-    fn from(p: RPCMethod) -> Self {
-        p as i32
+impl TryFrom<i32> for Method {
+    type Error = crate::Error;
+
+    fn try_from(value: i32) -> crate::Result<Self> {
+        use Method::*;
+        [
+            SessionList, SessionRevoke, ContactMutate, ContactSync, ChannelCreate,
+            ChannelDelete, ChannelOwnershipTransfer, ChannelSessionKeyRotate,
+            ChannelInfoUpdate, ChannelMembersRoleUpdate, ChannelMembersBan,
+            ChannelMembersUnban, ChannelMembersRemove, ChannelJoin, ChannelLeave, ChannelInfo,
+        ]
+        .into_iter()
+        .find(|method| method.value() == value)
+        .ok_or_else(|| crate::core::errors::ProtocolError::new(format!("Invalid RPC method: {value}")).into())
     }
 }

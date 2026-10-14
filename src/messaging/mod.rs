@@ -3,8 +3,8 @@ pub(crate) mod dto;
 
 pub mod channel;
 pub mod contact;
-pub mod conversation;
 pub mod errors;
+pub mod conversation;
 pub mod friend_request;
 pub mod invite_ticket;
 pub mod message;
@@ -41,7 +41,7 @@ pub use {
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
 pub use contact::{Contact, ContactEditor, ContactType};
-pub use conversation::Conversation;
+pub use conversation::ConversationOps;
 pub use invite_ticket::InviteTicket;
 pub use message::{
     content_type, Content, ContentDisposition, ContentDispositionType, Message, MessageBuilder,

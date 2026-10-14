@@ -1,7 +1,6 @@
 
 pub(crate) mod contact_editor;
 pub(crate) mod photon_contact;
-pub(crate) mod photon_converstation;
 pub(crate) mod photon_channel;
 pub(crate) mod handshake;
 pub(crate) mod notification;

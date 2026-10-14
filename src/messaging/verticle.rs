@@ -27,6 +27,7 @@ use crate::messaging::{
     options::Options,
     contact::Contact,
     message::Message,
+    conversation::Conversation,
     friend_request_listener::FriendRequestListener,
     connection_listener::ConnectionListener,
     channel_listener::ChannelListener,
@@ -78,10 +79,10 @@ pub(crate) enum Event {
     },
     GetConversation {
         id: Id,
-        complete: oneshot::Sender<CmdResult<Option<Box<dyn super::conversation::Conversation>>>>,
+        complete: oneshot::Sender<CmdResult<Option<Conversation>>>,
     },
     GetConversations {
-        complete: oneshot::Sender<CmdResult<Vec<Box<dyn super::conversation::Conversation>>>>,
+        complete: oneshot::Sender<CmdResult<Vec<Conversation>>>,
     },
     RemoveConversation {
         id: Id,
@@ -324,7 +325,7 @@ impl VerticleClient {
     pub(crate) async fn get_conversation(
         &self,
         id: Id,
-    ) -> Result<Option<Box<dyn super::conversation::Conversation>>> {
+    ) -> Result<Option<Conversation>> {
         self.call(|complete| Event::GetConversation {
             id,
             complete
@@ -333,7 +334,7 @@ impl VerticleClient {
 
     pub(crate) async fn get_conversations(
         &self,
-    ) -> Result<Vec<Box<dyn super::conversation::Conversation>>> {
+    ) -> Result<Vec<Conversation>> {
         self.call(|complete| Event::GetConversations {
             complete
         }).await

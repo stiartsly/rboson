@@ -212,11 +212,11 @@ impl Client {
         ))
     }
 
-    pub async fn get_conversation(&self, id: &Id) -> Result<Option<Box<dyn Conversation>>> {
+    pub async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
         self.verticle()?.get_conversation(*id).await
     }
 
-    pub async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
+    pub async fn get_conversations(&self) -> Result<Vec<Conversation>> {
         self.verticle()?.get_conversations().await
     }
 
@@ -557,11 +557,11 @@ impl MessagingClient for Client {
     async fn get_conversation(
         &self,
         id: &Id
-    ) -> Result<Option<Box<dyn Conversation>>> {
+    ) -> Result<Option<Conversation>> {
         self.get_conversation(id).await
     }
 
-    async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
+    async fn get_conversations(&self) -> Result<Vec<Conversation>> {
         self.get_conversations().await
     }
 

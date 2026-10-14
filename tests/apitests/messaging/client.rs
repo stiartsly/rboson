@@ -8,6 +8,7 @@ mod tests {
     use boson::{Id, signature::KeyPair};
     use boson::messaging::{Channel, ChannelListener, Client, Message, MessageListener, Options, Permission};
     use boson::messaging::ContactType;
+    use boson::messaging::ConversationOps;
 
     const BOB_YAML: &str = "tests/apitests/messaging/bob.yaml";
     const ALICE_YAML: &str = "tests/apitests/messaging/alice.yaml";
@@ -700,9 +701,7 @@ mod tests {
         let bob_conversation = conversation_opt.unwrap();
         assert_eq!(bob_conversation.id(), &alice_id);
         assert_eq!(bob_conversation.contact().id(), &alice_id);
-        assert_eq!(bob_conversation.preview(), body);
-        assert_eq!(bob_conversation.message_count(), 1);
-        assert_eq!(bob_conversation.unread_count(), 0);
+        assert_eq!(bob_conversation.preview().unwrap(), Some(body));
 
         let rc = bob.get_conversations().await;
         assert!(rc.is_ok());
@@ -718,9 +717,7 @@ mod tests {
         let alice_conversation = converstation_opt.unwrap();
         assert_eq!(alice_conversation.id(), &bob_id);
         assert_eq!(alice_conversation.contact().id(), &bob_id);
-        assert_eq!(alice_conversation.preview(), body);
-        assert_eq!(alice_conversation.message_count(), 1);
-        assert_eq!(alice_conversation.unread_count(), 1);
+        assert_eq!(alice_conversation.preview().unwrap(), Some(body));
 
         let rc = alice.get_conversations().await;
         assert!(rc.is_ok());

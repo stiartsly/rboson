@@ -45,7 +45,7 @@ use crate::messaging::{
     verticle::VerticleOptions,
     channel::{Channel, ChannelMember, Permission, Role},
     contact::{Contact, ContactType},
-    conversation::Conversation,
+    conversation::{ConversationOps, Conversation},
     invite_ticket::InviteTicket,
     message::{ContentDisposition, Message, MessageBuilder},
     session_info::SessionInfo,
@@ -237,7 +237,7 @@ pub(crate) struct MqttSession {
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, PhotonContact>>,
     channels: RefCell<HashMap<Id, PhotonChannel>>,
-    conversations: Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
+    conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
     message_listener: Arc<dyn MessageListener>,
@@ -1192,17 +1192,16 @@ impl MqttSession {
     pub(crate) async fn get_conversation(
         &self,
         id: &Id
-    ) -> Result<Option<Box<dyn Conversation>>> {
-        Ok(self.conversations.lock().unwrap().get(id).cloned()
-            .map(|conversation| Box::new(conversation) as Box<dyn Conversation>))
+    ) -> Result<Option<Conversation>> {
+        Ok(self.conversations.lock().unwrap().get(id).cloned())
     }
 
-    pub(crate) async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
+    pub(crate) async fn get_conversations(&self) -> Result<Vec<Conversation>> {
         let mut conversations = self.conversations.lock().unwrap().values().cloned().collect::<Vec<_>>();
-        conversations.sort_by(|left, right| left.compare(right));
-        Ok(conversations.into_iter()
-            .map(|conversation| Box::new(conversation) as Box<dyn Conversation>)
-            .collect())
+        conversations.sort_by(|left, right| {
+            left.updated_at().cmp(&right.updated_at()).then_with(|| left.id().cmp(right.id()))
+        });
+        Ok(conversations)
     }
 
     pub(crate) async fn remove_conversation(&self, id: &Id) -> Result<()> {
@@ -2208,7 +2207,7 @@ struct SessionMessageBuilder {
     blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
     origin_clock: Arc<std::sync::Mutex<i64>>,
     conversation_contact: Option<PhotonContact>,
-    conversations: Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
+    conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
     peer_id: Id,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
@@ -2353,7 +2352,7 @@ impl MessageBuilder for SessionMessageBuilder {
 }
 
 fn update_conversation(
-    conversations: &Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
+    conversations: &Arc<Mutex<HashMap<Id, Conversation>>>,
     contact: PhotonContact,
     message: PhotonMessage,
 ) -> Result<()> {
@@ -2363,7 +2362,7 @@ fn update_conversation(
     };
     let mut conversations = conversations.lock().unwrap();
     let conversation = conversations.entry(*contact.id())
-        .or_insert_with(|| super::internal::photon_converstation::PhotonConversation::new(contact));
+        .or_insert_with(|| Conversation::new(contact));
     conversation.update(Arc::new(message))
 }
 

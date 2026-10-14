@@ -67,12 +67,12 @@ pub trait MessagingClient {
     fn get_conversation(
         &self,
         id: &Id
-    ) -> impl Future<Output = Result<Option<Box<dyn Conversation>>>>;
+    ) -> impl Future<Output = Result<Option<Conversation>>>;
 
     /// Retrieves all conversations for the local user.
     fn get_conversations(
         &self
-    ) -> impl Future<Output = Result<Vec<Box<dyn Conversation>>>>;
+    ) -> impl Future<Output = Result<Vec<Conversation>>>;
 
     /// Removes a conversation and all its associated messages.
     fn remove_conversation(

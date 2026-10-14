@@ -1065,11 +1065,18 @@ impl MqttSession {
         let mqtt = self.mqtt()?;
 
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
-        let handshake_bytes = Handshake::new(timestamp, handshake_type, body)?.serialize()?;
-        let encrypted_handshake = self
+        let handshake = Handshake::new(timestamp, handshake_type, body)?;
+        let handshake_bytes = serde_cbor::to_vec(&handshake)
+            .map_err(|e|
+                EncodingError::new(format!("Encoding handshake error: {e}"))
+            )?;
+
+        let handshake_encrypted = self
             .user_identity
             .encrypt_into(&user_id, &handshake_bytes)
-            .map_err(|error| AuthenticationError::new(format!("Encrypting handshake failed: {error}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Encrypting handshake failed: {e}"))
+            )?;
 
         let message_id = Self::message_id(self.device_identity.id(), timestamp)?;
         let message = PhotonMessage::new(
@@ -1079,15 +1086,20 @@ impl MqttSession {
             HANDSHAKE_MESSAGE,
             None,
             timestamp as u64,
-            Value::Bytes(encrypted_handshake),
+            Value::Bytes(handshake_encrypted),
         );
+
         let plain = serde_cbor::to_vec(&message)
-            .map_err(|e| EncodingError::new(format!("Encoding handshake message error: {e}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Encoding handshake message error: {e}"))
+            )?;
 
         let encrypted = self
             .device_identity
             .encrypt_into(peer_id, &plain)
-            .map_err(|e| EncodingError::new(format!("Encrypting handshake message error: {e}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Encrypting handshake message error: {e}"))
+            )?;
 
         // Self::validate_outbox_packet(encrypted.len())?;
 
@@ -1966,8 +1978,6 @@ impl MqttSession {
     }
 
 }
-
-
 
 struct SessionMessageBuilder {
     recipient: Option<Id>,

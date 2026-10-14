@@ -236,6 +236,7 @@ pub(crate) struct MqttSession {
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, PhotonContact>>,
     channels: RefCell<HashMap<Id, PhotonChannel>>,
+    conversations: Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
     message_listener: Arc<dyn MessageListener>,
@@ -280,6 +281,7 @@ impl MqttSession {
             friend_requests: RefCell::new(HashMap::new()),
             contacts: RefCell::new(HashMap::new()),
             channels: RefCell::new(HashMap::new()),
+            conversations: Arc::new(Mutex::new(HashMap::new())),
 
             connection_listener: options.connection_listener.clone(),
             message_listener: options.message_listener.clone(),
@@ -916,10 +918,24 @@ impl MqttSession {
         message.sent_at = if outbox { Some(SystemTime::now()) } else { None };
         message.payload_bytes = content_bytes;
         message.content = Some(crate::messaging::message::Content::_new(headers, body));
+        let created_at = i64::try_from(message.created_at)
+            .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
+        let conversation_contact = self.contacts.borrow().get(&contact_id).cloned()
+            .unwrap_or_else(|| PhotonContact {
+                id: contact_id,
+                contact_type: ContactType::Auto,
+                name: None,
+                remark: None,
+                tags: None,
+                muted: false,
+                blocked: false,
+                created_at,
+                updated_at: created_at,
+                revision: 0,
+            });
+        update_conversation(&self.conversations, conversation_contact, message.clone())?;
         if outbox {
-            let timestamp = i64::try_from(message.created_at)
-                .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
-            if message.id != Self::message_id(self.device_id(), timestamp)?
+            if message.id != Self::message_id(self.device_id(), created_at)?
             {
                 self.message_listener.on_sent(&message);
             }
@@ -1152,21 +1168,31 @@ impl MqttSession {
 
     pub(crate) async fn get_conversation(
         &self,
-        _id: &Id
+        id: &Id
     ) -> Result<Option<Box<dyn Conversation>>> {
-        Err(NotImplemented::new("get_conversation"))
+        Ok(self.conversations.lock().unwrap().get(id).cloned()
+            .map(|conversation| Box::new(conversation) as Box<dyn Conversation>))
     }
 
     pub(crate) async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
-        Err(NotImplemented::new("get_conversations"))
+        let mut conversations = self.conversations.lock().unwrap().values().cloned().collect::<Vec<_>>();
+        conversations.sort_by(|left, right| left.compare(right));
+        Ok(conversations.into_iter()
+            .map(|conversation| Box::new(conversation) as Box<dyn Conversation>)
+            .collect())
     }
 
-    pub(crate) async fn remove_conversation(&self, _id: &Id) -> Result<()> {
-        Err(NotImplemented::new("remove_conversation"))
+    pub(crate) async fn remove_conversation(&self, id: &Id) -> Result<()> {
+        self.conversations.lock().unwrap().remove(id);
+        Ok(())
     }
 
-    pub(crate) async fn remove_conversations(&self, _ids: &[Id]) -> Result<()> {
-        Err(NotImplemented::new("remove_conversations"))
+    pub(crate) async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
+        let mut conversations = self.conversations.lock().unwrap();
+        for id in ids {
+            conversations.remove(id);
+        }
+        Ok(())
     }
 
     pub(crate) async fn get_messages(
@@ -1968,6 +1994,8 @@ impl MqttSession {
             friend_sessions: self.friend_sessions.clone(),
             blocked_contacts: self.blocked_contacts.clone(),
             origin_clock: self.origin_clock.clone(),
+            conversation_contact: recipient.and_then(|id| self.contacts.borrow().get(&id).cloned()),
+            conversations: self.conversations.clone(),
             peer_id: *self.peer_id(),
             content_type: None,
             content_disposition: None,
@@ -1987,6 +2015,8 @@ struct SessionMessageBuilder {
     friend_sessions: Arc<std::sync::Mutex<HashMap<Id, CryptoIdentity>>>,
     blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
     origin_clock: Arc<std::sync::Mutex<i64>>,
+    conversation_contact: Option<PhotonContact>,
+    conversations: Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
     peer_id: Id,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
@@ -2112,7 +2142,56 @@ impl MessageBuilder for SessionMessageBuilder {
             wire.sent_at = Some(SystemTime::now());
             wire.payload_bytes = content_bytes;
             wire.content = Some(crate::messaging::message::Content::_new(headers, body));
+            let contact = self.conversation_contact.unwrap_or_else(|| PhotonContact {
+                id: recipient,
+                contact_type: ContactType::Auto,
+                name: None,
+                remark: None,
+                tags: None,
+                muted: false,
+                blocked: false,
+                created_at: timestamp,
+                updated_at: timestamp,
+                revision: 0,
+            });
+            update_conversation(&self.conversations, contact, wire.clone())?;
             Ok(Box::new(wire) as Box<dyn Message>)
         })
+    }
+}
+
+fn update_conversation(
+    conversations: &Arc<Mutex<HashMap<Id, super::internal::photon_converstation::PhotonConversation>>>,
+    contact: PhotonContact,
+    message: PhotonMessage,
+) -> Result<()> {
+    let message = ConversationMessage {
+        message,
+        conversation_id: *contact.id(),
+    };
+    let mut conversations = conversations.lock().unwrap();
+    let conversation = conversations.entry(*contact.id())
+        .or_insert_with(|| super::internal::photon_converstation::PhotonConversation::new(contact));
+    conversation.update(Arc::new(message))
+}
+
+struct ConversationMessage {
+    message: PhotonMessage,
+    conversation_id: Id,
+}
+
+impl Message for ConversationMessage {
+    fn id(&self) -> &Id { self.message.id() }
+    fn rid(&self) -> i64 { self.message.rid() }
+    fn conversation_id(&self) -> Option<&Id> { Some(&self.conversation_id) }
+    fn recipient(&self) -> &Id { self.message.recipient() }
+    fn message_type(&self) -> crate::messaging::message::MessageType { self.message.message_type() }
+    fn from(&self) -> Option<&Id> { self.message.from() }
+    fn created_at(&self) -> SystemTime { self.message.created_at() }
+    fn received_at(&self) -> Option<SystemTime> { self.message.received_at() }
+    fn sent_at(&self) -> Option<SystemTime> { self.message.sent_at() }
+    fn payload_as_bytes(&self) -> &[u8] { self.message.payload_as_bytes() }
+    fn payload_as_content(&self) -> Option<&crate::messaging::message::Content> {
+        self.message.payload_as_content()
     }
 }

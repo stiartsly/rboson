@@ -8,6 +8,7 @@ use crate::messaging::{
 };
 use super::PhotonContact;
 
+#[derive(Clone)]
 pub(crate) struct PhotonConversation {
     contact: PhotonContact,
     last_message: Option<Arc<dyn Message>>,

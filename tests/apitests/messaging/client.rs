@@ -40,6 +40,151 @@ mod tests {
         .expect("The matching friend request should arrive within 15 seconds")
     }
 
+    fn create_client(config: &str) -> Client {
+        Client::new(Options::load(config).unwrap())
+    }
+
+    fn create_client_with_message_listener(
+        config: &str,
+        listener: impl MessageListener + 'static,
+    ) -> Client {
+        let options = build_options_with_message_listener(
+            Options::load(config).unwrap(),
+            listener,
+        );
+        Client::new(options)
+    }
+
+    async fn start_clients(first: &Client, second: &Client) {
+        assert_ne!(first.user_id(), second.user_id());
+        let (first_start, second_start) = tokio::join!(
+            first.start(),
+            second.start()
+        );
+        assert!(first_start.is_ok());
+        assert!(second_start.is_ok());
+
+        tokio::join!(
+            wait_until_ready(first),
+            wait_until_ready(second)
+        );
+    }
+
+    async fn check_friend_requests(client: &Client, user_id: Id, accepted: bool) {
+        let requests = client.get_friend_requests().await.unwrap();
+        let request = requests.iter()
+            .find(|request| request.user_id() == &user_id)
+            .expect("The friend request should be present in the request list");
+        assert_eq!(request.is_accepted(), accepted);
+    }
+
+    async fn check_friend_contact(client: &Client, user_id: &Id) {
+        let rc = client.get_contact(user_id).await;
+        assert!(rc.is_ok());
+
+        let contact = rc.unwrap();
+        assert!(contact.is_some());
+        assert_eq!(contact.unwrap().contact_type(), ContactType::Friend);
+    }
+
+    async fn make_friends_by_request(bob: &Client, alice: &Client) {
+        let bob_id = *bob.user_id();
+        let alice_id = *alice.user_id();
+
+        let rc = bob.friend_request(alice_id, Some("hello")).await;
+        assert!(rc.is_ok());
+
+        let rc = bob.get_friend_request(alice_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.as_ref().unwrap().is_some());
+
+        let outgoing_request = rc.unwrap().unwrap();
+        assert_eq!(outgoing_request.initiator_id(), &bob_id);
+        assert_eq!(outgoing_request.hello(), Some("hello"));
+        assert!(!outgoing_request.is_accepted());
+        check_friend_requests(bob, alice_id, false).await;
+
+        let incoming = wait_for_friend_request(
+            alice,
+            bob_id,
+            outgoing_request.created_at(),
+            false,
+        ).await;
+        assert_eq!(incoming.hello(), Some("hello"));
+        check_friend_requests(alice, bob_id, false).await;
+
+        let rc = alice.accept_friend_request(bob_id).await;
+        assert!(rc.is_ok());
+
+        wait_for_friend_request(
+            bob,
+            alice_id,
+            outgoing_request.created_at(),
+            true,
+        ).await;
+        wait_for_friend_request(
+            alice,
+            bob_id,
+            outgoing_request.created_at(),
+            true,
+        ).await;
+
+        check_friend_requests(bob, alice_id, true).await;
+        check_friend_requests(alice, bob_id, true).await;
+        check_friend_contact(bob, &alice_id).await;
+        check_friend_contact(alice, &bob_id).await;
+    }
+
+    async fn make_friends_with_keypair(
+        bob: &Client,
+        alice: &Client,
+        session_keypair: KeyPair,
+    ) {
+        bob.add_friend(
+            *alice.user_id(),
+            session_keypair.clone(),
+            Some("hello,alice"),
+        ).await.unwrap();
+
+        alice.add_friend(
+            *bob.user_id(),
+            session_keypair,
+            Some("hello,bob"),
+        ).await.unwrap();
+
+        check_friend_contact(bob, alice.user_id()).await;
+        check_friend_contact(alice, bob.user_id()).await;
+    }
+
+    async fn clear_friend_requests_and_contacts(first: &Client, second: &Client) {
+        let (first_result, second_result) = tokio::join!(
+            async {
+                let contacts = first.clear_contacts().await;
+                let requests = first.clear_friend_requests().await;
+                (contacts, requests)
+            },
+            async {
+                let contacts = second.clear_contacts().await;
+                let requests = second.clear_friend_requests().await;
+                (contacts, requests)
+            },
+        );
+        let (first_contacts, first_requests) = first_result;
+        let (second_contacts, second_requests) = second_result;
+        assert!(first_contacts.is_ok());
+        assert!(second_contacts.is_ok());
+        assert!(first_requests.is_ok());
+        assert!(second_requests.is_ok());
+    }
+
+    async fn stop_two_clients(first: &Client, second: &Client) -> (bool, bool) {
+        let (first_stop, second_stop) = tokio::join!(
+            first.stop(),
+            second.stop(),
+        );
+        (first_stop.is_ok(), second_stop.is_ok())
+    }
+
     struct MessageCapture {
         received: tokio::sync::mpsc::UnboundedSender<Option<Vec<u8>>>,
     }
@@ -381,43 +526,20 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn tests_add_friend() {
-        let bob = Client::new(Options::load(BOB_YAML).unwrap());
-        let alice = Client::new(Options::load(ALICE_YAML).unwrap());
+        let bob = create_client(BOB_YAML);
+        let alice = create_client(ALICE_YAML);
         let bob_id = *bob.user_id();
         let alice_id = *alice.user_id();
 
-        assert_ne!(bob_id, alice_id);
-
-        let (bob_start, alice_start) = tokio::join!(
-            bob.start(),
-            alice.start()
-        );
-        assert!(bob_start.is_ok());
-        assert!(alice_start.is_ok());
-
-        tokio::join!(
-            wait_until_ready(&bob),
-            wait_until_ready(&alice)
-        );
-
-        bob.clear_contacts().await.unwrap();
-        alice.clear_contacts().await.unwrap();
+        start_clients(&bob, &alice).await;
+        clear_friend_requests_and_contacts(&bob, &alice).await;
 
         let session_keypair = KeyPair::random();
-
-        let rc = bob.add_friend(
-            alice_id,
-            session_keypair.clone(),
-            Some("Hello,Alice".to_string())
+        make_friends_with_keypair(
+            &bob,
+            &alice,
+            session_keypair
         ).await;
-        assert!(rc.is_ok());
-
-        let rc = alice.add_friend(
-            bob_id,
-            session_keypair,
-            Some("Hello,Bob".to_string())
-        ).await;
-        assert!(rc.is_ok());
 
         let bob_contacts = bob.get_contacts().await.unwrap();
         let bob_friends: Vec<_> = bob_contacts.iter()
@@ -426,7 +548,7 @@ mod tests {
 
         assert_eq!(bob_friends.len(), 1);
         assert_eq!(bob_friends[0].id(), &alice_id);
-        assert_eq!(bob_friends[0].remark(), Some("Hello,Alice"));
+        assert_eq!(bob_friends[0].remark(), Some("hello,alice"));
 
         let rc = bob.get_contact(&alice_id).await;
         let contact = rc.unwrap();
@@ -434,7 +556,7 @@ mod tests {
 
         let contact = contact.as_ref().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Friend);
-        assert_eq!(contact.remark(), Some("Hello,Alice"));
+        assert_eq!(contact.remark(), Some("hello,alice"));
 
         let alice_contacts = alice.get_contacts().await.unwrap();
         let alice_friends: Vec<_> = alice_contacts.iter()
@@ -442,7 +564,7 @@ mod tests {
             .collect();
         assert_eq!(alice_friends.len(), 1);
         assert_eq!(alice_friends[0].id(), &bob_id);
-        assert_eq!(alice_friends[0].remark(), Some("Hello,Bob"));
+        assert_eq!(alice_friends[0].remark(), Some("hello,bob"));
 
 
         let rc = alice.get_contact(&bob_id).await;
@@ -452,69 +574,140 @@ mod tests {
 
         let contact = contact.as_ref().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Friend);
-        assert_eq!(contact.remark(), Some("Hello,Bob"));
+        assert_eq!(contact.remark(), Some("hello,bob"));
 
-        bob.clear_contacts().await.unwrap();
-        alice.clear_contacts().await.unwrap();
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
+    }
 
-        let (bob_stop, alice_stop) = tokio::join!(
-            bob.stop(),
-            alice.stop()
+    #[tokio::test]
+    #[serial]
+    async fn test_conversation() {
+        let bob = create_client(BOB_YAML);
+        let bob_id = *bob.user_id();
+
+        let (received_tx, mut received_rx) = mpsc::unbounded_channel();
+        let alice = create_client_with_message_listener(
+            ALICE_YAML,
+            MessageCapture { received: received_tx },
         );
-        assert!(bob_stop.is_ok());
-        assert!(alice_stop.is_ok());
+        let alice_id = *alice.user_id();
+
+        start_clients(&bob, &alice).await;
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let session_keypair = KeyPair::random();
+
+        make_friends_with_keypair(
+            &bob,
+            &alice,
+            session_keypair,
+        ).await;
+
+        let rc = bob.get_conversation(&alice_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+
+        let rc = alice.get_conversation(&bob_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+
+        let rc = bob.get_conversations().await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_empty());
+
+        let rc = alice.get_conversations().await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_empty());
+
+        let body = "conversation API verification";
+
+        let rc = bob.message(Some(alice_id)).text_body(body).send().await;
+        assert!(rc.is_ok());
+        let received = time::timeout(Duration::from_secs(15), received_rx.recv())
+            .await
+            .expect("The conversation test message should arrive")
+            .expect("The message listener should capture the incoming message");
+        assert_eq!(received, Some(body.as_bytes().to_vec()));
+
+        let rc = bob.get_conversation(&alice_id).await;
+        assert!(rc.is_ok());
+        let conversation_opt = rc.unwrap();
+        assert!(conversation_opt.is_some());
+
+        let bob_conversation = conversation_opt.unwrap();
+        assert_eq!(bob_conversation.id(), &alice_id);
+        assert_eq!(bob_conversation.contact().id(), &alice_id);
+        assert_eq!(bob_conversation.preview(), body);
+        assert_eq!(bob_conversation.message_count(), 1);
+        assert_eq!(bob_conversation.unread_count(), 0);
+
+        let rc = bob.get_conversations().await;
+        assert!(rc.is_ok());
+        let bob_conversations = rc.unwrap();
+        assert_eq!(bob_conversations.len(), 1);
+        assert_eq!(bob_conversations[0].id(), &alice_id);
+
+        let rc = alice.get_conversation(&bob_id).await;
+        assert!(rc.is_ok());
+        let converstation_opt = rc.unwrap();
+        assert!(converstation_opt.is_some());
+
+        let alice_conversation = converstation_opt.unwrap();
+        assert_eq!(alice_conversation.id(), &bob_id);
+        assert_eq!(alice_conversation.contact().id(), &bob_id);
+        assert_eq!(alice_conversation.preview(), body);
+        assert_eq!(alice_conversation.message_count(), 1);
+        assert_eq!(alice_conversation.unread_count(), 1);
+
+        let rc = alice.get_conversations().await;
+        assert!(rc.is_ok());
+        let alice_conversations = rc.unwrap();
+        assert_eq!(alice_conversations.len(), 1);
+        assert_eq!(alice_conversations[0].id(), &bob_id);
+
+        let rc = bob.remove_conversation(&alice_id).await;
+        assert!(rc.is_ok());
+        let rc = bob.get_conversation(&alice_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+
+        let rc = bob.get_conversations().await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_empty());
+
+        let rc = alice.remove_conversations(&[bob_id]).await;
+        assert!(rc.is_ok());
+        let rc = alice.get_conversation(&bob_id).await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_none());
+        let rc = alice.get_conversations().await;
+        assert!(rc.is_ok());
+        assert!(rc.unwrap().is_empty());
+
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
     }
 
     #[tokio::test]
     #[serial]
     async fn test_message() {
-        let options = Options::load(BOB_YAML).unwrap();
-        let sender = Client::new(options);
+        let sender = create_client(BOB_YAML);
         let sender_id = sender.user_id().clone();
 
         let (received_tx, mut received_rx) = mpsc::unbounded_channel();
-        let options = build_options_with_message_listener(
-            Options::load(ALICE_YAML).unwrap(),
+        let recipient = create_client_with_message_listener(
+            ALICE_YAML,
             MessageCapture { received: received_tx },
         );
-        let recipient = Client::new(options);
         let recipient_id = *recipient.user_id();
 
-        assert_ne!(sender_id, recipient_id);
-        let (sender_start, recipient_start) = tokio::join!(
-            sender.start(),
-            recipient.start()
-        );
-        assert!(sender_start.is_ok());
-        assert!(recipient_start.is_ok());
-
-        tokio::join!(
-            wait_until_ready(&sender),
-            wait_until_ready(&recipient)
-        );
-
-        sender.clear_contacts().await.unwrap();
-        recipient.clear_contacts().await.unwrap();
-        sender.clear_friend_requests().await.unwrap();
-        recipient.clear_friend_requests().await.unwrap();
-
-        sender.friend_request(
-            recipient_id,
-            Some("message test")
-        ).await.unwrap();
-        let request = wait_for_friend_request(
-            &recipient,
-            sender_id,
-            sender.get_friend_request(recipient_id).await.unwrap().unwrap().created_at(),
-            false,
-        ).await;
-        recipient.accept_friend_request(sender_id).await.unwrap();
-        wait_for_friend_request(
-            &sender,
-            recipient_id,
-            request.created_at(),
-            true,
-        ).await;
+        start_clients(&sender, &recipient).await;
+        clear_friend_requests_and_contacts(&sender, &recipient).await;
+        make_friends_by_request(&sender, &recipient).await;
 
         let body = "message delivery verification";
         let rc = sender.message(Some(recipient_id)).text_body(body).send().await;
@@ -533,46 +726,26 @@ mod tests {
             .expect("The receiver should capture the inbound message");
         assert_eq!(received, Some(body.as_bytes().to_vec()));
 
-        sender.clear_contacts().await.unwrap();
-        recipient.clear_contacts().await.unwrap();
-        sender.clear_friend_requests().await.unwrap();
-        recipient.clear_friend_requests().await.unwrap();
-
-        let (sender_stop, recipient_stop) = tokio::join!(
-            sender.stop(),
-            recipient.stop()
-        );
-        assert!(sender_stop.is_ok());
-        assert!(recipient_stop.is_ok());
+        clear_friend_requests_and_contacts(&sender, &recipient).await;
+        let (sender_stop, recipient_stop) = stop_two_clients(&sender, &recipient).await;
+        assert!(sender_stop);
+        assert!(recipient_stop);
     }
 
     #[tokio::test]
     #[serial]
     async fn test_channel_message() {
         let (received_tx, mut received_rx) = mpsc::unbounded_channel();
-        let options = build_options_with_message_listener(
-             Options::load(BOB_YAML).unwrap(),
-            ChannelMessageCapture { received: received_tx }
+        let bob = create_client_with_message_listener(
+            BOB_YAML,
+            ChannelMessageCapture { received: received_tx },
         );
-        let bob = Client::new(options);
         let bob_id = bob.user_id().clone();
 
-        let options = Options::load(ALICE_YAML).unwrap();
-        let alice = Client::new(options);
+        let alice = create_client(ALICE_YAML);
         let alice_id = alice.user_id().clone();
 
-        assert_ne!(bob_id, alice_id);
-        let (bob_start, alice_start) = tokio::join!(
-            bob.start(),
-            alice.start()
-        );
-        assert!(bob_start.is_ok());
-        assert!(alice_start.is_ok());
-
-        tokio::join!(
-            wait_until_ready(&bob),
-            wait_until_ready(&alice)
-        );
+        start_clients(&bob, &alice).await;
 
         let mut created_channel_id = None;
         let mut alice_joined = false;
@@ -586,42 +759,8 @@ mod tests {
             }
         }
 
-        bob.clear_contacts().await.unwrap();
-        alice.clear_contacts().await.unwrap();
-        bob.clear_friend_requests().await.unwrap();
-        alice.clear_friend_requests().await.unwrap();
-
-        let rc = bob.friend_request(alice_id, Some("channel test")).await;
-        assert!(rc.is_ok());
-        let rc = bob.get_friend_request(alice_id).await;
-        assert!(rc.is_ok());
-        assert!(rc.as_ref().unwrap().is_some());
-
-        let request = rc.unwrap().unwrap();
-        wait_for_friend_request(
-            &alice,
-            bob_id,
-            request.created_at(),
-            false
-        ).await;
-
-        let rc = alice.accept_friend_request(bob_id).await;
-        assert!(rc.is_ok());
-
-        wait_for_friend_request(
-            &bob,
-            alice_id,
-            request.created_at(),
-            true
-        ).await;
-
-        let rc = bob.get_contact(&alice_id).await;
-        assert!(rc.is_ok());
-        assert!(rc.unwrap().is_some());
-
-        let rc = alice.get_contact(&bob_id).await;
-        assert!(rc.is_ok());
-        assert!(rc.unwrap().is_some());
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        make_friends_by_request(&bob, &alice).await;
 
         let rc = bob.create_channel(
             Permission::OwnerInvite,
@@ -691,10 +830,7 @@ mod tests {
         assert!(rc.is_ok());
         assert!(rc.unwrap().is_none());
 
-        bob.clear_contacts().await.unwrap();
-        alice.clear_contacts().await.unwrap();
-        bob.clear_friend_requests().await.unwrap();
-        alice.clear_friend_requests().await.unwrap();
+        clear_friend_requests_and_contacts(&bob, &alice).await;
 
         };
         use futures::FutureExt;
@@ -710,20 +846,17 @@ mod tests {
             }
         }
 
-        let (bob_stop, alice_stop) = tokio::join!(
-            bob.stop(),
-            alice.stop()
-        );
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
         if let Err(panic) = result {
-            if let Err(error) = &bob_stop {
-                eprintln!("Stopping Bob during cleanup failed: {error}");
+            if !bob_stop {
+                eprintln!("Stopping Bob during cleanup failed");
             }
-            if let Err(error) = &alice_stop {
-                eprintln!("Stopping Alice during cleanup failed: {error}");
+            if !alice_stop {
+                eprintln!("Stopping Alice during cleanup failed");
             }
             std::panic::resume_unwind(panic);
         }
-        assert!(bob_stop.is_ok());
-        assert!(alice_stop.is_ok());
+        assert!(bob_stop);
+        assert!(alice_stop);
     }
 }

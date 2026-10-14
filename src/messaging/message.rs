@@ -313,6 +313,7 @@ impl TryFrom<i32> for MessageType {
 // ---------------------------------------------------------------------------
 
 /// The decoded content of a [`Message`].
+#[derive(Clone)]
 pub struct Content {
     headers: HashMap<String, serde_json::Value>,
     body: Vec<u8>,

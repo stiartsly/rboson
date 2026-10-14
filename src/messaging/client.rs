@@ -327,11 +327,15 @@ impl Client {
     pub async fn add_friend(
         &self,
         user_id: Id,
-        session_key: signature::KeyPair,
+        session_key: impl Into<signature::KeyPair>,
         remark: Option<impl Into<String>>,
     ) -> Result<()> {
-        let key = session_key.private_key().as_ref().to_vec();
-        self.verticle()?.add_friend(user_id, key, remark.map(Into::into)).await
+        let key = session_key.into().private_key().as_ref().to_vec();
+        self.verticle()?.add_friend(
+            user_id,
+            key,
+            remark.map(Into::into)
+        ).await
     }
 
     pub async fn block_user(
@@ -640,18 +644,18 @@ impl MessagingClient for Client {
 
     async fn add_friend(
         &self,
-        user_id: &Id,
+        userid: &Id,
         session_key: signature::KeyPair,
         remark: Option<String>,
     ) -> Result<()> {
-        self.add_friend(*user_id, session_key, remark).await
+        self.add_friend(*userid, session_key, remark).await
     }
 
     async fn block_user(
         &self,
-        user_id: &Id
+        userid: &Id
     ) -> Result<Box<dyn Contact>> {
-        self.block_user(*user_id).await
+        self.block_user(*userid).await
     }
 
     async fn create_channel(&self, perms: Permission, name: String, notice: Option<String>, announce: bool) -> Result<Box<dyn Channel>> {

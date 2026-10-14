@@ -4,7 +4,7 @@ use serde_cbor::Value;
 use crate::{Id, utils};
 use crate::messaging::message::{Message, Content};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PhotonMessage {
     #[serde(rename = "v")]
     pub(crate) version: u8,
@@ -75,9 +75,11 @@ impl Message for PhotonMessage {
     }
 
     fn conversation_id(&self) -> Option<&Id> {
-        self.from.as_ref().or(
+        if self.received_at.is_some() {
+            self.from.as_ref()
+        } else {
             Some(&self.recipient)
-        )
+        }
     }
 
     fn recipient(&self) -> &Id {

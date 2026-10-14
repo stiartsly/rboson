@@ -1,46 +1,57 @@
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value;
-use crate::{Id, errors::Result};
-use crate::messaging::errors::EncodingError;
+use crate::{
+    Id,
+    errors::{Error, Result},
+};
+use crate::messaging::{
+    errors::EncodingError,
+    SessionInfo,
+};
+use super::{
+    ChannelInfo,
+    ChannelMember,
+    ChannelMembersRole,
+    ContactSync
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
-pub(crate) enum NotificationEvent {
+pub(crate) enum Event {
     #[serde(rename = "sn")]
     SessionNew = 1,
     #[serde(rename = "cs")]
-    ContactSync,
+    ContactSync = 2,
     #[serde(rename = "cc")]
     ChannelCreate = 21,
     #[serde(rename = "cd")]
-    ChannelDelete,
+    ChannelDelete = 22,
     #[serde(rename = "cj")]
-    ChannelJoin,
+    ChannelJoin = 23,
     #[serde(rename = "cl")]
-    ChannelLeave,
+    ChannelLeave = 24,
     #[serde(rename = "cot")]
-    ChannelOwnershipTransfer,
+    ChannelOwnershipTransfer = 25,
     #[serde(rename = "csr")]
-    ChannelSessionKeyRotate,
+    ChannelSessionKeyRotate = 26,
     #[serde(rename = "ciu")]
-    ChannelInfoUpdate,
+    ChannelInfoUpdate = 27,
     #[serde(rename = "cru")]
-    ChannelMembersRoleUpdate,
+    ChannelMembersRoleUpdate = 28,
     #[serde(rename = "cmb")]
-    ChannelMembersBan,
+    ChannelMembersBan = 29,
     #[serde(rename = "cmu")]
-    ChannelMembersUnban,
+    ChannelMembersUnban = 30,
     #[serde(rename = "cmr")]
-    ChannelMembersRemove,
+    ChannelMembersRemove = 31,
     #[serde(rename = "cmj")]
-    ChannelMemberJoin,
+    ChannelMemberJoin = 32,
     #[serde(rename = "cml")]
-    ChannelMemberLeave,
+    ChannelMemberLeave = 33,
 }
 
-impl NotificationEvent {
-    pub(crate) fn value(self) -> i32 { self as i32 }
-
+impl Event {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::SessionNew => "sn",
@@ -62,103 +73,118 @@ impl NotificationEvent {
     }
 }
 
-impl TryFrom<i32> for NotificationEvent {
-    type Error = crate::errors::Error;
+impl TryFrom<i32> for Event {
+    type Error = Error;
 
     fn try_from(value: i32) -> Result<Self> {
-        use NotificationEvent::*;
-        [SessionNew, ContactSync, ChannelCreate, ChannelDelete, ChannelJoin, ChannelLeave,
-            ChannelOwnershipTransfer, ChannelSessionKeyRotate, ChannelInfoUpdate, ChannelMembersRoleUpdate,
-            ChannelMembersBan, ChannelMembersUnban, ChannelMembersRemove, ChannelMemberJoin, ChannelMemberLeave]
-            .into_iter().find(|event| event.value() == value)
-            .ok_or_else(|| EncodingError::new(format!("Invalid notification event: {value}")).into())
+        match value {
+            1 => Ok(Self::SessionNew),
+            2 => Ok(Self::ContactSync),
+            21 => Ok(Self::ChannelCreate),
+            22 => Ok(Self::ChannelDelete),
+            23 => Ok(Self::ChannelJoin),
+            24 => Ok(Self::ChannelLeave),
+            25 => Ok(Self::ChannelOwnershipTransfer),
+            26 => Ok(Self::ChannelSessionKeyRotate),
+            27 => Ok(Self::ChannelInfoUpdate),
+            28 => Ok(Self::ChannelMembersRoleUpdate),
+            29 => Ok(Self::ChannelMembersBan),
+            30 => Ok(Self::ChannelMembersUnban),
+            31 => Ok(Self::ChannelMembersRemove),
+            32 => Ok(Self::ChannelMemberJoin),
+            33 => Ok(Self::ChannelMemberLeave),
+            _ => Err(EncodingError::new(format!("Invalid notification event: {value}")).into()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "e", content = "b")]
+pub(crate) enum Body {
+    #[serde(rename = "sn")]
+    SessionNew(SessionInfo),
+    #[serde(rename = "cs")]
+    ContactSync(ContactSync),
+    #[serde(rename = "cc")]
+    ChannelCreate(ChannelInfo),
+    #[serde(rename = "cd")]
+    ChannelDelete,
+    #[serde(rename = "cj")]
+    ChannelJoin(ChannelInfo),
+    #[serde(rename = "cl")]
+    ChannelLeave,
+    #[serde(rename = "cot")]
+    ChannelOwnershipTransfer(Id),
+    #[serde(rename = "csr")]
+    ChannelSessionKeyRotate(#[serde(with = "serde_with::As::<serde_with::Bytes>")] Vec<u8>),
+    #[serde(rename = "ciu")]
+    ChannelInfoUpdate(BTreeMap<serde_cbor::Value, serde_cbor::Value>),
+    #[serde(rename = "cru")]
+    ChannelMembersRoleUpdate(ChannelMembersRole),
+    #[serde(rename = "cmb")]
+    ChannelMembersBan(Vec<Id>),
+    #[serde(rename = "cmu")]
+    ChannelMembersUnban(Vec<Id>),
+    #[serde(rename = "cmr")]
+    ChannelMembersRemove(Vec<Id>),
+    #[serde(rename = "cmj")]
+    ChannelMemberJoin(ChannelMember),
+    #[serde(rename = "cml")]
+    ChannelMemberLeave(Id),
+}
+
+impl Body {
+    pub(crate) fn event(&self) -> Event {
+        match self {
+            Self::SessionNew(_) => Event::SessionNew,
+            Self::ContactSync(_) => Event::ContactSync,
+            Self::ChannelCreate(_) => Event::ChannelCreate,
+            Self::ChannelDelete => Event::ChannelDelete,
+            Self::ChannelJoin(_) => Event::ChannelJoin,
+            Self::ChannelLeave => Event::ChannelLeave,
+            Self::ChannelOwnershipTransfer(_) => Event::ChannelOwnershipTransfer,
+            Self::ChannelSessionKeyRotate(_) => Event::ChannelSessionKeyRotate,
+            Self::ChannelInfoUpdate(_) => Event::ChannelInfoUpdate,
+            Self::ChannelMembersRoleUpdate(_) => Event::ChannelMembersRoleUpdate,
+            Self::ChannelMembersBan(_) => Event::ChannelMembersBan,
+            Self::ChannelMembersUnban(_) => Event::ChannelMembersUnban,
+            Self::ChannelMembersRemove(_) => Event::ChannelMembersRemove,
+            Self::ChannelMemberJoin(_) => Event::ChannelMemberJoin,
+            Self::ChannelMemberLeave(_) => Event::ChannelMemberLeave,
+        }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Notification {
-    pub(crate) id: Id,
+    #[serde(rename = "id")]
+    id: Id,
     #[serde(rename = "s")]
-    pub(crate) source: Id,
+    source: Id,
     #[serde(rename = "t")]
-    pub(crate) timestamp: i64,
-    #[serde(rename = "e")]
-    pub(crate) event: NotificationEvent,
-    #[serde(rename = "b", default, skip_serializing_if = "Option::is_none")]
-    pub(crate) body: Option<Value>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn notification_roundtrip_for_all_events() {
-        for value in [1, 2, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33] {
-            let event = NotificationEvent::try_from(value).unwrap();
-            assert_eq!(event.value(), value);
-            let body = match event {
-                NotificationEvent::ChannelDelete | NotificationEvent::ChannelLeave => None,
-                NotificationEvent::ChannelOwnershipTransfer | NotificationEvent::ChannelMemberLeave =>
-                    Some(Value::Bytes(Id::random().as_bytes().to_vec())),
-                NotificationEvent::ChannelSessionKeyRotate => Some(Value::Bytes(vec![1; 64])),
-                NotificationEvent::ChannelMembersBan | NotificationEvent::ChannelMembersUnban
-                    | NotificationEvent::ChannelMembersRemove => Some(Value::Array(Vec::new())),
-                _ => Some(Value::Map(Default::default())),
-            };
-            let notification = Notification { id: Id::random(), source: Id::random(), timestamp: 42, event, body };
-            let bytes = notification.serialize().unwrap();
-            let wire: Value = serde_cbor::from_slice(&bytes).unwrap();
-            let Value::Map(wire) = wire else { panic!("Notification must be a map") };
-            assert_eq!(wire.get(&Value::Text("e".into())), Some(&Value::Text(event.as_str().into())));
-            let parsed = Notification::parse(&bytes).unwrap();
-            assert_eq!(parsed.id, notification.id);
-            assert_eq!(parsed.source, notification.source);
-            assert_eq!(parsed.timestamp, notification.timestamp);
-            assert_eq!(parsed.event, event);
-            assert_eq!(parsed.body, notification.body);
-        }
-        assert!(NotificationEvent::try_from(20).is_err());
-        assert!(Notification::parse(&[0xff]).is_err());
-        let bad = Notification {
-            id: Id::random(), source: Id::random(), timestamp: 1,
-            event: NotificationEvent::ChannelMemberLeave, body: Some(Value::Integer(1)),
-        };
-        assert!(bad.serialize().is_err());
-        assert!(Notification::parse(&serde_cbor::to_vec(&bad).unwrap()).is_err());
-    }
+    timestamp: u64,
+    #[serde(flatten)]
+    body: Body,
 }
 
 impl Notification {
-    fn validate(&self) -> Result<()> {
-        if self.timestamp < 0 {
-            return Err(EncodingError::new("Notification timestamp is negative"));
-        }
-        match (self.event, self.body.as_ref()) {
-            (NotificationEvent::ChannelDelete | NotificationEvent::ChannelLeave, None | Some(Value::Null)) => Ok(()),
-            (NotificationEvent::ChannelOwnershipTransfer | NotificationEvent::ChannelMemberLeave, Some(Value::Bytes(id)))
-                if id.len() == 32 => Ok(()),
-            (NotificationEvent::ChannelSessionKeyRotate, Some(Value::Bytes(_))) => Ok(()),
-            (NotificationEvent::ChannelMembersBan | NotificationEvent::ChannelMembersUnban
-                | NotificationEvent::ChannelMembersRemove, Some(Value::Array(_))) => Ok(()),
-            (NotificationEvent::SessionNew | NotificationEvent::ContactSync
-                | NotificationEvent::ChannelCreate | NotificationEvent::ChannelJoin
-                | NotificationEvent::ChannelInfoUpdate | NotificationEvent::ChannelMembersRoleUpdate
-                | NotificationEvent::ChannelMemberJoin, Some(Value::Map(_))) => Ok(()),
-            _ => Err(EncodingError::new("Notification body does not match its event")),
-        }
+    pub(crate) fn id(&self) -> Id {
+        self.id
     }
 
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
-        self.validate()?;
-        Ok(serde_cbor::to_vec(self)
-            .map_err(|error| EncodingError::new(format!("Encoding notification failed: {error}")))?)
+    pub(crate) fn source(&self) -> Id {
+        self.source
     }
 
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        let notification: Self = serde_cbor::from_slice(bytes)
-            .map_err(|error| EncodingError::new(format!("Malformed notification: {error}")))?;
-        notification.validate()?;
-        Ok(notification)
+    pub(crate) fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    pub(crate) fn body(&self) -> &Body {
+        &self.body
     }
 }
+
+#[cfg(test)]
+#[path = "../unitests/test_notification.rs"]
+mod test_notification;

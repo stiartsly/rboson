@@ -96,9 +96,15 @@ async fn test_register_device_path() {
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
+    let node_id = Id::random();
     let server = tokio::spawn(async move {
         let (mut stream, request) = accept_request(&listener).await;
+        assert!(request.starts_with("GET /api/v1/client/id HTTP/1.1"));
+        respond(&mut stream, &json!({ "id": node_id.to_base58() })).await;
+
+        let (mut stream, request) = accept_request(&listener).await;
         assert!(request.starts_with("POST /api/v1/client/auth HTTP/1.1"));
+        assert!(request.lines().any(|line| line.starts_with("authorization: Bearer ")));
         respond(&mut stream, &json!({ "token": "device-test-token" })).await;
 
         let (mut stream, request) = accept_request(&listener).await;
@@ -107,7 +113,7 @@ async fn test_register_device_path() {
             "Expected path to start with /api/v1/client/devices, but got: {}",
             request.lines().next().unwrap_or_default()
         );
-        assert!(request.contains("authorization: Bearer"));
+        assert!(request.lines().any(|line| line == "authorization: Bearer device-test-token"));
         respond(&mut stream, &json!({})).await;
     });
 
@@ -187,12 +193,20 @@ async fn test_get_avatar_none() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
+    let node_id = Id::random();
     let server = tokio::spawn(async move {
-        let (mut stream, _) = accept_request(&listener).await;
+        let (mut stream, request) = accept_request(&listener).await;
+        assert!(request.starts_with("GET /api/v1/client/id HTTP/1.1"));
+        respond(&mut stream, &json!({ "id": node_id.to_base58() })).await;
+
+        let (mut stream, request) = accept_request(&listener).await;
+        assert!(request.starts_with("POST /api/v1/client/auth HTTP/1.1"));
+        assert!(request.lines().any(|line| line.starts_with("authorization: Bearer ")));
         respond(&mut stream, &json!({ "token": "avatar-token" })).await;
 
         let (mut stream, request) = accept_request(&listener).await;
         assert!(request.starts_with("GET /api/v1/client/avatar HTTP/1.1"));
+        assert!(request.lines().any(|line| line == "authorization: Bearer avatar-token"));
         stream
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await
@@ -215,8 +229,15 @@ async fn test_json_error_message_parsing() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
+    let node_id = Id::random();
     let server = tokio::spawn(async move {
-        let (mut stream, _) = accept_request(&listener).await;
+        let (mut stream, request) = accept_request(&listener).await;
+        assert!(request.starts_with("GET /api/v1/client/id HTTP/1.1"));
+        respond(&mut stream, &json!({ "id": node_id.to_base58() })).await;
+
+        let (mut stream, request) = accept_request(&listener).await;
+        assert!(request.starts_with("POST /api/v1/client/auth HTTP/1.1"));
+        assert!(request.lines().any(|line| line.starts_with("authorization: Bearer ")));
         let err_body =
             serde_json::to_vec(&json!({ "error": "Invalid signature credentials" })).unwrap();
         stream

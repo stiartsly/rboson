@@ -1,14 +1,14 @@
-use std::time::SystemTime;
 use crate::Id;
 use crate::messaging::{
-    channel::{Channel, ChannelEditor, ChannelMember, Permission, Role},
-    contact::{Contact, ContactEditor, ContactType},
+    channel::{Channel, ChannelEditor, Permission},
+    ChannelMember,
+    contact::{Contact, ContactOps, ContactType},
+    contact_editor::ContactEditor
 };
-use super::PhotonContact;
 
 #[derive(Clone)]
 pub(crate) struct PhotonChannel {
-    pub(crate) contact: PhotonContact,
+    pub(crate) contact: Contact,
     pub(crate) owner: Id,
     pub(crate) session_id: Id,
     pub(crate) permission: Permission,
@@ -17,31 +17,15 @@ pub(crate) struct PhotonChannel {
     pub(crate) members: Vec<PhotonChannelMember>,
 }
 
-#[derive(Clone, serde::Deserialize)]
-pub(crate) struct PhotonChannelMember {
-    pub(crate) id: Id,
-    #[serde(rename = "r")]
-    pub(crate) role: i32,
-    #[serde(rename = "j")]
-    pub(crate) joined: u64,
-}
+pub(crate) use super::channel_member::ChannelMember as PhotonChannelMember;
 
-impl ChannelMember for PhotonChannelMember {
-    fn id(&self) -> &Id { &self.id }
-    fn role(&self) -> Role {
-        match self.role {
-            0 => Role::Owner,
-            1 => Role::Moderator,
-            2 => Role::Member,
-            _ => Role::Banned,
-        }
-    }
-    fn joined(&self) -> SystemTime {
-        std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.joined)
+impl From<&PhotonChannelMember> for ChannelMember {
+    fn from(member: &PhotonChannelMember) -> Self {
+        Self::new(*member.id(), member.role(), member.joined())
     }
 }
 
-impl Contact for PhotonChannel {
+impl ContactOps for PhotonChannel {
     fn id(&self) -> &Id { self.contact.id() }
     fn contact_type(&self) -> ContactType { self.contact.contact_type() }
     fn name(&self) -> Option<&str> { self.contact.name() }
@@ -52,7 +36,7 @@ impl Contact for PhotonChannel {
     fn created_at(&self) -> i64 { self.contact.created_at() }
     fn updated_at(&self) -> i64 { self.contact.updated_at() }
     fn revision(&self) -> i32 { self.contact.revision() }
-    fn edit(&self) -> Box<dyn ContactEditor> { self.contact.edit() }
+    fn edit(&self) -> ContactEditor { self.contact.edit() }
 }
 
 impl Channel for PhotonChannel {
@@ -60,13 +44,13 @@ impl Channel for PhotonChannel {
     fn notice(&self) -> Option<&str> { self.notice.as_deref() }
     fn is_announced(&self) -> bool { self.announced }
     fn size(&self) -> usize { self.members.len() }
-    fn banned(&self) -> usize { self.members.iter().filter(|member| member.role == -1).count() }
-    fn members(&self) -> Vec<&dyn ChannelMember> {
-        self.members.iter().map(|member| member as &dyn ChannelMember).collect()
+    fn banned(&self) -> usize { self.members.iter().filter(|member| member.is_banned()).count() }
+    fn members(&self) -> Vec<ChannelMember> {
+        self.members.iter().map(ChannelMember::from).collect()
     }
-    fn member(&self, member_id: &Id) -> Option<&dyn ChannelMember> {
-        self.members.iter().find(|member| member.id == *member_id)
-            .map(|member| member as &dyn ChannelMember)
+    fn member(&self, member_id: &Id) -> Option<ChannelMember> {
+        self.members.iter().find(|member| member.id() == member_id)
+            .map(ChannelMember::from)
     }
     fn edit_channel(&self) -> Box<dyn ChannelEditor> {
         Box::new(PhotonChannelEditor(self.clone()))
@@ -81,7 +65,7 @@ impl ChannelEditor for PhotonChannelEditor {
         self
     }
     fn name(mut self: Box<Self>, name: String) -> Box<dyn ChannelEditor> {
-        self.0.contact.name = Some(name);
+        self.0.contact.set_name(Some(name));
         self
     }
     fn notice(mut self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditor> {

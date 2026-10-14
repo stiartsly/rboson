@@ -85,10 +85,6 @@ impl OptionsBuilder {
         self
     }
 
-    pub fn with_service_peerid(&mut self, peer_id: Id) -> &mut Self {
-        self.with_peer_id(peer_id)
-    }
-
     pub fn with_peer_endpoint(&mut self, endpoint: impl AsRef<str>) -> Result<&mut Self> {
         let url = url::Url::parse(endpoint.as_ref())
             .map_err(|e| ArgumentError::new(format!("Invalid endpoint URL: {e}")))?;
@@ -99,14 +95,6 @@ impl OptionsBuilder {
         Self::validate_endpoint(&url)?;
         self.peer_endpoint = Some(url);
         Ok(self)
-    }
-
-    pub fn with_service_endpoint_url(&mut self, url: url::Url) -> Result<&mut Self> {
-        self.with_peer_endpoint_url(url)
-    }
-
-    pub fn with_service_endpoint(&mut self, endpoint: impl AsRef<str>) -> Result<&mut Self> {
-        self.with_peer_endpoint(endpoint)
     }
 
     pub fn with_peer(&mut self, peer: &PeerInfo) -> Result<&mut Self> {
@@ -164,10 +152,6 @@ impl OptionsBuilder {
     pub fn with_database_schema(&mut self, schema: impl Into<String>) -> &mut Self {
         self.database_schema = Some(schema.into());
         self
-    }
-
-    pub fn with_database_schema_name(&mut self, schema: impl Into<String>) -> &mut Self {
-        self.with_database_schema(schema)
     }
 
     pub fn with_log_level(&mut self, level: log::LevelFilter) -> &mut Self {

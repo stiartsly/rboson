@@ -1,15 +1,24 @@
 pub(crate) mod internal;
-pub(crate) mod dto;
+pub(crate) mod rpc;
 
+pub(crate) mod mqtt;
+pub(crate) mod rpc_server;
+pub(crate) mod verticle;
+
+pub mod client;
+pub mod options;
 pub mod channel;
+pub mod channel_member;
 pub mod contact;
-pub mod conversation;
+pub mod contact_editor;
 pub mod errors;
+pub mod conversation;
 pub mod friend_request;
 pub mod invite_ticket;
 pub mod message;
-pub mod options;
-pub(crate) mod rpc;
+pub mod content_type;
+pub mod content_disposition;
+
 pub mod session_info;
 pub mod messaging_client;
 
@@ -19,11 +28,6 @@ pub mod contact_listener;
 pub mod friend_request_listener;
 pub mod message_listener;
 pub mod session_listener;
-
-pub mod client;
-
-pub(crate) mod mqtt;
-pub(crate) mod verticle;
 
 pub use {
     messaging_client::MessagingClient,
@@ -36,22 +40,22 @@ pub use {
     message_listener::MessageListener,
     session_listener::SessionListener,
     channel_listener::ChannelListener,
-
+    channel::{Channel, ChannelEditor, Permission, Role},
+    channel_member::ChannelMember,
+    contact::{Contact, ContactOps, ContactType},
+    contact_editor::ContactEditor,
+    conversation::ConversationOps,
+    invite_ticket::InviteTicket,
+    session_info::SessionInfo,
 };
 
-pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
-pub use contact::{Contact, ContactEditor, ContactType};
-pub use conversation::Conversation;
-pub use invite_ticket::InviteTicket;
 pub use message::{
-    content_type, Content, ContentDisposition, ContentDispositionType, Message, MessageBuilder,
+    Content, ContentDisposition, Type, Message, MessageBuilder,
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
-pub use session_info::SessionInfo;
 
 pub(crate) use {
     internal::{
-        PhotonContact,
         client_connection_listener::ClientConnectionListener
     },
 };
@@ -59,6 +63,7 @@ pub(crate) use {
 #[cfg(test)]
 mod unitests {
     mod test_message;
+    mod test_contact;
    // mod test_mqtt;
    // mod test_session;
    // mod test_verticle;

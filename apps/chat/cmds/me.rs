@@ -23,12 +23,10 @@ fn connection_status(client: &Arc<Client>) -> String {
 pub(crate) async fn execute(_: &ArgMatches, client: &Arc<Client>) {
     println!("User Id:            {}", client.user_id());
     println!("Device Id:          {}", client.device_id());
-    println!("Messaging Peer Id:  {}", client.service_peer_id());
+    println!("Messaging Peer Id:  {}", client.peer_id());
     println!(
         "Messaging endpoint: {}",
-        client
-            .service_endpoint()
-            .unwrap_or("<DHT discovery required>")
+        client.peer_endpoint().as_str()
     );
     println!("Connection Status:  {}", connection_status(client));
 }

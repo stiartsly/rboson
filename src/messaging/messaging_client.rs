@@ -67,12 +67,12 @@ pub trait MessagingClient {
     fn get_conversation(
         &self,
         id: &Id
-    ) -> impl Future<Output = Result<Option<Box<dyn Conversation>>>>;
+    ) -> impl Future<Output = Result<Option<Conversation>>>;
 
     /// Retrieves all conversations for the local user.
     fn get_conversations(
         &self
-    ) -> impl Future<Output = Result<Vec<Box<dyn Conversation>>>>;
+    ) -> impl Future<Output = Result<Vec<Conversation>>>;
 
     /// Removes a conversation and all its associated messages.
     fn remove_conversation(
@@ -192,7 +192,7 @@ pub trait MessagingClient {
     fn block_user(
         &self,
         user_id: &Id
-    ) -> impl Future<Output = Result<Box<dyn Contact>>>;
+    ) -> impl Future<Output = Result<Contact>>;
 
     // -----------------------------------------------------------------
     // Channels
@@ -288,17 +288,17 @@ pub trait MessagingClient {
     fn get_contact(
         &self,
         id: &Id
-    ) -> impl Future<Output = Result<Option<Box<dyn Contact>>>>;
+    ) -> impl Future<Output = Result<Option<Contact>>>;
 
     /// Retrieves all contacts.
     fn get_contacts(
         &self
-    ) -> impl Future<Output = Result<Vec<Box<dyn Contact>>>>;
+    ) -> impl Future<Output = Result<Vec<Contact>>>;
 
     /// Persists contact updates (remark, tags, muted, blocked …).
     fn update_contact(
         &self,
-        contact: &dyn Contact
+        contact: Contact
     ) -> impl Future<Output = Result<()>>;
 
     /// Removes a contact by `Id`.

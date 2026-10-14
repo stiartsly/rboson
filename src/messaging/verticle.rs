@@ -1,10 +1,11 @@
 use log::{debug, error};
 use std::{
     rc::Rc,
-    thread::JoinHandle,
-    future::Future,
     pin::Pin,
+    future::Future,
     result::Result as StdResult,
+    collections::HashMap,
+    thread::JoinHandle,
     sync::{
         mpsc as std_mpsc,
         Arc,
@@ -27,40 +28,23 @@ use crate::messaging::{
     options::Options,
     contact::Contact,
     message::Message,
+    conversation::Conversation,
     friend_request_listener::FriendRequestListener,
     connection_listener::ConnectionListener,
     channel_listener::ChannelListener,
     contact_listener::ContactListener,
     message_listener::MessageListener,
     session_listener::SessionListener,
-    mqtt::{Session, SessionAgent},
+    rpc_server::RpcServer,
     FriendRequest,
     InviteTicket,
     Channel,
     Permission,
     Role,
 };
-use super::internal::{
-    PhotonContact,
-};
 
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
 const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
-
-fn contact_snapshot(contact: &dyn Contact) -> PhotonContact {
-    PhotonContact {
-        id: *contact.id(),
-        contact_type: contact.contact_type(),
-        name: contact.name().map(ToString::to_string),
-        remark: contact.remark().map(ToString::to_string),
-        tags: contact.tags().map(ToString::to_string),
-        muted: contact.is_muted(),
-        blocked: contact.is_blocked(),
-        created_at: contact.created_at(),
-        updated_at: contact.updated_at(),
-        revision: contact.revision(),
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct VerticleClient {
@@ -69,6 +53,25 @@ pub(crate) struct VerticleClient {
 }
 
 type CmdResult<T> = StdResult<T, String>;
+
+/// Futures driven by [`Verticle::run_loop`]: engine commands plus internal work.
+type Pending = FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>;
+
+/// Runs one engine command on the verticle and forwards its outcome to the
+/// caller through `complete`, normalising every error to a message string.
+fn respond<T: 'static>(
+    pending: &mut Pending,
+    complete: oneshot::Sender<CmdResult<T>>,
+    command: impl Future<Output = Result<T>> + 'static,
+) {
+    pending.push(
+        async move {
+            let _ = complete.send(command.await.map_err(|error| error.to_string()));
+        }
+        .boxed_local(),
+    );
+}
+
 pub(crate) enum Event {
     Start {
         complete: oneshot::Sender<CmdResult<()>>,
@@ -78,10 +81,10 @@ pub(crate) enum Event {
     },
     GetConversation {
         id: Id,
-        complete: oneshot::Sender<CmdResult<Option<Box<dyn super::conversation::Conversation>>>>,
+        complete: oneshot::Sender<CmdResult<Option<Conversation>>>,
     },
     GetConversations {
-        complete: oneshot::Sender<CmdResult<Vec<Box<dyn super::conversation::Conversation>>>>,
+        complete: oneshot::Sender<CmdResult<Vec<Conversation>>>,
     },
     RemoveConversation {
         id: Id,
@@ -166,7 +169,7 @@ pub(crate) enum Event {
 
     BlockUser {
         user_id: Id,
-        complete: oneshot::Sender<CmdResult<Box<dyn Contact>>>,
+        complete: oneshot::Sender<CmdResult<Contact>>,
     },
 
     CreateChannel {
@@ -240,17 +243,13 @@ pub(crate) enum Event {
 
     GetContact {
         id: Id,
-        complete: oneshot::Sender<CmdResult<Option<PhotonContact>>>,
+        complete: oneshot::Sender<CmdResult<Option<Contact>>>,
     },
     GetContacts {
-        complete: oneshot::Sender<CmdResult<Vec<PhotonContact>>>,
+        complete: oneshot::Sender<CmdResult<Vec<Contact>>>,
     },
     UpdateContact {
-        contact: PhotonContact,
-        complete: oneshot::Sender<CmdResult<()>>,
-    },
-    RemoveContact {
-        id: Id,
+        contact: Contact,
         complete: oneshot::Sender<CmdResult<()>>,
     },
     RemoveContacts {
@@ -259,19 +258,7 @@ pub(crate) enum Event {
     },
     ClearContacts {
         complete: oneshot::Sender<CmdResult<()>>,
-    },
-    FriendReject {
-        user_id: Id,
-        complete: oneshot::Sender<CmdResult<()>>,
-    },
-    FriendRemove {
-        user_id: Id,
-        complete: oneshot::Sender<CmdResult<()>>,
-    },
-    FriendInfo {
-        user_id: Id,
-        complete: oneshot::Sender<CmdResult<()>>,
-    },
+    }
 }
 
 impl VerticleClient {
@@ -312,11 +299,20 @@ impl VerticleClient {
     pub(crate) async fn stop(&self) -> Result<()> {
         let result = self.call(|complete| Event::Stop { complete }).await;
 
-        let handle = self.handle.lock().unwrap().take();
+        // A poisoned lock still holds a usable handle; never panic on shutdown.
+        let handle = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
         if let Some(handle) = handle {
-            handle
-                .join()
-                .map_err(|_| StateError::new("Messaging verticle thread panicked"))?;
+            // `join` parks the calling thread, so keep it off the async worker.
+            let joined = task::spawn_blocking(move || handle.join())
+                .await
+                .map_err(|error| {
+                    StateError::new(format!("Joining messaging verticle task failed: {error}"))
+                })?;
+            joined.map_err(|_| StateError::new("Messaging verticle thread panicked"))?;
         }
         result
     }
@@ -324,7 +320,7 @@ impl VerticleClient {
     pub(crate) async fn get_conversation(
         &self,
         id: Id,
-    ) -> Result<Option<Box<dyn super::conversation::Conversation>>> {
+    ) -> Result<Option<Conversation>> {
         self.call(|complete| Event::GetConversation {
             id,
             complete
@@ -333,7 +329,7 @@ impl VerticleClient {
 
     pub(crate) async fn get_conversations(
         &self,
-    ) -> Result<Vec<Box<dyn super::conversation::Conversation>>> {
+    ) -> Result<Vec<Conversation>> {
         self.call(|complete| Event::GetConversations {
             complete
         }).await
@@ -512,7 +508,7 @@ impl VerticleClient {
     pub(crate) async fn block_user(
         &self,
         user_id: Id
-    ) -> Result<Box<dyn Contact>> {
+    ) -> Result<Contact> {
         self.call(|complete| Event::BlockUser {
             user_id,
             complete
@@ -658,29 +654,22 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<PhotonContact>> {
+    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<Contact>> {
         self.call(|complete| Event::GetContact {
             id,
             complete
         }).await
     }
 
-    pub(crate) async fn get_contacts(&self) -> Result<Vec<PhotonContact>> {
+    pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
         self.call(|complete| Event::GetContacts {
             complete
         }).await
     }
 
-    pub(crate) async fn update_contact(&self, contact: PhotonContact) -> Result<()> {
+    pub(crate) async fn update_contact(&self, contact: Contact) -> Result<()> {
         self.call(|complete| Event::UpdateContact {
             contact,
-            complete,
-        }).await
-    }
-
-    pub(crate) async fn remove_contact(&self, id: Id) -> Result<()> {
-        self.call(|complete| Event::RemoveContact {
-            id,
             complete,
         }).await
     }
@@ -694,30 +683,6 @@ impl VerticleClient {
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
         self.call(|complete| Event::ClearContacts {
-            complete,
-        }).await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn friend_reject(&self, user_id: Id) -> Result<()> {
-        self.call(|complete| Event::FriendReject {
-            user_id,
-            complete,
-        }).await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn friend_remove(&self, user_id: Id) -> Result<()> {
-        self.call(|complete| Event::FriendRemove {
-            user_id,
-            complete,
-        }).await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn friend_info(&self, user_id: Id) -> Result<()> {
-        self.call(|complete| Event::FriendInfo {
-            user_id,
             complete,
         }).await
     }
@@ -735,7 +700,7 @@ pub(crate) struct VerticleOptions {
 }
 
 pub(crate) struct Verticle {
-    engine:  Rc<SessionAgent>,
+    rpc_server:  Rc<RpcServer>,
     event_rx: mpsc::UnboundedReceiver<Event>,
     quit: bool,
 }
@@ -745,59 +710,35 @@ impl Verticle {
         options: VerticleOptions,
         event_rx: mpsc::UnboundedReceiver<Event>,
     ) -> Result<Self> {
-        let engine = Session::new(options)?;
+        let rpc_server = RpcServer::new(options)?;
         Ok(Self {
-            engine,
+            rpc_server,
             event_rx,
             quit: false,
         })
     }
 
-    fn handle_events(
-        &mut self,
-        event: Event,
-        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
-    ) {
-        let engine = self.engine.clone();
+    fn handle_events(&mut self, event: Event, pending: &mut Pending) {
+        let rpc = self.rpc_server.clone();
         match event {
             Event::Start { complete } => {
-                pending.push(async move {
-                    let rc = engine.start().await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move { rpc.start().await });
             }
             Event::Stop { complete } => {
                 self.quit = true;
-                pending.push(async move {
-                    let rc = engine.stop().await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move { rpc.stop().await });
             }
             Event::GetConversation { id, complete } => {
-                pending.push(async move {
-                    let rc = engine.get_conversation(&id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.get_conversation(&id).await });
             }
             Event::GetConversations { complete } => {
-                pending.push(async move {
-                    let rc = engine.get_conversations().await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.get_conversations().await });
             }
             Event::RemoveConversation { id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_conversation(&id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.remove_conversation(&id).await });
             }
             Event::RemoveConversations { ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_conversations(&ids).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.remove_conversations(&ids).await });
             }
             Event::GetMessages {
                 conversation_id,
@@ -806,10 +747,9 @@ impl Verticle {
                 offset,
                 complete,
             } => {
-                pending.push(async move {
-                    let rc = engine.get_messages(&conversation_id, until, limit, offset).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.get_messages(&conversation_id, until, limit, offset).await
+                });
             }
             Event::GetMessagesInRange {
                 conversation_id,
@@ -817,92 +757,63 @@ impl Verticle {
                 end,
                 complete,
             } => {
-                pending.push(async move {
-                    let rc = engine.get_messages_in_range(&conversation_id, begin, end).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.get_messages_in_range(&conversation_id, begin, end).await
+                });
             }
             Event::RemoveMessage { message_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_message(message_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.remove_message(message_id).await });
             }
             Event::RemoveMessagesByIds { message_ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_messages_by_ids(&message_ids).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.remove_messages_by_ids(&message_ids).await
+                });
             }
             Event::RemoveMessagesInConversation { conversation_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_messages_in_conversation(&conversation_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.remove_messages_in_conversation(&conversation_id).await
+                });
             }
             Event::GetSessions { complete } => {
-                pending.push(async move {
-                    let rc = engine.get_sessions().await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.get_sessions().await });
             }
             Event::RevokeSession { device_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.revoke_session(&device_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.revoke_session(&device_id).await });
             }
             Event::FriendRequest {
                 user_id,
                 hello,
                 complete,
             } => {
-                pending.push(async move {
-                    let rc = engine.friend_request(&user_id, hello).await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    rpc.friend_request(&user_id, hello).await
+                });
             }
             Event::FriendAccept { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.accept_friend_request(&user_id).await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    rpc.accept_friend_request(&user_id).await
+                });
             }
             Event::GetFriendRequest { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.get_friend_request(&user_id).await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    rpc.get_friend_request(&user_id).await
+                });
             }
             Event::GetFriendRequests { complete } => {
-                pending.push(async move {
-                    let rc = engine.get_friend_requests().await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move { rpc.get_friend_requests().await });
             }
             Event::RemoveFriendRequest { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_friend_request(&user_id).await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    rpc.remove_friend_request(&user_id).await
+                });
             }
             Event::RemoveFriendRequests { user_ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_friend_requests(&user_ids).await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    rpc.remove_friend_requests(&user_ids).await
+                });
             }
             Event::ClearFriendRequests { complete } => {
-                pending.push(async move {
-                    let rc = engine.clear_friend_requests().await;
-                    let _ = complete.send(rc.map_err(|e|e.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.clear_friend_requests().await });
             }
             Event::ContentMessage {
                 recipient,
@@ -911,30 +822,9 @@ impl Verticle {
                 text,
                 complete,
             } => {
-                pending.push(async move {
-                    let mut builder = engine.message(Some(recipient));
-                    for (key, value) in headers {
-                        let Some(value) = value.as_str() else {
-                            let _ = complete.send(Err(format!("Message header '{key}' is not text")));
-                            return;
-                        };
-                        builder = builder.header(&key, value);
-                    }
-                    builder = if text {
-                        match String::from_utf8(body) {
-                            Ok(body) => builder.text_body(&body),
-                            Err(error) => {
-                                let _ = complete.send(Err(error.to_string()));
-                                return;
-                            }
-                        }
-                    } else {
-                        builder.binary_body(body)
-                    };
-                    let result = builder.send().await;
-                    let _ = complete.send(result.map_err(|e| e.to_string()));
-                }
-                .boxed_local());
+                respond(pending, complete, async move {
+                    send_content_message(&rpc, recipient, headers, body, text).await
+                });
             }
             Event::RegisterFriendSession {
                 user_id,
@@ -942,16 +832,12 @@ impl Verticle {
                 remark,
                 complete,
             } => {
-                pending.push(async move {
-                    let rc = engine.add_friend(&user_id, session_key, remark).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.add_friend(&user_id, session_key, remark).await
+                });
             }
             Event::BlockUser { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.block_user(&user_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.block_user(&user_id).await });
             }
 
             Event::CreateChannel {
@@ -961,211 +847,183 @@ impl Verticle {
                 announcement,
                 complete
             } => {
-                pending.push(async move {
-                    let rc = engine.create_channel(permission, name, notice, announcement).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.create_channel(permission, name, notice, announcement).await
+                });
             }
             Event::RemoveChannel { channel_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_channel(&channel_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.remove_channel(&channel_id).await });
             }
 
             Event::JoinChannel { ticket, complete } => {
-                pending.push(async move {
-                    let rc = engine.join_channel(ticket).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.join_channel(ticket).await });
             }
 
             Event::LeaveChannel { channel_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.leave_channel(&channel_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.leave_channel(&channel_id).await });
             }
 
             Event::CreateInviteTicket { channel_id, invitee, complete } => {
-                pending.push(async move {
-                    let rc = engine.create_invite_ticket(&channel_id, invitee).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.create_invite_ticket(&channel_id, invitee).await
+                });
             }
 
             Event::TransferChannelOwnership { channel_id, new_owner, complete } => {
-                pending.push(async move {
-                    let rc = engine.transfer_channel_ownership(&channel_id, new_owner).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.transfer_channel_ownership(&channel_id, new_owner).await
+                });
             }
 
             Event::RotateChannelSessionKey { channel_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.rotate_channel_session_key(&channel_id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.rotate_channel_session_key(&channel_id).await
+                });
             }
 
             Event::UpdateChannelInfo { channel, complete } => {
-                pending.push(async move {
-                    let rc = engine.update_channel_info(channel.as_ref()).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.update_channel_info(channel.as_ref()).await
+                });
             }
 
             Event::SetChannelMemberRole { channel_id, member_ids, role, complete } => {
-                pending.push(async move {
-                    let rc = engine.set_channel_members_role(&channel_id, &member_ids, role).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.set_channel_members_role(&channel_id, &member_ids, role).await
+                });
             }
 
             Event::BanChannelMembers { channel_id, member_ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.ban_channel_members(&channel_id, &member_ids).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.ban_channel_members(&channel_id, &member_ids).await
+                });
             }
             Event::UnbanChannelMembers { channel_id, member_ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.unban_channel_members(&channel_id, &member_ids).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.unban_channel_members(&channel_id, &member_ids).await
+                });
             }
             Event::RemoveChannelMembers { channel_id, members, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_channel_members(&channel_id, &members).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move {
+                    rpc.remove_channel_members(&channel_id, &members).await
+                });
             }
 
             Event::GetContact { id, complete } => {
-                pending.push(async move {
-                    let rc = engine.get_contact(&id).await
-                        .map(|contact| contact.map(|contact| contact_snapshot(contact.as_ref())));
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.get_contact(&id).await });
             }
             Event::GetContacts { complete } => {
-                pending.push(async move {
-                    let rc = engine.get_contacts().await
-                        .map(|contacts| contacts.into_iter()
-                        .map(|contact| contact_snapshot(contact.as_ref()))
-                        .collect());
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.get_contacts().await });
             }
             Event::UpdateContact { contact, complete } => {
-                pending.push(async move {
-                    let rc = engine.update_contact(&contact).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
-            }
-            Event::RemoveContact { id, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_contact(&id).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.update_contact(&contact).await });
             }
             Event::RemoveContacts { ids, complete } => {
-                pending.push(async move {
-                    let rc = engine.remove_contacts(&ids).await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.remove_contacts(&ids).await });
             }
             Event::ClearContacts { complete } => {
-                pending.push(async move {
-                    let rc = engine.clear_contacts().await;
-                    let _ = complete.send(rc.map_err(|error| error.to_string()));
-                }.boxed_local());
-            }
-            Event::FriendReject { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.friend_reject(user_id).await;
-                    let _ = complete.send(rc.map_err(|e| e.to_string()));
-                }.boxed_local());
-            }
-            Event::FriendRemove { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.friend_remove(user_id).await;
-                    let _ = complete.send(rc.map_err(|e| e.to_string()));
-                }.boxed_local());
-            }
-            Event::FriendInfo { user_id, complete } => {
-                pending.push(async move {
-                    let rc = engine.friend_info(user_id).await;
-                    let _ = complete.send(rc.map_err(|e| e.to_string()));
-                }.boxed_local());
+                respond(pending, complete, async move { rpc.clear_contacts().await });
             }
         }
     }
 
     async fn run_loop(&mut self) {
-        let mut pendings = FuturesUnordered::<Pin<Box<dyn Future<Output = ()>>>>::new();
+        let mut pendings = Pending::new();
         loop {
-            if !self.quit {
-                self.engine.schedule_contact_sync(&mut pendings);
+            // Nothing can make progress once the command channel is closed and
+            // every command already in flight has settled.
+            if self.quit && pendings.is_empty() {
+                break;
             }
-            let engine = self.engine.clone();
+            if !self.quit {
+                self.rpc_server.schedule_contact_sync(&mut pendings);
+            }
+            let rpc = self.rpc_server.clone();
             tokio::select! {
                 event = self.event_rx.recv(), if !self.quit => {
                     match event {
                         Some(event) => self.handle_events(event, &mut pendings),
-                        None => {
-                            self.quit = true;
-                            let engine = self.engine.clone();
-                            pendings.push(async move {
-                                if let Err(error) = engine.stop().await {
-                                    error!("Stopping closed messaging verticle failed: {error}");
-                                }
-                            }.boxed_local());
-                        },
+                        // Every sender is gone: drain in-flight commands, then
+                        // let the shutdown below stop the session exactly once.
+                        None => self.quit = true,
                     }
                 }
-                Some(_) = pendings.next(), if !pendings.is_empty() => {},
-                event = engine.receive_event(), if engine.is_running() => {
-                    engine.handle_mqtt_event(event, &mut pendings);
+                Some(()) = pendings.next(), if !pendings.is_empty() => {},
+                event = rpc.receive_event(), if rpc.is_running() => {
+                    rpc.handle_mqtt_event(event, &mut pendings);
                 }
                 else => break,
             }
-
-            if self.quit && pendings.is_empty() {
-                break;
-            }
         }
 
-        if let Err(e) = self.engine.stop().await {
-            error!("Stopping messaging session failed: {e}");
+        if let Err(error) = self.rpc_server.stop().await {
+            error!("Stopping messaging session failed: {error}");
         }
     }
+}
+
+async fn send_content_message(
+    engine: &Rc<RpcServer>,
+    recipient: Id,
+    headers: HashMap<String, serde_json::Value>,
+    body: Vec<u8>,
+    text: bool,
+) -> Result<Box<dyn Message>> {
+    let mut builder = engine.message(Some(recipient));
+    for (key, value) in headers {
+        let value = value
+            .as_str()
+            .ok_or_else(|| StateError::new(format!("Message header '{key}' is not text")))?;
+        builder = builder.header(&key, value);
+    }
+    builder = if text {
+        let content = String::from_utf8(body)
+            .map_err(|error| StateError::new(error.to_string()))?;
+        builder.text_body(&content)
+    } else {
+        builder.binary_body(body)
+    };
+    builder.send().await
 }
 
 pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
     let (startup_tx, startup_rx) = std_mpsc::sync_channel::<StdResult<(), String>>(1);
 
-    let handle = std::thread::spawn(move || {
-        let rt = runtime::Builder::new_current_thread()
-            .enable_time()
-            .enable_io()
-            .build()
-            .expect("Messaging verticle should be built");
-
-        let local = task::LocalSet::new();
-        rt.block_on(local.run_until(async move {
-            let mut v = match Verticle::new(options, event_rx) {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = startup_tx.send(Err(e.to_string()));
+    let handle = std::thread::Builder::new()
+        .name("messaging-verticle".into())
+        .spawn(move || {
+            let rt = match runtime::Builder::new_current_thread()
+                .enable_time()
+                .enable_io()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(error) => {
+                    let _ = startup_tx.send(Err(format!(
+                        "Building messaging verticle runtime failed: {error}"
+                    )));
                     return;
                 }
             };
-            let _ = startup_tx.send(Ok(()));
-            v.run_loop().await;
-        }));
-    });
+
+            let local = task::LocalSet::new();
+            rt.block_on(local.run_until(async move {
+                let mut verticle = match Verticle::new(options, event_rx) {
+                    Ok(verticle) => verticle,
+                    Err(error) => {
+                        let _ = startup_tx.send(Err(error.to_string()));
+                        return;
+                    }
+                };
+                let _ = startup_tx.send(Ok(()));
+                verticle.run_loop().await;
+            }));
+        })
+        .map_err(|error| {
+            error!("Spawning messaging verticle thread failed: {error}");
+            StateError::new(format!("Spawning messaging verticle thread failed: {error}"))
+        })?;
 
     match startup_rx.recv() {
         Ok(Ok(())) => {
@@ -1174,10 +1032,12 @@ pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
         }
         Ok(Err(msg)) => {
             error!("Messaging verticle failed to deploy: {msg}");
+            let _ = handle.join();
             Err(StateError::new(msg))
         }
         Err(_) => {
             error!("Messaging verticle startup channel closed unexpectedly");
+            let _ = handle.join();
             Err(StateError::new(
                 "Messaging verticle startup channel closed",
             ))

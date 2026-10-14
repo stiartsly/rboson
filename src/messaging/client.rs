@@ -1,9 +1,33 @@
+//! # Messaging client
+//!
+//! [`Client`] is the public entry point of the messaging stack.
+//!
+//! It owns nothing but configuration and liveness flags: every request is
+//! forwarded to a dedicated verticle thread, which is the only place that
+//! touches session state. That keeps the public API `&self` + `async` while
+//! the state machine stays single-threaded and lock-free.
+//!
+//! ```text
+//!   Client ──Event────▶ verticle thread ──▶ SessionAgent ──▶ MQTT
+//!          ◀─oneshot──
+//! ```
+//!
+//! Three flags describe how far the connection has progressed:
+//!
+//! | flag        | means                                            |
+//! |-------------|--------------------------------------------------|
+//! | `running`   | the verticle thread is deployed                  |
+//! | `connected` | the transport finished the MQTT handshake        |
+//! | `ready`     | topics are subscribed, application traffic flows |
+//!
+//! Requests only require `connected`; a full teardown clears all three.
+
 use std::{
     collections::HashMap,
     future::Future,
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -23,7 +47,13 @@ use crate::messaging::{
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
-    message::{ContentDisposition, Message, MessageBuilder},
+    message::{
+        content_type,
+        CONTENT_DISPOSITION_HEADER,
+        ContentDisposition,
+        Message,
+        MessageBuilder,
+    },
     message_listener::MessageListener,
     options::Options,
     session_info::SessionInfo,
@@ -31,10 +61,6 @@ use crate::messaging::{
     MessagingClient,
     verticle::{self, VerticleClient, VerticleOptions},
     ClientConnectionListener
-};
-
-pub(crate) use super::internal::{
-    PhotonContact,
 };
 
 /// Default maximum number of messages returned by a range query.
@@ -58,16 +84,13 @@ pub struct Client {
     lifecycle: tokio::sync::Mutex<()>,
 }
 
+// ---------------------------------------------------------------------------
+// Construction & accessors
+// ---------------------------------------------------------------------------
+
 impl Client {
     pub fn new(options: Options) -> Self {
-        if log::max_level() == log::LevelFilter::Off {
-            logger::setup(options.log_level(), options.log_file());
-            if options.log_console() {
-                logger::enable_console_output();
-            } else {
-                logger::disable_console_output();
-            }
-        }
+        Self::setup_logging(&options);
 
         let connection_listener = options.connection_listener();
         let message_listener = options.message_listener();
@@ -92,142 +115,143 @@ impl Client {
         }
     }
 
+    /// Installs the process-wide logger, but only if nobody else has yet.
+    ///
+    /// Kept out of `new` so the global side effect is visible in one place.
+    fn setup_logging(options: &Options) {
+        if log::max_level() != log::LevelFilter::Off {
+            return;
+        }
+        logger::setup(options.log_level(), options.log_file());
+        if options.log_console() {
+            logger::enable_console_output();
+        } else {
+            logger::disable_console_output();
+        }
+    }
+
+    /// The options this client was built from.
     pub fn options(&self) -> &Options {
         &self.options
     }
 
+    /// The user this client authenticates as.
     pub fn user_id(&self) -> &Id {
         self.options.user_id()
     }
 
+    /// The device this client runs on.
     pub fn device_id(&self) -> &Id {
         self.options.device_id()
     }
 
+    /// The messaging service peer.
     pub fn peer_id(&self) -> &Id {
         self.options.peer_id()
     }
 
+    /// The messaging service endpoint.
     pub fn peer_endpoint(&self) -> &url::Url {
         self.options.peer_endpoint()
     }
 
-    pub fn service_peer_id(&self) -> &Id {
-        self.peer_id()
-    }
-
-    pub fn service_endpoint(&self) -> Option<&str> {
-        Some(self.peer_endpoint().as_str())
-    }
-
+    /// Directory holding this client's local state.
     pub fn data_dir(&self) -> &Path {
         self.options.data_dir()
     }
+}
 
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+impl Client {
     pub async fn start(&self) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
-        if self.running.load(Ordering::Acquire) {
+        if self.is_running() {
             return Ok(());
         }
 
-        let connection_listener = Arc::new(ClientConnectionListener::new(
-            self.connection_listener.clone(),
-            self.connected.clone(),
-            self.ready.clone(),
-        ));
-
-        let options = VerticleOptions {
-            options: self.options.clone(),
-            connection_listener,
-            message_listener: self.message_listener.clone(),
-            channel_listener: self.channel_listener.clone(),
-            contact_listener: self.contact_listener.clone(),
-            session_listener: self.session_listener.clone(),
-            friend_request_listener: self.friend_request_listener.clone(),
-        };
-
-        let verticle = match verticle::deploy(options) {
+        let verticle = match verticle::deploy(self.verticle_options()) {
             Ok(verticle) => verticle,
-            Err(e) => {
-                self.running.store(false, Ordering::Release);
-                return Err(StateError::new(&format!("{e}")));
+            Err(error) => {
+                self.reset_state();
+                return Err(error);
             }
         };
 
         if let Err(error) = verticle.start().await {
+            // The thread is already up; do not let it outlive a client that
+            // never started.
             if let Err(stop_error) = verticle.stop().await {
                 log::error!("Stopping messaging verticle failed: {stop_error}");
             }
-            self.connected.store(false, Ordering::Release);
-            self.ready.store(false, Ordering::Release);
+            self.reset_state();
             return Err(error);
         }
-        *self.verticle.lock().unwrap() = Some(Arc::new(verticle));
-        self.running.store(true, Ordering::Release);
 
+        *self.verticle_slot() = Some(Arc::new(verticle));
+        self.running.store(true, Ordering::Release);
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
-        let verticle = self.verticle.lock().unwrap().take();
-        let result = match verticle {
-            Some(v) => v.stop().await,
+        let result = match self.take_verticle() {
+            Some(verticle) => verticle.stop().await,
             _ => Ok(()),
         };
-        self.running.store(false, Ordering::Release);
-        self.connected.store(false, Ordering::Release);
-        self.ready.store(false, Ordering::Release);
+        self.reset_state();
         result
     }
 
+    /// Whether the verticle thread is deployed.
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
     }
 
+    /// Whether the transport completed the MQTT handshake.
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }
 
+    /// Whether topics are subscribed and application traffic may flow.
     pub fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Acquire)
     }
+}
 
-    fn verticle(&self) -> Result<Arc<VerticleClient>> {
-        if !self.is_connected() {
-            return Err(StateError::new("Messaging client is not connected"));
-        }
-        let verticle_guard = self.verticle.lock().unwrap();
-        let Some(v) = verticle_guard.as_ref() else {
-            return Err(StateError::new("Messaging verticle is not deployed"));
-        };
-        Ok(v.clone())
+// ---------------------------------------------------------------------------
+// Conversations
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Looks up a single conversation by contact id.
+    pub async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
+        self.verticle_client()?.get_conversation(*id).await
     }
 
-    pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
-        Box::new(ComposedMessageBuilder::new(
-            recipient,
-            self.verticle.lock().unwrap().as_ref().map(|v| v.sender()),
-            self.message_listener.clone(),
-        ))
+    /// Lists every known conversation.
+    pub async fn get_conversations(&self) -> Result<Vec<Conversation>> {
+        self.verticle_client()?.get_conversations().await
     }
 
-    pub async fn get_conversation(&self, id: &Id) -> Result<Option<Box<dyn Conversation>>> {
-        self.verticle()?.get_conversation(*id).await
-    }
-
-    pub async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
-        self.verticle()?.get_conversations().await
-    }
-
+    /// Drops the conversation with `id`. The peer is not notified.
     pub async fn remove_conversation(&self, id: &Id) -> Result<()> {
-        self.verticle()?.remove_conversation(*id).await
+        self.verticle_client()?.remove_conversation(*id).await
     }
 
+    /// Drops several conversations in one round trip.
     pub async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
-        self.verticle()?.remove_conversations(ids.to_vec()).await
+        self.verticle_client()?.remove_conversations(ids.to_vec()).await
     }
+}
 
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Reads a page of history, newest first, ending at `until` when given.
     pub async fn get_messages(
         &self,
         conversation_id: &Id,
@@ -235,48 +259,82 @@ impl Client {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.verticle()?
+        self.verticle_client()?
             .get_messages(*conversation_id, until, limit, offset)
             .await
     }
 
+    /// Reads every message with a timestamp in `begin..=end`.
     pub async fn get_messages_in_range(
         &self,
         conversation_id: &Id,
         begin: i64,
         end: i64,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.verticle()?
+        self.verticle_client()?
             .get_messages_in_range(*conversation_id, begin, end)
             .await
     }
 
+    /// Removes a single message by id.
     pub async fn remove_message(&self, message_id: i64) -> Result<()> {
-        self.verticle()?.remove_message(message_id).await
+        self.verticle_client()?.remove_message(message_id).await
     }
 
+    /// Removes several messages by id in one round trip.
     pub async fn remove_messages_by_ids(&self, message_ids: &[i64]) -> Result<()> {
-        self.verticle()?.remove_messages_by_ids(message_ids.to_vec()).await
+        self.verticle_client()?.remove_messages_by_ids(message_ids.to_vec()).await
     }
 
+    /// Clears the whole history of a conversation.
     pub async fn remove_messages_in_conversation(&self, conversation_id: &Id) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .remove_messages_in_conversation(*conversation_id)
             .await
     }
 
+    /// Starts composing an outgoing message.
+    ///
+    /// The builder captures the verticle sender as it is created, so a builder
+    /// obtained while the client is stopped can never be sent later.
+    pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
+        let sender = self.verticle_slot().as_ref().map(|verticle| verticle.sender());
+        Box::new(ComposedMessageBuilder::new(
+            recipient,
+            sender,
+            self.message_listener.clone(),
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Lists the sessions currently authorised for this user.
     pub async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
-        self.verticle()?.get_sessions().await
+        self.verticle_client()?.get_sessions().await
     }
 
+    /// Revokes another device's session.
+    ///
+    /// Revoking your own session is rejected: that is what [`Client::stop`] is
+    /// for.
     pub async fn revoke_session(&self, device_id: &Id) -> Result<()> {
         if device_id == self.device_id() {
             return Err(ArgumentError::new("Cannot revoke the current session"));
         }
-
-        self.verticle()?.revoke_session(*device_id).await
+        self.verticle_client()?.revoke_session(*device_id).await
     }
+}
 
+// ---------------------------------------------------------------------------
+// Friend requests
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Sends a friend request with an optional greeting.
     pub async fn friend_request(
         &self,
         user_id: Id,
@@ -285,62 +343,131 @@ impl Client {
         if &user_id == self.user_id() {
             return Err(ArgumentError::new("Cannot send friend request to yourself"));
         }
-        self.verticle()?.friend_request(user_id, hello.map(Into::into)).await
+        self.verticle_client()?.friend_request(user_id, hello.map(Into::into)).await
     }
 
+    /// Accepts a pending friend request.
     pub async fn accept_friend_request(
         &self,
         user_id: Id,
     ) -> Result<()> {
-        self.verticle()?.friend_accept(user_id).await
+        if &user_id == self.user_id() {
+            return Err(ArgumentError::new("Cannot accept friend request from yourself"));
+        }
+        self.verticle_client()?.friend_accept(user_id).await
     }
 
+    /// Looks up a single pending friend request.
     pub async fn get_friend_request(
         &self,
         user_id: Id,
     ) -> Result<Option<FriendRequest>> {
-        self.verticle()?.get_friend_request(user_id).await
+        self.verticle_client()?.get_friend_request(user_id).await
     }
 
+    /// Lists every pending friend request.
     pub async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
-        self.verticle()?.get_friend_requests().await
+        self.verticle_client()?.get_friend_requests().await
     }
 
+    /// Dismisses a pending friend request without accepting it.
     pub async fn remove_friend_request(
         &self,
         user_id: Id
     ) -> Result<()> {
-        self.verticle()?.remove_friend_request(user_id).await
+        self.verticle_client()?.remove_friend_request(user_id).await
     }
 
+    /// Dismisses several pending friend requests in one round trip.
     pub async fn remove_friend_requests(
         &self,
         user_ids: &[Id]
     ) -> Result<()> {
-        self.verticle()?.remove_friend_requests(user_ids.to_vec()).await
+        if user_ids.is_empty() {
+            return Ok(());
+        }
+        self.verticle_client()?.remove_friend_requests(user_ids.to_vec()).await
     }
 
+    /// Dismisses every pending friend request.
     pub async fn clear_friend_requests(&self) -> Result<()> {
-        self.verticle()?.clear_friend_requests().await
+        self.verticle_client()?.clear_friend_requests().await
     }
 
+    /// Registers an existing friend together with their session key.
     pub async fn add_friend(
         &self,
         user_id: Id,
-        session_key: signature::KeyPair,
+        session_key: impl Into<signature::KeyPair>,
         remark: Option<impl Into<String>>,
     ) -> Result<()> {
-        let key = session_key.private_key().as_ref().to_vec();
-        self.verticle()?.add_friend(user_id, key, remark.map(Into::into)).await
+        let key = session_key.into().private_key().as_ref().to_vec();
+        self.verticle_client()?.add_friend(
+            user_id,
+            key,
+            remark.map(Into::into)
+        ).await
     }
 
+    /// Blocks a user, which also stops them from messaging you.
     pub async fn block_user(
         &self,
         user_id: Id,
-    ) -> Result<Box<dyn Contact>> {
-        self.verticle()?.block_user(user_id).await
+    ) -> Result<Contact> {
+        self.verticle_client()?.block_user(user_id).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Looks up a single contact.
+    pub async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
+        self.verticle_client()?
+            .get_contact(*id)
+            .await
     }
 
+    /// Lists every known contact.
+    pub async fn get_contacts(&self) -> Result<Vec<Contact>> {
+        self.verticle_client()?
+            .get_contacts()
+            .await
+    }
+
+    /// Overwrites a contact's locally stored metadata.
+    pub async fn update_contact(&self, contact: Contact) -> Result<()> {
+        self.verticle_client()?
+            .update_contact(contact)
+            .await
+    }
+
+    /// Removes a single contact; sugar for a one-element [`Client::remove_contacts`].
+    pub async fn remove_contact(&self, id: &Id) -> Result<()> {
+        self.remove_contacts(&[*id]).await
+    }
+
+    /// Removes several contacts in one round trip.
+    pub async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
+        if ids.is_empty() {
+            return Err(ArgumentError::new("No contact IDs specified"));
+        }
+        self.verticle_client()?.remove_contacts(ids.to_vec()).await
+    }
+
+    /// Removes every contact.
+    pub async fn clear_contacts(&self) -> Result<()> {
+        self.verticle_client()?.clear_contacts().await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Channels
+// ---------------------------------------------------------------------------
+
+impl Client {
     /// Creates a new channel.
     pub async fn create_channel(
         &self,
@@ -354,7 +481,7 @@ impl Client {
             return Err(ArgumentError::new("Channel name is required"));
         }
 
-        self.verticle()?
+        self.verticle_client()?
             .create_channel(permission, name, notice.map(Into::into), announce)
             .await
     }
@@ -364,7 +491,7 @@ impl Client {
         &self,
         channel_id: &Id
     ) -> Result<()> {
-        self.verticle()?.remove_channel(*channel_id).await
+        self.verticle_client()?.remove_channel(*channel_id).await
     }
 
     /// Joins a channel using an invite ticket.
@@ -372,7 +499,7 @@ impl Client {
         &self,
         ticket: InviteTicket
     ) -> Result<Box<dyn Channel>> {
-        self.verticle()?.join_channel(ticket).await
+        self.verticle_client()?.join_channel(ticket).await
     }
 
     /// Leaves a channel.
@@ -380,7 +507,7 @@ impl Client {
         &self,
         channel_id: &Id
     ) -> Result<()> {
-        self.verticle()?.leave_channel(*channel_id).await
+        self.verticle_client()?.leave_channel(*channel_id).await
     }
 
     /// Creates an invite ticket for a channel.
@@ -389,7 +516,7 @@ impl Client {
         channel_id: &Id,
         invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        self.verticle()?.create_invite_ticket(*channel_id, invitee).await
+        self.verticle_client()?.create_invite_ticket(*channel_id, invitee).await
     }
 
     /// Transfers channel ownership to another user.
@@ -398,7 +525,7 @@ impl Client {
         channel_id: &Id,
         new_owner: Id,
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .transfer_channel_ownership(*channel_id, new_owner)
             .await
     }
@@ -408,7 +535,7 @@ impl Client {
         &self,
         channel_id: &Id
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .rotate_channel_session_key(*channel_id)
             .await
     }
@@ -418,93 +545,122 @@ impl Client {
         &self,
         channel: &dyn Channel
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .update_channel_info(channel.edit_channel().build())
             .await
     }
 
+    /// Updates the roles of a set of channel members.
+    ///
+    /// The role is accepted by name so callers can pass a value read from
+    /// config or a UI without depending on [`Role`] itself.
     pub async fn set_channel_members_role(
         &self,
         channel_id: &Id,
-        member: &[Id],
-        role: &str
+        members: &[Id],
+        role: Role,
     ) -> Result<()> {
-        let role = match role {
-            "Owner" => Role::Owner,
-            "Moderator" => Role::Moderator,
-            "Member" => Role::Member,
-            "Banned" => Role::Banned,
-            _ => return Err(ArgumentError::new(format!("Invalid channel role: {role}"))),
-        };
-        self.verticle()?
-            .set_channel_members_role(*channel_id, member.to_vec(), role)
+        self.verticle_client()?
+            .set_channel_members_role(*channel_id, members.to_vec(), role)
             .await
     }
 
+    /// Bans a set of channel members.
     pub async fn ban_channel_members(
         &self,
         channel_id: &Id,
         members: &[Id]
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .ban_channel_members(*channel_id, members.to_vec())
             .await
     }
 
+    /// Unbans a set of channel members.
     pub async fn unban_channel_members(
         &self,
         channel_id: &Id,
         members: &[Id]
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .unban_channel_members(*channel_id, members.to_vec())
             .await
     }
 
+    /// Removes a set of channel members.
     pub async fn remove_channel_members(
         &self,
         channel_id: &Id,
         members: &[Id]
     ) -> Result<()> {
-        self.verticle()?
+        self.verticle_client()?
             .remove_channel_members(*channel_id, members.to_vec())
             .await
     }
+}
 
-    pub async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
-        self.verticle()?
-            .get_contact(*id)
-            .await
-            .map(|v| v.map(|v|Box::new(v) as Box<dyn Contact>))
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+impl Client {
+    /// Returns the deployed verticle, or explains why there is none.
+    fn verticle_client(&self) -> Result<Arc<VerticleClient>> {
+        if !self.is_connected() {
+            return Err(StateError::new("Messaging client is not connected"));
+        }
+        match self.verticle_slot().clone() {
+            Some(verticle) => Ok(verticle),
+            _ => Err(StateError::new("Messaging verticle is not deployed")),
+        }
     }
 
-    pub async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
-        self.verticle()?
-            .get_contacts()
-            .await
-            .map(|v| v.into_iter().map(|v| Box::new(v) as Box<dyn Contact>)
-            .collect())
+    /// Removes the verticle handle so teardown happens exactly once.
+    fn take_verticle(&self) -> Option<Arc<VerticleClient>> {
+        self.verticle_slot().take()
     }
 
-    pub async fn remove_contact(&self, id: &Id) -> Result<()> {
-        self.verticle()?.remove_contact(*id).await
+    /// Locks the verticle slot.
+    ///
+    /// The slot only ever holds an `Option<Arc<_>>`, which stays perfectly
+    /// usable after a panic elsewhere, so poisoning is ignored rather than
+    /// turned into a second panic.
+    fn verticle_slot(&self) -> MutexGuard<'_, Option<Arc<VerticleClient>>> {
+        self.verticle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
-        self.verticle()?
-            .update_contact(PhotonContact::from(contact))
-            .await
+    /// Clears every liveness flag; used by both the success and failure paths.
+    fn reset_state(&self) {
+        self.running.store(false, Ordering::Release);
+        self.connected.store(false, Ordering::Release);
+        self.ready.store(false, Ordering::Release);
     }
 
-    pub async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
-        self.verticle()?.remove_contacts(ids.to_vec()).await
-    }
+    /// Builds the option set consumed by the verticle thread.
+    fn verticle_options(&self) -> VerticleOptions {
+        let connection_listener = Arc::new(ClientConnectionListener::new(
+            self.connection_listener.clone(),
+            self.connected.clone(),
+            self.ready.clone(),
+        ));
 
-    pub async fn clear_contacts(&self) -> Result<()> {
-        self.verticle()?.clear_contacts().await
+        VerticleOptions {
+            options: self.options.clone(),
+            connection_listener,
+            message_listener: self.message_listener.clone(),
+            channel_listener: self.channel_listener.clone(),
+            contact_listener: self.contact_listener.clone(),
+            session_listener: self.session_listener.clone(),
+            friend_request_listener: self.friend_request_listener.clone(),
+        }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Trait delegation
+// ---------------------------------------------------------------------------
 impl MessagingClient for Client {
     fn user_id(&self) -> &Id {
         self.user_id()
@@ -553,11 +709,11 @@ impl MessagingClient for Client {
     async fn get_conversation(
         &self,
         id: &Id
-    ) -> Result<Option<Box<dyn Conversation>>> {
+    ) -> Result<Option<Conversation>> {
         self.get_conversation(id).await
     }
 
-    async fn get_conversations(&self) -> Result<Vec<Box<dyn Conversation>>> {
+    async fn get_conversations(&self) -> Result<Vec<Conversation>> {
         self.get_conversations().await
     }
 
@@ -640,18 +796,18 @@ impl MessagingClient for Client {
 
     async fn add_friend(
         &self,
-        user_id: &Id,
+        userid: &Id,
         session_key: signature::KeyPair,
         remark: Option<String>,
     ) -> Result<()> {
-        self.add_friend(*user_id, session_key, remark).await
+        self.add_friend(*userid, session_key, remark).await
     }
 
     async fn block_user(
         &self,
-        user_id: &Id
-    ) -> Result<Box<dyn Contact>> {
-        self.block_user(*user_id).await
+        userid: &Id
+    ) -> Result<Contact> {
+        self.block_user(*userid).await
     }
 
     async fn create_channel(&self, perms: Permission, name: String, notice: Option<String>, announce: bool) -> Result<Box<dyn Channel>> {
@@ -700,8 +856,7 @@ impl MessagingClient for Client {
         members: &[Id],
         role: Role,
     ) -> Result<()> {
-        self.set_channel_members_role(channel_id, members, &role.to_string())
-            .await
+        self.set_channel_members_role(channel_id, members, role).await
     }
 
     async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
@@ -724,15 +879,15 @@ impl MessagingClient for Client {
         self.remove_channel_members(channel_id, members).await
     }
 
-    async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
+    async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
         self.get_contact(id).await
     }
 
-    async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
+    async fn get_contacts(&self) -> Result<Vec<Contact>> {
         self.get_contacts().await
     }
 
-    async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
+    async fn update_contact(&self, contact: Contact) -> Result<()> {
         self.update_contact(contact).await
     }
 
@@ -749,7 +904,14 @@ impl MessagingClient for Client {
     }
 }
 
-#[allow(dead_code)]
+// ---------------------------------------------------------------------------
+// Message composition
+// ---------------------------------------------------------------------------
+
+/// Collects a message on the caller's side, then hands it to the verticle.
+///
+/// Nothing here touches the session: the builder only decides *what* to send,
+/// and [`Client::message`] captures the sender at construction time.
 struct ComposedMessageBuilder {
     recipient: Option<Id>,
     verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
@@ -819,37 +981,29 @@ impl MessageBuilder for ComposedMessageBuilder {
                 .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
             let body = self.body
                 .ok_or_else(|| ArgumentError::new("Message content is required"))?;
-            let tx = self.verticle_tx
+            let sender = self.verticle_tx
                 .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-            let mut headers = HashMap::new();
-            for (key, value) in self.headers {
-                headers.insert(key, serde_json::Value::String(value));
-            }
-            if let Some(content_type) = self.content_type {
-                headers.insert("Content-Type".into(), serde_json::Value::String(content_type));
-            } else if !self.text {
-                headers.insert(
-                    "Content-Type".into(),
-                    serde_json::Value::String(crate::messaging::message::content_type::BINARY.into()),
-                );
-            }
-            if let Some(disposition) = self.content_disposition {
-                headers.insert(
-                    crate::messaging::message::CONTENT_DISPOSITION_HEADER.into(),
-                    serde_json::Value::String(disposition.value()),
-                );
-            }
 
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            tx.send(verticle::Event::ContentMessage {
-                recipient,
-                headers,
-                body,
-                text: self.text,
-                complete: reply_tx,
-            })
-            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-            let message = reply_rx
+            let text = self.text;
+            let headers = merge_headers(
+                self.headers,
+                self.content_type,
+                self.content_disposition,
+                text,
+            );
+
+            let (complete, response) = tokio::sync::oneshot::channel();
+            sender
+                .send(verticle::Event::ContentMessage {
+                    recipient,
+                    headers,
+                    body,
+                    text,
+                    complete,
+                })
+                .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
+
+            let message = response
                 .await
                 .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
                 .map_err(StateError::new)?;
@@ -857,4 +1011,40 @@ impl MessageBuilder for ComposedMessageBuilder {
             Ok(message)
         })
     }
+}
+
+/// Folds the typed builder fields into the flat header map the verticle takes.
+///
+/// A binary body without an explicit [`MessageBuilder::content_type`] gets
+/// `application/octet-stream`. Note that an explicit type only counts when it
+/// came from `content_type`; a raw [`MessageBuilder::header`] of the same name
+/// is overwritten here — that matches the behaviour this method replaced.
+fn merge_headers(
+    headers: Vec<(String, String)>,
+    declared_type: Option<String>,
+    disposition: Option<ContentDisposition>,
+    text: bool,
+) -> HashMap<String, serde_json::Value> {
+    let mut merged: HashMap<String, serde_json::Value> = headers
+        .into_iter()
+        .map(|(key, value)| (key, serde_json::Value::String(value)))
+        .collect();
+
+    if let Some(declared_type) = declared_type {
+        merged.insert(content_type::HEADER_NAME.into(), serde_json::Value::String(declared_type));
+    } else if !text {
+        merged.insert(
+            content_type::HEADER_NAME.into(),
+            serde_json::Value::String(content_type::BINARY.into()),
+        );
+    }
+
+    if let Some(disposition) = disposition {
+        merged.insert(
+            CONTENT_DISPOSITION_HEADER.into(),
+            serde_json::Value::String(disposition.value()),
+        );
+    }
+
+    merged
 }

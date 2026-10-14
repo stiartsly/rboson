@@ -51,6 +51,7 @@ impl FriendRequest {
         self.accepted
     }
 
+    #[allow(unused)]
     pub(crate) fn accept(&mut self) {
         self.accept_at(SystemTime::now());
     }

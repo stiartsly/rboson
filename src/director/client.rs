@@ -29,6 +29,8 @@ use super::{
 
 const API_PREFIX: &str = "api/v1/client";
 const AUTH_NONCE_BYTES: usize = 32;
+const SIGN_IN_TOKEN_LIFETIME_SECS: i128 = 5 * 60;
+const SIGN_IN_TOKEN_BACKDATE_SECS: i128 = 60;
 
 pub struct Client {
     client: reqwest::Client,
@@ -619,27 +621,16 @@ impl Client {
             return Ok(token);
         }
 
-        let user_id = self
-            .options
-            .user_id()
-            .copied()
-            .ok_or_else(|| StateError::new("This call needs a user identity"))?;
-        let nonce = crate::random_array::<AUTH_NONCE_BYTES>();
-        let mut body = json!({"userId": user_id, "nonce": base64url(&nonce)});
-        if let Some(key) = self.options.user_private_key() {
-            body["userSig"] =
-                json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
-        } else if let Some(key) = self.options.device_private_key() {
-            body["deviceId"] = json!(self.device_id);
-            body["deviceSig"] =
-                json!(sign_nonce(key, &nonce).map_err(|e| MalformedError::new(e.to_string()))?);
-        } else {
-            return Err(StateError::new("This call needs a user identity"));
-        }
+        self.check_identity()?;
+        let node_id = match self.options.node_id() {
+            Some(node_id) => *node_id,
+            None => Box::pin(self.fetch_node_id()).await?,
+        };
+        let sign_in_token = self.sign_in_token(&node_id)?;
         let response = self
             .client
             .post(self.url("auth")?)
-            .json(&body)
+            .bearer_auth(sign_in_token)
             .send()
             .await
             .map_err(|e| NetworkError::new(e.to_string()))?;
@@ -655,6 +646,53 @@ impl Client {
             .ok_or_else(|| MalformedError::new("missing 'token'"))?;
         self.set_token(Some(token.clone()));
         Ok(token)
+    }
+
+    fn sign_in_token(&self, node_id: &Id) -> Result<String> {
+        use serde_cbor::Value as Cbor;
+        use std::{collections::BTreeMap, time::{SystemTime, UNIX_EPOCH}};
+
+        let Some(user_id) = self.options.user_id() else {
+            return Err(StateError::new("This call needs a user identity"));
+        };
+        let Some(key) = self.options.user_key().or_else(|| self.options.device_key()) else {
+            return Err(StateError::new("This call needs a user identity"));
+        };
+        let issuer = Id::from(key.public_key());
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?;
+        let issued_at = i128::from(now.as_secs()) - SIGN_IN_TOKEN_BACKDATE_SECS;
+        let protected = serde_cbor::to_vec(&BTreeMap::from([(1, -8)]))?;
+        // RFC 8392 claim labels, plus Boson's client_id (12) for device sign-in.
+        let mut claims = BTreeMap::from([
+            (1, Cbor::Bytes(issuer.as_bytes().to_vec())),
+            (2, Cbor::Bytes(user_id.as_bytes().to_vec())),
+            (3, Cbor::Bytes(node_id.as_bytes().to_vec())),
+            (4, Cbor::Integer(issued_at + SIGN_IN_TOKEN_LIFETIME_SECS)),
+            (5, Cbor::Integer(issued_at)),
+            (6, Cbor::Integer(issued_at)),
+            (7, Cbor::Bytes(crate::random_array::<16>().to_vec())),
+            (9, Cbor::Text("api:client".into())),
+        ]);
+        if self.options.user_key().is_none() {
+            claims.insert(12, Cbor::Bytes(issuer.as_bytes().to_vec()));
+        }
+        let payload = serde_cbor::to_vec(&claims)?;
+        let signing_data = serde_cbor::to_vec(&Cbor::Array(vec![
+            Cbor::Text("Signature1".into()),
+            Cbor::Bytes(protected.clone()),
+            Cbor::Bytes(Vec::new()),
+            Cbor::Bytes(payload.clone()),
+        ]))?;
+        let signature = key.private_key().sign_into(&signing_data)?;
+        let mut token = vec![0xd2]; // COSE_Sign1 tag (18).
+        token.extend(serde_cbor::to_vec(&Cbor::Array(vec![
+            Cbor::Bytes(protected),
+            Cbor::Map(BTreeMap::new()),
+            Cbor::Bytes(payload),
+            Cbor::Bytes(signature),
+        ]))?);
+        Ok(base64url(&token))
     }
 
     fn url(&self, path: &str) -> Result<Url> {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use clap::{Arg, ArgMatches, Command};
-use boson::messaging::{Client, ContactType};
+use boson::messaging::{Client, ContactOps, ContactType};
 use super::parse_id;
 
 pub(crate) fn cli() -> Command {

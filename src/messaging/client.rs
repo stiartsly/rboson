@@ -270,6 +270,10 @@ impl Client {
     }
 
     pub async fn revoke_session(&self, device_id: &Id) -> Result<()> {
+        if device_id == self.device_id() {
+            return Err(ArgumentError::new("Cannot revoke the current session"));
+        }
+
         self.verticle()?.revoke_session(*device_id).await
     }
 
@@ -278,6 +282,9 @@ impl Client {
         user_id: Id,
         hello: Option<impl Into<String>>,
     ) -> Result<()> {
+        if &user_id == self.user_id() {
+            return Err(ArgumentError::new("Cannot send friend request to yourself"));
+        }
         self.verticle()?.friend_request(user_id, hello.map(Into::into)).await
     }
 
@@ -310,7 +317,6 @@ impl Client {
         &self,
         user_ids: &[Id]
     ) -> Result<()> {
-
         self.verticle()?.remove_friend_requests(user_ids.to_vec()).await
     }
 

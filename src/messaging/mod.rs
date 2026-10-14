@@ -1,6 +1,12 @@
 pub(crate) mod internal;
 pub(crate) mod dto;
+pub(crate) mod rpc;
 
+pub(crate) mod mqtt;
+pub(crate) mod verticle;
+
+pub mod client;
+pub mod options;
 pub mod channel;
 pub mod contact;
 pub mod errors;
@@ -8,8 +14,7 @@ pub mod conversation;
 pub mod friend_request;
 pub mod invite_ticket;
 pub mod message;
-pub mod options;
-pub(crate) mod rpc;
+
 pub mod session_info;
 pub mod messaging_client;
 
@@ -20,10 +25,7 @@ pub mod friend_request_listener;
 pub mod message_listener;
 pub mod session_listener;
 
-pub mod client;
 
-pub(crate) mod mqtt;
-pub(crate) mod verticle;
 
 pub use {
     messaging_client::MessagingClient,

@@ -13,12 +13,12 @@ use std::{
 
 use log::{debug, error, info, trace, warn};
 use futures::{stream::FuturesUnordered, FutureExt};
+use rumqttc::tokio_rustls::rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    pki_types::{CertificateDer, ServerName, UnixTime},
+    ClientConfig, DigitallySignedStruct, Error as RustlsError, SignatureScheme,
+};
 use rumqttc::{
-    tokio_rustls::rustls::{
-        client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-        pki_types::{CertificateDer, ServerName, UnixTime},
-        ClientConfig, DigitallySignedStruct, Error as RustlsError, SignatureScheme,
-    },
     AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS, SubscribeFilter, TlsConfiguration,
     Transport,
 };
@@ -26,12 +26,11 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 use sha2::{Digest, Sha256};
 
-
 use crate::{
-    CryptoIdentity,
     Id,
     Identity,
     signature,
+    CryptoIdentity,
 };
 use crate::errors::{
     Result,
@@ -52,9 +51,10 @@ use crate::messaging::{
     ChannelListener, ConnectionListener, ContactListener, MessageListener, SessionListener,
     FriendRequestListener,
     errors::{AuthenticationError, EncodingError, ProtocolError},
+    FriendRequest,
 };
 
-use super::internal::{PhotonChannel, PhotonChannelMember, PhotonContact, PhotonMessage, PhotonFriendRequest as FriendRequest};
+use super::internal::{PhotonChannel, PhotonChannelMember, PhotonContact, PhotonMessage };
 use super::internal::{
     handshake::{Handshake, HandshakeType},
     notification::{Notification, NotificationEvent},

@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::{Id, core::logger};
+use crate::{Id, core::logger, signature};
 use crate::errors::{
     Result,
     StateError,
@@ -321,10 +321,11 @@ impl Client {
     pub async fn add_friend(
         &self,
         user_id: Id,
-        session_key: Vec<u8>,
-        remark: Option<String>,
+        session_key: signature::KeyPair,
+        remark: Option<impl Into<String>>,
     ) -> Result<()> {
-        self.verticle()?.add_friend(user_id, session_key, remark).await
+        let key = session_key.private_key().as_ref().to_vec();
+        self.verticle()?.add_friend(user_id, key, remark.map(Into::into)).await
     }
 
     pub async fn block_user(
@@ -634,7 +635,7 @@ impl MessagingClient for Client {
     async fn add_friend(
         &self,
         user_id: &Id,
-        session_key: Vec<u8>,
+        session_key: signature::KeyPair,
         remark: Option<String>,
     ) -> Result<()> {
         self.add_friend(*user_id, session_key, remark).await

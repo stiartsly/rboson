@@ -3,17 +3,16 @@ use std::{
     future::Future
 };
 
-use crate::{Id, errors::{Result}};
+use crate::{Id, signature, errors::Result};
 use crate::messaging::{
     channel::{Channel, Permission, Role},
     contact::Contact,
+    session_info::SessionInfo,
     conversation::Conversation,
     friend_request::FriendRequest,
     invite_ticket::InviteTicket,
     message::{Message, MessageBuilder},
-    session_info::SessionInfo,
 };
-
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -186,7 +185,7 @@ pub trait MessagingClient {
     fn add_friend(
         &self,
         user_id: &Id,
-        session_key: Vec<u8>,
+        session_key: signature::KeyPair,
         remark: Option<String>,
     ) -> impl Future<Output = Result<()>>;
 

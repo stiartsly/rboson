@@ -351,6 +351,79 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn tests_add_friend() {
+        let bob = Client::new(Options::load(BOB_YAML).unwrap());
+        let alice = Client::new(Options::load(ALICE_YAML).unwrap());
+        let bob_id = *bob.user_id();
+        let alice_id = *alice.user_id();
+
+        assert_ne!(bob_id, alice_id);
+
+        let (bob_start, alice_start) = tokio::join!(
+            bob.start(),
+            alice.start()
+        );
+        assert!(bob_start.is_ok());
+        assert!(alice_start.is_ok());
+
+        tokio::join!(
+            wait_until_ready(&bob),
+            wait_until_ready(&alice)
+        );
+
+        bob.clear_contacts().await.unwrap();
+        alice.clear_contacts().await.unwrap();
+
+        let session_keypair = KeyPair::random();
+        let session_key = session_keypair.private_key().as_ref().to_vec();
+
+        let rc = bob.add_friend(
+            alice_id,
+            session_key.clone(),
+            Some("Hello,Alice".to_string())
+        ).await;
+        assert!(rc.is_ok());
+
+        let rc = alice.add_friend(
+            bob_id,
+            session_key,
+            Some("Hello,Bob".to_string())
+        ).await;
+        assert!(rc.is_ok());
+
+        let bob_contacts = bob.get_contacts().await.unwrap();
+        let bob_friends: Vec<_> = bob_contacts.iter()
+            .filter(|contact| contact.contact_type() == ContactType::Friend)
+            .collect();
+        assert_eq!(bob_friends.len(), 1);
+        assert_eq!(bob_friends[0].id(), &alice_id);
+        assert_eq!(bob_friends[0].remark(), Some("Hello,Alice"));
+        let bob_alice_contact = bob.get_contact(&alice_id).await.unwrap();
+        assert!(bob_alice_contact.is_some());
+        assert_eq!(bob_alice_contact.as_ref().unwrap().contact_type(), ContactType::Friend);
+        assert_eq!(bob_alice_contact.as_ref().unwrap().remark(), Some("Hello,Alice"));
+
+        let alice_contacts = alice.get_contacts().await.unwrap();
+        let alice_friends: Vec<_> = alice_contacts.iter()
+            .filter(|contact| contact.contact_type() == ContactType::Friend)
+            .collect();
+        assert_eq!(alice_friends.len(), 1);
+        assert_eq!(alice_friends[0].id(), &bob_id);
+        assert_eq!(alice_friends[0].remark(), Some("Hello,Bob"));
+        let alice_bob_contact = alice.get_contact(&bob_id).await.unwrap();
+        assert!(alice_bob_contact.is_some());
+        assert_eq!(alice_bob_contact.as_ref().unwrap().contact_type(), ContactType::Friend);
+        assert_eq!(alice_bob_contact.as_ref().unwrap().remark(), Some("Hello,Bob"));
+
+        bob.clear_contacts().await.unwrap();
+        alice.clear_contacts().await.unwrap();
+        let (bob_stop, alice_stop) = tokio::join!(bob.stop(), alice.stop());
+        assert!(bob_stop.is_ok());
+        assert!(alice_stop.is_ok());
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_message() {
         let options = Options::load(BOB_YAML).unwrap();
         let sender = Client::new(options);

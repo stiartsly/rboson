@@ -43,7 +43,7 @@ use crate::errors::{
 use crate::messaging::{
     options::Options,
     verticle::VerticleOptions,
-    channel::{Channel, Permission, Role},
+    channel::{Channel, ChannelMember, Permission, Role},
     contact::{Contact, ContactType},
     conversation::Conversation,
     invite_ticket::InviteTicket,
@@ -63,6 +63,7 @@ use super::internal::{
 
 use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
 use super::dto::{
+    channel_session_rotation::ChannelSessionKeyRotation,
     new_channel_info::NewChannelInfo,
 };
 
@@ -386,7 +387,7 @@ impl MqttSession {
             return Err(EncodingError::new("Notification payload is not binary"));
         };
         let notification = Notification::parse(&payload)?;
-        if matches!(notification.event.as_str(), "cc" | "cj" | "cd" | "cl" | "cmj" | "cml")
+        if matches!(notification.event.as_str(), "cc" | "cj" | "cd" | "cl" | "csr" | "cmj" | "cml")
             && notification.source == *self.user_id()
             && notification.id == Self::message_id(self.device_id(), notification.timestamp)?
         {
@@ -434,6 +435,25 @@ impl MqttSession {
                         self.channel_listener.on_left_channel(&channel);
                     }
                 }
+            }
+            "csr" => {
+                let Value::Bytes(encrypted_key) = body else {
+                    return Err(EncodingError::new("Channel session rotation key is not binary"));
+                };
+                let mut channel = self.channel_snapshot(sender)?;
+                if notification.source != channel.owner {
+                    return Err(EncodingError::new("Channel session key rotation has an unexpected source"));
+                }
+                let session = self.friend_sessions.lock().unwrap().get(sender).cloned()
+                    .ok_or_else(|| StateError::new("Channel session key is missing"))?;
+                let key = session.decrypt_into(&notification.source, &encrypted_key)
+                    .map_err(|error| AuthenticationError::new(format!("Decrypting rotated channel session key failed: {error}")))?;
+                let session = CryptoIdentity::try_from(key.as_slice())
+                    .map_err(|error| AuthenticationError::new(format!("Invalid rotated channel session key: {error}")))?;
+                channel.session_id = *session.id();
+                self.friend_sessions.lock().unwrap().insert(*sender, session);
+                self.channels.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener.on_channel_session_key_rotated(&channel);
             }
             "cmj" => {
                 let member: PhotonChannelMember = serde_cbor::value::from_value(body)
@@ -777,7 +797,10 @@ impl MqttSession {
             } else if message.recipient == from {
                 let session = self.friend_sessions.lock().unwrap().get(&from).cloned()
                     .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
-                session.decrypt_into(&from, &payload)?
+                session.decrypt_into(&from, &payload)
+                    .map_err(|error| AuthenticationError::new(format!(
+                        "Decrypting channel notification envelope failed: {error}"
+                    )))?
             } else {
                 return Err(EncodingError::new("Invalid channel notification recipient"));
             };
@@ -1659,41 +1682,210 @@ impl MqttSession {
         Err(NotImplemented::new("transfer_channel_ownership"))
     }
 
-    pub(crate) async fn rotate_channel_session_key(&self, _channel_id: &Id) -> Result<()> {
-        Err(NotImplemented::new("rotate_channel_session_key"))
+    pub(crate) async fn rotate_channel_session_key(&self, channel_id: &Id) -> Result<()> {
+        let _request = self.requests.lock().await;
+        let mut channel = self.channel_snapshot(channel_id)?;
+        if channel.owner != *self.user_id() {
+            return Err(StateError::new("Only the channel owner can rotate the session key"));
+        }
+        let current_session = self.friend_sessions.lock().unwrap().get(channel_id).cloned()
+            .ok_or_else(|| StateError::new("Channel session key is missing"))?;
+        if current_session.id() != &channel.session_id {
+            return Err(StateError::new("Channel session key does not match the channel"));
+        }
+
+        let keypair = signature::KeyPair::random();
+        let encrypted_key = self.user_identity.encrypt_into(
+            current_session.id(),
+            keypair.private_key().as_ref(),
+        )?;
+        let session = CryptoIdentity::from(keypair.clone());
+        let rotation = ChannelSessionKeyRotation::new(*session.id(), encrypted_key);
+        let params = serde_cbor::value::to_value(rotation)
+            .map_err(|error| EncodingError::new(format!("Encoding channel session rotation failed: {error}")))?;
+        self.rpc_call_to(channel_id, Method::ChannelSessionKeyRotate, Some(params)).await?;
+
+        channel.session_id = *session.id();
+        self.friend_sessions.lock().unwrap().insert(*channel_id, session);
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        self.channel_listener.on_channel_session_key_rotated(&channel);
+        Ok(())
     }
 
-    pub(crate) async fn update_channel_info(&self, _channel: &dyn Channel) -> Result<()> {
-        Err(NotImplemented::new("update_channel_info"))
+    pub(crate) async fn update_channel_info(&self, channel: &dyn Channel) -> Result<()> {
+        let _request = self.requests.lock().await;
+        let mut current = self.channel_snapshot(channel.id())?;
+        if current.owner != *self.user_id() {
+            return Err(StateError::new("Only the channel owner can update channel information"));
+        }
+
+        let mut changes = std::collections::BTreeMap::new();
+        if current.permission != channel.permission() {
+            changes.insert(Value::Text("p".into()), Value::Integer((channel.permission() as i32).into()));
+        }
+        if current.contact.name.as_deref() != channel.name() {
+            changes.insert(Value::Text("n".into()), channel.name().map(|name| Value::Text(name.to_string())).unwrap_or(Value::Null));
+        }
+        if current.notice.as_deref() != channel.notice() {
+            changes.insert(Value::Text("nt".into()), channel.notice().map(|notice| Value::Text(notice.to_string())).unwrap_or(Value::Null));
+        }
+        if current.announced != channel.is_announced() {
+            changes.insert(Value::Text("a".into()), Value::Bool(channel.is_announced()));
+        }
+        if changes.is_empty() {
+            return Err(ArgumentError::new("Channel information has not changed"));
+        }
+
+        self.rpc_call_to(
+            channel.id(),
+            Method::ChannelInfoUpdate,
+            Some(Value::Map(changes)),
+        ).await?;
+        current.permission = channel.permission();
+        current.contact.name = channel.name().map(ToString::to_string);
+        current.notice = channel.notice().map(ToString::to_string);
+        current.announced = channel.is_announced();
+        current.contact.updated_at = Self::current_timestamp()?;
+        self.contacts.borrow_mut().insert(*channel.id(), current.contact.clone());
+        self.channels.borrow_mut().insert(*channel.id(), current.clone());
+        self.channel_listener.on_channel_updated(&current);
+        Ok(())
     }
 
     pub(crate) async fn set_channel_members_role(
         &self,
-        _channel_id: &Id,
-        _members: &[Id],
-        _role: Role,
+        channel_id: &Id,
+        members: &[Id],
+        role: Role,
     ) -> Result<()> {
-        Err(NotImplemented::new("set_channel_members_role"))
+        if members.is_empty() {
+            return Err(ArgumentError::new("No members specified"));
+        }
+        if matches!(role, Role::Owner | Role::Banned) {
+            return Err(ArgumentError::new("Owner and Banned roles cannot be assigned with this operation"));
+        }
+        let _request = self.requests.lock().await;
+        let mut channel = self.channel_snapshot(channel_id)?;
+        Self::ensure_channel_moderator(&channel, self.user_id())?;
+        let params = Value::Map([
+            (Value::Text("ids".into()), Value::Array(members.iter()
+                .map(|id| Value::Bytes(id.as_bytes().to_vec())).collect())),
+            (Value::Text("r".into()), Value::Integer((role as i32).into())),
+        ].into_iter().collect());
+        let result = self.rpc_call_to(channel_id, Method::ChannelMembersRoleUpdate, Some(params)).await?;
+        let updated: Vec<Id> = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid updated channel members: {error}")))?;
+        let changed: Vec<_> = channel.members.iter_mut()
+            .filter(|member| updated.contains(&member.id))
+            .map(|member| {
+                member.role = role as i32;
+                Box::new(member.clone()) as Box<dyn ChannelMember>
+            })
+            .collect();
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        if !changed.is_empty() {
+            self.channel_listener.on_channel_members_role_updated(&channel, &changed);
+        }
+        Ok(())
     }
 
-    pub(crate) async fn ban_channel_members(&self, _channel_id: &Id, _members: &[Id]) -> Result<()> {
-        Err(NotImplemented::new("ban_channel_members"))
+    pub(crate) async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
+        if members.is_empty() {
+            return Err(ArgumentError::new("No members specified"));
+        }
+        let _request = self.requests.lock().await;
+        let mut channel = self.channel_snapshot(channel_id)?;
+        Self::ensure_channel_moderator(&channel, self.user_id())?;
+        let params = Value::Array(members.iter()
+            .map(|id| Value::Bytes(id.as_bytes().to_vec())).collect());
+        let result = self.rpc_call_to(channel_id, Method::ChannelMembersBan, Some(params)).await?;
+        let banned: Vec<Id> = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid banned channel members: {error}")))?;
+        let changed: Vec<_> = channel.members.iter_mut()
+            .filter(|member| banned.contains(&member.id))
+            .map(|member| {
+                member.role = Role::Banned as i32;
+                Box::new(member.clone()) as Box<dyn ChannelMember>
+            })
+            .collect();
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        if !changed.is_empty() {
+            self.channel_listener.on_channel_members_banned(&channel, &changed);
+        }
+        Ok(())
     }
 
     pub(crate) async fn unban_channel_members(
         &self,
-        _channel_id: &Id,
-        _members: &[Id],
+        channel_id: &Id,
+        members: &[Id],
     ) -> Result<()> {
-        Err(NotImplemented::new("unban_channel_members"))
+        if members.is_empty() {
+            return Err(ArgumentError::new("No members specified"));
+        }
+        let _request = self.requests.lock().await;
+        let mut channel = self.channel_snapshot(channel_id)?;
+        Self::ensure_channel_moderator(&channel, self.user_id())?;
+        let params = Value::Array(members.iter()
+            .map(|id| Value::Bytes(id.as_bytes().to_vec())).collect());
+        let result = self.rpc_call_to(channel_id, Method::ChannelMembersUnban, Some(params)).await?;
+        let unbanned: Vec<Id> = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid unbanned channel members: {error}")))?;
+        let changed: Vec<_> = channel.members.iter_mut()
+            .filter(|member| unbanned.contains(&member.id))
+            .map(|member| {
+                member.role = Role::Member as i32;
+                Box::new(member.clone()) as Box<dyn ChannelMember>
+            })
+            .collect();
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        if !changed.is_empty() {
+            self.channel_listener.on_channel_members_unbanned(&channel, &changed);
+        }
+        Ok(())
     }
 
     pub(crate) async fn remove_channel_members(
         &self,
-        _channel_id: &Id,
-        _members: &[Id],
+        channel_id: &Id,
+        members: &[Id],
     ) -> Result<()> {
-        Err(NotImplemented::new("remove_channel_members"))
+        if members.is_empty() {
+            return Err(ArgumentError::new("No members specified"));
+        }
+        let _request = self.requests.lock().await;
+        let mut channel = self.channel_snapshot(channel_id)?;
+        Self::ensure_channel_moderator(&channel, self.user_id())?;
+        let params = Value::Array(members.iter()
+            .map(|id| Value::Bytes(id.as_bytes().to_vec())).collect());
+        let result = self.rpc_call_to(channel_id, Method::ChannelMembersRemove, Some(params)).await?;
+        let removed: Vec<Id> = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid removed channel members: {error}")))?;
+        let changed: Vec<_> = channel.members.iter()
+            .filter(|member| removed.contains(&member.id))
+            .cloned()
+            .map(|member| Box::new(member) as Box<dyn ChannelMember>)
+            .collect();
+        channel.members.retain(|member| !removed.contains(&member.id));
+        self.channels.borrow_mut().insert(*channel_id, channel.clone());
+        if !changed.is_empty() {
+            self.channel_listener.on_channel_members_removed(&channel, &changed);
+        }
+        Ok(())
+    }
+
+    fn ensure_channel_moderator(channel: &PhotonChannel, user_id: &Id) -> Result<()> {
+        if !channel.member(user_id).is_some_and(|member| member.is_owner() || member.is_moderator()) {
+            return Err(StateError::new("Only a channel owner or moderator can manage members"));
+        }
+        Ok(())
+    }
+
+    fn current_timestamp() -> Result<i64> {
+        let millis = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|error| StateError::new(format!("System clock error: {error}")))?
+            .as_millis();
+        i64::try_from(millis).map_err(|_| StateError::new("System clock timestamp is out of range").into())
     }
 
     pub(crate) async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {

@@ -36,7 +36,9 @@ impl ChannelListener for ClientChannelListener {
     ) {}
 
     /// Called when the channel session key was rotated.
-    fn on_channel_session_key_rotated(&self, _channel: &dyn Channel) {}
+    fn on_channel_session_key_rotated(&self, channel: &dyn Channel) {
+        self.listener.on_channel_session_key_rotated(channel);
+    }
 
     /// Called when channel metadata (name, notice, etc.) was updated.
     fn on_channel_updated(&self, _channel: &dyn Channel) {}

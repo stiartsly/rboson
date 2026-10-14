@@ -6,7 +6,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     use boson::{Id, signature::KeyPair};
-    use boson::messaging::{Client, Message, MessageListener, Options, Permission};
+    use boson::messaging::{Channel, ChannelListener, Client, Message, MessageListener, Options, Permission};
     use boson::messaging::ContactType;
 
     const BOB_YAML: &str = "tests/apitests/messaging/bob.yaml";
@@ -53,6 +53,28 @@ mod tests {
             listener,
         );
         Client::new(options)
+    }
+
+    fn create_client_with_channel_listener(
+        config: &str,
+        listener: impl ChannelListener + 'static,
+    ) -> Client {
+        let options = Options::load(config).unwrap();
+        let mut builder = Options::builder();
+        builder.with_peer_id(*options.peer_id());
+        builder.with_peer_endpoint(options.peer_endpoint().as_str()).unwrap();
+        builder.with_user_keypair(options.user_key().clone());
+        builder.with_device_keypair(options.device_key().clone());
+        builder.with_data_dir(options.data_dir());
+        builder.with_database(options.database_uri(), options.database_pool_size()).unwrap();
+        builder.with_database_schema(options.database_schema());
+        builder.with_log_level(options.log_level());
+        builder.with_log_console(options.log_console());
+        if let Some(log_file) = options.log_file() {
+            builder.with_log_file(log_file);
+        }
+        builder.with_channel_listener(listener);
+        Client::new(builder.build().unwrap())
     }
 
     async fn start_clients(first: &Client, second: &Client) {
@@ -156,6 +178,34 @@ mod tests {
         check_friend_contact(alice, bob.user_id()).await;
     }
 
+    async fn create_channel_with_member(
+        bob: &Client,
+        alice: &Client,
+        name: &str,
+    ) -> (Id, Box<dyn Channel>) {
+        for contact in bob.get_contacts().await.unwrap() {
+            if contact.contact_type() == ContactType::Channel && contact.name() == Some(name) {
+                bob.remove_channel(contact.id()).await.unwrap();
+            }
+        }
+        clear_friend_requests_and_contacts(bob, alice).await;
+        let channel = bob.create_channel(
+            Permission::OwnerInvite,
+            name,
+            None::<String>,
+            false,
+        ).await.unwrap();
+        let channel_id = *channel.id();
+        assert!(channel.has_member(bob.user_id()));
+
+        let ticket = bob.create_invite_ticket(&channel_id, Some(*alice.user_id()))
+            .await.unwrap();
+        let joined = alice.join_channel(ticket).await.unwrap();
+        assert_eq!(joined.id(), &channel_id);
+        assert!(joined.has_member(alice.user_id()));
+        (channel_id, channel)
+    }
+
     async fn clear_friend_requests_and_contacts(first: &Client, second: &Client) {
         let (first_result, second_result) = tokio::join!(
             async {
@@ -207,6 +257,17 @@ mod tests {
             let body = message.payload_as_content().map(|content| content.body().to_vec());
             self.received.send((*message.id(), message.from().copied(), *message.recipient(), body))
                 .expect("Channel testcase receiver should remain open");
+        }
+    }
+
+    struct ChannelRotationCapture {
+        rotated: tokio::sync::mpsc::UnboundedSender<Id>,
+    }
+
+    impl ChannelListener for ChannelRotationCapture {
+        fn on_channel_session_key_rotated(&self, channel: &dyn Channel) {
+            self.rotated.send(*channel.id())
+                .expect("Channel rotation testcase receiver should remain open");
         }
     }
 
@@ -730,6 +791,169 @@ mod tests {
         let (sender_stop, recipient_stop) = stop_two_clients(&sender, &recipient).await;
         assert!(sender_stop);
         assert!(recipient_stop);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_rotate_channel_session_key() {
+        let (rotated_tx, mut rotated_rx) = mpsc::unbounded_channel();
+        let bob = create_client_with_channel_listener(
+            BOB_YAML,
+            ChannelRotationCapture { rotated: rotated_tx },
+        );
+        let bob_id = *bob.user_id();
+        assert!(bob.start().await.is_ok());
+        wait_until_ready(&bob).await;
+
+        let mut created_channel_id = None;
+        let routine = async {
+            for contact in bob.get_contacts().await.unwrap() {
+                if contact.contact_type() == ContactType::Channel
+                    && contact.name() == Some("API channel rotation test")
+                {
+                    bob.remove_channel(contact.id()).await.unwrap();
+                }
+            }
+            bob.clear_contacts().await.unwrap();
+            bob.clear_friend_requests().await.unwrap();
+
+            let channel = bob.create_channel(
+                Permission::OwnerInvite,
+                "API channel rotation test",
+                None::<String>,
+                false,
+            ).await.unwrap();
+            let channel_id = *channel.id();
+            created_channel_id = Some(channel_id);
+            assert!(channel.has_member(&bob_id));
+
+            let previous_session_id = *bob.create_invite_ticket(&channel_id, None)
+                .await.unwrap().session_id();
+            assert!(bob.rotate_channel_session_key(&channel_id).await.is_ok());
+            let rotated_channel = time::timeout(Duration::from_secs(15), rotated_rx.recv())
+                .await
+                .expect("The channel owner should receive the rotation callback")
+                .expect("The rotation listener should remain open");
+            assert_eq!(rotated_channel, channel_id);
+
+            let rotated_session_id = *bob.create_invite_ticket(&channel_id, None)
+                .await.unwrap().session_id();
+            assert_ne!(previous_session_id, rotated_session_id);
+        };
+
+        use futures::FutureExt;
+        let result = std::panic::AssertUnwindSafe(routine).catch_unwind().await;
+        if let Some(channel_id) = created_channel_id {
+            if let Err(error) = bob.remove_channel(&channel_id).await {
+                eprintln!("Removing rotation testcase channel during cleanup failed: {error}");
+            }
+        }
+        let contacts = bob.clear_contacts().await;
+        let requests = bob.clear_friend_requests().await;
+        let bob_stop = bob.stop().await.is_ok();
+        if let Err(panic) = result {
+            if let Err(error) = &contacts {
+                eprintln!("Clearing Bob's contacts during rotation testcase cleanup failed: {error}");
+            }
+            if let Err(error) = &requests {
+                eprintln!("Clearing Bob's friend requests during rotation testcase cleanup failed: {error}");
+            }
+            if !bob_stop {
+                eprintln!("Stopping Bob during rotation testcase cleanup failed");
+            }
+            std::panic::resume_unwind(panic);
+        }
+        assert!(contacts.is_ok());
+        assert!(requests.is_ok());
+        assert!(bob_stop);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_update_channel_info() {
+        let bob = create_client(BOB_YAML);
+        let alice = create_client(ALICE_YAML);
+        start_clients(&bob, &alice).await;
+        let (channel_id, channel) =
+            create_channel_with_member(&bob, &alice, "API channel info test").await;
+        let updated = channel.edit_channel()
+            .name("API channel info test update".to_string())
+            .notice(Some("Updated channel notice".to_string()))
+            .announced(true)
+            .permission(Permission::Public)
+            .build();
+        let rc = bob.update_channel_info(updated.as_ref()).await;
+        assert!(rc.is_ok());
+
+        let contact = bob.get_contact(&channel_id).await.unwrap().unwrap();
+        assert_eq!(contact.name(), Some("API channel info test update"));
+
+        assert!(bob.remove_channel(&channel_id).await.is_ok());
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_set_channel_member_role() {
+        let bob = create_client(BOB_YAML);
+        let alice = create_client(ALICE_YAML);
+        start_clients(&bob, &alice).await;
+        let (channel_id, _) =
+            create_channel_with_member(&bob, &alice, "API channel role test").await;
+        let alice_id = *alice.user_id();
+
+        assert!(bob.set_channel_members_role(&channel_id, &[alice_id], "Moderator").await.is_ok());
+        assert!(bob.set_channel_members_role(&channel_id, &[alice_id], "Member").await.is_ok());
+        assert!(bob.set_channel_members_role(&channel_id, &[alice_id], "Owner").await.is_err());
+
+        assert!(bob.remove_channel(&channel_id).await.is_ok());
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_ban_and_unban_channel_member() {
+        let bob = create_client(BOB_YAML);
+        let alice = create_client(ALICE_YAML);
+        start_clients(&bob, &alice).await;
+        let (channel_id, _) =
+            create_channel_with_member(&bob, &alice, "API channel ban test").await;
+        let alice_id = *alice.user_id();
+
+        assert!(bob.ban_channel_members(&channel_id, &[alice_id]).await.is_ok());
+        assert!(bob.unban_channel_members(&channel_id, &[alice_id]).await.is_ok());
+
+        assert!(bob.remove_channel(&channel_id).await.is_ok());
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_remove_channel_member() {
+        let bob = create_client(BOB_YAML);
+        let alice = create_client(ALICE_YAML);
+        start_clients(&bob, &alice).await;
+        let (channel_id, _) =
+            create_channel_with_member(&bob, &alice, "API channel member removal test").await;
+        let alice_id = *alice.user_id();
+
+        assert!(bob.remove_channel_members(&channel_id, &[alice_id]).await.is_ok());
+        assert!(alice.leave_channel(&channel_id).await.is_err());
+
+        assert!(bob.remove_channel(&channel_id).await.is_ok());
+        clear_friend_requests_and_contacts(&bob, &alice).await;
+        let (bob_stop, alice_stop) = stop_two_clients(&bob, &alice).await;
+        assert!(bob_stop);
+        assert!(alice_stop);
     }
 
     #[tokio::test]

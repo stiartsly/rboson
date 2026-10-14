@@ -7,6 +7,7 @@ pub(crate) mod notification;
 pub(crate) mod message;
 
 pub(crate) mod client_connection_listener;
+pub(crate) mod client_channel_listener;
 
 pub(crate) use {
     photon_channel::{PhotonChannel, PhotonChannelMember},

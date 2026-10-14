@@ -1,9 +1,9 @@
 use std::sync::Arc;
+use crate::Id;
 use crate::messaging::{
     ChannelListener,
     Channel,
     ChannelMember,
-    Id,
 };
 
 pub(crate) struct ClientChannelListener {
@@ -12,10 +12,10 @@ pub(crate) struct ClientChannelListener {
 
 impl ChannelListener for ClientChannelListener {
     fn on_channel_created(&self, _channel: &dyn Channel) {
-        let listener = Arc::clone(&self.listener);
-        tokio::spawn(async move {
-            listener.on_channel_created(_channel);
-        });
+        //let listener = Arc::clone(&self.listener);
+        //task::spawn(async move {
+        //    listener.on_channel_created(_channel);
+        //});
     }
 
     /// Called when a channel was deleted by its owner.

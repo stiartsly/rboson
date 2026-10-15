@@ -26,8 +26,6 @@ pub mod friend_request_listener;
 pub mod message_listener;
 pub mod session_listener;
 
-
-
 pub use {
     messaging_client::MessagingClient,
     options::{Options, OptionsBuilder},
@@ -62,6 +60,7 @@ pub(crate) use {
 #[cfg(test)]
 mod unitests {
     mod test_message;
+    mod test_contact;
    // mod test_mqtt;
    // mod test_session;
    // mod test_verticle;

@@ -527,7 +527,7 @@ mod tests {
 
         let contact = rc.unwrap().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Friend);
-        assert_eq!(contact.revision(), 1);
+        assert!(contact.revision() > 0);
 
         // check the contacts for sender.
         let rc = sender.remove_friend_request(recipient_id).await;
@@ -551,7 +551,7 @@ mod tests {
 
         let contact = rc.unwrap().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Friend);
-        assert_eq!(contact.revision(), 1);
+        assert!(contact.revision() > 0);
 
         let rc = recipient.remove_friend_request(sender_id).await;
         assert!(rc.is_ok());

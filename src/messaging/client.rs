@@ -483,17 +483,20 @@ impl Client {
             .await
     }
 
-    pub async fn remove_contact(&self, id: &Id) -> Result<()> {
-        self.verticle()?.remove_contact(*id).await
-    }
-
-    pub async fn update_contact(&self, contact: &Contact) -> Result<()> {
+    pub async fn update_contact(&self, contact: Contact) -> Result<()> {
         self.verticle()?
-            .update_contact(contact.clone())
+            .update_contact(contact)
             .await
     }
 
+    pub async fn remove_contact(&self, id: &Id) -> Result<()> {
+        self.remove_contacts(&[*id]).await
+    }
+
     pub async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
+        if ids.is_empty() {
+            return Err(ArgumentError::new("No contact IDs specified"));
+        }
         self.verticle()?.remove_contacts(ids.to_vec()).await
     }
 
@@ -729,7 +732,7 @@ impl MessagingClient for Client {
         self.get_contacts().await
     }
 
-    async fn update_contact(&self, contact: &Contact) -> Result<()> {
+    async fn update_contact(&self, contact: Contact) -> Result<()> {
         self.update_contact(contact).await
     }
 

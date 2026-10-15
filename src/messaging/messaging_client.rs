@@ -298,7 +298,7 @@ pub trait MessagingClient {
     /// Persists contact updates (remark, tags, muted, blocked …).
     fn update_contact(
         &self,
-        contact: &Contact
+        contact: Contact
     ) -> impl Future<Output = Result<()>>;
 
     /// Removes a contact by `Id`.

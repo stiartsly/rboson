@@ -1044,7 +1044,7 @@ impl Verticle {
             }
             Event::RemoveContact { id, complete } => {
                 pending.push(async move {
-                    let rc = engine.remove_contact(&id).await;
+                    let rc = engine.remove_contacts(&[id]).await;
                     let _ = complete.send(rc.map_err(|error| error.to_string()));
                 }.boxed_local());
             }

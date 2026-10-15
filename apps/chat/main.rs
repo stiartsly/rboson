@@ -3,7 +3,7 @@ use boson::{
     errors::Result,
     Id,
     messaging::{
-        Channel, ChannelListener, Client, ConnectionListener, Contact, ContactListener,
+        Channel, ChannelListener, Client, ConnectionListener, Contact, ContactOps, ContactListener,
         FriendRequestListener, Message, MessageListener, Options as MessagingOptions,
         OptionsBuilder as MessagingOptionsBuilder, SessionInfo, SessionListener,
     },
@@ -269,12 +269,12 @@ impl PhotonContactListener {
 }
 
 impl ContactListener for PhotonContactListener {
-    fn on_contact_added(&self, contact: &dyn Contact) {
+    fn on_contact_added(&self, contact: &Contact) {
         self.output
             .println(format!("Contact added: {}", contact.id()));
     }
 
-    fn on_contacts_updated(&self, contacts: &[Box<dyn Contact>]) {
+    fn on_contacts_updated(&self, contacts: &[Contact]) {
         self.output
             .println(format!("Updated {} contact(s)", contacts.len()));
     }

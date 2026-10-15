@@ -2,13 +2,13 @@ use std::time::SystemTime;
 use crate::Id;
 use crate::messaging::{
     channel::{Channel, ChannelEditor, ChannelMember, Permission, Role},
-    contact::{Contact, ContactEditor, ContactType},
+    contact::{Contact, ContactOps, ContactType},
+    contact_editor::ContactEditor
 };
-use super::PhotonContact;
 
 #[derive(Clone)]
 pub(crate) struct PhotonChannel {
-    pub(crate) contact: PhotonContact,
+    pub(crate) contact: Contact,
     pub(crate) owner: Id,
     pub(crate) session_id: Id,
     pub(crate) permission: Permission,
@@ -41,7 +41,7 @@ impl ChannelMember for PhotonChannelMember {
     }
 }
 
-impl Contact for PhotonChannel {
+impl ContactOps for PhotonChannel {
     fn id(&self) -> &Id { self.contact.id() }
     fn contact_type(&self) -> ContactType { self.contact.contact_type() }
     fn name(&self) -> Option<&str> { self.contact.name() }
@@ -52,7 +52,7 @@ impl Contact for PhotonChannel {
     fn created_at(&self) -> i64 { self.contact.created_at() }
     fn updated_at(&self) -> i64 { self.contact.updated_at() }
     fn revision(&self) -> i32 { self.contact.revision() }
-    fn edit(&self) -> Box<dyn ContactEditor> { self.contact.edit() }
+    fn edit(&self) -> ContactEditor { self.contact.edit() }
 }
 
 impl Channel for PhotonChannel {
@@ -81,7 +81,7 @@ impl ChannelEditor for PhotonChannelEditor {
         self
     }
     fn name(mut self: Box<Self>, name: String) -> Box<dyn ChannelEditor> {
-        self.0.contact.name = Some(name);
+        self.0.contact.set_name(Some(name));
         self
     }
     fn notice(mut self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditor> {

@@ -9,6 +9,7 @@ pub mod client;
 pub mod options;
 pub mod channel;
 pub mod contact;
+pub mod contact_editor;
 pub mod errors;
 pub mod conversation;
 pub mod friend_request;
@@ -42,7 +43,8 @@ pub use {
 };
 
 pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
-pub use contact::{Contact, ContactEditor, ContactType};
+pub use contact::{Contact, ContactOps, ContactType};
+pub use contact_editor::ContactEditor;
 pub use conversation::ConversationOps;
 pub use invite_ticket::InviteTicket;
 pub use message::{
@@ -53,7 +55,6 @@ pub use session_info::SessionInfo;
 
 pub(crate) use {
     internal::{
-        PhotonContact,
         client_connection_listener::ClientConnectionListener
     },
 };

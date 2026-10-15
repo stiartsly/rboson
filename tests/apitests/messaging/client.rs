@@ -7,7 +7,7 @@ mod tests {
 
     use boson::{Id, signature::KeyPair};
     use boson::messaging::{Channel, ChannelListener, Client, Message, MessageListener, Options, Permission};
-    use boson::messaging::ContactType;
+    use boson::messaging::{ContactOps, ContactType};
     use boson::messaging::ConversationOps;
 
     const BOB_YAML: &str = "tests/apitests/messaging/bob.yaml";

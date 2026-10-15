@@ -35,7 +35,7 @@ mod tests {
     }
 
     impl ContactListener for ThreadRecorder {
-        fn on_contact_added(&self, _contact: &dyn Contact) {
+        fn on_contact_added(&self, _contact: &Contact) {
             self.record("contact_added");
         }
     }
@@ -436,10 +436,10 @@ mod protocol_tests {
     }
 
     impl ContactListener for Observed {
-        fn on_contact_added(&self, contact: &dyn Contact) {
+        fn on_contact_added(&self, contact: &Contact) {
             self.events.lock().unwrap().push(("add", *contact.id()));
         }
-        fn on_contacts_updated(&self, contacts: &[Box<dyn Contact>]) {
+        fn on_contacts_updated(&self, contacts: &[Contact]) {
             self.events.lock().unwrap().extend(contacts.iter().map(|contact| ("update", *contact.id())));
         }
         fn on_contacts_removed(&self, ids: &[Id]) {
@@ -463,24 +463,12 @@ mod protocol_tests {
 
     fn opaque(session: &MqttSession, id: Id, revision: i32, key: &crate::signature::KeyPair, blocked: bool) -> OpaqueContact {
         let encrypted_key = session.user_identity.encrypt_into(session.user_id(), key.private_key().as_ref()).unwrap();
-        let data = ContactData {
-            id,
-            kind: 1,
-            session_key: Some(Value::Bytes(encrypted_key)),
-            name: Some("friend".into()),
-            remark: None,
-            tags: None,
-            muted: false,
-            blocked,
-            created_at: 100,
-            updated_at: 100 + i64::from(revision),
-        };
-        let data = serde_cbor::to_vec(&data).unwrap();
-        OpaqueContact {
-            id,
-            revision,
-            data: Value::Bytes(session.user_identity.encrypt_into(session.user_id(), &data).unwrap()),
-        }
+        let mut data = ContactData::new(id, 1, 100);
+        data.set_session_key(encrypted_key);
+        data.name = Some("friend".into());
+        data.blocked = blocked;
+        data.updated_at = 100 + i64::from(revision);
+        data.to_opaque(revision, &session.user_identity).unwrap()
     }
 
     #[test]
@@ -597,7 +585,7 @@ mod protocol_tests {
         session.apply_contact_sync(replay).unwrap();
         assert_eq!(session.get_contacts().await.unwrap().len(), 2);
         assert_eq!(observed.events.lock().unwrap().len(), 2);
-        let invalid = OpaqueContact { id: friend, revision: 3, data: Value::Bytes(vec![0]) };
+        let invalid = OpaqueContact::new(friend, 3, Value::Bytes(vec![0]));
         assert!(session.apply_contact_sync(ContactSync {
             revision: 3, kind: 2, mutations: vec![],
             contacts: vec![opaque(&session, other, 3, &key, false), invalid],

@@ -1,4 +1,4 @@
-use crate::messaging::contact::Contact;
+use crate::messaging::contact::ContactOps;
 use crate::Id;
 use std::fmt;
 use std::time::SystemTime;
@@ -133,8 +133,8 @@ pub trait ChannelMember: Send + Sync {
 
 /// A channel contact – a group conversation on the boson network.
 ///
-/// Extends [`Contact`] with channel-specific information.
-pub trait Channel: Contact {
+/// Extends [`ContactOps`] with channel-specific information.
+pub trait Channel: ContactOps {
     /// The channel's join / invite permission policy.
     fn permission(&self) -> Permission;
 

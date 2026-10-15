@@ -41,27 +41,9 @@ use crate::messaging::{
     Permission,
     Role,
 };
-use super::internal::{
-    PhotonContact,
-};
 
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
 const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
-
-fn contact_snapshot(contact: &dyn Contact) -> PhotonContact {
-    PhotonContact {
-        id: *contact.id(),
-        contact_type: contact.contact_type(),
-        name: contact.name().map(ToString::to_string),
-        remark: contact.remark().map(ToString::to_string),
-        tags: contact.tags().map(ToString::to_string),
-        muted: contact.is_muted(),
-        blocked: contact.is_blocked(),
-        created_at: contact.created_at(),
-        updated_at: contact.updated_at(),
-        revision: contact.revision(),
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct VerticleClient {
@@ -167,7 +149,7 @@ pub(crate) enum Event {
 
     BlockUser {
         user_id: Id,
-        complete: oneshot::Sender<CmdResult<Box<dyn Contact>>>,
+        complete: oneshot::Sender<CmdResult<Contact>>,
     },
 
     CreateChannel {
@@ -241,13 +223,13 @@ pub(crate) enum Event {
 
     GetContact {
         id: Id,
-        complete: oneshot::Sender<CmdResult<Option<PhotonContact>>>,
+        complete: oneshot::Sender<CmdResult<Option<Contact>>>,
     },
     GetContacts {
-        complete: oneshot::Sender<CmdResult<Vec<PhotonContact>>>,
+        complete: oneshot::Sender<CmdResult<Vec<Contact>>>,
     },
     UpdateContact {
-        contact: PhotonContact,
+        contact: Contact,
         complete: oneshot::Sender<CmdResult<()>>,
     },
     RemoveContact {
@@ -513,7 +495,7 @@ impl VerticleClient {
     pub(crate) async fn block_user(
         &self,
         user_id: Id
-    ) -> Result<Box<dyn Contact>> {
+    ) -> Result<Contact> {
         self.call(|complete| Event::BlockUser {
             user_id,
             complete
@@ -659,20 +641,20 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<PhotonContact>> {
+    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<Contact>> {
         self.call(|complete| Event::GetContact {
             id,
             complete
         }).await
     }
 
-    pub(crate) async fn get_contacts(&self) -> Result<Vec<PhotonContact>> {
+    pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
         self.call(|complete| Event::GetContacts {
             complete
         }).await
     }
 
-    pub(crate) async fn update_contact(&self, contact: PhotonContact) -> Result<()> {
+    pub(crate) async fn update_contact(&self, contact: Contact) -> Result<()> {
         self.call(|complete| Event::UpdateContact {
             contact,
             complete,
@@ -1044,17 +1026,13 @@ impl Verticle {
 
             Event::GetContact { id, complete } => {
                 pending.push(async move {
-                    let rc = engine.get_contact(&id).await
-                        .map(|contact| contact.map(|contact| contact_snapshot(contact.as_ref())));
+                    let rc = engine.get_contact(&id).await;
                     let _ = complete.send(rc.map_err(|error| error.to_string()));
                 }.boxed_local());
             }
             Event::GetContacts { complete } => {
                 pending.push(async move {
-                    let rc = engine.get_contacts().await
-                        .map(|contacts| contacts.into_iter()
-                        .map(|contact| contact_snapshot(contact.as_ref()))
-                        .collect());
+                    let rc = engine.get_contacts().await;
                     let _ = complete.send(rc.map_err(|error| error.to_string()));
                 }.boxed_local());
             }

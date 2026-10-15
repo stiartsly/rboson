@@ -8,11 +8,10 @@ use crate::{
     errors::{ArgumentError, Result}
 };
 use crate::messaging::{
-    contact::{Contact, ContactType},
+    contact::{Contact, ContactOps, ContactType},
     invite_ticket::InviteTicket,
     message::Message,
 };
-use super::PhotonContact;
 
 /// A conversation between the local user and another party (person or channel).
 ///
@@ -22,7 +21,7 @@ pub trait ConversationOps: Send + Sync {
     fn id(&self) -> &Id;
 
     /// The contact representing the other participant.
-    fn contact(&self) -> &dyn Contact;
+    fn contact(&self) -> &Contact;
 
     /// Whether this is a channel (group) conversation.
     fn is_channel(&self) -> bool;
@@ -36,7 +35,7 @@ pub trait ConversationOps: Send + Sync {
 
     #[derive(Clone)]
 pub struct Conversation {
-    contact: PhotonContact,
+    contact: Contact,
     last_message: Option<Arc<dyn Message>>,
     preview: Option<String>,
 }
@@ -44,7 +43,7 @@ pub struct Conversation {
 impl Conversation {
     pub(crate) const MAX_SNIPPET_LENGTH: usize = 128;
 
-    pub(crate) fn new(contact: PhotonContact) -> Self {
+    pub(crate) fn new(contact: Contact) -> Self {
         Self {
             contact,
             last_message: None,
@@ -120,7 +119,7 @@ impl ConversationOps for Conversation {
         self.contact.id()
     }
 
-    fn contact(&self) -> &dyn Contact {
+    fn contact(&self) -> &Contact {
         &self.contact
     }
 

@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use clap::{arg, Arg, ArgMatches, Command};
 
 use boson::{
-    messaging::{Client, Contact, ContactType, InviteTicket, MessagingClient, Permission},
+    messaging::{Client, ContactOps, ContactType, InviteTicket, MessagingClient, Permission},
     Id,
 };
 
@@ -154,7 +154,7 @@ async fn info(args: &ArgMatches, client: &Arc<Client>) {
     };
     match client.get_contact(&id).await {
         Ok(Some(contact)) if contact.contact_type() == ContactType::Channel => {
-            print_contact(contact.as_ref())
+            print_contact(&contact)
         }
         Ok(Some(_)) => println!("{id} is not a channel"),
         Ok(None) => println!("Channel {id} was not found"),
@@ -169,14 +169,14 @@ async fn list(client: &Arc<Client>) {
                 .iter()
                 .filter(|contact| contact.contact_type() == ContactType::Channel)
             {
-                print_contact(contact.as_ref());
+                print_contact(contact);
             }
         }
         Err(error) => println!("Listing channels failed: {error}"),
     }
 }
 
-fn print_contact(contact: &dyn Contact) {
+fn print_contact(contact: &dyn ContactOps) {
     println!(
         "{} name={} muted={} blocked={}",
         contact.id(),

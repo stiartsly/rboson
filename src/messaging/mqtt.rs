@@ -43,7 +43,7 @@ use crate::messaging::{
     options::Options,
     verticle::VerticleOptions,
     channel::{Channel, ChannelMember, Permission, Role},
-    contact::{Contact, ContactType},
+    contact::{Contact, ContactOps, ContactType},
     conversation::{ConversationOps, Conversation},
     invite_ticket::InviteTicket,
     message::{ContentDisposition, Message, MessageBuilder},
@@ -54,11 +54,10 @@ use crate::messaging::{
     FriendRequest,
 };
 
-use super::internal::{PhotonChannel, PhotonChannelMember, PhotonContact, PhotonMessage };
+use super::internal::{PhotonChannel, PhotonChannelMember, PhotonMessage, ContactData, OpaqueContact };
 use super::internal::{
     handshake::{Handshake, HandshakeType},
     notification::{Notification, NotificationEvent},
-    photon_contact::{ContactData, OpaqueContact},
 };
 
 use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
@@ -235,7 +234,7 @@ pub(crate) struct MqttSession {
     blocked_contacts: Arc<Mutex<HashSet<Id>>>,
 
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
-    contacts: RefCell<HashMap<Id, PhotonContact>>,
+    contacts: RefCell<HashMap<Id, Contact>>,
     channels: RefCell<HashMap<Id, PhotonChannel>>,
     conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
 
@@ -483,16 +482,16 @@ impl MqttSession {
         Ok(())
     }
 
-    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(PhotonContact, Option<CryptoIdentity>, Option<PhotonChannel>)> {
+    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(Contact, Option<CryptoIdentity>, Option<PhotonChannel>)> {
         let (data, plaintext) = opaque.decode(&self.user_identity)?;
-        let contact = data.contact(opaque.revision)?;
+        let contact = data.contact(opaque.revision())?;
         let session = data.session(&self.user_identity)?;
-        let channel = if contact.contact_type == ContactType::Channel {
+        let channel = if contact.contact_type() == ContactType::Channel {
             let info: ChannelContactInfo = serde_cbor::from_slice(&plaintext)
                 .map_err(|error| EncodingError::new(format!("Malformed channel contact: {error}")))?;
             let session_id = *session.as_ref()
                 .ok_or_else(|| EncodingError::new("Channel session is missing"))?.id();
-            let members = self.channels.borrow().get(&contact.id)
+            let members = self.channels.borrow().get(contact.id())
                 .filter(|channel| channel.session_id == session_id)
                 .map(|channel| channel.members.clone()).unwrap_or_default();
             Some(PhotonChannel {
@@ -535,20 +534,20 @@ impl MqttSession {
                 sessions.clear();
                 channels.clear();
                 for opaque in sync.contacts {
-                    if opaque.revision > sync.revision {
+                    if opaque.revision() > sync.revision {
                         return Err(EncodingError::new("Contact revision exceeds snapshot revision"));
                     }
                     let (contact, session, channel) = self.decode_contact(opaque)?;
-                    if contacts.contains_key(&contact.id) {
+                    if contacts.contains_key(contact.id()) {
                         return Err(EncodingError::new("Snapshot contains duplicate contacts"));
                     }
                     if let Some(session) = session {
-                        sessions.insert(contact.id, session);
+                        sessions.insert(*contact.id(), session);
                     }
                     if let Some(channel) = channel {
-                        channels.insert(contact.id, channel);
+                        channels.insert(*contact.id(), channel);
                     }
-                    contacts.insert(contact.id, contact);
+                    contacts.insert(*contact.id(), contact);
                 }
                 revision = sync.revision;
             }
@@ -574,19 +573,19 @@ impl MqttSession {
                             let opaque: OpaqueContact = serde_cbor::value::from_value(mutation.data
                                 .ok_or_else(|| EncodingError::new("Contact mutation data is missing"))?)
                                 .map_err(|error| EncodingError::new(format!("Malformed contact mutation: {error}")))?;
-                            if opaque.revision != next {
+                            if opaque.revision() != next {
                                 return Err(EncodingError::new("Contact mutation revision is inconsistent"));
                             }
                             let (contact, session, channel) = self.decode_contact(opaque)?;
-                            sessions.remove(&contact.id);
+                            sessions.remove(contact.id());
                             if let Some(session) = session {
-                                sessions.insert(contact.id, session);
+                                sessions.insert(*contact.id(), session);
                             }
-                            channels.remove(&contact.id);
+                            channels.remove(contact.id());
                             if let Some(channel) = channel {
-                                channels.insert(contact.id, channel);
+                                channels.insert(*contact.id(), channel);
                             }
-                            contacts.insert(contact.id, contact);
+                            contacts.insert(*contact.id(), contact);
                         }
                         "r" => {
                             let ids: Vec<Id> = serde_cbor::value::from_value(mutation.data
@@ -617,15 +616,15 @@ impl MqttSession {
             _ => return Err(EncodingError::new("Unknown contact sync type")),
         }
         let removed: Vec<_> = previous.keys().filter(|id| !contacts.contains_key(id)).copied().collect();
-        let added: Vec<_> = contacts.values().filter(|contact| !previous.contains_key(&contact.id)).cloned().collect();
-        let updated: Vec<Box<dyn Contact>> = contacts.values().filter(|contact| {
-            previous.get(&contact.id).is_some_and(|old| old.revision != contact.revision
-                || old.updated_at != contact.updated_at || old.blocked != contact.blocked
-                || old.muted != contact.muted || old.name != contact.name || old.remark != contact.remark
-                || old.tags != contact.tags || old.contact_type != contact.contact_type)
-        }).cloned().map(|contact| Box::new(contact) as Box<dyn Contact>).collect();
+        let added: Vec<_> = contacts.values().filter(|contact| !previous.contains_key(contact.id())).cloned().collect();
+        let updated: Vec<Contact> = contacts.values().filter(|contact| {
+            previous.get(contact.id()).is_some_and(|old| old.revision() != contact.revision()
+                || old.updated_at() != contact.updated_at() || old.is_blocked() != contact.is_blocked()
+                || old.is_muted() != contact.is_muted() || old.name() != contact.name() || old.remark() != contact.remark()
+                || old.tags() != contact.tags() || old.contact_type() != contact.contact_type())
+        }).cloned().collect();
         *self.blocked_contacts.lock().unwrap() = contacts.values()
-            .filter(|contact| contact.blocked).map(|contact| contact.id).collect();
+            .filter(|contact| contact.is_blocked()).map(|contact| *contact.id()).collect();
         *self.contacts.borrow_mut() = contacts;
         *self.friend_sessions.lock().unwrap() = sessions;
         *self.channels.borrow_mut() = channels;
@@ -898,11 +897,11 @@ impl MqttSession {
             return Err(EncodingError::new("Outbox message has an unexpected sender"));
         }
         let contact_id = if outbox || message.recipient != *self.user_id() { message.recipient } else { from };
-        if self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.blocked) {
+        if self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.is_blocked()) {
             return Err(StateError::new("Message is from a blocked contact"));
         }
         if !outbox && message.recipient != *self.user_id()
-            && !self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.contact_type == ContactType::Channel)
+            && !self.contacts.borrow().get(&contact_id).is_some_and(|contact| contact.contact_type() == ContactType::Channel)
         {
             return Err(EncodingError::new("Content message has an unexpected recipient"));
         }
@@ -944,18 +943,7 @@ impl MqttSession {
         let created_at = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let conversation_contact = self.contacts.borrow().get(&contact_id).cloned()
-            .unwrap_or_else(|| PhotonContact {
-                id: contact_id,
-                contact_type: ContactType::Auto,
-                name: None,
-                remark: None,
-                tags: None,
-                muted: false,
-                blocked: false,
-                created_at,
-                updated_at: created_at,
-                revision: 0,
-            });
+            .unwrap_or_else(|| Contact::new(contact_id, ContactType::Auto, created_at));
         update_conversation(&self.conversations, conversation_contact, message.clone())?;
         if outbox {
             if message.id != Self::message_id(self.device_id(), created_at)?
@@ -988,8 +976,8 @@ impl MqttSession {
             return;
         }
         if let Some(contact) = self.contacts.borrow().get(&user_id) {
-            if contact.blocked || contact.contact_type == ContactType::Friend
-                || contact.contact_type == ContactType::Channel
+            if contact.is_blocked() || contact.contact_type() == ContactType::Friend
+                || contact.contact_type() == ContactType::Channel
             {
                 return;
             }
@@ -1042,7 +1030,7 @@ impl MqttSession {
             request.accept_at(accepted_at);
         }
 
-        if self.contacts.borrow().get(&user_id).is_some_and(|contact| contact.contact_type == ContactType::Friend) {
+        if self.contacts.borrow().get(&user_id).is_some_and(|contact| contact.contact_type() == ContactType::Friend) {
             if notify {
                 self.friend_request_listener.on_friend_request_accepted(&user_id);
             }
@@ -1052,18 +1040,8 @@ impl MqttSession {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or(0);
-        let contact = PhotonContact {
-            id: user_id,
-            contact_type: ContactType::Friend,
-            name: None,
-            remark: None,
-            tags: None,
-            muted: false,
-            blocked: false,
-            created_at: now_ms,
-            updated_at: now_ms,
-            revision: 1,
-        };
+        let mut contact = Contact::new(user_id, ContactType::Friend, now_ms);
+        contact.set_revision(1);
         self.contacts.borrow_mut().insert(user_id, contact.clone());
         if notify {
             self.friend_request_listener
@@ -1078,7 +1056,7 @@ impl MqttSession {
             ArgumentError::new(format!("No friend request found for {user_id}"))
         })?;
         if self.contacts.borrow().get(user_id)
-            .is_some_and(|contact| contact.blocked || contact.contact_type == ContactType::Channel)
+            .is_some_and(|contact| contact.is_blocked() || contact.contact_type() == ContactType::Channel)
         {
             return Err(ArgumentError::new("Cannot accept a friend request from a blocked user or channel"));
         }
@@ -1322,7 +1300,7 @@ impl MqttSession {
         if self.contacts
             .borrow()
             .get(user_id)
-            .map(|v| v.blocked || v.contact_type == ContactType::Channel)
+            .map(|v| v.is_blocked() || v.contact_type() == ContactType::Channel)
             .unwrap_or(false)
         {
             return Err(ArgumentError::new("Cannot accept a friend request from a blocked user or channel"));
@@ -1395,18 +1373,10 @@ impl MqttSession {
         self.friend_sessions.lock().unwrap().insert(*user_id, session_identity);
 
         let now_ms = SystemTime::now();
-        let contact = PhotonContact {
-            id: *user_id,
-            contact_type: ContactType::Friend,
-            name: None,
-            remark,
-            tags: None,
-            muted: false,
-            blocked: false,
-            created_at: crate::as_ms!(now_ms) as i64,
-            updated_at: crate::as_ms!(now_ms) as i64,
-            revision: 1,
-        };
+        let mut data = ContactData::new(*user_id, ContactType::Friend as u8, crate::as_ms!(now_ms) as i64);
+        data.remark = remark;
+        data.revision = 1;
+        let contact = Contact::try_from(data)?;
 
         self.contacts.borrow_mut().insert(*user_id, contact.clone());
         self.contact_listener.on_contact_added(&contact);
@@ -1416,7 +1386,7 @@ impl MqttSession {
     pub(crate) async fn block_user(
         &self,
         _user_id: &Id
-    ) -> Result<Box<dyn Contact>> {
+    ) -> Result<Contact> {
         Err(NotImplemented::new("block_user"))
     }
 
@@ -1499,7 +1469,7 @@ impl MqttSession {
         )).collect());
         let result = self.rpc_call_to(ticket.channel_id(), Method::ChannelJoin, Some(params)).await?;
         let (channel, returned_session) = self.decode_channel_info(result)?;
-        if channel.contact.id != *ticket.channel_id() || channel.session_id != *session.id()
+        if channel.contact.id() != ticket.channel_id() || channel.session_id != *session.id()
             || !channel.has_member(self.user_id())
         {
             return Err(EncodingError::new("Joined channel does not match invitation or membership"));
@@ -1590,12 +1560,11 @@ impl MqttSession {
         if session.id() != &info.sid {
             return Err(EncodingError::new("Channel session key does not match session ID"));
         }
+        let mut data = ContactData::new(info.id, ContactType::Channel as u8, info.created_at);
+        data.name = info.name;
+        data.updated_at = info.updated_at;
         let channel = PhotonChannel {
-            contact: PhotonContact {
-                id: info.id, contact_type: ContactType::Channel, name: info.name,
-                remark: None, tags: None, muted: false, blocked: false,
-                created_at: info.created_at, updated_at: info.updated_at, revision: 0,
-            },
+            contact: Contact::try_from(data)?,
             owner: info.owner, session_id: info.sid, permission: Permission::try_from(info.permission)?,
             notice: info.notice, announced: info.announced, members: info.members,
         };
@@ -1610,15 +1579,15 @@ impl MqttSession {
 
     async fn store_channel(&self, mut channel: PhotonChannel, session: CryptoIdentity) -> Result<()> {
         let key = self.user_identity.encrypt_into(self.user_id(), session.signature_keypair().private_key().as_ref())?;
-        let data = ContactData {
-            id: *channel.id(), kind: 2, session_key: Some(Value::Bytes(key)),
-            name: channel.contact.name.clone(), remark: None, tags: None, muted: false, blocked: false,
-            created_at: channel.contact.created_at, updated_at: channel.contact.updated_at,
-        };
+        let mut data = ContactData::new(*channel.id(), ContactType::Channel as u8, channel.contact.created_at());
+        data.set_session_key(key.clone());
+        data.name = channel.contact.name().map(ToString::to_string);
+        data.updated_at = channel.contact.updated_at();
         let Value::Map(mut data) = serde_cbor::value::to_value(data)
             .map_err(|error| EncodingError::new(format!("Encoding channel contact failed: {error}")))? else {
             return Err(EncodingError::new("Channel contact is not a map"));
         };
+        data.insert(Value::Text("sk".into()), Value::Bytes(key));
         data.extend([
             (Value::Text("o".into()), Value::Bytes(channel.owner.as_bytes().to_vec())),
             (Value::Text("p".into()), Value::Integer((channel.permission as i32).into())),
@@ -1644,11 +1613,11 @@ impl MqttSession {
         if revision < self.contacts_revision.get() {
             return Err(StateError::new("Channel contact revision is outdated"));
         }
-        channel.contact.revision = revision;
+        channel.contact.set_revision(revision);
         self.contacts_revision.set(revision);
         self.friend_sessions.lock().unwrap().insert(*channel.id(), session);
         self.contacts.borrow_mut().insert(*channel.id(), channel.contact.clone());
-        self.contact_listener.on_contact_added(&channel);
+        self.contact_listener.on_contact_added(&channel.contact);
         self.channels.borrow_mut().insert(*channel.id(), channel);
         Ok(())
     }
@@ -1722,7 +1691,7 @@ impl MqttSession {
         if current.permission != channel.permission() {
             changes.insert(Value::Text("p".into()), Value::Integer((channel.permission() as i32).into()));
         }
-        if current.contact.name.as_deref() != channel.name() {
+        if current.contact.name() != channel.name() {
             changes.insert(Value::Text("n".into()), channel.name().map(|name| Value::Text(name.to_string())).unwrap_or(Value::Null));
         }
         if current.notice.as_deref() != channel.notice() {
@@ -1741,10 +1710,10 @@ impl MqttSession {
             Some(Value::Map(changes)),
         ).await?;
         current.permission = channel.permission();
-        current.contact.name = channel.name().map(ToString::to_string);
+        current.contact.set_name(channel.name().map(ToString::to_string));
         current.notice = channel.notice().map(ToString::to_string);
         current.announced = channel.is_announced();
-        current.contact.updated_at = Self::current_timestamp()?;
+        current.contact.set_updated_at(Self::current_timestamp()?);
         self.contacts.borrow_mut().insert(*channel.id(), current.contact.clone());
         self.channels.borrow_mut().insert(*channel.id(), current.clone());
         self.channel_listener.on_channel_updated(&current);
@@ -1887,48 +1856,37 @@ impl MqttSession {
         i64::try_from(millis).map_err(|_| StateError::new("System clock timestamp is out of range").into())
     }
 
-    pub(crate) async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
+    pub(crate) async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
         Ok(self.contacts
             .borrow()
             .get(id)
-            .cloned()
-            .map(|contact| Box::new(contact) as Box<dyn Contact>))
+            .cloned())
     }
 
-    pub(crate) async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
+    pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
         Ok(self.contacts
             .borrow()
             .values()
             .cloned()
-            .map(|contact| Box::new(contact) as Box<dyn Contact>)
             .collect())
     }
 
-    pub(crate) async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
+    pub(crate) async fn update_contact(&self, contact: &Contact) -> Result<()> {
         let _request = self.requests.lock().await;
-        let updated = PhotonContact {
-            id: *contact.id(),
-            contact_type: contact.contact_type(),
-            name: contact.name().map(ToString::to_string),
-            remark: contact.remark().map(ToString::to_string),
-            tags: contact.tags().map(ToString::to_string),
-            muted: contact.is_muted(),
-            blocked: contact.is_blocked(),
-            created_at: contact.created_at(),
-            updated_at: SystemTime::now()
+        let mut updated = contact.clone();
+        updated.set_updated_at(SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|duration| duration.as_millis() as i64)
-                .unwrap_or(0),
-            revision: contact.revision() + 1,
-        };
-        self.contacts.borrow_mut().insert(updated.id, updated.clone());
-        if updated.blocked {
-            self.blocked_contacts.lock().unwrap().insert(updated.id);
+                .unwrap_or(0));
+        updated.set_revision(contact.revision() + 1);
+        self.contacts.borrow_mut().insert(*updated.id(), updated.clone());
+        if updated.is_blocked() {
+            self.blocked_contacts.lock().unwrap().insert(*updated.id());
         } else {
-            self.blocked_contacts.lock().unwrap().remove(&updated.id);
+            self.blocked_contacts.lock().unwrap().remove(updated.id());
         }
         self.contact_listener
-            .on_contacts_updated(&[Box::new(updated) as Box<dyn Contact>]);
+            .on_contacts_updated(&[updated]);
         Ok(())
     }
 
@@ -2206,7 +2164,7 @@ struct SessionMessageBuilder {
     friend_sessions: Arc<std::sync::Mutex<HashMap<Id, CryptoIdentity>>>,
     blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
     origin_clock: Arc<std::sync::Mutex<i64>>,
-    conversation_contact: Option<PhotonContact>,
+    conversation_contact: Option<Contact>,
     conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
     peer_id: Id,
     content_type: Option<String>,
@@ -2333,18 +2291,9 @@ impl MessageBuilder for SessionMessageBuilder {
             wire.sent_at = Some(SystemTime::now());
             wire.payload_bytes = content_bytes;
             wire.content = Some(crate::messaging::message::Content::_new(headers, body));
-            let contact = self.conversation_contact.unwrap_or_else(|| PhotonContact {
-                id: recipient,
-                contact_type: ContactType::Auto,
-                name: None,
-                remark: None,
-                tags: None,
-                muted: false,
-                blocked: false,
-                created_at: timestamp,
-                updated_at: timestamp,
-                revision: 0,
-            });
+            let contact = self.conversation_contact.unwrap_or_else(|| Contact::new(
+                recipient, ContactType::Auto, timestamp,
+            ));
             update_conversation(&self.conversations, contact, wire.clone())?;
             Ok(Box::new(wire) as Box<dyn Message>)
         })
@@ -2353,7 +2302,7 @@ impl MessageBuilder for SessionMessageBuilder {
 
 fn update_conversation(
     conversations: &Arc<Mutex<HashMap<Id, Conversation>>>,
-    contact: PhotonContact,
+    contact: Contact,
     message: PhotonMessage,
 ) -> Result<()> {
     let message = ConversationMessage {

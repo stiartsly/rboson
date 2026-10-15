@@ -4,10 +4,10 @@ use crate::messaging::contact::Contact;
 /// The listener to handle events related to the contact list change events.
 pub trait ContactListener: Send + Sync {
     /// Called when a new contact has been added.
-    fn on_contact_added(&self, _contact: &dyn Contact) {}
+    fn on_contact_added(&self, _contact: &Contact) {}
 
     /// Called when one or more existing contacts were updated.
-    fn on_contacts_updated(&self, _contacts: &[Box<dyn Contact>]) {}
+    fn on_contacts_updated(&self, _contacts: &[Contact]) {}
 
     /// Called when one or more contacts were removed.
     fn on_contacts_removed(&self, _contact_ids: &[Id]) {}

@@ -33,10 +33,6 @@ use crate::messaging::{
     ClientConnectionListener
 };
 
-pub(crate) use super::internal::{
-    PhotonContact,
-};
-
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
 
@@ -341,7 +337,7 @@ impl Client {
     pub async fn block_user(
         &self,
         user_id: Id,
-    ) -> Result<Box<dyn Contact>> {
+    ) -> Result<Contact> {
         self.verticle()?.block_user(user_id).await
     }
 
@@ -475,28 +471,25 @@ impl Client {
             .await
     }
 
-    pub async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
+    pub async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
         self.verticle()?
             .get_contact(*id)
             .await
-            .map(|v| v.map(|v|Box::new(v) as Box<dyn Contact>))
     }
 
-    pub async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
+    pub async fn get_contacts(&self) -> Result<Vec<Contact>> {
         self.verticle()?
             .get_contacts()
             .await
-            .map(|v| v.into_iter().map(|v| Box::new(v) as Box<dyn Contact>)
-            .collect())
     }
 
     pub async fn remove_contact(&self, id: &Id) -> Result<()> {
         self.verticle()?.remove_contact(*id).await
     }
 
-    pub async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
+    pub async fn update_contact(&self, contact: &Contact) -> Result<()> {
         self.verticle()?
-            .update_contact(PhotonContact::from(contact))
+            .update_contact(contact.clone())
             .await
     }
 
@@ -654,7 +647,7 @@ impl MessagingClient for Client {
     async fn block_user(
         &self,
         userid: &Id
-    ) -> Result<Box<dyn Contact>> {
+    ) -> Result<Contact> {
         self.block_user(*userid).await
     }
 
@@ -728,15 +721,15 @@ impl MessagingClient for Client {
         self.remove_channel_members(channel_id, members).await
     }
 
-    async fn get_contact(&self, id: &Id) -> Result<Option<Box<dyn Contact>>> {
+    async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
         self.get_contact(id).await
     }
 
-    async fn get_contacts(&self) -> Result<Vec<Box<dyn Contact>>> {
+    async fn get_contacts(&self) -> Result<Vec<Contact>> {
         self.get_contacts().await
     }
 
-    async fn update_contact(&self, contact: &dyn Contact) -> Result<()> {
+    async fn update_contact(&self, contact: &Contact) -> Result<()> {
         self.update_contact(contact).await
     }
 

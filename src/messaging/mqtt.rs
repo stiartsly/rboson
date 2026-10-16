@@ -1,3 +1,4 @@
+use core::f32::consts::E;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -61,7 +62,7 @@ use super::internal::{
     contact_mutation::MutationData,
     contact_sync::SyncType,
     handshake::{Handshake, HandshakeType},
-    notification::{Notification, NotificationEvent},
+    notification::{Notification, NotificationBody, NotificationEvent},
 };
 
 use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
@@ -347,33 +348,34 @@ impl MqttSession {
         let Value::Bytes(payload) = payload else {
             return Err(EncodingError::new("Notification payload is not binary"));
         };
-        let notification = Notification::parse(&payload)?;
-        if matches!(notification.event.as_str(), "cc" | "cj" | "cd" | "cl" | "csr" | "cmj" | "cml")
+        let notification: Notification = serde_cbor::from_slice(&payload)
+            .map_err(|error| EncodingError::new(format!("Malformed notification: {error}")))?;
+        let timestamp = i64::try_from(notification.timestamp)
+            .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
+        let event = notification.body.event();
+        if matches!(event, NotificationEvent::ChannelCreate | NotificationEvent::ChannelJoin
+            | NotificationEvent::ChannelDelete | NotificationEvent::ChannelLeave | NotificationEvent::ChannelSessionKeyRotate
+            | NotificationEvent::ChannelMemberJoin | NotificationEvent::ChannelMemberLeave)
             && notification.source == *self.user_id()
-            && notification.id == Self::message_id(self.device_id(), notification.timestamp)?
+            && notification.id == Self::message_id(self.device_id(), timestamp)?
         {
             return Ok(());
         }
-        let body = notification.body.unwrap_or(Value::Null);
-        match notification.event.as_str() {
-            "sn" => {
-                let session: SessionInfo = serde_cbor::value::from_value(body)
-                    .map_err(|error| EncodingError::new(format!("Malformed session notification: {error}")))?;
+        match notification.body {
+            NotificationBody::SessionNew(session) => {
                 self.session_listener.on_new_session(&session);
             }
-            "cs" => {
-                let sync: ContactSync = serde_cbor::value::from_value(body)
-                    .map_err(|error| EncodingError::new(format!("Malformed contact sync: {error}")))?;
+            NotificationBody::ContactSync(sync) => {
                 self.apply_contact_sync(sync)?;
                 if self.connected.get() && !self.stopping.get() && !self.ready.replace(true) {
                     info!("Messaging session is ready");
                     self.notify_connection(|l| l.on_ready());
                 }
             }
-            "cc" | "cj" => {
-                let (channel, session) = self.decode_channel_info(body)?;
-                if (notification.event == NotificationEvent::ChannelCreate && sender != self.peer_id())
-                    || (notification.event == NotificationEvent::ChannelJoin && channel.id() != sender)
+            NotificationBody::ChannelCreate(info) | NotificationBody::ChannelJoin(info) => {
+                let (channel, session) = self.channel_from_info(info)?;
+                if (event == NotificationEvent::ChannelCreate && sender != self.peer_id())
+                    || (event == NotificationEvent::ChannelJoin && channel.id() != sender)
                 {
                     return Err(EncodingError::new("Channel notification has an unexpected source"));
                 }
@@ -384,27 +386,24 @@ impl MqttSession {
                 if !new {
                     return Ok(());
                 }
-                if notification.event == NotificationEvent::ChannelCreate {
+                if event == NotificationEvent::ChannelCreate {
                     self.channel_listener.on_channel_created(&channel);
                 } else {
                     self.channel_listener.on_joined_channel(&channel);
                 }
             }
-            "cd" | "cl" => {
+            NotificationBody::ChannelDelete | NotificationBody::ChannelLeave => {
                 if let Some(channel) = self.channels.borrow_mut().remove(sender) {
                     self.contacts.borrow_mut().remove(sender);
                     self.friend_sessions.lock().unwrap().remove(sender);
-                    if notification.event == NotificationEvent::ChannelDelete {
+                    if event == NotificationEvent::ChannelDelete {
                         self.channel_listener.on_channel_deleted(&channel);
                     } else {
                         self.channel_listener.on_left_channel(&channel);
                     }
                 }
             }
-            "csr" => {
-                let Value::Bytes(encrypted_key) = body else {
-                    return Err(EncodingError::new("Channel session rotation key is not binary"));
-                };
+            NotificationBody::ChannelSessionKeyRotate(encrypted_key) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 if notification.source != channel.owner {
                     return Err(EncodingError::new("Channel session key rotation has an unexpected source"));
@@ -420,9 +419,7 @@ impl MqttSession {
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener.on_channel_session_key_rotated(&channel);
             }
-            "cmj" => {
-                let member: PhotonChannelMember = serde_cbor::value::from_value(body)
-                    .map_err(|error| EncodingError::new(format!("Malformed channel member: {error}")))?;
+            NotificationBody::ChannelMemberJoin(member) => {
                 UNIX_EPOCH.checked_add(Duration::from_millis(member.joined()))
                     .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range"))?;
                 let mut channel = self.channel_snapshot(sender)?;
@@ -431,9 +428,7 @@ impl MqttSession {
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener.on_channel_member_joined(&channel, &ChannelMember::from(&member));
             }
-            "cml" => {
-                let id: Id = serde_cbor::value::from_value(body)
-                    .map_err(|error| EncodingError::new(format!("Malformed leaving member: {error}")))?;
+            NotificationBody::ChannelMemberLeave(id) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let member = channel.members.iter().find(|member| member.id() == &id).cloned();
                 channel.members.retain(|member| member.id() != &id);
@@ -442,7 +437,7 @@ impl MqttSession {
                     self.channel_listener.on_channel_member_left(&channel, &ChannelMember::from(&member));
                 }
             }
-            event => return Err(EncodingError::new(format!("Unsupported home-peer notification '{event}'"))),
+            body => return Err(EncodingError::new(format!("Unsupported home-peer notification '{}'", body.event().as_str()))),
         }
         Ok(())
     }
@@ -788,25 +783,21 @@ impl MqttSession {
             .user_identity
             .decrypt_into(&friend_id, &encrypted_handshake)
             .map_err(|error| AuthenticationError::new(format!("Decrypting handshake failed: {error}")))?;
-        let mut handshake = Handshake::parse(&handshake_bytes)?;
+        let mut handshake: Handshake = serde_cbor::from_slice(&handshake_bytes)
+            .map_err(|error| EncodingError::new(format!("Malformed handshake: {error}")))?;
         handshake.from = Some(from);
 
-        match handshake.handshake_type {
-            HandshakeType::FriendRequest => {
-                let hello = match handshake.body {
-                    Some(Value::Text(hello)) => hello,
-                    None => String::new(),
-                    _ => return Err(EncodingError::new("Friend request greeting is not text")),
-                };
+        match handshake.body {
+            HandshakeType::FriendRequest(hello) => {
                 self.on_friend_request(
                     friend_id,
                     if is_inbox { from } else { *self.user_identity.id() },
-                    hello,
+                    hello.unwrap_or_default(),
                     handshake.timestamp,
                     is_inbox,
                 );
             }
-            HandshakeType::FriendRequestAccept => {
+            HandshakeType::FriendRequestAccept(session_key) => {
                 let _request = self.requests.lock().await;
                 if self.friend_requests.borrow().get(&friend_id)
                     .is_some_and(|request| request.is_accepted())
@@ -818,20 +809,6 @@ impl MqttSession {
                 let request = self.pending_friend_request(&friend_id, &initiator_id)?;
                 if Self::timestamp(handshake.timestamp) < request.created_at() {
                     return Err(EncodingError::new("Friend request acceptance predates the request"));
-                }
-                let session_key = match handshake.body {
-                    Some(Value::Bytes(session_key)) => session_key,
-                    _ => {
-                        return Err(EncodingError::new(
-                            "Friend request acceptance session key is not binary",
-                        ))
-                    }
-                };
-                if session_key.len() != crate::signature::PrivateKey::BYTES {
-                    return Err(EncodingError::new(format!(
-                        "Invalid friend session key length: {}",
-                        session_key.len()
-                    )));
                 }
                 let session_identity = CryptoIdentity::try_from(session_key.as_slice())
                     .map_err(|error| AuthenticationError::new(format!("Invalid friend session key: {error}")))?;
@@ -1052,17 +1029,14 @@ impl MqttSession {
         &self,
         peer_id: &Id,
         user_id: Id,
-        handshake_type: HandshakeType,
-        body: Value,
+        body: HandshakeType,
     ) -> Result<i64> {
         let mqtt = self.mqtt()?;
 
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
-        let handshake = Handshake::new(timestamp, handshake_type, body)?;
+        let handshake = Handshake::new(timestamp, body)?;
         let handshake_bytes = serde_cbor::to_vec(&handshake)
-            .map_err(|e|
-                EncodingError::new(format!("Encoding handshake error: {e}"))
-            )?;
+            .map_err(|error| EncodingError::new(format!("Encoding handshake failed: {error}")))?;
 
         let handshake_encrypted = self
             .user_identity
@@ -1235,12 +1209,11 @@ impl MqttSession {
 
         let unwrap_hello = hello.clone().unwrap_or_default();
         info!("Sending friend request to {user_id} with greeting: '{}'", unwrap_hello);
-        let value = Value::Text(unwrap_hello.clone());
+        let value = HandshakeType::FriendRequest(hello.clone());
 
         let timestamp = self.send_handshake(
             self.options.peer_id(),
             user_id.clone(),
-            HandshakeType::FriendRequest,
             value,
         )
         .await?;
@@ -1283,13 +1256,12 @@ impl MqttSession {
         }
 
         let key = signature::KeyPair::random();
-        let value = Value::Bytes(key.private_key().as_bytes().to_vec());
+        let value = HandshakeType::FriendRequestAccept(key.private_key().as_bytes().to_vec());
         let session_identity = CryptoIdentity::from(key.clone());
         self.store_friend_contact(user_id, &session_identity).await?;
         let timestamp = self.send_handshake(
             self.options.peer_id(),
             user_id.clone(),
-            HandshakeType::FriendRequestAccept,
             value,
         ).await?;
 
@@ -1517,6 +1489,10 @@ impl MqttSession {
     fn decode_channel_info(&self, value: Value) -> Result<(PhotonChannel, CryptoIdentity)> {
         let info: ChannelInfo = serde_cbor::value::from_value(value)
             .map_err(|error| EncodingError::new(format!("Malformed channel info: {error}")))?;
+        self.channel_from_info(info)
+    }
+
+    fn channel_from_info(&self, info: ChannelInfo) -> Result<(PhotonChannel, CryptoIdentity)> {
         let timestamp = |time: SystemTime| -> Result<i64> {
             let millis = time.duration_since(UNIX_EPOCH)
                 .map_err(|error| EncodingError::new(format!("Invalid channel timestamp: {error}")))?
@@ -1851,40 +1827,78 @@ impl MqttSession {
 
     pub(crate) async fn update_contact(&self, contact: &Contact) -> Result<()> {
         let _request = self.requests.lock().await;
-        let borrowed = self.contacts.borrow();
-
-        let Some(origin) = borrowed.get(contact.id()) else {
-            return Err(StateError::new("Contact not found"));
-        };
-        if origin == contact {
+        let origin = self.contacts.borrow().get(contact.id()).cloned()
+            .ok_or_else(|| StateError::new("Contact not found"))?;
+        if origin.remark() == contact.remark() && origin.tags() == contact.tags()
+            && origin.is_muted() == contact.is_muted() && origin.is_blocked() == contact.is_blocked()
+        {
             return Err(StateError::new("No changes detected"));
         }
         if contact.revision() < origin.revision() {
             return Err(StateError::new("Updated contact version is older than the current version"));
         }
 
-        use super::contact_editor::ContactEditorOps;
-        let editor = Box::new(origin.edit()).remark(contact.remark().map(ToString::to_string));
-        let editor = Box::new(editor).tags(contact.tags().map(ToString::to_string));
-        let editor = Box::new(editor).muted(contact.is_muted());
-        let editor = Box::new(editor).blocked(contact.is_blocked());
-        let mut updated = Box::new(editor).build();
-
-        /*
-        ContactMutation mutation = ContactMutation.update(contactsRevision, updated.toOpaque(selfContext));
-        RpcCall<Integer> call = RpcCall.contactMutate(mutation);
-        return sendRpcCall(homePeerId, call).compose(revision -> {
-            Contact updatedContact = ((ContactEditor) updated.edit()).setRevision(revision).build();
-            return repository.putContacts(revision, List.of(updatedContact)).map(vv -> {
-                advanceContactsRevision(revision);
-                contactCache.synchronous().invalidate(updated.getId());
-                return updatedContact;
-            });
-        });
-
-        */
-
-        // TODO:
+        let revision = self.contacts_revision.get();
+        let next_revision = revision.checked_add(1)
+            .ok_or_else(|| StateError::new("Contact revision is exhausted"))?;
+        let mut data = ContactData::from(origin.clone());
+        data.remark = contact.remark().map(ToString::to_string);
+        data.tags = contact.tags().map(ToString::to_string);
+        data.muted = contact.is_muted();
+        data.blocked = contact.is_blocked();
+        data.updated_at = Self::current_timestamp()?.max(origin.updated_at());
+        data.revision = next_revision;
+        let session = self.friend_sessions.lock().unwrap().get(contact.id()).cloned();
+        let key = session.as_ref().map(|session| self.user_identity.encrypt_into(
+            self.user_id(), session.signature_keypair().private_key().as_ref(),
+        )).transpose()?;
+        if let Some(key) = &key {
+            data.set_session_key(key.clone());
+        }
+        let mut updated = data.contact(next_revision)?;
+        let opaque = if origin.contact_type() == ContactType::Channel {
+            let channel = self.channel_snapshot(contact.id())?;
+            let key = key.ok_or_else(|| StateError::new("Channel session key is missing"))?;
+            let Value::Map(mut wire) = serde_cbor::value::to_value(&data)
+                .map_err(|error| EncodingError::new(format!("Encoding channel contact failed: {error}")))? else {
+                return Err(EncodingError::new("Channel contact is not a map"));
+            };
+            wire.insert(Value::Text("sk".into()), Value::Bytes(key));
+            wire.extend([
+                (Value::Text("o".into()), Value::Bytes(channel.owner.as_bytes().to_vec())),
+                (Value::Text("p".into()), Value::Integer((channel.permission as i32).into())),
+                (Value::Text("nt".into()), channel.notice.map(Value::Text).unwrap_or(Value::Null)),
+                (Value::Text("a".into()), Value::Bool(channel.announced)),
+            ]);
+            let bytes = serde_cbor::to_vec(&Value::Map(wire))
+                .map_err(|error| EncodingError::new(format!("Encoding channel contact failed: {error}")))?;
+            OpaqueContact::new(*contact.id(), next_revision, Value::Bytes(
+                self.user_identity.encrypt_into(self.user_id(), &bytes)?,
+            ))
+        } else {
+            data.to_opaque(next_revision, &self.user_identity)?
+        };
+        let mutation = ContactMutation::update(revision, opaque);
+        let params = serde_cbor::value::to_value(mutation)
+            .map_err(|error| EncodingError::new(format!("Encoding contact update failed: {error}")))?;
+        let result = self.rpc_call(Method::ContactMutate, Some(params)).await?;
+        let revision: i32 = serde_cbor::value::from_value(result)
+            .map_err(|error| EncodingError::new(format!("Invalid contact revision: {error}")))?;
+        if revision < next_revision || revision < self.contacts_revision.get() {
+            return Err(StateError::new("Contact update revision is outdated"));
+        }
+        updated.set_revision(revision);
+        self.contacts.borrow_mut().insert(*updated.id(), updated.clone());
+        if let Some(channel) = self.channels.borrow_mut().get_mut(updated.id()) {
+            channel.contact = updated.clone();
+        }
+        if updated.is_blocked() {
+            self.blocked_contacts.lock().unwrap().insert(*updated.id());
+        } else {
+            self.blocked_contacts.lock().unwrap().remove(updated.id());
+        }
+        self.contacts_revision.set(revision);
+        self.contact_listener.on_contacts_updated(&[updated]);
         Ok(())
     }
 
@@ -1892,13 +1906,22 @@ impl MqttSession {
         if ids.is_empty() {
             return Err(ArgumentError::new("No contact IDs specified"));
         }
+
         let _request = self.requests.lock().await;
-        let mutation = ContactMutation::remove(self.contacts_revision.get(), ids.to_vec());
+        let mutation = ContactMutation::remove(
+            self.contacts_revision.get(),
+            ids.to_vec()
+        );
         let params = serde_cbor::value::to_value(mutation)
-            .map_err(|error| EncodingError::new(format!("Encoding contact removal failed: {error}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Encoding Contact removal error: {e}"))
+            )?;
         let result = self.rpc_call(Method::ContactMutate, Some(params)).await?;
         let revision: i32 = serde_cbor::value::from_value(result)
-            .map_err(|error| EncodingError::new(format!("Invalid contact revision: {error}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Decoding contact revision error: {e}"))
+            )?;
+
         if revision < self.contacts_revision.get() {
             return Err(StateError::new("Contact removal revision is outdated"));
         }
@@ -1918,13 +1941,20 @@ impl MqttSession {
         let _request = self.requests.lock().await;
         let mutation = ContactMutation::clear(self.contacts_revision.get());
         let params = serde_cbor::value::to_value(mutation)
-            .map_err(|error| EncodingError::new(format!("Encoding contact clear failed: {error}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Encoding ContactClear error: {e}"))
+            )?;
+
         let result = self.rpc_call(Method::ContactMutate, Some(params)).await?;
         let revision: i32 = serde_cbor::value::from_value(result)
-            .map_err(|error| EncodingError::new(format!("Invalid contact revision: {error}")))?;
+            .map_err(|e|
+                EncodingError::new(format!("Decoding contact revision error: {e}"))
+            )?;
+
         if revision < self.contacts_revision.get() {
             return Err(StateError::new("Contact clear revision is outdated"));
         }
+
         self.friend_sessions.lock().unwrap().clear();
         self.blocked_contacts.lock().unwrap().clear();
         self.contacts.borrow_mut().clear();

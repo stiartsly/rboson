@@ -6,6 +6,10 @@ pub(crate) mod notification;
 pub(crate) mod message;
 pub(crate) mod opaque_contact;
 pub(crate) mod contact_mutation;
+pub(crate) mod contact_sync;
+pub(crate) mod topic;
+
+pub(crate) mod session_context;
 
 pub(crate) mod client_connection_listener;
 pub(crate) mod client_channel_listener;
@@ -16,4 +20,5 @@ pub(crate) use {
     opaque_contact::OpaqueContact,
     contact::ContactData,
     contact_mutation::ContactMutation,
+    contact_sync::ContactSync,
 };

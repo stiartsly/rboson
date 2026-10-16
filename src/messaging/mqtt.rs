@@ -54,8 +54,10 @@ use crate::messaging::{
     FriendRequest,
 };
 
-use super::internal::{PhotonChannel, PhotonChannelMember, PhotonMessage, ContactData, OpaqueContact };
+use super::internal::{PhotonChannel, PhotonChannelMember, PhotonMessage, ContactData, OpaqueContact, ContactMutation, ContactSync };
 use super::internal::{
+    contact_mutation::MutationData,
+    contact_sync::SyncType,
     handshake::{Handshake, HandshakeType},
     notification::{Notification, NotificationEvent},
 };
@@ -74,27 +76,6 @@ const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 const MESSAGE_VERSION: u8 = 2;
 const HANDSHAKE_MESSAGE: u8 = 0;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ContactSync {
-    #[serde(rename = "v")]
-    revision: i32,
-    #[serde(rename = "t")]
-    kind: u8,
-    #[serde(rename = "d", default)]
-    mutations: Vec<ContactMutation>,
-    #[serde(rename = "s", default)]
-    contacts: Vec<OpaqueContact>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ContactMutation {
-    #[serde(rename = "v")]
-    revision: i32,
-    op: String,
-    #[serde(rename = "d", default, skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
-}
 
 #[derive(Deserialize)]
 struct ChannelInfo {
@@ -486,7 +467,7 @@ impl MqttSession {
         Ok(())
     }
 
-    fn decode_contact(&self, opaque: OpaqueContact) -> Result<(Contact, Option<CryptoIdentity>, Option<PhotonChannel>)> {
+    fn decode_contact(&self, opaque: &OpaqueContact) -> Result<(Contact, Option<CryptoIdentity>, Option<PhotonChannel>)> {
         let (data, plaintext) = opaque.decode(&self.user_identity)?;
         let contact = data.contact(opaque.revision())?;
         let session = data.session(&self.user_identity)?;
@@ -511,34 +492,28 @@ impl MqttSession {
 
     fn apply_contact_sync(&self, sync: ContactSync) -> Result<()> {
         let original_revision = self.contacts_revision.get();
-        if sync.revision < 0 {
-            return Err(EncodingError::new("Contact sync revision is negative"));
-        }
         let previous = self.contacts.borrow().clone();
         let mut contacts = previous.clone();
         let mut sessions = self.friend_sessions.lock().unwrap().clone();
         let mut channels = self.channels.borrow().clone();
         let mut revision = original_revision;
-        match sync.kind {
-            0 => {
-                if !sync.contacts.is_empty() || !sync.mutations.is_empty() {
-                    return Err(EncodingError::new("Up-to-date sync contains changes"));
-                }
-                if sync.revision != revision {
-                    self.contact_sync_needed.set(sync.revision > revision);
+        match sync.kind() {
+            SyncType::UpToDate => {
+                if sync.revision() != revision {
+                    self.contact_sync_needed.set(sync.revision() > revision);
                     return Err(StateError::new("Contact sync revision does not match local state"));
                 }
                 return Ok(());
             }
-            2 => {
-                if !sync.mutations.is_empty() || sync.revision < revision {
+            SyncType::Snapshot => {
+                if sync.revision() < revision {
                     return Err(StateError::new("Invalid or outdated contact snapshot"));
                 }
                 contacts.clear();
                 sessions.clear();
                 channels.clear();
-                for opaque in sync.contacts {
-                    if opaque.revision() > sync.revision {
+                for opaque in sync.contacts() {
+                    if opaque.revision() > sync.revision() {
                         return Err(EncodingError::new("Contact revision exceeds snapshot revision"));
                     }
                     let (contact, session, channel) = self.decode_contact(opaque)?;
@@ -553,30 +528,24 @@ impl MqttSession {
                     }
                     contacts.insert(*contact.id(), contact);
                 }
-                revision = sync.revision;
+                revision = sync.revision();
             }
-            1 => {
-                if !sync.contacts.is_empty() || sync.mutations.is_empty() {
-                    return Err(EncodingError::new("Invalid contact delta"));
-                }
-                for mutation in sync.mutations {
-                    if mutation.revision < 0 {
+            SyncType::Delta => {
+                for mutation in sync.mutations() {
+                    if mutation.revision() < 0 {
                         return Err(EncodingError::new("Contact mutation revision is negative"));
                     }
-                    if mutation.revision < revision {
+                    if mutation.revision() < revision {
                         continue;
                     }
-                    if mutation.revision > revision {
+                    if mutation.revision() > revision {
                         self.contact_sync_needed.set(true);
                         return Err(StateError::new("Contact delta has a revision gap"));
                     }
                     let next = revision.checked_add(1)
                         .ok_or_else(|| EncodingError::new("Contact revision is exhausted"))?;
-                    match mutation.op.as_str() {
-                        "a" | "u" => {
-                            let opaque: OpaqueContact = serde_cbor::value::from_value(mutation.data
-                                .ok_or_else(|| EncodingError::new("Contact mutation data is missing"))?)
-                                .map_err(|error| EncodingError::new(format!("Malformed contact mutation: {error}")))?;
+                    match mutation.data() {
+                        Some(MutationData::Add(opaque) | MutationData::Update(opaque)) => {
                             if opaque.revision() != next {
                                 return Err(EncodingError::new("Contact mutation revision is inconsistent"));
                             }
@@ -591,33 +560,25 @@ impl MqttSession {
                             }
                             contacts.insert(*contact.id(), contact);
                         }
-                        "r" => {
-                            let ids: Vec<Id> = serde_cbor::value::from_value(mutation.data
-                                .ok_or_else(|| EncodingError::new("Contact removal IDs are missing"))?)
-                                .map_err(|error| EncodingError::new(format!("Malformed contact removal: {error}")))?;
+                        Some(MutationData::Remove(ids)) => {
                             for id in ids {
-                                contacts.remove(&id);
-                                sessions.remove(&id);
-                                channels.remove(&id);
+                                contacts.remove(id);
+                                sessions.remove(id);
+                                channels.remove(id);
                             }
                         }
-                        "c" => {
-                            if mutation.data.is_some_and(|data| data != Value::Null) {
-                                return Err(EncodingError::new("Contact clear contains unexpected data"));
-                            }
+                        None | Some(MutationData::Clear) => {
                             contacts.clear();
                             sessions.clear();
                             channels.clear();
                         }
-                        _ => return Err(EncodingError::new("Unknown contact mutation operation")),
                     }
                     revision = next;
                 }
-                if revision < sync.revision || (revision > sync.revision && revision > original_revision) {
+                if revision < sync.revision() || (revision > sync.revision() && revision > original_revision) {
                     return Err(EncodingError::new("Contact delta final revision is inconsistent"));
                 }
             }
-            _ => return Err(EncodingError::new("Unknown contact sync type")),
         }
         let removed: Vec<_> = previous.keys().filter(|id| !contacts.contains_key(id)).copied().collect();
         let added: Vec<_> = contacts.values().filter(|contact| !previous.contains_key(contact.id())).cloned().collect();
@@ -1092,7 +1053,7 @@ impl MqttSession {
         data.set_session_key(self.user_identity.encrypt_into(
             self.user_id(), session.signature_keypair().private_key().as_ref(),
         )?);
-        let mutation = super::internal::ContactMutation::add(
+        let mutation = ContactMutation::add(
             revision, data.to_opaque(revision, &self.user_identity)?,
         );
         let params = serde_cbor::value::to_value(mutation)
@@ -1946,7 +1907,7 @@ impl MqttSession {
             return Err(ArgumentError::new("No contact IDs specified"));
         }
         let _request = self.requests.lock().await;
-        let mutation = super::internal::ContactMutation::remove(self.contacts_revision.get(), ids.to_vec());
+        let mutation = ContactMutation::remove(self.contacts_revision.get(), ids.to_vec());
         let params = serde_cbor::value::to_value(mutation)
             .map_err(|error| EncodingError::new(format!("Encoding contact removal failed: {error}")))?;
         let result = self.rpc_call(Method::ContactMutate, Some(params)).await?;
@@ -1969,7 +1930,7 @@ impl MqttSession {
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
         let _request = self.requests.lock().await;
-        let mutation = super::internal::ContactMutation::clear(self.contacts_revision.get());
+        let mutation = ContactMutation::clear(self.contacts_revision.get());
         let params = serde_cbor::value::to_value(mutation)
             .map_err(|error| EncodingError::new(format!("Encoding contact clear failed: {error}")))?;
         let result = self.rpc_call(Method::ContactMutate, Some(params)).await?;

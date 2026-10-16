@@ -26,11 +26,14 @@ mod tests {
     }
 
     #[test]
-    fn notifications_roundtrip_all_event_payloads_directly() {
+    fn test_notification_events() {
         let id = Id::random();
-        let session = serde_cbor::value::from_value(Value::Map([
-            (Value::Text("id".into()), Value::Bytes(id.as_bytes().to_vec())),
-        ].into_iter().collect())).unwrap();
+        let session = serde_cbor::value::from_value(
+            Value::Map([
+                (Value::Text("id".into()), Value::Bytes(id.as_bytes().to_vec())),
+            ].into_iter().collect())
+        ).unwrap();
+
         let bodies = [
             NotificationBody::SessionNew(session),
             NotificationBody::ContactSync(ContactSync::up_to_date(0).unwrap()),
@@ -50,12 +53,29 @@ mod tests {
         ];
         for body in bodies {
             let event = body.event();
-            assert_eq!(NotificationEvent::try_from(event).unwrap(), event);
-            let notification = Notification { id, source: Id::random(), timestamp: 42, body };
-            let bytes = serde_cbor::to_vec(&notification).unwrap();
-            let Value::Map(wire) = serde_cbor::from_slice::<Value>(&bytes).unwrap() else {
+            let rc = NotificationEvent::try_from(event);
+            assert!(rc.is_ok());
+            let decoded_event = rc.unwrap();
+            assert_eq!(decoded_event, event);
+
+            let notification = Notification {
+                id,
+                source: Id::random(),
+                timestamp: 42,
+                body
+            };
+            let rc = serde_cbor::to_vec(&notification);
+            assert!(rc.is_ok());
+
+            let bytes = rc.unwrap();
+            let rc = serde_cbor::from_slice::<Value>(&bytes);
+            assert!(rc.is_ok());
+            let decoded = rc.unwrap();
+
+            let Value::Map(wire) = decoded else {
                 panic!("Notification must serialize as a map");
             };
+
             assert_eq!(wire.get(&Value::Text("e".into())), Some(&Value::Text(event.as_str().into())));
             assert_eq!(wire.get(&Value::Text("t".into())), Some(&Value::Integer(42)));
             if event == NotificationEvent::ChannelSessionKeyRotate {
@@ -71,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn notifications_accept_absent_or_null_body_only_for_empty_events() {
+    fn test_notifications_accept_events() {
         for event in ["cd", "cl"] {
             for body in [None, Some(Value::Null)] {
                 let mut wire = [

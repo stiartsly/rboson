@@ -1,5 +1,4 @@
 pub(crate) mod internal;
-pub(crate) mod dto;
 pub(crate) mod rpc;
 
 pub(crate) mod mqtt;
@@ -8,6 +7,7 @@ pub(crate) mod verticle;
 pub mod client;
 pub mod options;
 pub mod channel;
+pub mod channel_member;
 pub mod contact;
 pub mod contact_editor;
 pub mod errors;
@@ -40,7 +40,8 @@ pub use {
 
 };
 
-pub use channel::{Channel, ChannelEditor, ChannelMember, Permission, Role};
+pub use channel::{Channel, ChannelEditor, Permission, Role};
+pub use channel_member::ChannelMember;
 pub use contact::{Contact, ContactOps, ContactType};
 pub use contact_editor::ContactEditor;
 pub use conversation::ConversationOps;

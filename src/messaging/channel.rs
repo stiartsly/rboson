@@ -1,11 +1,13 @@
-use crate::messaging::contact::ContactOps;
+use std::{fmt, time::SystemTime};
+use serde::{Deserialize, Serialize};
 use crate::Id;
-use std::fmt;
-use std::time::SystemTime;
-
 use crate::{Result, errors::ArgumentError};
+use crate::messaging::contact::ContactOps;
+use crate::messaging::channel_member::ChannelMember;
+
 
 /// Controls who may invite new members to a channel.
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Permission {
@@ -51,6 +53,7 @@ impl fmt::Display for Permission {
 }
 
 /// Role of a member within a channel.
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Role {
@@ -102,35 +105,6 @@ impl fmt::Display for Role {
     }
 }
 
-/// A single member of a channel, combining identity and role.
-pub trait ChannelMember: Send + Sync {
-    /// The member's boson `Id`.
-    fn id(&self) -> &Id;
-
-    /// The member's role within the channel.
-    fn role(&self) -> Role;
-
-    /// The time the member joined.
-    fn joined(&self) -> SystemTime;
-
-    // --- convenience helpers ---
-
-    fn is_owner(&self) -> bool {
-        return matches!(self.role(), Role::Owner)
-    }
-
-    fn is_moderator(&self) -> bool {
-        return matches!(self.role(), Role::Moderator)
-    }
-    fn is_member(&self) -> bool {
-        return matches!(self.role(), Role::Member)
-    }
-
-    fn is_banned(&self) -> bool {
-        return self.role().is_banned()
-    }
-}
-
 /// A channel contact – a group conversation on the boson network.
 ///
 /// Extends [`ContactOps`] with channel-specific information.
@@ -154,10 +128,10 @@ pub trait Channel: ContactOps {
     fn banned(&self) -> usize;
 
     /// Members ordered by join time, with unbanned members first.
-    fn members(&self) -> Vec<&dyn ChannelMember>;
+    fn members(&self) -> Vec<ChannelMember>;
 
     /// Look up a member by ID.
-    fn member(&self, member_id: &Id) -> Option<&dyn ChannelMember>;
+    fn member(&self, member_id: &Id) -> Option<ChannelMember>;
 
     fn has_member(&self, member_id: &Id) -> bool {
         self.member(member_id).is_some()

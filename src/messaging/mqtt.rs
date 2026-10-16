@@ -11,6 +11,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use tokio::sync;
 use log::{debug, error, info, trace, warn};
 use futures::{stream::FuturesUnordered, FutureExt};
 use rumqttc::tokio_rustls::rustls::{
@@ -42,7 +43,8 @@ use crate::errors::{
 use crate::messaging::{
     options::Options,
     verticle::VerticleOptions,
-    channel::{Channel, ChannelMember, Permission, Role},
+    channel::{Channel, Permission, Role},
+    ChannelMember,
     contact::{Contact, ContactOps, ContactType},
     conversation::{ConversationOps, Conversation},
     invite_ticket::InviteTicket,
@@ -63,7 +65,8 @@ use super::internal::{
 };
 
 use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
-use super::dto::{
+use super::internal::{
+    channel_info::ChannelInfo,
     channel_session_rotation::ChannelSessionKeyRotation,
     new_channel_info::NewChannelInfo,
 };
@@ -76,30 +79,6 @@ const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 const MESSAGE_VERSION: u8 = 2;
 const HANDSHAKE_MESSAGE: u8 = 0;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Deserialize)]
-struct ChannelInfo {
-    id: Id,
-    #[serde(rename = "o")]
-    owner: Id,
-    sid: Id,
-    #[serde(rename = "sk", default)]
-    session_key: Option<Value>,
-    #[serde(rename = "p")]
-    permission: i32,
-    #[serde(rename = "n", default)]
-    name: Option<String>,
-    #[serde(rename = "nt", default)]
-    notice: Option<String>,
-    #[serde(rename = "a", default)]
-    announced: bool,
-    #[serde(rename = "c")]
-    created_at: i64,
-    #[serde(rename = "u")]
-    updated_at: i64,
-    #[serde(rename = "m", default)]
-    members: Vec<PhotonChannelMember>,
-}
 
 #[derive(Deserialize)]
 struct ChannelContactInfo {
@@ -201,8 +180,10 @@ pub(crate) struct MqttSession {
     reconnect_at: Cell<Option<tokio::time::Instant>>,
     sync_running: Cell<bool>,
     stopping: Cell<bool>,
-    lifecycle: tokio::sync::Mutex<()>,
-    requests: tokio::sync::Mutex<()>,
+
+    lifecycle: sync::Mutex<()>,
+    requests: sync::Mutex<()>,
+
     origin_clock: Arc<std::sync::Mutex<i64>>,
     pending_rpc: Calls,
     contacts_revision: Cell<i32>,
@@ -442,24 +423,23 @@ impl MqttSession {
             "cmj" => {
                 let member: PhotonChannelMember = serde_cbor::value::from_value(body)
                     .map_err(|error| EncodingError::new(format!("Malformed channel member: {error}")))?;
-                Role::try_from(member.role)?;
-                UNIX_EPOCH.checked_add(Duration::from_millis(member.joined))
+                UNIX_EPOCH.checked_add(Duration::from_millis(member.joined()))
                     .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range"))?;
                 let mut channel = self.channel_snapshot(sender)?;
-                channel.members.retain(|existing| existing.id != member.id);
+                channel.members.retain(|existing| existing.id() != member.id());
                 channel.members.push(member.clone());
                 self.channels.borrow_mut().insert(*sender, channel.clone());
-                self.channel_listener.on_channel_member_joined(&channel, &member);
+                self.channel_listener.on_channel_member_joined(&channel, &ChannelMember::from(&member));
             }
             "cml" => {
                 let id: Id = serde_cbor::value::from_value(body)
                     .map_err(|error| EncodingError::new(format!("Malformed leaving member: {error}")))?;
                 let mut channel = self.channel_snapshot(sender)?;
-                let member = channel.members.iter().find(|member| member.id == id).cloned();
-                channel.members.retain(|member| member.id != id);
+                let member = channel.members.iter().find(|member| member.id() == &id).cloned();
+                channel.members.retain(|member| member.id() != &id);
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 if let Some(member) = member {
-                    self.channel_listener.on_channel_member_left(&channel, &member);
+                    self.channel_listener.on_channel_member_left(&channel, &ChannelMember::from(&member));
                 }
             }
             event => return Err(EncodingError::new(format!("Unsupported home-peer notification '{event}'"))),
@@ -1537,36 +1517,43 @@ impl MqttSession {
     fn decode_channel_info(&self, value: Value) -> Result<(PhotonChannel, CryptoIdentity)> {
         let info: ChannelInfo = serde_cbor::value::from_value(value)
             .map_err(|error| EncodingError::new(format!("Malformed channel info: {error}")))?;
-        if info.created_at < 0 || info.updated_at < info.created_at {
+        let timestamp = |time: SystemTime| -> Result<i64> {
+            let millis = time.duration_since(UNIX_EPOCH)
+                .map_err(|error| EncodingError::new(format!("Invalid channel timestamp: {error}")))?
+                .as_millis();
+            i64::try_from(millis).map_err(|_| EncodingError::new("Channel timestamp is out of range").into())
+        };
+        let created_at = timestamp(info.created_at())?;
+        let updated_at = timestamp(info.update_at())?;
+        if updated_at < created_at {
             return Err(EncodingError::new("Invalid channel timestamps"));
         }
-        for member in &info.members {
-            Role::try_from(member.role)?;
-            UNIX_EPOCH.checked_add(Duration::from_millis(member.joined))
+        for member in info.members() {
+            UNIX_EPOCH.checked_add(Duration::from_millis(member.joined()))
                 .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range"))?;
         }
-        let session = match info.session_key {
-            Some(Value::Bytes(key)) => {
-                let key = self.user_identity.decrypt_into(self.user_id(), &key)?;
+        let session = match info.session_key() {
+            Some(key) => {
+                let key = self.user_identity.decrypt_into(self.user_id(), key)?;
                 CryptoIdentity::try_from(key.as_slice())?
             }
-            None | Some(Value::Null) => self.friend_sessions.lock().unwrap().get(&info.id).cloned()
+            None => self.friend_sessions.lock().unwrap().get(info.channel_id()).cloned()
                 .ok_or_else(|| StateError::new("Channel session key is missing"))?,
-            _ => return Err(EncodingError::new("Channel session key is not binary")),
         };
-        if session.id() != &info.sid {
+        if session.id() != info.session_id() {
             return Err(EncodingError::new("Channel session key does not match session ID"));
         }
-        let mut data = ContactData::new(info.id, ContactType::Channel as u8, info.created_at);
-        data.name = info.name;
-        data.updated_at = info.updated_at;
+        let mut data = ContactData::new(*info.channel_id(), ContactType::Channel as u8, created_at);
+        data.name = info.name().map(ToString::to_string);
+        data.updated_at = updated_at;
         let channel = PhotonChannel {
             contact: Contact::try_from(data)?,
-            owner: info.owner, session_id: info.sid, permission: Permission::try_from(info.permission)?,
-            notice: info.notice, announced: info.announced, members: info.members,
+            owner: *info.owner_id(), session_id: *info.session_id(), permission: info.permission(),
+            notice: info.notice().map(ToString::to_string), announced: info.announce(),
+            members: info.members().to_vec(),
         };
         let mut ids = HashSet::new();
-        if channel.members.iter().any(|member| !ids.insert(member.id))
+        if channel.members.iter().any(|member| !ids.insert(*member.id()))
             || !channel.member(&channel.owner).is_some_and(|member| member.is_owner())
         {
             return Err(EncodingError::new("Channel members or owner are inconsistent"));
@@ -1741,10 +1728,10 @@ impl MqttSession {
         let updated: Vec<Id> = serde_cbor::value::from_value(result)
             .map_err(|error| EncodingError::new(format!("Invalid updated channel members: {error}")))?;
         let changed: Vec<_> = channel.members.iter_mut()
-            .filter(|member| updated.contains(&member.id))
+            .filter(|member| updated.contains(member.id()))
             .map(|member| {
-                member.role = role as i32;
-                Box::new(member.clone()) as Box<dyn ChannelMember>
+                *member = PhotonChannelMember::new(*member.id(), role, member.joined());
+                ChannelMember::from(&*member)
             })
             .collect();
         self.channels.borrow_mut().insert(*channel_id, channel.clone());
@@ -1767,10 +1754,10 @@ impl MqttSession {
         let banned: Vec<Id> = serde_cbor::value::from_value(result)
             .map_err(|error| EncodingError::new(format!("Invalid banned channel members: {error}")))?;
         let changed: Vec<_> = channel.members.iter_mut()
-            .filter(|member| banned.contains(&member.id))
+            .filter(|member| banned.contains(member.id()))
             .map(|member| {
-                member.role = Role::Banned as i32;
-                Box::new(member.clone()) as Box<dyn ChannelMember>
+                *member = PhotonChannelMember::new(*member.id(), Role::Banned, member.joined());
+                ChannelMember::from(&*member)
             })
             .collect();
         self.channels.borrow_mut().insert(*channel_id, channel.clone());
@@ -1797,10 +1784,10 @@ impl MqttSession {
         let unbanned: Vec<Id> = serde_cbor::value::from_value(result)
             .map_err(|error| EncodingError::new(format!("Invalid unbanned channel members: {error}")))?;
         let changed: Vec<_> = channel.members.iter_mut()
-            .filter(|member| unbanned.contains(&member.id))
+            .filter(|member| unbanned.contains(member.id()))
             .map(|member| {
-                member.role = Role::Member as i32;
-                Box::new(member.clone()) as Box<dyn ChannelMember>
+                *member = PhotonChannelMember::new(*member.id(), Role::Member, member.joined());
+                ChannelMember::from(&*member)
             })
             .collect();
         self.channels.borrow_mut().insert(*channel_id, channel.clone());
@@ -1827,11 +1814,10 @@ impl MqttSession {
         let removed: Vec<Id> = serde_cbor::value::from_value(result)
             .map_err(|error| EncodingError::new(format!("Invalid removed channel members: {error}")))?;
         let changed: Vec<_> = channel.members.iter()
-            .filter(|member| removed.contains(&member.id))
-            .cloned()
-            .map(|member| Box::new(member) as Box<dyn ChannelMember>)
+            .filter(|member| removed.contains(member.id()))
+            .map(ChannelMember::from)
             .collect();
-        channel.members.retain(|member| !removed.contains(&member.id));
+        channel.members.retain(|member| !removed.contains(member.id()));
         self.channels.borrow_mut().insert(*channel_id, channel.clone());
         if !changed.is_empty() {
             self.channel_listener.on_channel_members_removed(&channel, &changed);

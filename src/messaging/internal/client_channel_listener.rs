@@ -47,41 +47,41 @@ impl ChannelListener for ClientChannelListener {
     fn on_channel_member_joined(
         &self,
         _channel: &dyn Channel,
-        _member: &dyn ChannelMember
+        _member: &ChannelMember
     ) {}
 
     /// Called when a member left the channel.
     fn on_channel_member_left(
         &self,
         _channel: &dyn Channel,
-        _member: &dyn ChannelMember
+        _member: &ChannelMember
     ) {}
 
     /// Called when members were removed by an administrator.
     fn on_channel_members_removed(
         &self,
         _channel: &dyn Channel,
-        _members: &[Box<dyn ChannelMember>],
+        _members: &[ChannelMember],
     ) {}
 
     /// Called when members were banned.
     fn on_channel_members_banned(
         &self,
         _channel: &dyn Channel,
-        _banned: &[Box<dyn ChannelMember>],
+        _banned: &[ChannelMember],
     ) {}
 
     /// Called when members were unbanned.
     fn on_channel_members_unbanned(
         &self,
         _channel: &dyn Channel,
-        _unbanned: &[Box<dyn ChannelMember>],
+        _unbanned: &[ChannelMember],
     ) {}
 
     /// Called when member roles were updated.
     fn on_channel_members_role_updated(
         &self,
         _channel: &dyn Channel,
-        _members: &[Box<dyn ChannelMember>],
+        _members: &[ChannelMember],
     ) {}
 }

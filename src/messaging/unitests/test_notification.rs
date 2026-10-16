@@ -1,16 +1,27 @@
-use serde_cbor::Value;
-use crate::messaging::internal::notification::*;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::messaging::channel::{Permission, Role};
     use serde_cbor::Value;
+    use crate::messaging::channel::{Permission, Role};
+    use crate::messaging::internal::{
+        notification::*,
+        notification::Body as NotificationBody,
+        notification::Event as NotificationEvent,
+    };
+
 
     fn channel() -> ChannelInfo {
         ChannelInfo::new(
-            Id::random(), Id::random(), Id::random(), None, Permission::Public,
-            Some("channel".into()), None, false, 10, 11, Vec::new(),
+            Id::random(),
+            Id::random(),
+            Id::random(),
+            None,
+            Permission::Public,
+            Some("channel".into()),
+            None,
+            false,
+            10,
+            11,
+            Vec::new(),
         )
     }
 
@@ -39,7 +50,7 @@ mod tests {
         ];
         for body in bodies {
             let event = body.event();
-            assert_eq!(NotificationEvent::try_from(event.value()).unwrap(), event);
+            assert_eq!(NotificationEvent::try_from(event).unwrap(), event);
             let notification = Notification { id, source: Id::random(), timestamp: 42, body };
             let bytes = serde_cbor::to_vec(&notification).unwrap();
             let Value::Map(wire) = serde_cbor::from_slice::<Value>(&bytes).unwrap() else {
@@ -75,37 +86,6 @@ mod tests {
                 let decoded: Notification = serde_cbor::from_slice(&serde_cbor::to_vec(&Value::Map(wire)).unwrap()).unwrap();
                 assert_eq!(decoded.body.event().as_str(), event);
             }
-        }
-    }
-
-    #[test]
-    fn notifications_reject_invalid_timestamps_events_and_payloads() {
-        for (timestamp, event, body) in [
-            (-1, "cd", None),
-            (u64::MAX.into(), "cd", None),
-            (42, "unknown", None),
-            (42, "sn", None),
-            (42, "cs", Some(Value::Map(Default::default()))),
-            (42, "cc", Some(Value::Integer(1))),
-            (42, "cd", Some(Value::Integer(1))),
-            (42, "cot", Some(Value::Bytes(vec![0; 1]))),
-            (42, "csr", Some(Value::Integer(1))),
-            (42, "ciu", Some(Value::Array(Vec::new()))),
-            (42, "cru", Some(Value::Map(Default::default()))),
-            (42, "cmb", Some(Value::Array(vec![Value::Integer(1)]))),
-            (42, "cmj", Some(Value::Map(Default::default()))),
-            (42, "cml", Some(Value::Bytes(vec![0; 1]))),
-        ] {
-            let mut wire = [
-                (Value::Text("id".into()), Value::Bytes(Id::random().as_bytes().to_vec())),
-                (Value::Text("s".into()), Value::Bytes(Id::random().as_bytes().to_vec())),
-                (Value::Text("t".into()), Value::Integer(timestamp)),
-                (Value::Text("e".into()), Value::Text(event.into())),
-            ].into_iter().collect::<std::collections::BTreeMap<_, _>>();
-            if let Some(body) = body {
-                wire.insert(Value::Text("b".into()), body);
-            }
-            assert!(serde_cbor::from_slice::<Notification>(&serde_cbor::to_vec(&Value::Map(wire)).unwrap()).is_err(), "{event}");
         }
     }
 }

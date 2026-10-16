@@ -1,4 +1,3 @@
-use core::f32::consts::E;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -51,31 +50,39 @@ use crate::messaging::{
     invite_ticket::InviteTicket,
     message::{ContentDisposition, Message, MessageBuilder},
     session_info::SessionInfo,
-    ChannelListener, ConnectionListener, ContactListener, MessageListener, SessionListener,
+    ChannelListener,
+    ConnectionListener,
+    ContactListener,
+    MessageListener,
+    SessionListener,
     FriendRequestListener,
     errors::{AuthenticationError, EncodingError, ProtocolError},
     FriendRequest,
 };
 
-use super::internal::{PhotonChannel, PhotonChannelMember, PhotonMessage, ContactData, OpaqueContact, ContactMutation, ContactSync };
 use super::internal::{
+    PhotonChannel,
+    PhotonChannelMember,
+    PhotonMessage,
+    ContactData,
+    OpaqueContact,
+    ContactMutation,
+    ContactSync,
     contact_mutation::MutationData,
     contact_sync::SyncType,
     handshake::{Handshake, HandshakeType},
-    notification::{Notification, NotificationBody, NotificationEvent},
-};
-
-use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
-use super::internal::{
+    notification::{
+        Notification,
+        Body as NotificationBody,
+        Event as NotificationEvent
+    },
+    topic::Topic,
     channel_info::ChannelInfo,
     channel_session_rotation::ChannelSessionKeyRotation,
     new_channel_info::NewChannelInfo,
 };
+use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
 
-const USER_INBOX: &str = "u/i";
-const USER_OUTBOX: &str = "u/o";
-const DEVICE_INBOX: &str = "d/i";
-const DEVICE_OUTBOX: &str = "d/o";
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 const MESSAGE_VERSION: u8 = 2;
 const HANDSHAKE_MESSAGE: u8 = 0;
@@ -276,7 +283,7 @@ impl MqttSession {
     }
 
     fn validate_outbox_packet(payload_len: usize) -> Result<()> {
-        let remaining = payload_len.checked_add(2 + DEVICE_OUTBOX.len() + 2)
+        let remaining = payload_len.checked_add(2 + Topic::DeviceOutbox.as_str().len() + 2)
             .ok_or_else(|| ArgumentError::new("MQTT packet size is out of range"))?;
         let mut value = remaining;
         let mut header = 1;
@@ -327,7 +334,7 @@ impl MqttSession {
         Self::validate_outbox_packet(payload.len())?;
         let call = self.pending_rpc.register(timestamp, method, *recipient)?;
         tokio::time::timeout(RPC_TIMEOUT, async move {
-            mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, payload).await
+            mqtt.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, payload).await
                 .map_err(|error| StateError::new(format!("Publishing RPC request failed: {error}")))?;
             call.await
         }).await.map_err(|_| StateError::new(format!("RPC '{method:?}' timed out")))?
@@ -350,20 +357,20 @@ impl MqttSession {
         };
         let notification: Notification = serde_cbor::from_slice(&payload)
             .map_err(|error| EncodingError::new(format!("Malformed notification: {error}")))?;
-        let timestamp = i64::try_from(notification.timestamp)
+        let timestamp = i64::try_from(notification.timestamp())
             .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
-        let event = notification.body.event();
+        let event = notification.body().event();
         if matches!(event, NotificationEvent::ChannelCreate | NotificationEvent::ChannelJoin
             | NotificationEvent::ChannelDelete | NotificationEvent::ChannelLeave | NotificationEvent::ChannelSessionKeyRotate
             | NotificationEvent::ChannelMemberJoin | NotificationEvent::ChannelMemberLeave)
-            && notification.source == *self.user_id()
-            && notification.id == Self::message_id(self.device_id(), timestamp)?
+            && notification.source() == *self.user_id()
+            && notification.id() == Self::message_id(self.device_id(), timestamp)?
         {
             return Ok(());
         }
-        match notification.body {
+        match notification.body() {
             NotificationBody::SessionNew(session) => {
-                self.session_listener.on_new_session(&session);
+                self.session_listener.on_new_session(session);
             }
             NotificationBody::ContactSync(sync) => {
                 self.apply_contact_sync(sync)?;
@@ -405,12 +412,12 @@ impl MqttSession {
             }
             NotificationBody::ChannelSessionKeyRotate(encrypted_key) => {
                 let mut channel = self.channel_snapshot(sender)?;
-                if notification.source != channel.owner {
+                if notification.source() != channel.owner {
                     return Err(EncodingError::new("Channel session key rotation has an unexpected source"));
                 }
                 let session = self.friend_sessions.lock().unwrap().get(sender).cloned()
                     .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-                let key = session.decrypt_into(&notification.source, &encrypted_key)
+                let key = session.decrypt_into(&notification.source(), encrypted_key)
                     .map_err(|error| AuthenticationError::new(format!("Decrypting rotated channel session key failed: {error}")))?;
                 let session = CryptoIdentity::try_from(key.as_slice())
                     .map_err(|error| AuthenticationError::new(format!("Invalid rotated channel session key: {error}")))?;
@@ -426,12 +433,12 @@ impl MqttSession {
                 channel.members.retain(|existing| existing.id() != member.id());
                 channel.members.push(member.clone());
                 self.channels.borrow_mut().insert(*sender, channel.clone());
-                self.channel_listener.on_channel_member_joined(&channel, &ChannelMember::from(&member));
+                self.channel_listener.on_channel_member_joined(&channel, &ChannelMember::from(member));
             }
             NotificationBody::ChannelMemberLeave(id) => {
                 let mut channel = self.channel_snapshot(sender)?;
-                let member = channel.members.iter().find(|member| member.id() == &id).cloned();
-                channel.members.retain(|member| member.id() != &id);
+                let member = channel.members.iter().find(|member| member.id() == id).cloned();
+                channel.members.retain(|member| member.id() != id);
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 if let Some(member) = member {
                     self.channel_listener.on_channel_member_left(&channel, &ChannelMember::from(&member));
@@ -465,7 +472,7 @@ impl MqttSession {
         Ok((contact, session, channel))
     }
 
-    fn apply_contact_sync(&self, sync: ContactSync) -> Result<()> {
+    fn apply_contact_sync(&self, sync: &ContactSync) -> Result<()> {
         let original_revision = self.contacts_revision.get();
         let previous = self.contacts.borrow().clone();
         let mut contacts = previous.clone();
@@ -585,7 +592,7 @@ impl MqttSession {
         let result = self.rpc_call(Method::ContactSync, Some(Value::Integer(self.contacts_revision.get().into()))).await?;
         let sync: ContactSync = serde_cbor::value::from_value(result)
             .map_err(|error| EncodingError::new(format!("Malformed contact sync response: {error}")))?;
-        self.apply_contact_sync(sync)
+        self.apply_contact_sync(&sync)
     }
 
     fn password(&self) -> Result<String> {
@@ -677,17 +684,22 @@ impl MqttSession {
             warn!("Ignoring oversized MQTT message on '{}'", publish.topic);
             return;
         }
-        if publish.topic != USER_INBOX && publish.topic != USER_OUTBOX && publish.topic != DEVICE_INBOX {
-            warn!("Ignoring MQTT message on unexpected topic '{}'", publish.topic);
-            return;
-        }
+        let topic = match publish.topic.as_str() {
+            name if name == Topic::UserInbox.as_str() => Topic::UserInbox,
+            name if name == Topic::UserOutbox.as_str() => Topic::UserOutbox,
+            name if name == Topic::DeviceInbox.as_str() => Topic::DeviceInbox,
+            _ => {
+                warn!("Ignoring MQTT message on unexpected topic '{}'", publish.topic);
+                return;
+            }
+        };
 
-        if let Err(error) = self.handle_user_publish(peer_id, &publish.topic, publish.payload.as_ref()).await {
+        if let Err(error) = self.handle_user_publish(peer_id, topic, publish.payload.as_ref()).await {
             warn!("Failed to process MQTT message on '{}': {error}", publish.topic);
         }
     }
 
-    async fn handle_user_publish(&self, peer_id: &Id, topic: &str, payload: &[u8]) -> Result<()> {
+    async fn handle_user_publish(&self, peer_id: &Id, topic: Topic, payload: &[u8]) -> Result<()> {
         let envelope = self
             .device_identity
             .decrypt_into(peer_id, payload)
@@ -705,7 +717,7 @@ impl MqttSession {
             .from()
             .copied()
             .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
-        if topic == DEVICE_INBOX {
+        if matches!(topic, Topic::DeviceInbox) {
             if message.message_type != crate::messaging::message::MessageType::ControlMessage as u8
                 || (message.recipient != *self.user_id() && message.recipient != *self.device_id())
             {
@@ -722,7 +734,7 @@ impl MqttSession {
             return self.handle_rpc_response(message.payload, &from);
         }
         if message.message_type == crate::messaging::message::MessageType::StateMessage as u8 {
-            if topic != USER_INBOX {
+            if !matches!(topic, Topic::UserInbox) {
                 return Err(EncodingError::new("Invalid home-peer notification"));
             }
             if from == *peer_id && message.recipient == *self.user_id() {
@@ -760,15 +772,15 @@ impl MqttSession {
         let timestamp = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let originated_here = message.id == Self::message_id(self.device_identity.id(), timestamp)?;
-        if topic == USER_OUTBOX && originated_here {
+        if matches!(topic, Topic::UserOutbox) && originated_here {
             return Ok(());
         }
-        let friend_id = if topic == USER_OUTBOX {
+        let friend_id = if matches!(topic, Topic::UserOutbox) {
             message.recipient
         } else {
             from
         };
-        let is_inbox = topic == USER_INBOX;
+        let is_inbox = matches!(topic, Topic::UserInbox);
         if (is_inbox && message.recipient != *self.user_identity.id())
             || (!is_inbox && from != *self.user_identity.id())
         {
@@ -820,8 +832,8 @@ impl MqttSession {
         Ok(())
     }
 
-    fn handle_content_message(&self, topic: &str, mut message: PhotonMessage, from: Id) -> Result<()> {
-        let outbox = topic == USER_OUTBOX;
+    fn handle_content_message(&self, topic: Topic, mut message: PhotonMessage, from: Id) -> Result<()> {
+        let outbox = matches!(topic, Topic::UserOutbox);
         if outbox && from != *self.user_id() {
             return Err(EncodingError::new("Outbox message has an unexpected sender"));
         }
@@ -1070,7 +1082,7 @@ impl MqttSession {
 
         // Self::validate_outbox_packet(encrypted.len())?;
 
-        mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, encrypted)
+        mqtt.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, encrypted)
             .await
             .map_err(|e| StateError::new(format!("Publishing handshake message error: {e}")))?;
         Ok(timestamp)
@@ -1489,10 +1501,10 @@ impl MqttSession {
     fn decode_channel_info(&self, value: Value) -> Result<(PhotonChannel, CryptoIdentity)> {
         let info: ChannelInfo = serde_cbor::value::from_value(value)
             .map_err(|error| EncodingError::new(format!("Malformed channel info: {error}")))?;
-        self.channel_from_info(info)
+        self.channel_from_info(&info)
     }
 
-    fn channel_from_info(&self, info: ChannelInfo) -> Result<(PhotonChannel, CryptoIdentity)> {
+    fn channel_from_info(&self, info: &ChannelInfo) -> Result<(PhotonChannel, CryptoIdentity)> {
         let timestamp = |time: SystemTime| -> Result<i64> {
             let millis = time.duration_since(UNIX_EPOCH)
                 .map_err(|error| EncodingError::new(format!("Invalid channel timestamp: {error}")))?
@@ -2017,7 +2029,7 @@ impl MqttSession {
                         }
                         debug!(
                             "Subscribing to topics: [{}, {}, {}]",
-                            USER_INBOX, USER_OUTBOX, DEVICE_INBOX
+                            Topic::UserInbox.as_str(), Topic::UserOutbox.as_str(), Topic::DeviceInbox.as_str()
                         );
                         let mqtt = self.mqtt.lock().unwrap().clone();
                         let session = self.clone();
@@ -2028,9 +2040,9 @@ impl MqttSession {
                                 return;
                             };
                             if let Err(error) = mqtt.subscribe_many([
-                                SubscribeFilter::new(USER_INBOX.to_string(), QoS::AtLeastOnce),
-                                SubscribeFilter::new(USER_OUTBOX.to_string(), QoS::AtLeastOnce),
-                                SubscribeFilter::new(DEVICE_INBOX.to_string(), QoS::AtLeastOnce),
+                                SubscribeFilter::new(Topic::UserInbox.as_str().to_string(), QoS::AtLeastOnce),
+                                SubscribeFilter::new(Topic::UserOutbox.as_str().to_string(), QoS::AtLeastOnce),
+                                SubscribeFilter::new(Topic::DeviceInbox.as_str().to_string(), QoS::AtLeastOnce),
                             ]).await {
                                 error!("Failed to subscribe topics: {error}");
                                 session.close_transport("MQTT topic subscription failed");
@@ -2324,7 +2336,7 @@ impl MessageBuilder for SessionMessageBuilder {
                 .encrypt_into(&self.peer_id, &message_bytes)
                 .map_err(|error| AuthenticationError::new(format!("Encrypting message envelope failed: {error}")))?;
             MqttSession::validate_outbox_packet(mqtt_payload.len())?;
-            mqtt.publish(DEVICE_OUTBOX, QoS::AtLeastOnce, false, mqtt_payload)
+            mqtt.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, mqtt_payload)
                 .await
                 .map_err(|error| StateError::new(format!("Publishing message failed: {error}")))?;
 

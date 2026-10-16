@@ -1,16 +1,24 @@
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use crate::{
     Id,
     errors::{Error, Result},
 };
-use crate::messaging::errors::EncodingError;
-use crate::messaging::SessionInfo;
-use super::{ChannelInfo, ChannelMember, ChannelMembersRole, ContactSync};
+use crate::messaging::{
+    errors::EncodingError,
+    SessionInfo,
+};
+use super::{
+    ChannelInfo,
+    ChannelMember,
+    ChannelMembersRole,
+    ContactSync
+};
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
-pub(crate) enum NotificationEvent {
+pub(crate) enum Event {
     #[serde(rename = "sn")]
     SessionNew = 1,
     #[serde(rename = "cs")]
@@ -43,11 +51,7 @@ pub(crate) enum NotificationEvent {
     ChannelMemberLeave = 33,
 }
 
-impl NotificationEvent {
-    pub(crate) fn value(self) -> i32 {
-        self as i32
-    }
-
+impl Event {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::SessionNew => "sn",
@@ -69,7 +73,7 @@ impl NotificationEvent {
     }
 }
 
-impl TryFrom<i32> for NotificationEvent {
+impl TryFrom<i32> for Event {
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self> {
@@ -96,7 +100,7 @@ impl TryFrom<i32> for NotificationEvent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "e", content = "b")]
-pub(crate) enum NotificationBody {
+pub(crate) enum Body {
     #[serde(rename = "sn")]
     SessionNew(SessionInfo),
     #[serde(rename = "cs")]
@@ -114,7 +118,7 @@ pub(crate) enum NotificationBody {
     #[serde(rename = "csr")]
     ChannelSessionKeyRotate(#[serde(with = "serde_with::As::<serde_with::Bytes>")] Vec<u8>),
     #[serde(rename = "ciu")]
-    ChannelInfoUpdate(std::collections::BTreeMap<serde_cbor::Value, serde_cbor::Value>),
+    ChannelInfoUpdate(BTreeMap<serde_cbor::Value, serde_cbor::Value>),
     #[serde(rename = "cru")]
     ChannelMembersRoleUpdate(ChannelMembersRole),
     #[serde(rename = "cmb")]
@@ -129,59 +133,55 @@ pub(crate) enum NotificationBody {
     ChannelMemberLeave(Id),
 }
 
-impl NotificationBody {
-    pub(crate) fn event(&self) -> NotificationEvent {
+impl Body {
+    pub(crate) fn event(&self) -> Event {
         match self {
-            Self::SessionNew(_) => NotificationEvent::SessionNew,
-            Self::ContactSync(_) => NotificationEvent::ContactSync,
-            Self::ChannelCreate(_) => NotificationEvent::ChannelCreate,
-            Self::ChannelDelete => NotificationEvent::ChannelDelete,
-            Self::ChannelJoin(_) => NotificationEvent::ChannelJoin,
-            Self::ChannelLeave => NotificationEvent::ChannelLeave,
-            Self::ChannelOwnershipTransfer(_) => NotificationEvent::ChannelOwnershipTransfer,
-            Self::ChannelSessionKeyRotate(_) => NotificationEvent::ChannelSessionKeyRotate,
-            Self::ChannelInfoUpdate(_) => NotificationEvent::ChannelInfoUpdate,
-            Self::ChannelMembersRoleUpdate(_) => NotificationEvent::ChannelMembersRoleUpdate,
-            Self::ChannelMembersBan(_) => NotificationEvent::ChannelMembersBan,
-            Self::ChannelMembersUnban(_) => NotificationEvent::ChannelMembersUnban,
-            Self::ChannelMembersRemove(_) => NotificationEvent::ChannelMembersRemove,
-            Self::ChannelMemberJoin(_) => NotificationEvent::ChannelMemberJoin,
-            Self::ChannelMemberLeave(_) => NotificationEvent::ChannelMemberLeave,
+            Self::SessionNew(_) => Event::SessionNew,
+            Self::ContactSync(_) => Event::ContactSync,
+            Self::ChannelCreate(_) => Event::ChannelCreate,
+            Self::ChannelDelete => Event::ChannelDelete,
+            Self::ChannelJoin(_) => Event::ChannelJoin,
+            Self::ChannelLeave => Event::ChannelLeave,
+            Self::ChannelOwnershipTransfer(_) => Event::ChannelOwnershipTransfer,
+            Self::ChannelSessionKeyRotate(_) => Event::ChannelSessionKeyRotate,
+            Self::ChannelInfoUpdate(_) => Event::ChannelInfoUpdate,
+            Self::ChannelMembersRoleUpdate(_) => Event::ChannelMembersRoleUpdate,
+            Self::ChannelMembersBan(_) => Event::ChannelMembersBan,
+            Self::ChannelMembersUnban(_) => Event::ChannelMembersUnban,
+            Self::ChannelMembersRemove(_) => Event::ChannelMembersRemove,
+            Self::ChannelMemberJoin(_) => Event::ChannelMemberJoin,
+            Self::ChannelMemberLeave(_) => Event::ChannelMemberLeave,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(try_from = "NotificationData")]
 pub(crate) struct Notification {
     #[serde(rename = "id")]
-    pub(crate) id: Id,
-    #[serde(rename = "s")]
-    pub(crate) source: Id,
-    #[serde(rename = "t")]
-    pub(crate) timestamp: u64,
-    #[serde(flatten)]
-    pub(crate) body: NotificationBody,
-}
-
-#[derive(Deserialize)]
-struct NotificationData {
     id: Id,
     #[serde(rename = "s")]
     source: Id,
     #[serde(rename = "t")]
     timestamp: u64,
     #[serde(flatten)]
-    body: NotificationBody,
+    body: Body,
 }
 
-impl TryFrom<NotificationData> for Notification {
-    type Error = Error;
+impl Notification {
+    pub(crate) fn id(&self) -> Id {
+        self.id
+    }
 
-    fn try_from(data: NotificationData) -> Result<Self> {
-        i64::try_from(data.timestamp)
-            .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
-        Ok(Self { id: data.id, source: data.source, timestamp: data.timestamp, body: data.body })
+    pub(crate) fn source(&self) -> Id {
+        self.source
+    }
+
+    pub(crate) fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    pub(crate) fn body(&self) -> &Body {
+        &self.body
     }
 }
 

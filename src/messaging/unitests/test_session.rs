@@ -8,7 +8,7 @@ mod session_tests {
     }
 
     #[tokio::test]
-    async fn plain_session_maps_track_incoming_requests_and_acceptance() {
+    async fn tracks_incoming_requests() {
         let agent = agent();
         let friend = *CryptoIdentity::new().id();
         {
@@ -31,7 +31,7 @@ mod session_tests {
     }
 
     #[tokio::test]
-    async fn agent_delegates_outgoing_requests_acceptance_and_messages() {
+    async fn sends_outgoing_requests() {
         let agent = agent();
         let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("test", "localhost", 1883), 8);
         *agent.mqtt.lock().unwrap() = Some(mqtt);
@@ -66,7 +66,7 @@ mod session_tests {
     }
 
     #[tokio::test]
-    async fn failed_requests_leave_plain_session_state_unchanged() {
+    async fn preserves_failed_requests() {
         let agent = agent();
         let friend = *CryptoIdentity::new().id();
         assert!(agent.friend_request(&friend, None).await.is_err());

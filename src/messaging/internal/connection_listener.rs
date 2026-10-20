@@ -1,10 +1,9 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering}
-};
 use crate::messaging::ConnectionListener;
 
+/// Forwards lifecycle callbacks to the user listener and updates client state.
 pub(crate) struct ClientConnectionListener {
     listener: Arc<dyn ConnectionListener>,
     connected: Arc<AtomicBool>,
@@ -23,38 +22,35 @@ impl ClientConnectionListener {
             ready,
         }
     }
+
+    /// Runs a user callback on a task so a slow listener cannot block the
+    /// transport thread.
+    fn notify(&self, callback: impl FnOnce(&dyn ConnectionListener) + Send + 'static) {
+        let listener = Arc::clone(&self.listener);
+        tokio::spawn(async move {
+            callback(listener.as_ref());
+        });
+    }
 }
 
 impl ConnectionListener for ClientConnectionListener {
     fn on_connecting(&self) {
-        let listener = self.listener.clone();
-        tokio::spawn(async move {
-            listener.on_connecting();
-        });
+        self.notify(|listener| listener.on_connecting());
     }
+
     fn on_connected(&self) {
         self.connected.store(true, Ordering::Release);
-        let listener = self.listener.clone();
-
-        tokio::spawn(async move {
-            listener.on_connected();
-        });
+        self.notify(|listener| listener.on_connected());
     }
+
     fn on_ready(&self) {
         self.ready.store(true, Ordering::Release);
-        let listener = self.listener.clone();
-
-        tokio::spawn(async move {
-            listener.on_ready();
-        });
+        self.notify(|listener| listener.on_ready());
     }
+
     fn on_disconnected(&self) {
         self.connected.store(false, Ordering::Release);
         self.ready.store(false, Ordering::Release);
-        let listener = self.listener.clone();
-
-        tokio::spawn(async move {
-            listener.on_disconnected();
-        });
+        self.notify(|listener| listener.on_disconnected());
     }
 }

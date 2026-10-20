@@ -5,7 +5,7 @@ mod tests {
     use super::ContentDisposition;
 
     #[test]
-    fn parses_rfc5987_filename() {
+    fn parses_filename() {
         let disposition = ContentDisposition::parse(
             "attachment; filename=\"file_name.jpg\"; filename*=UTF-8''file%20name.jpg",
         )
@@ -21,7 +21,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_unicode_attachment() {
+    fn creates_attachment() {
         let disposition = ContentDisposition::attachment("fïle nãme.jpg");
 
         assert_eq!(disposition.filename(), Some("fïle nãme.jpg"));

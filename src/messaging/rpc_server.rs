@@ -63,27 +63,26 @@ use super::mqtt::{
     to_cbor_bytes,
 };
 use super::internal::{
+    ChannelInfo,
+    ChannelSessionKeyRotation,
+    ContactData,
+    ContactMutation,
+    ContactSync,
+    ContentFormat,
+    Handshake,
+    HandshakeType,
+    MessageContent,
+    MutationData,
+    NewChannelInfo,
+    Notification,
+    NotificationBody,
+    NotificationEvent,
+    OpaqueContact,
     PhotonChannel,
     PhotonChannelMember,
     PhotonMessage,
-    ContactData,
-    OpaqueContact,
-    ContactMutation,
-    ContactSync,
-    MessageContent,
-    ContentFormat,
-    contact_mutation::MutationData,
-    contact_sync::SyncType,
-    handshake::{Handshake, HandshakeType},
-    notification::{
-        Notification,
-        Body as NotificationBody,
-        Event as NotificationEvent
-    },
-    topic::Topic,
-    channel_info::ChannelInfo,
-    channel_session_rotation::ChannelSessionKeyRotation,
-    new_channel_info::NewChannelInfo,
+    SyncType,
+    Topic,
 };
 use super::rpc::{call::{Calls, RPCRequest, RPCResponse}, method::Method};
 
@@ -619,7 +618,7 @@ impl RpcServer {
             if opaque.revision() > sync.revision() {
                 return Err(EncodingError::new("Contact revision exceeds snapshot revision"));
             }
-            let DecodedContact { contact, session, channel } = self.decode_contact(opaque)?;
+            let DecodedContact { contact, session, channel } = self.decode_contact(&opaque)?;
             let id = *contact.id();
             if state.contacts.contains_key(&id) {
                 return Err(EncodingError::new("Snapshot contains duplicate contacts"));
@@ -672,8 +671,8 @@ impl RpcServer {
                 }
                 Some(MutationData::Remove(ids)) => {
                     for id in ids {
-                        state.contacts.remove(id);
-                        state.sessions.remove(id);
+                        state.contacts.remove(&id);
+                        state.sessions.remove(&id);
                         state.channels.remove(id);
                     }
                 }
@@ -1662,7 +1661,7 @@ impl RpcServer {
             i64::try_from(millis).map_err(|_| EncodingError::new("Channel timestamp is out of range").into())
         };
         let created_at = timestamp(info.created_at())?;
-        let updated_at = timestamp(info.update_at())?;
+        let updated_at = timestamp(info.updated_at())?;
         if updated_at < created_at {
             return Err(EncodingError::new("Invalid channel timestamps"));
         }

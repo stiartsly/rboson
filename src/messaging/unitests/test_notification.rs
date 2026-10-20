@@ -26,7 +26,7 @@ mod tests {
     }
 
     #[test]
-    fn test_notification_events() {
+    fn notification_events() {
         let id = Id::random();
         let session = serde_cbor::value::from_value(
             Value::Map([
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn test_notifications_accept_events() {
+    fn accepts_events() {
         for event in ["cd", "cl"] {
             for body in [None, Some(Value::Null)] {
                 let mut wire = [

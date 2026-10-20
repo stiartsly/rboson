@@ -1,40 +1,55 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
-use crate::{Id, utils};
-use crate::messaging::message::{Message, Content};
 
+use crate::messaging::message::{Content, Message, MessageType};
+use crate::{utils, Id};
+
+/// Message envelope as it appears on the wire.
+///
+/// The local-only fields (`received_at`, `sent_at`, `payload_bytes`, `content`)
+/// are filled by the transport layer after decoding and are never serialized.
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PhotonMessage {
     #[serde(rename = "v")]
     pub(crate) version: u8,
+
     #[serde(rename = "id")]
     pub(crate) id: Id,
+
     #[serde(rename = "r")]
     pub(crate) recipient: Id,
+
     #[serde(rename = "y")]
     pub(crate) message_type: u8,
+
     #[serde(
         rename = "f",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub(crate) from: Option<Id>,
+
     #[serde(
         rename = "c",
         default,
         skip_serializing_if = "utils::is_default"
     )]
     pub(crate) created_at: u64,
+
     #[serde(rename = "p")]
     pub(crate) payload: Value,
 
     #[serde(skip)]
     pub(crate) received_at: Option<SystemTime>,
+
     #[serde(skip)]
     pub(crate) sent_at: Option<SystemTime>,
+
     #[serde(skip)]
     pub(crate) payload_bytes: Vec<u8>,
+
     #[serde(skip)]
     pub(crate) content: Option<Content>,
 }
@@ -86,8 +101,9 @@ impl Message for PhotonMessage {
         &self.recipient
     }
 
-    fn message_type(&self) -> crate::messaging::message::MessageType {
-        crate::messaging::message::MessageType::ContentMessage
+    fn message_type(&self) -> MessageType {
+        // Only content messages are surfaced through the public listener API.
+        MessageType::ContentMessage
     }
 
     fn from(&self) -> Option<&Id> {
@@ -95,7 +111,7 @@ impl Message for PhotonMessage {
     }
 
     fn created_at(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(self.created_at.max(0) as u64)
+        UNIX_EPOCH + Duration::from_millis(self.created_at)
     }
 
     fn received_at(&self) -> Option<SystemTime> {

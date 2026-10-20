@@ -1,23 +1,19 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::Arc,
-};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::{
-    Id,
-    errors::ArgumentError,
-    Result,
-    cryptobox,
-    Identity,
-    CryptoIdentity,
-    core::CryptoContext,
-};
+use crate::core::CryptoContext;
+use crate::errors::ArgumentError;
+use crate::{CryptoIdentity, Id, Identity, Result};
 
+/// Distinguishes one-to-one sessions from channel sessions, which keep a
+/// separate crypto context per sending member.
 enum ContextKind {
     User,
     Channel(HashMap<Id, CryptoContext>),
 }
 
+/// Session key material and cached crypto contexts for a single contact.
 pub(crate) struct SessionContext {
     contact_id: Id,
     user_identity: Arc<CryptoIdentity>,
@@ -29,10 +25,11 @@ pub(crate) struct SessionContext {
 }
 
 impl SessionContext {
-    pub(crate) fn for_user(
+    fn new(
         contact_id: Id,
         user_identity: Arc<CryptoIdentity>,
         session_identity: Arc<CryptoIdentity>,
+        kind: ContextKind,
     ) -> Self {
         Self {
             contact_id,
@@ -40,8 +37,16 @@ impl SessionContext {
             session_identity,
             rx_crypto_context: None,
             tx_crypto_context: None,
-            kind: ContextKind::User,
+            kind,
         }
+    }
+
+    pub(crate) fn for_user(
+        contact_id: Id,
+        user_identity: Arc<CryptoIdentity>,
+        session_identity: Arc<CryptoIdentity>,
+    ) -> Self {
+        Self::new(contact_id, user_identity, session_identity, ContextKind::User)
     }
 
     pub(crate) fn for_channel(
@@ -49,14 +54,12 @@ impl SessionContext {
         user_identity: Arc<CryptoIdentity>,
         session_identity: Arc<CryptoIdentity>,
     ) -> Self {
-        Self {
+        Self::new(
             contact_id,
             user_identity,
             session_identity,
-            rx_crypto_context: None,
-            tx_crypto_context: None,
-            kind: ContextKind::Channel(HashMap::new()),
-        }
+            ContextKind::Channel(HashMap::new()),
+        )
     }
 
     pub(crate) fn session_id(&self) -> &Id {
@@ -87,7 +90,7 @@ impl SessionContext {
     pub(crate) fn tx_crypto_context(&mut self) -> Result<&mut CryptoContext> {
         match self.tx_crypto_context {
             Some(ref mut context) => Ok(context),
-            _ => {
+            None => {
                 let context = self
                     .user_identity
                     .create_crypto_context(self.session_identity.id())?;
@@ -99,13 +102,14 @@ impl SessionContext {
     pub(crate) fn rx_crypto_context(&mut self) -> Result<&mut CryptoContext> {
         match self.rx_crypto_context {
             Some(ref mut context) => Ok(context),
-            _ => {
+            None => {
                 let context = self.create_crypto_context(&self.contact_id)?;
                 Ok(self.rx_crypto_context.insert(context))
             }
         }
     }
 
+    /// Returns the receive context for `sender`, caching per member for channels.
     pub(crate) fn rx_crypto_context_for(&mut self, sender: &Id) -> Result<&mut CryptoContext> {
         if sender == &self.contact_id {
             return self.rx_crypto_context();
@@ -113,7 +117,7 @@ impl SessionContext {
 
         match &mut self.kind {
             ContextKind::User => Err(ArgumentError::new(
-                "Invalid sender, the sender should be the contact",
+                "Invalid sender: expected the session contact",
             )),
             ContextKind::Channel(contexts) => match contexts.entry(*sender) {
                 Entry::Occupied(entry) => Ok(entry.into_mut()),

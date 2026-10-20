@@ -54,11 +54,7 @@ pub use message::{
     MessageType, CONTENT_DISPOSITION_HEADER,
 };
 
-pub(crate) use {
-    internal::{
-        client_connection_listener::ClientConnectionListener
-    },
-};
+pub(crate) use internal::ClientConnectionListener;
 
 #[cfg(test)]
 mod unitests {

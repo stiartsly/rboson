@@ -13,7 +13,7 @@ fn context(for_channel: bool, contact_id: Id) -> SessionContext {
 }
 
 #[test]
-fn test_session_context_signing() {
+fn signs_data() {
     for channel in [false, true] {
         let user = Arc::new(CryptoIdentity::new());
         let session = Arc::new(CryptoIdentity::new());
@@ -50,7 +50,7 @@ fn test_session_context_signing() {
 }
 
 #[test]
-fn test_session_context_encryption1() {
+fn encrypts_channel_data() {
     for channel in [false, true] {
         let peer = CryptoIdentity::new();
         let context = context(channel, *peer.id());
@@ -80,7 +80,7 @@ fn test_session_context_encryption1() {
 }
 
 #[test]
-fn test_session_context_encryption_for_user() {
+fn encrypts_user_data() {
     let peer = CryptoIdentity::new();
     let context = context(false, *peer.id());
     let mut session_ctxt = context.create_crypto_context(peer.id()).unwrap();
@@ -108,7 +108,7 @@ fn test_session_context_encryption_for_user() {
 }
 
 #[test]
-fn transmit_context_is_lazy_cached_and_preserves_nonce_state() {
+fn caches_transmit_context() {
     for channel in [false, true] {
         let peer = CryptoIdentity::new();
         let mut context = context(channel, *peer.id());
@@ -137,7 +137,7 @@ fn transmit_context_is_lazy_cached_and_preserves_nonce_state() {
 }
 
 #[test]
-fn receive_context_is_lazy_and_shared_with_contact_lookup() {
+fn caches_receive_context() {
     for channel in [false, true] {
         let contact = CryptoIdentity::new();
         let mut context = context(channel, *contact.id());
@@ -160,7 +160,7 @@ fn receive_context_is_lazy_and_shared_with_contact_lookup() {
 }
 
 #[test]
-fn user_context_rejects_other_senders_before_and_after_caching() {
+fn rejects_other_senders() {
     let contact = CryptoIdentity::new();
     let other = CryptoIdentity::new();
     let mut context = context(false, *contact.id());
@@ -174,7 +174,7 @@ fn user_context_rejects_other_senders_before_and_after_caching() {
 }
 
 #[test]
-fn channel_context_caches_independent_member_contexts() {
+fn caches_channel_contexts() {
     let contact = CryptoIdentity::new();
     let members = [CryptoIdentity::new(), CryptoIdentity::new()];
     let mut context = context(true, *contact.id());

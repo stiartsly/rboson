@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Topic {
     UserInbox,
     UserOutbox,
@@ -6,7 +7,14 @@ pub(crate) enum Topic {
 }
 
 impl Topic {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::UserInbox,
+        Self::UserOutbox,
+        Self::DeviceInbox,
+        Self::DeviceOutbox,
+    ];
+
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::UserInbox => "u/i",
             Self::UserOutbox => "u/o",
@@ -14,16 +22,23 @@ impl Topic {
             Self::DeviceOutbox => "d/o",
         }
     }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|topic| topic.as_str() == value)
+    }
 }
 
-impl From<&'static str> for Topic {
-    fn from(value: &'static str) -> Self {
-        match value {
-            "u/i" => Topic::UserInbox,
-            "u/o" => Topic::UserOutbox,
-            "d/i" => Topic::DeviceInbox,
-            "d/o" => Topic::DeviceOutbox,
-            _ => panic!("Invalid topic name: {}", value),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn topic_names_round_trip() {
+        for topic in Topic::ALL {
+            assert_eq!(Topic::parse(topic.as_str()), Some(topic));
         }
+        assert_eq!(Topic::parse("unknown"), None);
     }
 }

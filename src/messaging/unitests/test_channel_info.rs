@@ -12,7 +12,7 @@ mod tests {
     use serde_cbor::Value;
 
     #[test]
-    fn channel_info_round_trips_numeric_permission_and_role() {
+    fn permission_role_roundtrip() {
         let info = ChannelInfo::new(
             Id::default(),
             Id::default(),
@@ -51,7 +51,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_info_defaults_optional_fields_and_requires_identity_and_permission() {
+    fn optional_fields_defaults() {
         let required = [
             (Value::Text("id".into()), Value::Bytes(Id::random().as_bytes().to_vec())),
             (Value::Text("o".into()), Value::Bytes(Id::random().as_bytes().to_vec())),
@@ -65,7 +65,7 @@ mod tests {
         assert_eq!(info.notice(), None);
         assert!(!info.announce());
         assert_eq!(info.created_at(), std::time::UNIX_EPOCH);
-        assert_eq!(info.update_at(), std::time::UNIX_EPOCH);
+        assert_eq!(info.updated_at(), std::time::UNIX_EPOCH);
         assert!(info.members().is_empty());
 
         for field in ["id", "o", "sid", "p"] {
@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_info_preserves_metadata_and_omits_empty_optional_fields() {
+    fn metadata_serialization() {
         let channel_id = Id::random();
         let owner_id = Id::random();
         let session_id = Id::random();
@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(decoded.notice(), Some("notice"));
         assert!(decoded.announce());
         assert_eq!(decoded.created_at(), std::time::UNIX_EPOCH + std::time::Duration::from_millis(10));
-        assert_eq!(decoded.update_at(), std::time::UNIX_EPOCH + std::time::Duration::from_millis(11));
+        assert_eq!(decoded.updated_at(), std::time::UNIX_EPOCH + std::time::Duration::from_millis(11));
         assert_eq!(decoded.members(), info.members());
         assert_eq!(decoded, info);
         use std::hash::{Hash, Hasher};

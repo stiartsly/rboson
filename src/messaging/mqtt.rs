@@ -24,7 +24,7 @@ use crate::messaging::{
     errors::{AuthenticationError, EncodingError},
 };
 
-use super::internal::{PhotonMessage, topic::Topic};
+use super::internal::{PhotonMessage, Topic};
 
 /// The MQTT client handle, shared with the message builders on other threads.
 pub(crate) type Client = AsyncClient;
@@ -196,13 +196,7 @@ pub(crate) async fn publish_outbox(client: &AsyncClient, payload: Vec<u8>, what:
 
 /// Maps a broker topic name onto one of the topics we subscribe to.
 fn parse_topic(name: &str) -> Option<Topic> {
-    [
-        Topic::UserInbox,
-        Topic::UserOutbox,
-        Topic::DeviceInbox,
-    ]
-    .into_iter()
-    .find(|topic| topic.as_str() == name)
+    Topic::parse(name)
 }
 
 // ---------------------------------------------------------------------------

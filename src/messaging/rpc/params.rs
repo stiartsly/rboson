@@ -3,7 +3,6 @@ use crate::Id;
 use crate::messaging::{
     channel,
     invite_ticket::InviteTicket,
-    internal::contacts_update::ContactsUpdate,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -142,5 +141,4 @@ pub(crate) enum Parameters {
     BanChannelMembers(Vec<Id>),
     UnbanChannelMembers(Vec<Id>),
     RemoveChannelMembers(Vec<Id>),
-    ContactsUpdate(ContactsUpdate),
 }

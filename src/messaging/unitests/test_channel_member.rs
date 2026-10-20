@@ -4,7 +4,7 @@ mod tests {
     use serde_cbor::Value;
 
     #[test]
-    fn channel_member_round_trips_roles() {
+    fn roles_roundtrip() {
         for role in [Role::Owner, Role::Moderator, Role::Member, Role::Banned] {
             let member = ChannelMember::new(Id::random(), role, 12);
             let bytes = serde_cbor::to_vec(&member).unwrap();
@@ -25,7 +25,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_member_rejects_invalid_roles_and_timestamps() {
+    fn invalid_values() {
         for (role, joined) in [("Unknown", 12), ("Owner", -1)] {
             let wire = Value::Map([
                 (Value::Text("id".into()), Value::Bytes(Id::default().as_bytes().to_vec())),

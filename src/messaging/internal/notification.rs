@@ -1,22 +1,18 @@
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+
+use crate::messaging::errors::EncodingError;
+use crate::messaging::SessionInfo;
 use crate::{
-    Id,
     errors::{Error, Result},
-};
-use crate::messaging::{
-    errors::EncodingError,
-    SessionInfo,
-};
-use super::{
-    ChannelInfo,
-    ChannelMember,
-    ChannelMembersRole,
-    ContactSync
+    Id,
 };
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use super::channel::{ChannelInfo, ChannelMember, ChannelMembersRole};
+use super::contact::ContactSync;
+
+/// Notification event tag used on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
 pub(crate) enum Event {
     #[serde(rename = "sn")]
@@ -52,7 +48,7 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::SessionNew => "sn",
             Self::ContactSync => "cs",
@@ -93,11 +89,15 @@ impl TryFrom<i32> for Event {
             31 => Ok(Self::ChannelMembersRemove),
             32 => Ok(Self::ChannelMemberJoin),
             33 => Ok(Self::ChannelMemberLeave),
-            _ => Err(EncodingError::new(format!("Invalid notification event: {value}")).into()),
+            _ => Err(EncodingError::new(format!(
+                "Invalid notification event: {value}"
+            ))
+            .into()),
         }
     }
 }
 
+/// Payload carried by a [`Notification`].
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "e", content = "b")]
 pub(crate) enum Body {
@@ -116,7 +116,9 @@ pub(crate) enum Body {
     #[serde(rename = "cot")]
     ChannelOwnershipTransfer(Id),
     #[serde(rename = "csr")]
-    ChannelSessionKeyRotate(#[serde(with = "serde_with::As::<serde_with::Bytes>")] Vec<u8>),
+    ChannelSessionKeyRotate(
+        #[serde(with = "serde_with::As::<serde_with::Bytes>")] Vec<u8>,
+    ),
     #[serde(rename = "ciu")]
     ChannelInfoUpdate(BTreeMap<serde_cbor::Value, serde_cbor::Value>),
     #[serde(rename = "cru")]
@@ -155,6 +157,7 @@ impl Body {
     }
 }
 
+/// A home-peer notification envelope.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Notification {
     #[serde(rename = "id")]

@@ -1,11 +1,12 @@
-use crate::Id;
 use crate::messaging::{
     channel::{Channel, ChannelEditor, Permission},
-    ChannelMember,
     contact::{Contact, ContactOps, ContactType},
-    contact_editor::ContactEditor
+    contact_editor::ContactEditor,
+    ChannelMember,
 };
+use crate::Id;
 
+/// Channel implementation backed by a local contact and its membership list.
 #[derive(Clone)]
 pub(crate) struct PhotonChannel {
     pub(crate) contact: Contact,
@@ -17,7 +18,8 @@ pub(crate) struct PhotonChannel {
     pub(crate) members: Vec<PhotonChannelMember>,
 }
 
-pub(crate) use super::channel_member::ChannelMember as PhotonChannelMember;
+/// Alias kept for call sites that distinguish wire members from public ones.
+pub(crate) use super::ChannelMember as PhotonChannelMember;
 
 impl From<&PhotonChannelMember> for ChannelMember {
     fn from(member: &PhotonChannelMember) -> Self {
@@ -26,37 +28,89 @@ impl From<&PhotonChannelMember> for ChannelMember {
 }
 
 impl ContactOps for PhotonChannel {
-    fn id(&self) -> &Id { self.contact.id() }
-    fn contact_type(&self) -> ContactType { self.contact.contact_type() }
-    fn name(&self) -> Option<&str> { self.contact.name() }
-    fn remark(&self) -> Option<&str> { self.contact.remark() }
-    fn tags(&self) -> Option<&str> { self.contact.tags() }
-    fn is_muted(&self) -> bool { self.contact.is_muted() }
-    fn is_blocked(&self) -> bool { self.contact.is_blocked() }
-    fn created_at(&self) -> i64 { self.contact.created_at() }
-    fn updated_at(&self) -> i64 { self.contact.updated_at() }
-    fn revision(&self) -> i32 { self.contact.revision() }
-    fn edit(&self) -> ContactEditor { self.contact.edit() }
+    fn id(&self) -> &Id {
+        self.contact.id()
+    }
+
+    fn contact_type(&self) -> ContactType {
+        self.contact.contact_type()
+    }
+
+    fn name(&self) -> Option<&str> {
+        self.contact.name()
+    }
+
+    fn remark(&self) -> Option<&str> {
+        self.contact.remark()
+    }
+
+    fn tags(&self) -> Option<&str> {
+        self.contact.tags()
+    }
+
+    fn is_muted(&self) -> bool {
+        self.contact.is_muted()
+    }
+
+    fn is_blocked(&self) -> bool {
+        self.contact.is_blocked()
+    }
+
+    fn created_at(&self) -> i64 {
+        self.contact.created_at()
+    }
+
+    fn updated_at(&self) -> i64 {
+        self.contact.updated_at()
+    }
+
+    fn revision(&self) -> i32 {
+        self.contact.revision()
+    }
+
+    fn edit(&self) -> ContactEditor {
+        self.contact.edit()
+    }
 }
 
 impl Channel for PhotonChannel {
-    fn permission(&self) -> Permission { self.permission }
-    fn notice(&self) -> Option<&str> { self.notice.as_deref() }
-    fn is_announced(&self) -> bool { self.announced }
-    fn size(&self) -> usize { self.members.len() }
-    fn banned(&self) -> usize { self.members.iter().filter(|member| member.is_banned()).count() }
+    fn permission(&self) -> Permission {
+        self.permission
+    }
+
+    fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    fn is_announced(&self) -> bool {
+        self.announced
+    }
+
+    fn size(&self) -> usize {
+        self.members.len()
+    }
+
+    fn banned(&self) -> usize {
+        self.members.iter().filter(|member| member.is_banned()).count()
+    }
+
     fn members(&self) -> Vec<ChannelMember> {
         self.members.iter().map(ChannelMember::from).collect()
     }
+
     fn member(&self, member_id: &Id) -> Option<ChannelMember> {
-        self.members.iter().find(|member| member.id() == member_id)
+        self.members
+            .iter()
+            .find(|member| member.id() == member_id)
             .map(ChannelMember::from)
     }
+
     fn edit_channel(&self) -> Box<dyn ChannelEditor> {
         Box::new(PhotonChannelEditor(self.clone()))
     }
 }
 
+/// Immutable update builder for [`PhotonChannel`].
 struct PhotonChannelEditor(PhotonChannel);
 
 impl ChannelEditor for PhotonChannelEditor {
@@ -64,17 +118,23 @@ impl ChannelEditor for PhotonChannelEditor {
         self.0.permission = permission;
         self
     }
+
     fn name(mut self: Box<Self>, name: String) -> Box<dyn ChannelEditor> {
         self.0.contact.set_name(Some(name));
         self
     }
+
     fn notice(mut self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditor> {
         self.0.notice = notice;
         self
     }
+
     fn announced(mut self: Box<Self>, announced: bool) -> Box<dyn ChannelEditor> {
         self.0.announced = announced;
         self
     }
-    fn build(self: Box<Self>) -> Box<dyn Channel> { Box::new(self.0) }
+
+    fn build(self: Box<Self>) -> Box<dyn Channel> {
+        Box::new(self.0)
+    }
 }

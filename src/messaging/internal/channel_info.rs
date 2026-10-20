@@ -1,15 +1,13 @@
 use std::time::{Duration, SystemTime};
-use serde::{
-    de::Error as DeError,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize};
 
-use crate::{Id, utils};
-use crate::messaging::{
-    channel::Permission,
-};
+use crate::messaging::channel::Permission;
+use crate::messaging::internal::codec;
+use crate::{utils, Id};
+
 use super::ChannelMember;
 
+/// Channel metadata and membership as sent by the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct ChannelInfo {
     #[serde(rename = "id")]
@@ -24,13 +22,13 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "serialize_session_key",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "codec::optional_bytes::serialize",
+        deserialize_with = "codec::optional_bytes::deserialize",
         skip_serializing_if = "is_bytes_none_or_empty"
     )]
     session_key: Option<Vec<u8>>,
 
-    #[serde(rename = "p", with = "permission")]
+    #[serde(rename = "p", with = "codec::permission")]
     permission: Permission,
 
     #[serde(
@@ -43,7 +41,7 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "nt",
         default,
-        skip_serializing_if = "is_none_or_empty"
+        skip_serializing_if = "codec::is_none_or_empty"
     )]
     notice: Option<String>,
 
@@ -58,7 +56,7 @@ pub(crate) struct ChannelInfo {
     created_at: u64,
 
     #[serde(rename = "u", default)]
-    update_at: u64,
+    updated_at: u64,
 
     #[serde(
         rename = "m",
@@ -69,6 +67,8 @@ pub(crate) struct ChannelInfo {
 }
 
 impl ChannelInfo {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         channel_id: Id,
         owner_id: Id,
@@ -79,7 +79,7 @@ impl ChannelInfo {
         notice: Option<String>,
         announce: bool,
         created_at: u64,
-        update_at: u64,
+        updated_at: u64,
         members: Vec<ChannelMember>,
     ) -> Self {
         Self {
@@ -92,7 +92,7 @@ impl ChannelInfo {
             notice,
             announce,
             created_at,
-            update_at,
+            updated_at,
             members,
         }
     }
@@ -133,8 +133,8 @@ impl ChannelInfo {
         SystemTime::UNIX_EPOCH + Duration::from_millis(self.created_at)
     }
 
-    pub(crate) fn update_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(self.update_at)
+    pub(crate) fn updated_at(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(self.updated_at)
     }
 
     pub(crate) fn members(&self) -> &[ChannelMember] {
@@ -142,45 +142,8 @@ impl ChannelInfo {
     }
 }
 
-fn is_none_or_empty(value: &Option<String>) -> bool {
-    value.as_ref().map_or(true, String::is_empty)
-}
-
 fn is_bytes_none_or_empty(value: &Option<Vec<u8>>) -> bool {
     value.as_ref().map_or(true, Vec::is_empty)
-}
-
-fn serialize_session_key<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match value {
-        Some(value) if serializer.is_human_readable() => utils::serialize_bytes(value, serializer),
-        Some(value) => serializer.serialize_bytes(value),
-        None => serializer.serialize_none(),
-    }
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
-}
-
-mod permission {
-    use super::*;
-
-    pub(super) fn serialize<S>(value: &Permission, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_i32(*value as i32)
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Permission, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Permission::try_from(i32::deserialize(deserializer)?).map_err(D::Error::custom)
-    }
 }
 
 #[cfg(test)]

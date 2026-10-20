@@ -6,7 +6,7 @@ mod tests {
     use serde_cbor::Value;
 
     #[test]
-    fn handshake_roundtrips_with_the_java_wire_format() {
+    fn java_wire_roundtrip() {
         for body in [
             HandshakeType::FriendRequest(Some("hello".into())),
             HandshakeType::FriendRequest(Some(String::new())),
@@ -36,7 +36,7 @@ mod tests {
     }
 
     #[test]
-    fn handshake_accepts_an_omitted_greeting() {
+    fn accepts_missing_greeting() {
         let wire = Value::Map([
             (Value::Text("t".into()), Value::Integer(42)),
             (Value::Text("y".into()), Value::Text("fr".into())),
@@ -46,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn handshake_rejects_invalid_headers_and_bodies() {
+    fn rejects_invalid_payload() {
         for (timestamp, tag, body) in [
             (-1, "fr", Some(Value::Text("hello".into()))),
             (42, "unknown", None),

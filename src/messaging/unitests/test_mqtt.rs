@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merged_session_handles_mqtt_and_requests_on_one_thread() {
+    async fn handles_requests() {
         task::LocalSet::new().run_until(async {
             tokio::time::timeout(Duration::from_secs(5), async {
                 let thread_id = thread::current().id();
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merged_session_preserves_state_and_reports_request_failures() {
+    async fn reports_request_failures() {
         let session = MqttSession::new(options(
             "mqtt://127.0.0.1:1883",
             *CryptoIdentity::new().id(),
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_and_stale_friend_requests_preserve_state() {
+    async fn preserves_duplicate_requests() {
         let recorder = ThreadRecorder::default();
         let session = MqttSession::new(options(
             "mqtt://127.0.0.1:1883",
@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn outbox_handshakes_sync_requests_and_acceptance_without_rotating_keys() {
+    async fn sends_outbox_handshakes() {
         let peer = CryptoIdentity::new();
         let friend = CryptoIdentity::new();
         let session = MqttSession::new(options(
@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unexpected_and_stale_acceptance_leave_state_unchanged() {
+    async fn preserves_stale_acceptance() {
         let peer = CryptoIdentity::new();
         let friend = CryptoIdentity::new();
         let session = MqttSession::new(options(
@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_failure_does_not_accept_or_create_friend_requests() {
+    async fn preserves_publish_failure() {
         let session = MqttSession::new(options(
             "mqtt://127.0.0.1:1883", *CryptoIdentity::new().id(), ThreadRecorder::default(),
         )).unwrap();
@@ -472,7 +472,7 @@ mod protocol_tests {
     }
 
     #[test]
-    fn origin_timestamps_are_unique_and_packet_limit_includes_mqtt_headers() {
+    fn validates_origin_timestamps() {
         let clock = Mutex::new(0);
         let first = MqttSession::origin_timestamp(&clock).unwrap();
         let second = MqttSession::origin_timestamp(&clock).unwrap();
@@ -483,7 +483,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn home_peer_notifications_are_routed_and_untrusted_control_is_rejected() {
+    async fn routes_notifications() {
         let observed = Observed::default();
         let session = session(&observed);
         let peer = CryptoIdentity::new();
@@ -523,7 +523,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn rejected_subscription_does_not_mark_the_session_ready() {
+    async fn rejects_subscription() {
         task::LocalSet::new().run_until(async {
             tokio::time::timeout(Duration::from_secs(5), async {
                 let session = session(&Observed::default());
@@ -559,7 +559,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn encrypted_contact_sync_is_atomic_and_revision_checked() {
+    async fn syncs_contacts() {
         let observed = Observed::default();
         let session = session(&observed);
         let friend = *CryptoIdentity::new().id();
@@ -612,7 +612,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn synced_blocking_applies_to_live_builders_and_friend_acceptance() {
+    async fn applies_blocking() {
         let session = session(&Observed::default());
         let friend = *CryptoIdentity::new().id();
         let key = crate::signature::KeyPair::random();
@@ -628,7 +628,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn inbox_and_other_device_outbox_content_use_the_correct_keys() {
+    async fn uses_content_keys() {
         let observed = Observed::default();
         let session = session(&observed);
         let peer = CryptoIdentity::new();
@@ -663,7 +663,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn rpc_errors_cancellation_and_shutdown_clean_pending_calls() {
+    async fn cleans_rpc_calls() {
         let session = session(&Observed::default());
         let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("rpc", "localhost", 1883), 8);
         *session.mqtt.lock().unwrap() = Some(mqtt);
@@ -696,7 +696,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn rpc_timeout_is_bounded_and_removes_the_registration() {
+    async fn times_out_rpc() {
         let session = session(&Observed::default());
         let (mqtt, _eventloop) = AsyncClient::new(MqttOptions::new("timeout", "localhost", 1883), 8);
         *session.mqtt.lock().unwrap() = Some(mqtt);
@@ -748,7 +748,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn session_rpc_and_contact_sync_round_trip_through_device_inbox() {
+    async fn syncs_device_inbox() {
         task::LocalSet::new().run_until(async {
             tokio::time::timeout(Duration::from_secs(5), async {
                 let peer = CryptoIdentity::new();

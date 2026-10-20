@@ -30,7 +30,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn events_execute_in_order_and_return_session_errors() {
+    async fn orders_events() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let client = client(options());
             let friend = *CryptoIdentity::new().id();
@@ -78,7 +78,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn message_events_reject_invalid_input_without_stopping_verticle() {
+    async fn rejects_invalid_messages() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let client = client(options());
             let friend = *CryptoIdentity::new().id();
@@ -103,7 +103,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn startup_errors_are_returned_and_shutdown_finishes() {
+    async fn starts_and_stops() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let mut options = options();
             let mut builder = OptionsBuilder::new();
@@ -123,7 +123,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn public_client_sends_friend_request_and_message_through_mqtt() {
+    async fn sends_public_messages() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         async fn packet(stream: &mut tokio::net::TcpStream) -> (u8, Vec<u8>) {

@@ -21,7 +21,7 @@ mod tests {
     }
 
     #[test]
-    fn test_contact_try_from_data() {
+    fn parses_contact() {
         for kind in 0..=2 {
             let contact_data = contact_data(kind, 7);
             let contact = Contact::try_from(contact_data.clone()).unwrap();
@@ -46,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn test_contact_try_from_invalid_data_failure() {
+    fn rejects_invalid_contact() {
         let mut invalids = vec![contact_data(3, 0), contact_data(1, -1)];
         let mut negative_timestamp = contact_data(1, 0);
         negative_timestamp.created_at = -1;
@@ -62,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn test_contact_editor_preserves_original_contact() {
+    fn editor_preserves_contact() {
         let contact = Contact::try_from(contact_data(1, 0)).unwrap();
         let editor = Box::new(contact.edit()).remark(Some("updated".into()));
         let editor = Box::new(editor).tags(None);

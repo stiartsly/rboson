@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
 use crate::messaging::{
-    internal::codec,
     contact::{Contact, ContactOps, ContactType},
     errors::{AuthenticationError, EncodingError},
 };
@@ -22,8 +21,8 @@ pub(crate) struct ContactData {
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "codec::optional_bytes::serialize",
-        deserialize_with = "codec::optional_bytes::deserialize",
+        serialize_with = "crate::utils::codec::bytes_opt::serialize",
+        deserialize_with = "crate::utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     session_key: Option<Vec<u8>>,

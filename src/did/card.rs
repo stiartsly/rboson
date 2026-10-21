@@ -46,13 +46,13 @@ pub struct Card {
     #[serde(rename = "s", skip_serializing_if = "utils::is_default")]
     services: Option<Vec<Service>>,
 
-    #[serde(rename = "sat", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "sat", skip_serializing_if = "Option::is_none")]
     signed_at: Option<u64>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "crate::utils::serialize_bytes",
-        deserialize_with = "crate::utils::deserialize_bytes"
+        serialize_with = "crate::utils::codec::bytes::serialize",
+        deserialize_with = "crate::utils::codec::bytes::deserialize"
     )]
     signature: Vec<u8>,
 

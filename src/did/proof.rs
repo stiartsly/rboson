@@ -55,8 +55,8 @@ pub struct Proof {
 
     #[serde(
         rename = "proofValue",
-        serialize_with = "utils::serialize_bytes",
-        deserialize_with = "utils::deserialize_bytes"
+        serialize_with = "utils::codec::bytes::serialize",
+        deserialize_with = "utils::codec::bytes::deserialize"
     )]
     proof_value: Vec<u8>,
 }

@@ -25,13 +25,13 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "sat", skip_serializing_if = "Option::is_none")]
     signed_at: Option<u64>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::serialize_bytes",
-        deserialize_with = "utils::deserialize_bytes"
+        serialize_with = "utils::codec::bytes::serialize",
+        deserialize_with = "utils::codec::bytes::deserialize"
     )]
     signature: Vec<u8>,
 

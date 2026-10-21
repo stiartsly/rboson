@@ -12,18 +12,16 @@ use super::ChannelMember;
 pub(crate) struct ChannelInfo {
     #[serde(rename = "id")]
     channel_id: Id,
-
     #[serde(rename = "o")]
     owner_id: Id,
-
     #[serde(rename = "sid")]
     session_id: Id,
 
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "codec::optional_bytes::serialize",
-        deserialize_with = "codec::optional_bytes::deserialize",
+        serialize_with = "crate::utils::codec::bytes_opt::serialize",
+        deserialize_with = "crate::utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "is_bytes_none_or_empty"
     )]
     session_key: Option<Vec<u8>>,
@@ -41,7 +39,7 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "nt",
         default,
-        skip_serializing_if = "codec::is_none_or_empty"
+        skip_serializing_if = "is_none_or_empty"
     )]
     notice: Option<String>,
 
@@ -144,6 +142,10 @@ impl ChannelInfo {
 
 fn is_bytes_none_or_empty(value: &Option<Vec<u8>>) -> bool {
     value.as_ref().map_or(true, Vec::is_empty)
+}
+
+fn is_none_or_empty(value: &Option<String>) -> bool {
+    value.as_deref().map_or(true, str::is_empty)
 }
 
 #[cfg(test)]

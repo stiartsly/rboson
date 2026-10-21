@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    core::version,
+    dht::version,
     dht::msg::{
         AnnouncePeerRequest, ErrorBody, FindNodeRequest, FindNodeResponse, FindPeerRequest,
         FindPeerResponse, FindValueRequest, FindValueResponse, StoreValueRequest,
@@ -340,15 +340,15 @@ struct SerdeCborMessage {
     ver: i32,
 
     #[serde(rename = "q")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     req: Option<CborValue>,
 
     #[serde(rename = "r")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     rsp: Option<CborValue>,
 
     #[serde(rename = "e")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     err: Option<CborValue>,
 }
 
@@ -358,14 +358,14 @@ struct SerdeJsonMessage<'a> {
     type_: i32,
     #[serde(rename = "t")]
     txid: u32,
-    #[serde(rename = "v", serialize_with = "utils::serialize_ver")]
+    #[serde(rename = "v", serialize_with = "utils::codec::ver::serialize")]
     ver: i32,
 
-    #[serde(rename = "q", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
     req: Option<&'a Body>,
-    #[serde(rename = "r", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "r", skip_serializing_if = "Option::is_none")]
     rsp: Option<&'a Body>,
-    #[serde(rename = "e", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "e", skip_serializing_if = "Option::is_none")]
     err: Option<&'a Body>,
 }
 

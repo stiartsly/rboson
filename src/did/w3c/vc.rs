@@ -22,14 +22,14 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct VerifiableCredential {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: String,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "name")]
@@ -44,11 +44,11 @@ pub struct VerifiableCredential {
     issuer: Id,
 
     #[serde(rename = "validFrom")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     valid_from: Option<u64>,
 
     #[serde(rename = "validUntil")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     valid_until: Option<u64>,
 
     #[serde(rename = "credentialSubject")]

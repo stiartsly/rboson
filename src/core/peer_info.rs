@@ -14,7 +14,7 @@ use super::{
     signature::{KeyPair, PrivateKey},
     Id, Identity, Result,
 };
-use crate::utils;
+use crate::utils::codec;
 
 pub struct PeerBuilder {
     keypair: Option<KeyPair>,
@@ -391,59 +391,59 @@ impl fmt::Display for PeerInfo {
 struct SerdePeerInfo {
     #[serde(
         rename = "id",
-        serialize_with = "utils::serialize_id",
-        deserialize_with = "utils::deserialize_id"
+        serialize_with = "codec::id::serialize",
+        deserialize_with = "codec::id::deserialize"
     )]
     pk: Id,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "utils::deserialize_seq"
+        deserialize_with = "codec::seq::deserialize"
     )]
     seq: i32,
 
     #[serde(
         rename = "o",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::id_opt::serialize",
+        deserialize_with = "codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     nodeid: Option<Id>,
 
     #[serde(
         rename = "os",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::bytes_opt::serialize",
+        deserialize_with = "codec::bytes_opt::deserialize",
+        skip_serializing_if = "codec::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::serialize_bytes",
-        deserialize_with = "utils::deserialize_bytes"
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize"
     )]
     sig: Vec<u8>,
 
     #[serde(
         rename = "f",
         default,
-        skip_serializing_if = "utils::is_default"
+        skip_serializing_if = "codec::is_default"
     )]
     fingerprint: u64,
 
-    #[serde(rename = "e", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "e", skip_serializing_if = "codec::is_default")]
     endpoint: String,
 
     #[serde(
         rename = "ex",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::bytes_opt::serialize",
+        deserialize_with = "codec::bytes_opt::deserialize",
+        skip_serializing_if = "codec::is_default"
     )]
     extra: Option<Vec<u8>>,
 }

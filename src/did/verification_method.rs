@@ -2,11 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::{errors::ArgumentError, utils, Id, Result};
+use crate::{
+    errors::ArgumentError, Result,
+    utils,
+    Id
+};
+use super::{did_constants, DIDUrl};
 
-use crate::did::{did_constants, DIDUrl};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VerificationMethodType {
     Ed25519VerificationKey2020,
 }
@@ -21,7 +25,8 @@ impl fmt::Display for VerificationMethodType {
     }
 }
 
-#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq)]
 pub enum VerificationMethod {
     Reference(Reference),
     Entity(Entity),
@@ -172,9 +177,9 @@ pub struct Entity {
 
     #[serde(
         rename = "controller",
-        serialize_with = "crate::utils::serialize_id_opt",
-        deserialize_with = "crate::utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "crate::utils::codec::id_opt::serialize",
+        deserialize_with = "crate::utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     controller: Option<Id>,
 

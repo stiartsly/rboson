@@ -25,9 +25,10 @@ use crate::dht::{
     },
     token_manager::TokenManager,
     LookupOption, NodeOptions,
+    version,
 };
 use crate::{
-    core::{logger, version},
+    core::logger,
     errors::{ArgumentError, IOError, Result, StateError},
     signature, BoxHandler, CryptoContext, CryptoIdentity, Id, Identity, Network, NodeInfo,
     PeerInfo, Value,

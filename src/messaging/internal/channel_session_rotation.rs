@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::internal::codec;
 use crate::Id;
 
 /// Session-key rotation request for a channel.
@@ -10,8 +9,8 @@ pub(crate) struct ChannelSessionKeyRotation {
     session_id: Id,
     #[serde(
         rename = "sk",
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize"
+        serialize_with = "crate::utils::codec::bytes::serialize",
+        deserialize_with = "crate::utils::codec::bytes::deserialize"
     )]
     session_key: Vec<u8>,
 }

@@ -8,10 +8,10 @@ use crate::{utils, Id};
 /// Channel creation request sent to the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct NewChannelInfo {
-    #[serde(rename = "sid", serialize_with = "utils::serialize_id")]
+    #[serde(rename = "sid", serialize_with = "utils::codec::id::serialize")]
     session_id: Id,
 
-    #[serde(rename = "sk", serialize_with = "utils::serialize_bytes")]
+    #[serde(rename = "sk", serialize_with = "utils::codec::bytes::serialize")]
     session_key: Vec<u8>,
 
     #[serde(rename = "p", with = "codec::permission")]

@@ -1,4 +1,4 @@
-use crate::core::version;
+use crate::dht::version;
 
 #[cfg(test)]
 mod tests {

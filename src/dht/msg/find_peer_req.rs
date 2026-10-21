@@ -50,8 +50,8 @@ impl LookupRequest for FindPeerRequest {
 struct SerdeFindPeerRequest {
     #[serde(
         rename = "t",
-        serialize_with = "utils::serialize_id",
-        deserialize_with = "utils::deserialize_id"
+        serialize_with = "utils::codec::id::serialize",
+        deserialize_with = "utils::codec::id::deserialize"
     )]
     target: Id,
 
@@ -60,9 +60,9 @@ struct SerdeFindPeerRequest {
 
     #[serde(
         rename = "cas",
-        default = "utils::default_expected_seq",
-        deserialize_with = "utils::deserialize_expected_seq",
-        skip_serializing_if = "utils::is_default_expected_seq"
+        default = "default_expected_seq",
+        deserialize_with = "utils::codec::expected_seq::deserialize",
+        skip_serializing_if = "is_default_expected_seq"
     )]
     expected_seq: i32,
 
@@ -83,6 +83,14 @@ where
         return Err(DeError::custom("count must be larger than or equal to 0"));
     }
     Ok(count)
+}
+
+fn default_expected_seq() -> i32 {
+    -1
+}
+
+fn is_default_expected_seq(value: &i32) -> bool {
+    *value == -1
 }
 
 impl Into<SerdeFindPeerRequest> for FindPeerRequest {

@@ -1,4 +1,3 @@
-pub(crate) mod version;
 pub(crate) mod crypto_context;
 
 pub mod logger;
@@ -34,7 +33,6 @@ mod unitests {
     mod test_node_info;
     mod test_peer_info;
     mod test_value;
-    mod test_version;
 }
 
 #[macro_export]

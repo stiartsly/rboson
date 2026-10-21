@@ -10,7 +10,7 @@ use super::{
     signature::{KeyPair, PrivateKey},
     Id, Result,
 };
-use crate::utils;
+use crate::utils::codec;
 
 #[derive(Clone)]
 pub struct ImmutableBuilder<'a> {
@@ -367,47 +367,47 @@ struct SerdeValue {
     #[serde(
         rename = "k",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::id_opt::serialize",
+        deserialize_with = "codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     pk: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::id_opt::serialize",
+        deserialize_with = "codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     recipient: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::serialize_nonce_opt",
-        deserialize_with = "utils::deserialize_nonce_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::nonce_opt::serialize",
+        deserialize_with = "codec::nonce_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     nonce: Option<Nonce>,
 
     #[serde(
         rename = "s",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "codec::bytes_opt::serialize",
+        deserialize_with = "codec::bytes_opt::deserialize",
+        skip_serializing_if = "codec::is_default"
     )]
     sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        serialize_with = "utils::serialize_bytes",
-        deserialize_with = "utils::deserialize_bytes"
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize"
     )]
     data: Vec<u8>,
 
-    #[serde(rename = "seq", deserialize_with = "utils::deserialize_seq")]
+    #[serde(rename = "seq", deserialize_with = "codec::seq::deserialize")]
     seq: i32,
 }
 

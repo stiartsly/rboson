@@ -10,9 +10,9 @@ pub(crate) mod utils {
     pub(crate) mod promise;
     pub(crate) mod timer_client;
     pub(crate) mod timer_manager;
-    pub(crate) mod utils;
+    pub(crate) mod codec;
 
-    pub(crate) use utils::*;
+    pub(crate) use codec::*;
 }
 
 #[allow(unused_imports)]

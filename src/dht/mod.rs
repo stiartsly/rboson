@@ -132,6 +132,7 @@ mod storage;
 mod suspicious_node_detector;
 mod token_manager;
 
+pub mod version;
 pub mod connection_status;
 pub mod connection_status_listener;
 pub mod errors;
@@ -231,6 +232,7 @@ mod unitests {
     mod test_node;
     mod test_rpccall;
     mod test_token_manager;
+    mod test_version;
 
     // storage
     mod test_storage;

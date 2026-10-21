@@ -22,7 +22,7 @@ use crate::did::{
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct DIDDocument {
     #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
@@ -49,7 +49,7 @@ pub struct DIDDocument {
     services: Option<Vec<Service>>,
 
     #[serde(rename = "proof")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     proof: Option<Proof>,
 }
 

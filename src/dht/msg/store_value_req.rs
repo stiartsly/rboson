@@ -43,16 +43,16 @@ struct SerdeStoreValueRequest {
 
     #[serde(
         rename = "cas",
-        default = "utils::default_expected_seq",
-        deserialize_with = "utils::deserialize_expected_seq",
-        skip_serializing_if = "utils::is_default_expected_seq"
+        default = "default_expected_seq",
+        deserialize_with = "utils::codec::expected_seq::deserialize",
+        skip_serializing_if = "is_default_expected_seq"
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "utils::deserialize_seq",
+        deserialize_with = "utils::codec::seq::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     seq: i32,
@@ -60,26 +60,26 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "k",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     public_key: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     recipient: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     nonce: Option<Vec<u8>>,
@@ -87,19 +87,27 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     signature: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        serialize_with = "utils::serialize_bytes",
-        deserialize_with = "utils::deserialize_bytes",
+        serialize_with = "utils::codec::bytes::serialize",
+        deserialize_with = "utils::codec::bytes::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     data: Vec<u8>,
+}
+
+fn default_expected_seq() -> i32 {
+    -1
+}
+
+fn is_default_expected_seq(value: &i32) -> bool {
+    *value == -1
 }
 
 impl Into<SerdeStoreValueRequest> for StoreValueRequest {

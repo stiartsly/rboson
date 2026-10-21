@@ -32,8 +32,8 @@ impl LookupRequest for FindNodeRequest {
 struct SerdeFindNodeRequest {
     #[serde(
         rename = "t",
-        serialize_with = "utils::serialize_id",
-        deserialize_with = "utils::deserialize_id"
+        serialize_with = "utils::codec::id::serialize",
+        deserialize_with = "utils::codec::id::deserialize"
     )]
     target: Id,
     #[serde(rename = "w")]

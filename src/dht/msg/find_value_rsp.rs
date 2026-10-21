@@ -55,26 +55,26 @@ struct SerdeFindValueResponse {
     #[serde(
         rename = "k",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     pk: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "utils::serialize_id_opt",
-        deserialize_with = "utils::deserialize_id_opt",
-        skip_serializing_if = "utils::is_default"
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
     )]
     rec: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     nonce: Option<Vec<u8>>,
@@ -88,8 +88,8 @@ struct SerdeFindValueResponse {
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     sig: Option<Vec<u8>>,
@@ -97,8 +97,8 @@ struct SerdeFindValueResponse {
     #[serde(
         rename = "v",
         default,
-        serialize_with = "utils::serialize_bytes_opt",
-        deserialize_with = "utils::deserialize_bytes_opt",
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "utils::is_default"
     )]
     value: Option<Vec<u8>>,

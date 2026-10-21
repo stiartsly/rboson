@@ -1,4 +1,4 @@
-use crate::{core::version, dht::rpc::TargetInfo, Id, NodeInfo};
+use crate::{dht::version, dht::rpc::TargetInfo, Id, NodeInfo};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},

@@ -1,5 +1,4 @@
 mod date;
-mod did_bytes;
 
 pub mod did_constants;
 pub mod didurl;

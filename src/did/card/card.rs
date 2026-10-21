@@ -10,7 +10,12 @@ use std::time::SystemTime;
 use crate::did::date;
 use crate::{
     errors::{ArgumentError, SignatureError},
-    signature, utils, CryptoIdentity, Error, Id, Result,
+    Result,
+    Error,
+    signature,
+    CryptoIdentity,
+    Id,
+    utils::codec,
 };
 
 use crate::did::{w3c::DIDDocument, CardBuilder, Credential};
@@ -28,17 +33,26 @@ fn is_none<T>(value: &&Option<T>) -> bool {
 struct CardSignData<'a> {
     #[serde(rename = "id")]
     id: &'a Id,
-    #[serde(rename = "c",
-        default, skip_serializing_if = "is_none")]
+
+    #[serde(
+        rename = "c",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     credentials: &'a Option<Vec<Credential>>,
-    #[serde(rename = "s",
-        default, skip_serializing_if = "is_none")]
+
+    #[serde(
+        rename = "s",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     services: &'a Option<Vec<Service>>,
+
     #[serde(
         rename = "sat",
         default,
+        serialize_with = "date::serialize_opt",
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt"
     )]
     signed_at: &'a Option<SystemTime>,
 }
@@ -48,26 +62,32 @@ pub struct Card {
     #[serde(rename = "id")]
     id: Id,
 
-    #[serde(rename = "c", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "c",
+        skip_serializing_if = "codec::is_default"
+    )]
     credentials: Option<Vec<Credential>>,
 
-    #[serde(rename = "s", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "s",
+        skip_serializing_if = "codec::is_default"
+    )]
     services: Option<Vec<Service>>,
 
     #[serde(
         rename = "sat",
-        skip_serializing_if = "Option::is_none",
         serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        deserialize_with = "date::deserialize_opt",
+        skip_serializing_if = "Option::is_none",
     )]
     signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "crate::did::did_bytes::serialize",
-        deserialize_with = "crate::did::did_bytes::deserialize",
-        skip_serializing_if = "Vec::is_empty"
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize",
+        skip_serializing_if = "codec::is_default"
     )]
     signature: Vec<u8>,
 

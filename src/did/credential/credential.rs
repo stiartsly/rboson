@@ -1,19 +1,26 @@
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt,
+    hash::Hash,
+    str::FromStr,
+    time::SystemTime,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
-use std::hash::Hash;
-use std::str::FromStr;
-use std::time::SystemTime;
 
-use crate::did::date;
-use crate::{
-    errors::{ArgumentError, BeforeValidPeriodError, ExpiredError, Result, SignatureError},
-    signature, utils, CryptoIdentity, Id,
+use crate::errors::{
+    ArgumentError,
+    BeforeValidPeriodError,
+    ExpiredError,
+    SignatureError,
+    Result};
+use crate::{signature, utils::codec, CryptoIdentity, Id};
+use crate::did::{
+    date,
+    w3c::VerifiableCredential as VC,
+    CredentialBuilder
 };
-
-use crate::did::{w3c::VerifiableCredential as VC, CredentialBuilder};
 
 #[derive(Debug, Clone, Eq, Hash, Serialize)]
 pub struct Credential {
@@ -21,15 +28,15 @@ pub struct Credential {
     id: String,
 
     #[serde(rename = "t",
-        default, skip_serializing_if = "utils::is_default")]
+        default, skip_serializing_if = "codec::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "n",
-        default, skip_serializing_if = "utils::is_default")]
+        default, skip_serializing_if = "codec::is_default")]
     name: Option<String>,
 
     #[serde(rename = "d",
-        default, skip_serializing_if = "utils::is_default")]
+        default, skip_serializing_if = "codec::is_default")]
     description: Option<String>,
 
     #[serde(rename = "i")]
@@ -67,13 +74,13 @@ pub struct Credential {
 
     #[serde(
         rename = "sig",
-        serialize_with = "crate::did::did_bytes::serialize",
-        deserialize_with = "crate::did::did_bytes::deserialize",
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize",
         skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,
 
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip)]
     vc: Option<VC>,
 }
 
@@ -309,8 +316,8 @@ struct CredentialData {
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "crate::did::did_bytes::serialize",
-        deserialize_with = "crate::did::did_bytes::deserialize"
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize"
     )]
     signature: Vec<u8>,
 }

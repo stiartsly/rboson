@@ -1,24 +1,26 @@
+use std::{fmt, str, time::SystemTime};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
-use std::time::SystemTime;
 
 use crate::did::date;
 use crate::{
     errors::{ArgumentError, Error, Result, SignatureError},
-    signature, utils, CryptoIdentity, Id,
+    signature, utils::codec, CryptoIdentity, Id,
 };
 
-use crate::did::{w3c::VerifiablePresentation as VP, Credential, VouchBuilder};
+use crate::did::{
+    w3c::VerifiablePresentation as VP,
+    Credential,
+    VouchBuilder
+};
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
     #[serde(rename = "id",
-        default, skip_serializing_if = "utils::is_default")]
+        default, skip_serializing_if = "codec::is_default")]
     id: Option<String>,
 
     #[serde(rename = "t",
-        default, skip_serializing_if = "utils::is_default")]
+        default, skip_serializing_if = "codec::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
@@ -39,8 +41,8 @@ pub struct Vouch {
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "crate::did::did_bytes::serialize",
-        deserialize_with = "crate::did::did_bytes::deserialize",
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize",
         skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,
@@ -209,7 +211,7 @@ impl TryFrom<&str> for Vouch {
     }
 }
 
-impl FromStr for Vouch {
+impl str::FromStr for Vouch {
     type Err = Error;
 
     fn from_str(data: &str) -> Result<Self> {

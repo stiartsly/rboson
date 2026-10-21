@@ -1,11 +1,20 @@
+use std::collections::HashMap;
 use indexmap::IndexMap;
 use serde_json::Map;
-use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
-
-use crate::did::{card::Service, BosonIdentityObjectBuilder, Card, Credential};
+use crate::{
+    errors::ArgumentError,
+    CryptoIdentity,
+    Identity,
+    Result
+};
+use crate::did::{
+    card::Service,
+    BosonIdentityObjectBuilder,
+    Card,
+    Credential
+};
 
 pub struct CardBuilder {
     identity: CryptoIdentity,

@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use std::time::SystemTime;
+use std::{
+    collections::HashMap,
+    time::SystemTime
+};
 use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 

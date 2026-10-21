@@ -3,5 +3,7 @@
 mod card;
 pub(crate) mod builder;
 
-pub use card::{Card, Service};
-pub use builder::CardBuilder;
+pub use {
+    card::{Card, Service},
+    builder::CardBuilder,
+};

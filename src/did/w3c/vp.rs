@@ -59,7 +59,7 @@ pub struct VerifiablePresentation {
     holder: Id,
 
     #[serde(rename = "verifiableCredential")]
-    #[serde(skip_serializing_if = "codec::is_default")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<VC>,
 
     #[serde(

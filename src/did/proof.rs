@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::SystemTime;
 
 use crate::did::date;
-use crate::{signature, Id};
+use crate::{signature, Id, utils::codec};
 
 use crate::did::{DIDUrl, VerificationMethod};
 
@@ -59,8 +59,8 @@ pub struct Proof {
 
     #[serde(
         rename = "proofValue",
-        serialize_with = "crate::did::did_bytes::serialize",
-        deserialize_with = "crate::did::did_bytes::deserialize"
+        serialize_with = "codec::bytes::serialize",
+        deserialize_with = "codec::bytes::deserialize"
     )]
     proof_value: Vec<u8>,
 }

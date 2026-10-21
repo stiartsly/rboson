@@ -6,6 +6,10 @@ use serde::{
     de::{self, Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use base64::{
+    engine::general_purpose::URL_SAFE_NO_PAD,
+    Engine as _
+};
 use crate::{
     core::cryptobox::Nonce,
     Id,
@@ -104,6 +108,37 @@ pub(crate) mod nonce_opt {
     }
 }
 
+pub(crate) mod bytes_opt {
+    use super::*;
+
+    pub(crate) fn serialize<S>(value: &Option<Vec<u8>>, se: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(value) => bytes::serialize(value, se),
+            _ => se.serialize_none(),
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if de.is_human_readable() {
+            Option::<String>::deserialize(de)?
+                .map(|v| {
+                    URL_SAFE_NO_PAD
+                        .decode(v.as_bytes())
+                        .map_err(D::Error::custom)
+                })
+                .transpose()
+        } else {
+            de.deserialize_option(OptionalBytesVisitor)
+        }
+    }
+}
+
 pub(crate) mod bytes {
     use super::*;
 
@@ -112,7 +147,7 @@ pub(crate) mod bytes {
         S: Serializer,
     {
         if se.is_human_readable() {
-            se.serialize_str(&format!("0x{}", hex::encode(value)))
+            se.serialize_str(&URL_SAFE_NO_PAD.encode(value))
         } else {
             se.serialize_bytes(value)
         }
@@ -123,54 +158,18 @@ pub(crate) mod bytes {
         D: Deserializer<'de>,
     {
         if de.is_human_readable() {
-            let s = String::deserialize(de)?;
-            if s.starts_with("0x") {
-                let hex_str = &s[2..];
-                let bytes = hex::decode(hex_str).map_err(Error::custom)?;
-                Ok(bytes)
-            } else {
-                Err(Error::custom("invalid hex string"))
-            }
+            let value = String::deserialize(de)?;
+            URL_SAFE_NO_PAD
+                .decode(value.as_bytes())
+                .map_err(D::Error::custom)
         } else {
-            de.deserialize_any(ByteVecVisitor)
+            de.deserialize_any(BytesVisitor)
         }
     }
 }
 
-pub(crate) mod bytes_opt {
-    use super::*;
-
-    pub(crate) fn serialize<S>(value: &Option<Vec<u8>>, se: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match value {
-            Some(value) => bytes::serialize(value, se),
-            None => se.serialize_none(),
-        }
-    }
-
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<Vec<u8>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        if de.is_human_readable() {
-            Option::<String>::deserialize(de)?
-                .map(|s| {
-                    let hex_str = s
-                        .strip_prefix("0x")
-                        .ok_or_else(|| Error::custom("invalid hex string"))?;
-                    hex::decode(hex_str).map_err(Error::custom)
-                })
-                .transpose()
-        } else {
-            de.deserialize_option(OptionalByteVecVisitor)
-        }
-    }
-}
-
-struct ByteVecVisitor;
-impl<'de> Visitor<'de> for ByteVecVisitor {
+struct BytesVisitor;
+impl<'de> Visitor<'de> for BytesVisitor {
     type Value = Vec<u8>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -199,8 +198,8 @@ impl<'de> Visitor<'de> for ByteVecVisitor {
     }
 }
 
-struct OptionalByteVecVisitor;
-impl<'de> Visitor<'de> for OptionalByteVecVisitor {
+struct OptionalBytesVisitor;
+impl<'de> Visitor<'de> for OptionalBytesVisitor {
     type Value = Option<Vec<u8>>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

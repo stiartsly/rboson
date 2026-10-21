@@ -278,7 +278,7 @@ mod tests {
     fn test_card_signature_covers_signed_timestamp() {
         let card = Card::builder(CryptoIdentity::new()).build().unwrap();
         let mut json: serde_json::Value = serde_json::from_str(&card.to_string()).unwrap();
-        json["sat"] = serde_json::Value::from(0);
+        json["sat"] = serde_json::Value::from("1970-01-01T00:00:00Z");
         let tampered = Card::try_from(serde_json::to_string(&json).unwrap().as_str()).unwrap();
         assert!(!tampered.is_genuine());
     }

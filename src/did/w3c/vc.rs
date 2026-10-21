@@ -1,60 +1,99 @@
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::{Hash, Hasher},
+    str::FromStr,
+    time::SystemTime,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::str::FromStr;
-use std::time::{Duration, SystemTime};
 
-use crate::{
-    as_secs,
-    errors::{ArgumentError, BeforeValidPeriodError, ExpiredError, SignatureError},
-    utils, CryptoIdentity, Error, Id, Result,
+use crate::errors::{
+    ArgumentError,
+    BeforeValidPeriodError,
+    ExpiredError,
+    SignatureError,
+    Result,
+    Error,
 };
-
+use crate::{utils::codec, CryptoIdentity, Id};
 use crate::did::{
+    date,
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
-    w3c::VerifiableCredentialBuilder,
-    Credential, DIDUrl, VerificationMethod,
+    w3c::VerifiableCredentialBuilder as VCBuilder,
+    Credential,
+    VerificationMethod,
+    DIDUrl
 };
 
-#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq)]
 pub struct VerifiableCredential {
-    #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "@context",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     contexts: Option<Vec<String>>,
 
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "type",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     types: Option<Vec<String>>,
 
-    #[serde(rename = "name")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "name",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     name: Option<String>,
 
-    #[serde(rename = "description")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "description",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     description: Option<String>,
 
-    #[serde(rename = "issuer")]
+    #[serde(
+        rename = "issuer",
+        serialize_with = "codec::id::serialize",
+        deserialize_with = "codec::id::deserialize"
+    )]
     issuer: Id,
 
-    #[serde(rename = "validFrom")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    valid_from: Option<u64>,
+    #[serde(
+        rename = "validFrom",
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "date::serialize_opt",
+        deserialize_with = "date::deserialize_opt"
+    )]
+    valid_from: Option<SystemTime>,
 
-    #[serde(rename = "validUntil")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    valid_until: Option<u64>,
+    #[serde(
+        rename = "validUntil",
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "date::serialize_opt",
+        deserialize_with = "date::deserialize_opt"
+    )]
+    valid_until: Option<SystemTime>,
 
     #[serde(rename = "credentialSubject")]
     subject: CredentialSubject,
 
-    #[serde(rename = "proof")]
+    #[serde(
+        rename = "proof",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     proof: Option<Proof>,
 }
 
@@ -88,8 +127,8 @@ impl VerifiableCredential {
             description,
             issuer,
             subject,
-            valid_from: valid_from.map(|v| as_secs!(v)),
-            valid_until: valid_until.map(|v| as_secs!(v)),
+            valid_from,
+            valid_until,
             proof: None,
         }
     }
@@ -99,7 +138,18 @@ impl VerifiableCredential {
         vc
     }
 
-    pub(crate) fn from_cred(credential: &Credential) -> Self {
+    pub fn from_credential(credential: &Credential) -> Self {
+        Self::from_cred(credential)
+    }
+
+    pub fn from_credential_with_type_contexts(
+        credential: &Credential,
+        type_contexts: Option<HashMap<&str, Vec<&str>>>,
+    ) -> Self {
+        Self::from_cred_with_type_contexts(credential, type_contexts)
+    }
+
+    pub fn from_cred(credential: &Credential) -> Self {
         Self::from_cred_with_type_contexts(credential, None)
     }
 
@@ -159,8 +209,8 @@ impl VerifiableCredential {
             name: credential.name().map(|v| v.to_string()),
             description: credential.description().map(|v| v.to_string()),
             issuer: credential.issuer().clone(),
-            valid_from: credential.valid_from().map(|v| as_secs!(v)),
-            valid_until: credential.valid_until().map(|v| as_secs!(v)),
+            valid_from: credential.valid_from(),
+            valid_until: credential.valid_until(),
             subject,
             proof: Some(proof),
         }
@@ -198,12 +248,10 @@ impl VerifiableCredential {
 
     pub fn valid_from(&self) -> Option<SystemTime> {
         self.valid_from
-            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn valid_until(&self) -> Option<SystemTime> {
         self.valid_until
-            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn subject(&self) -> &CredentialSubject {
@@ -223,11 +271,11 @@ impl VerifiableCredential {
             return true;
         }
 
-        let now = as_secs!(SystemTime::now());
-        if self.valid_from.map(|v| v > now).unwrap_or(false) {
+        let now = SystemTime::now();
+        if self.valid_from.is_some_and(|value| now < value) {
             return false;
         }
-        if self.valid_until.map(|v| v < now).unwrap_or(false) {
+        if self.valid_until.is_some_and(|value| now > value) {
             return false;
         }
         true
@@ -241,11 +289,11 @@ impl VerifiableCredential {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let now = as_secs!(SystemTime::now());
-        if self.valid_from.is_some() && self.valid_from.unwrap() > now {
+        let now = SystemTime::now();
+        if self.valid_from.is_some_and(|value| now < value) {
             return Err(BeforeValidPeriodError::new("VC is not yet valid"));
         }
-        if self.valid_until.is_some() && self.valid_until.unwrap() < now {
+        if self.valid_until.is_some_and(|value| now > value) {
             return Err(ExpiredError::new("VC has expired"));
         }
 
@@ -256,10 +304,14 @@ impl VerifiableCredential {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        self.to_unsigned_boson_credential().to_sign_data()
+        let unsigned = self.to_unsigned_boson_credential();
+        match self.proof.as_ref() {
+            Some(proof) => unsigned.stamp_signed_at(proof.created()).to_sign_data(),
+            None => unsigned.to_sign_data(),
+        }
     }
 
-    fn to_unsigned_boson_credential(&self) -> Credential {
+    pub(crate) fn to_unsigned_boson_credential(&self) -> Credential {
         let id = self
             .id
             .parse::<DIDUrl>()
@@ -290,16 +342,40 @@ impl VerifiableCredential {
         )
     }
 
+    pub fn to_credential(&self) -> Credential {
+        self.to_boson_credential()
+    }
+
     pub fn to_boson_credential(&self) -> Credential {
         Credential::signed(
             self.to_unsigned_boson_credential(),
-            self.proof.as_ref().map(|p| as_secs!(p.created())),
-            self.proof.as_ref().map(|p| p.proof_value().to_vec()),
+            self.proof.as_ref().map(|proof| proof.created()),
+            self.proof.as_ref().map(|proof| proof.proof_value().to_vec()),
         )
     }
 
-    pub fn builder(issuer: CryptoIdentity) -> VerifiableCredentialBuilder {
-        VerifiableCredentialBuilder::new(issuer)
+    pub fn parse(json: &str) -> Result<Self> {
+        Self::try_from(json)
+    }
+
+    pub fn parse_bytes(cbor: &[u8]) -> Result<Self> {
+        Self::try_from(cbor)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode VerifiableCredential: {error}")).into()
+        })
+    }
+
+    pub fn to_pretty_string(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode VerifiableCredential: {error}")).into()
+        })
+    }
+
+    pub fn builder(issuer: CryptoIdentity) -> VCBuilder {
+        VCBuilder::new(issuer)
     }
 }
 
@@ -395,7 +471,11 @@ impl PartialEq for VerifiableCredential {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CredentialSubject {
-    #[serde(rename = "id")]
+    #[serde(
+        rename = "id",
+        serialize_with = "codec::id::serialize",
+        deserialize_with = "codec::id::deserialize"
+    )]
     id: Id,
 
     claims: Map<String, Value>,
@@ -408,6 +488,10 @@ impl CredentialSubject {
 
     pub fn id(&self) -> &Id {
         &self.id
+    }
+
+    pub fn claims_map(&self) -> &Map<String, Value> {
+        &self.claims
     }
 
     pub fn claims<'a, T>(&'a self) -> HashMap<&'a str, T>

@@ -1,3 +1,6 @@
+mod date;
+mod did_bytes;
+
 pub mod did_constants;
 pub mod didurl;
 pub mod proof;
@@ -6,19 +9,20 @@ pub mod verification_method;
 pub mod w3c {
     mod diddoc;
     mod diddoc_builder;
+    mod format;
     mod vc;
     mod vc_builder;
     mod vp;
     mod vp_builder;
 
     pub use self::{
-        diddoc::DIDDocument, diddoc_builder::DIDDocumentBuilder, vc::VerifiableCredential,
-        vc_builder::VerifiableCredentialBuilder, vp::VerifiablePresentation,
-        vp_builder::VerifiablePresentationBuilder,
+        diddoc::DIDDocument, diddoc_builder::DIDDocumentBuilder, format::W3CDIDFormat,
+        vc::VerifiableCredential, vc_builder::VerifiableCredentialBuilder,
+        vp::VerifiablePresentation, vp_builder::VerifiablePresentationBuilder,
     };
 }
 
-pub(crate) mod boson_identity_object_builder;
+pub(crate) mod boson_identity_builder;
 pub mod cached_resolver;
 pub mod card;
 pub mod card_builder;
@@ -34,7 +38,7 @@ pub mod resolver;
 pub mod vouch;
 pub mod vouch_builder;
 
-pub(crate) use crate::did::boson_identity_object_builder::BosonIdentityObjectBuilder;
+pub(crate) use crate::did::boson_identity_builder::BosonIdentityObjectBuilder;
 
 pub use crate::did::{
     cached_resolver::CachedResolver,
@@ -48,7 +52,7 @@ pub use crate::did::{
     didurl::DIDUrl,
     filesystem_resolution_cache::FileSystemResolutionCache,
     proof::Proof,
-    registry::Registry,
+    registry::{PublishedCard, Registry, RegistryResolver},
     resolution_cache::ResolutionCache,
     resolution_errors::{RegistryError, ResolutionCacheError, ResolverError},
     resolver::{
@@ -58,11 +62,3 @@ pub use crate::did::{
     vouch::Vouch,
     vouch_builder::VouchBuilder,
 };
-
-#[cfg(test)]
-mod unitests {
-    mod test_didurl;
-    mod test_proof;
-    mod test_resolution_cache;
-    mod test_verification_method;
-}

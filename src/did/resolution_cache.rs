@@ -17,3 +17,7 @@ pub fn filesystem(
         expiration_secs,
     )?))
 }
+
+#[cfg(test)]
+#[path = "unitests/test_resolution_cache.rs"]
+mod test_resolution_cache;

@@ -1,14 +1,18 @@
 use std::fmt;
 use std::str::FromStr;
+
 use unicode_normalization::UnicodeNormalization;
 
+use crate::did::{DID_METHOD, DID_SCHEME};
 use crate::{
     errors::{MalformedError, StateError},
     Error, Id, Result,
 };
 
-use crate::did::{DID_METHOD, DID_SCHEME};
-
+/// A `did:boson:` URL, or a relative reference to one.
+///
+/// The component layout follows the Java `DIDURL` implementation:
+/// `did:<method>:<method-specific-id><path>?<query>#<fragment>`.
 #[derive(Debug, Clone, Eq, Hash)]
 pub struct DIDUrl {
     scheme: Option<String>,
@@ -21,39 +25,13 @@ pub struct DIDUrl {
 
 impl DIDUrl {
     pub fn new(id: &Id, path: Option<&str>, query: Option<&str>, fragment: Option<&str>) -> Self {
-        let query = query
-            .map(|v| {
-                let q = match v.starts_with("?") {
-                    true => &v[1..],
-                    false => v,
-                };
-                match q.is_empty() {
-                    true => None,
-                    false => Some(q),
-                }
-            })
-            .flatten();
-
-        let fragment = fragment
-            .map(|v| {
-                let f = match v.starts_with("#") {
-                    true => &v[1..],
-                    false => v,
-                };
-                match f.is_empty() {
-                    true => None,
-                    false => Some(f),
-                }
-            })
-            .unwrap_or_default();
-
         Self {
             scheme: Some(DID_SCHEME.to_string()),
             method: Some(DID_METHOD.to_string()),
-            id: Some(id.clone()),
-            path: path.map(|v| v.nfc().collect::<String>()),
-            query: query.map(|v| v.nfc().collect::<String>()),
-            fragment: fragment.map(|v| v.nfc().collect::<String>()),
+            id: Some(*id),
+            path: normalize_path(path),
+            query: normalize_delimiter(query, '?'),
+            fragment: normalize_delimiter(fragment, '#'),
         }
     }
 
@@ -61,90 +39,107 @@ impl DIDUrl {
         Self::new(id, None, None, None)
     }
 
-    // did:<method>:<method-specific-id><path>?<query>#<fragment>
+    /// Parses a DID URL or a relative reference such as `/path` or `#fragment`.
     pub fn parse(did_url: &str) -> Result<Self> {
-        let trimmed: &str = did_url.trim();
-        if trimmed.is_empty() {
-            return Err(StateError::new("DIDUrl cannot be empty"));
+        let spec = did_url.trim();
+        if spec.is_empty() {
+            return Ok(Self {
+                scheme: None,
+                method: None,
+                id: None,
+                path: None,
+                query: None,
+                fragment: None,
+            });
         }
 
-        let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
-        if parts.len() != 3 && parts.len() != 1 {
-            return Err(MalformedError::new(format!("Invalid DIDUrl format {}, refering to the specs: <did>:<method>:<method-specific-id><path>?<query>#<fragment>", trimmed)));
+        if spec.starts_with('/') || spec.starts_with('#') {
+            let mut url = Self {
+                scheme: None,
+                method: None,
+                id: None,
+                path: None,
+                query: None,
+                fragment: None,
+            };
+            url.parse_reference(spec)?;
+            return Ok(url);
         }
 
-        let scheme = if parts.len() == 3 {
-            if parts[0] != DID_SCHEME {
-                return Err(MalformedError::new(format!(
-                    "Invalid DIDUrl scheme: {}",
-                    parts[0]
-                )));
-            }
-            Some(DID_SCHEME)
-        } else {
-            None
+        let (scheme, rest) = split_component(spec, ':').ok_or_else(|| {
+            MalformedError::new(format!("Missing DIDURL scheme: {spec}"))
+        })?;
+        if !scheme.eq_ignore_ascii_case(DID_SCHEME) {
+            return Err(MalformedError::new(format!("Invalid DIDURL scheme: {scheme}")).into());
+        }
+
+        let (method, rest) = split_component(rest, ':').ok_or_else(|| {
+            MalformedError::new(format!("Missing DIDURL method: {spec}"))
+        })?;
+        if !method.eq_ignore_ascii_case(DID_METHOD) {
+            return Err(MalformedError::new(format!(
+                "Unsupported DIDURL method: {method}"
+            ))
+            .into());
+        }
+
+        let end = rest
+            .find(['/', '?', '#'])
+            .unwrap_or(rest.len());
+        let id_text = &rest[..end];
+        if id_text.is_empty() {
+            return Err(StateError::new("Missing DIDURL method specific id").into());
+        }
+        let id = id_text.parse::<Id>().map_err(|_| {
+            MalformedError::new(format!("Invalid DIDURL method specific id: {id_text}"))
+        })?;
+
+        let mut url = Self {
+            scheme: Some(DID_SCHEME.to_string()),
+            method: Some(DID_METHOD.to_string()),
+            id: Some(id),
+            path: None,
+            query: None,
+            fragment: None,
         };
-        let method = if parts.len() == 3 {
-            if parts[1] != DID_METHOD {
+        url.parse_reference(&rest[end..])?;
+        Ok(url)
+    }
+
+    fn parse_reference(&mut self, spec: &str) -> Result<()> {
+        let mut remainder = spec;
+
+        if let Some(index) = remainder.find('#') {
+            self.fragment = normalize_delimiter(Some(&remainder[index + 1..]), '#');
+            remainder = &remainder[..index];
+        }
+
+        if let Some(index) = remainder.find('?') {
+            self.query = normalize_delimiter(Some(&remainder[index + 1..]), '?');
+            remainder = &remainder[..index];
+        }
+
+        if !remainder.is_empty() {
+            if !remainder.starts_with('/') {
                 return Err(MalformedError::new(format!(
-                    "Unsupported DIDUrl method: {}",
-                    parts[1]
+                    "Invalid DIDURL path: {remainder}"
                 ))
                 .into());
             }
-            Some(DID_METHOD)
-        } else {
-            None
-        };
+            self.path = Some(remainder.nfc().collect());
+        }
 
-        let mut remainder = parts[parts.len() - 1];
-
-        // Find and remove fragment
-        let fragment = match remainder.find('#') {
-            Some(idx) => Some({
-                let frag = &remainder[idx + 1..];
-                remainder = &remainder[..idx];
-                frag.nfc().collect::<String>()
-            }),
-            None => None,
-        };
-
-        // Find and remove query
-        let query = match remainder.find('?') {
-            Some(idx) => Some({
-                let query = &remainder[idx + 1..];
-                remainder = &remainder[..idx];
-                query.nfc().collect::<String>()
-            }),
-            None => None,
-        };
-
-        let path = match remainder.find('/') {
-            Some(idx) => Some({
-                let path = &remainder[idx + 1..];
-                remainder = &remainder[..idx];
-                path.nfc().collect::<String>()
-            }),
-            None => None,
-        };
-
-        let id = remainder.parse::<Id>().map_err(|_| {
-            MalformedError::new(format!("Invalid DIDUrl method specific id: {}", remainder))
-        })?;
-
-        Ok(Self {
-            scheme: scheme.map(|s| s.to_string()),
-            method: method.map(|m| m.to_string()),
-            id: Some(id),
-            path,
-            query,
-            fragment,
-        })
+        Ok(())
     }
 
+    /// Parses `spec` and associates it with `id` when the spec has no id.
     pub fn parse_with_id(id: &Id, spec: &str) -> Result<Self> {
         let mut did_url = Self::parse(spec)?;
-        did_url.id = Some(id.clone());
+        if did_url.id.is_none() {
+            did_url.id = Some(*id);
+            did_url.scheme = Some(DID_SCHEME.to_string());
+            did_url.method = Some(DID_METHOD.to_string());
+        }
         Ok(did_url)
     }
 
@@ -152,12 +147,19 @@ impl DIDUrl {
         Self::parse(url)
     }
 
-    pub fn scheme(&self) -> &str {
-        self.scheme.as_ref().map_or(DID_SCHEME, |s| s.as_str())
+    /// Converts this DID URL to a generic [`url::Url`].
+    pub fn to_uri(&self) -> Result<url::Url> {
+        url::Url::parse(&self.to_string()).map_err(|error| {
+            crate::errors::MalformedError::new(format!("Invalid DIDURL: {error}")).into()
+        })
     }
 
-    pub fn method(&self) -> &str {
-        self.method.as_ref().map_or(DID_METHOD, |m| m.as_str())
+    pub fn scheme(&self) -> Option<&str> {
+        self.scheme.as_deref()
+    }
+
+    pub fn method(&self) -> Option<&str> {
+        self.method.as_deref()
     }
 
     pub fn id(&self) -> Option<&Id> {
@@ -175,6 +177,33 @@ impl DIDUrl {
     pub fn fragment(&self) -> Option<&str> {
         self.fragment.as_deref()
     }
+}
+
+fn split_component(value: &str, delimiter: char) -> Option<(&str, &str)> {
+    value.split_once(delimiter)
+}
+
+fn normalize_delimiter(value: Option<&str>, delimiter: char) -> Option<String> {
+    let value = value?;
+    let value = value.strip_prefix(delimiter).unwrap_or(value);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.nfc().collect())
+    }
+}
+
+fn normalize_path(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    if value.is_empty() {
+        return None;
+    }
+    let value = if value.starts_with('/') {
+        value.to_string()
+    } else {
+        format!("/{value}")
+    };
+    Some(value.nfc().collect())
 }
 
 impl TryFrom<&str> for DIDUrl {
@@ -201,10 +230,8 @@ impl From<&Id> for DIDUrl {
 
 impl PartialEq for DIDUrl {
     fn eq(&self, other: &Self) -> bool {
-        self.scheme.as_deref().unwrap_or(DID_SCHEME)
-            == other.scheme.as_deref().unwrap_or(DID_SCHEME)
-            && self.method.as_deref().unwrap_or(DID_METHOD)
-                == other.method.as_deref().unwrap_or(DID_METHOD)
+        self.scheme == other.scheme
+            && self.method == other.method
             && self.id == other.id
             && self.path == other.path
             && self.query == other.query
@@ -224,7 +251,7 @@ impl fmt::Display for DIDUrl {
             write!(f, "{}", id)?;
         }
         if let Some(path) = &self.path {
-            write!(f, "/{}", path)?;
+            write!(f, "{}", path)?;
         }
         if let Some(query) = &self.query {
             write!(f, "?{}", query)?;
@@ -233,5 +260,26 @@ impl fmt::Display for DIDUrl {
             write!(f, "#{}", fragment)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_and_displays_relative_references() {
+        let id = Id::random();
+        let path = DIDUrl::parse(&format!("/path/to/file")).unwrap();
+        assert_eq!(path.scheme(), None);
+        assert_eq!(path.id(), None);
+        assert_eq!(path.path(), Some("/path/to/file"));
+
+        let url = DIDUrl::new(&id, Some("path/to/file"), Some("a=b"), Some("frag"));
+        assert_eq!(url.path(), Some("/path/to/file"));
+        assert_eq!(url.to_string(), format!("did:boson:{id}/path/to/file?a=b#frag"));
+
+        let restored = DIDUrl::parse(&url.to_string()).unwrap();
+        assert_eq!(restored, url);
     }
 }

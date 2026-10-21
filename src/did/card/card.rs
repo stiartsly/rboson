@@ -4,15 +4,16 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, SystemTime};
+use std::str::FromStr;
+use std::time::SystemTime;
 
+use crate::did::date;
 use crate::{
-    as_secs,
     errors::{ArgumentError, SignatureError},
     signature, utils, CryptoIdentity, Error, Id, Result,
 };
 
-use super::{w3c::DIDDocument, CardBuilder, Credential};
+use crate::did::{w3c::DIDDocument, CardBuilder, Credential};
 
 const DEFAULT_PROFILE_CREDENTIAL_ID: &str = "profile";
 const DEFAULT_PROFILE_CREDENTIAL_TYPE: &str = "BosonProfile";
@@ -27,12 +28,19 @@ fn is_none<T>(value: &&Option<T>) -> bool {
 struct CardSignData<'a> {
     #[serde(rename = "id")]
     id: &'a Id,
-    #[serde(rename = "c", skip_serializing_if = "is_none")]
+    #[serde(rename = "c",
+        default, skip_serializing_if = "is_none")]
     credentials: &'a Option<Vec<Credential>>,
-    #[serde(rename = "s", skip_serializing_if = "is_none")]
+    #[serde(rename = "s",
+        default, skip_serializing_if = "is_none")]
     services: &'a Option<Vec<Service>>,
-    #[serde(rename = "sat")]
-    signed_at: &'a Option<u64>,
+    #[serde(
+        rename = "sat",
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "date::serialize_opt"
+    )]
+    signed_at: &'a Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
@@ -46,13 +54,20 @@ pub struct Card {
     #[serde(rename = "s", skip_serializing_if = "utils::is_default")]
     services: Option<Vec<Service>>,
 
-    #[serde(rename = "sat", skip_serializing_if = "Option::is_none")]
-    signed_at: Option<u64>,
+    #[serde(
+        rename = "sat",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "date::serialize_opt",
+        deserialize_with = "date::deserialize_opt"
+    )]
+    signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "crate::utils::codec::bytes::serialize",
-        deserialize_with = "crate::utils::codec::bytes::deserialize"
+        default,
+        serialize_with = "crate::did::did_bytes::serialize",
+        deserialize_with = "crate::did::did_bytes::deserialize",
+        skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,
 
@@ -69,8 +84,8 @@ impl Card {
     ) -> Self {
         Self {
             id,
-            credentials,
-            services,
+            credentials: credentials.filter(|values| !values.is_empty()),
+            services: services.filter(|values| !values.is_empty()),
             signed_at: None,
             signature: vec![0u8; 0],
             doc,
@@ -82,8 +97,10 @@ impl Card {
         signed_at: Option<SystemTime>,
         signature: Option<Vec<u8>>,
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v| as_secs!(v));
-        unsigned.signature = signature.unwrap_or_else(|| vec![0u8; 0]);
+        if signed_at.is_some() {
+            unsigned.signed_at = signed_at;
+        }
+        unsigned.signature = signature.unwrap_or_default();
         unsigned
     }
 
@@ -107,6 +124,23 @@ impl Card {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub fn credential(&self, id: &str) -> Option<&Credential> {
+        self.credentials
+            .as_ref()
+            .and_then(|credentials| credentials.iter().find(|credential| credential.id() == id))
+    }
+
+    pub fn credential_with_type(&self, id: &str, credential_type: &str) -> Option<&Credential> {
+        self.credentials
+            .as_ref()
+            .and_then(|credentials| {
+                credentials.iter().find(|credential| {
+                    credential.id() == id
+                        && credential.types().contains(&credential_type)
+                })
+            })
     }
 
     pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
@@ -146,6 +180,20 @@ impl Card {
             .unwrap_or_default()
     }
 
+    pub fn service(&self, id: &str) -> Option<&Service> {
+        self.services
+            .as_ref()
+            .and_then(|services| services.iter().find(|service| service.id() == id))
+    }
+
+    pub fn service_with_type(&self, id: &str, service_type: &str) -> Option<&Service> {
+        self.services.as_ref().and_then(|services| {
+            services
+                .iter()
+                .find(|service| service.id() == id && service.service_type() == service_type)
+        })
+    }
+
     pub fn services_by_id(&self, id: &str) -> Vec<&Service> {
         self.services
             .as_ref()
@@ -167,7 +215,6 @@ impl Card {
 
     pub fn signed_at(&self) -> Option<SystemTime> {
         self.signed_at
-            .map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s))
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -212,6 +259,26 @@ impl Card {
         self.doc.as_ref()
     }
 
+    pub fn parse(json: &str) -> Result<Self> {
+        Self::try_from(json)
+    }
+
+    pub fn parse_bytes(cbor: &[u8]) -> Result<Self> {
+        Self::try_from(cbor)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode Card: {error}")).into()
+        })
+    }
+
+    pub fn to_pretty_string(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode Card: {error}")).into()
+        })
+    }
+
     pub fn builder(subject: CryptoIdentity) -> CardBuilder {
         CardBuilder::new(subject)
     }
@@ -253,9 +320,23 @@ impl TryFrom<&[u8]> for Card {
     }
 }
 
+impl FromStr for Card {
+    type Err = Error;
+
+    fn from_str(data: &str) -> Result<Self> {
+        Self::try_from(data)
+    }
+}
+
 impl From<&Card> for Vec<u8> {
     fn from(card: &Card) -> Self {
         serde_cbor::to_vec(card).unwrap()
+    }
+}
+
+impl From<&Card> for String {
+    fn from(card: &Card) -> Self {
+        serde_json::to_string(card).unwrap()
     }
 }
 

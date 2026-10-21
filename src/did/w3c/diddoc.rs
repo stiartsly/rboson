@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 use crate::{
     errors::{ArgumentError, Result, SignatureError},
-    utils, CryptoIdentity, Id,
+    utils::codec, CryptoIdentity, Id,
 };
 
 use crate::did::{
@@ -21,35 +21,60 @@ use crate::did::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct DIDDocument {
-    #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "@context",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     contexts: Option<Vec<String>>,
 
-    #[serde(rename = "id")]
+    #[serde(
+        rename = "id",
+        serialize_with = "codec::id::serialize",
+        deserialize_with = "codec::id::deserialize"
+    )]
     id: Id,
 
-    #[serde(rename = "verificationMethod")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "verificationMethod",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     verification_methods: Option<Vec<VM>>,
 
-    #[serde(rename = "authentication")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "authentication",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     authentications: Option<Vec<VM>>,
 
-    #[serde(rename = "assertion")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "assertion",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     assertions: Option<Vec<VM>>,
 
-    #[serde(rename = "verifiableCredential")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "verifiableCredential",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     credentials: Option<Vec<VC>>,
 
-    #[serde(rename = "service")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "service",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     services: Option<Vec<Service>>,
 
-    #[serde(rename = "proof")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "proof",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     proof: Option<Proof>,
 }
 
@@ -191,7 +216,7 @@ impl DIDDocument {
 
     pub fn verification_method(&self, id: &str) -> Option<&VM> {
         let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            true => DIDUrl::parse(id).unwrap(),
+            true => DIDUrl::parse(id).ok()?,
             false => DIDUrl::new(&self.id, None, None, Some(id)),
         };
         self.verification_method_by_didurl(&didurl)
@@ -212,7 +237,7 @@ impl DIDDocument {
 
     pub fn authentication(&self, id: &str) -> Option<&VM> {
         let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            true => DIDUrl::parse(id).unwrap(),
+            true => DIDUrl::parse(id).ok()?,
             false => DIDUrl::new(&self.id, None, None, Some(id)),
         };
         self.authentication_by_didurl(&didurl)
@@ -234,7 +259,7 @@ impl DIDDocument {
 
     pub fn assertion(&self, id: &str) -> Option<&VM> {
         let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            true => DIDUrl::parse(id).unwrap(),
+            true => DIDUrl::parse(id).ok()?,
             false => DIDUrl::new(&self.id, None, None, Some(id)),
         };
         self.assertion_by_didurl(&didurl)
@@ -264,7 +289,7 @@ impl DIDDocument {
 
     pub fn credential(&self, id: &str) -> Option<&VC> {
         let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            true => DIDUrl::parse(id).unwrap(),
+            true => DIDUrl::parse(id).ok()?,
             false => DIDUrl::new(&self.id, None, None, Some(id)),
         };
         self.credential_by_didurl(&didurl)
@@ -274,8 +299,30 @@ impl DIDDocument {
         let id_str = id.to_string();
         self.credentials
             .as_ref()
-            .map(|v| v.iter().find(|vc| vc.id() == id_str))
-            .flatten()
+            .and_then(|values| values.iter().find(|vc| vc.id() == id_str))
+    }
+
+    pub fn credential_with_type(&self, id: &str, credential_type: &str) -> Option<&VC> {
+        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
+            DIDUrl::parse(id).ok()?
+        } else {
+            DIDUrl::new(&self.id, None, None, Some(id))
+        };
+        self.credential_by_didurl_with_type(&did_url, credential_type)
+    }
+
+    pub fn credential_by_didurl_with_type(
+        &self,
+        id: &DIDUrl,
+        credential_type: &str,
+    ) -> Option<&VC> {
+        let id = id.to_string();
+        self.credentials.as_ref().and_then(|values| {
+            values.iter().find(|credential| {
+                credential.id() == id
+                    && credential.types().contains(&credential_type)
+            })
+        })
     }
 
     pub fn services(&self) -> Vec<&Service> {
@@ -294,7 +341,7 @@ impl DIDDocument {
 
     pub fn service(&self, id: &str) -> Option<&Service> {
         let didurl = match id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            true => DIDUrl::parse(id).unwrap(),
+            true => DIDUrl::parse(id).ok()?,
             false => DIDUrl::new(&self.id, None, None, Some(id)),
         };
         self.service_by_didurl(&didurl)
@@ -304,8 +351,29 @@ impl DIDDocument {
         let id_str = id.to_string();
         self.services
             .as_ref()
-            .map(|v| v.iter().find(|s| s.id() == id_str))
-            .flatten()
+            .and_then(|values| values.iter().find(|service| service.id() == id_str))
+    }
+
+    pub fn service_with_type(&self, id: &str, service_type: &str) -> Option<&Service> {
+        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
+            DIDUrl::parse(id).ok()?
+        } else {
+            DIDUrl::new(&self.id, None, None, Some(id))
+        };
+        self.service_by_didurl_with_type(&did_url, service_type)
+    }
+
+    pub fn service_by_didurl_with_type(
+        &self,
+        id: &DIDUrl,
+        service_type: &str,
+    ) -> Option<&Service> {
+        let id = id.to_string();
+        self.services.as_ref().and_then(|values| {
+            values.iter().find(|service| {
+                service.id() == id && service.service_type() == service_type
+            })
+        })
     }
 
     pub fn proof(&self) -> &Proof {
@@ -324,6 +392,38 @@ impl DIDDocument {
             true => Ok(()),
             false => Err(SignatureError::new("Document signature is not valid")),
         }
+    }
+
+    /// Validates the structural constraints Java's constructor enforces.
+    pub fn validate_structure(&self) -> Result<()> {
+        let methods = self.verification_methods();
+        if methods.iter().any(|method| method.is_reference()) {
+            return Err(ArgumentError::new(
+                "verificationMethod must not contain references",
+            )
+            .into());
+        }
+        for method in self.authentications() {
+            if method.is_reference()
+                && !methods.iter().any(|candidate| candidate.id() == method.id())
+            {
+                return Err(ArgumentError::new(
+                    "authentication contains an invalid reference",
+                )
+                .into());
+            }
+        }
+        for method in self.assertions() {
+            if method.is_reference()
+                && !methods.iter().any(|candidate| candidate.id() == method.id())
+            {
+                return Err(ArgumentError::new(
+                    "assertion contains an invalid reference",
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
@@ -354,10 +454,14 @@ impl DIDDocument {
 
         Card::unsigned(
             self.id.clone(),
-            Some(creds),
-            Some(services),
+            (!creds.is_empty()).then_some(creds),
+            (!services.is_empty()).then_some(services),
             Some(self.clone()),
         )
+    }
+
+    pub fn to_card(&self) -> Card {
+        self.to_boson_card()
     }
 
     pub fn to_boson_card(&self) -> Card {
@@ -366,6 +470,26 @@ impl DIDDocument {
             self.proof.as_ref().map(|p| p.created()),
             self.proof.as_ref().map(|p| p.proof_value().to_vec()),
         )
+    }
+
+    pub fn parse(json: &str) -> Result<Self> {
+        Self::try_from(json)
+    }
+
+    pub fn parse_bytes(cbor: &[u8]) -> Result<Self> {
+        Self::try_from(cbor)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode DIDDocument: {error}")).into()
+        })
+    }
+
+    pub fn to_pretty_string(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode DIDDocument: {error}")).into()
+        })
     }
 
     pub fn builder(subject: CryptoIdentity) -> DIDDocumentBuilder {
@@ -390,9 +514,11 @@ impl TryFrom<&str> for DIDDocument {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &str) -> Result<Self> {
-        serde_json::from_str(data).map_err(|e| {
+        let document: Self = serde_json::from_str(data).map_err(|e| -> crate::Error {
             ArgumentError::new(format!("Failed to parse DIDDocument from string: {}", e)).into()
-        })
+        })?;
+        document.validate_structure()?;
+        Ok(document)
     }
 }
 
@@ -408,9 +534,11 @@ impl TryFrom<&[u8]> for DIDDocument {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        serde_cbor::from_slice(data).map_err(|e| {
+        let document: Self = serde_cbor::from_slice(data).map_err(|e| -> crate::Error {
             ArgumentError::new(format!("Failed to parse DIDDocument from bytes: {}", e)).into()
-        })
+        })?;
+        document.validate_structure()?;
+        Ok(document)
     }
 }
 

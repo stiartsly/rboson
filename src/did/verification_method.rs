@@ -1,10 +1,12 @@
-use serde::{Deserialize, Serialize};
+use serde::de::{MapAccess, Visitor};
+use serde::de::value::MapAccessDeserializer;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use crate::{
     errors::ArgumentError, Result,
-    utils,
+    utils::codec,
     Id
 };
 use super::{did_constants, DIDUrl};
@@ -25,7 +27,6 @@ impl fmt::Display for VerificationMethodType {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Eq)]
 pub enum VerificationMethod {
     Reference(Reference),
@@ -47,7 +48,7 @@ impl VerificationMethod {
         })
     }
 
-    pub(crate) fn reference(id: &str) -> Self {
+    pub fn reference(id: &str) -> Self {
         Self::Reference(Reference {
             id: id.into(),
             entity: None,
@@ -151,19 +152,72 @@ impl PartialEq for VerificationMethod {
     }
 }
 
+impl Serialize for VerificationMethod {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Reference(reference) => serializer.serialize_str(reference.id()),
+            Self::Entity(entity) => entity.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for VerificationMethod {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct VerificationMethodVisitor;
+
+        impl<'de> Visitor<'de> for VerificationMethodVisitor {
+            type Value = VerificationMethod;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a verification method id string or object")
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(VerificationMethod::Reference(Reference {
+                    id: value.to_string(),
+                    entity: None,
+                }))
+            }
+
+            fn visit_map<A>(self, map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                Entity::deserialize(MapAccessDeserializer::new(map))
+                    .map(VerificationMethod::Entity)
+            }
+        }
+
+        deserializer.deserialize_any(VerificationMethodVisitor)
+    }
+}
+
 impl fmt::Display for VerificationMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "VerificationMethod{{id:{}\'", self.id())?;
-        if !self.is_reference() {
+        write!(f, "VerificationMethod{{id='{}'", self.id())?;
+        if let (Some(method_type), Some(controller), Some(public_key)) = (
+            self.method_type(),
+            self.controller(),
+            self.public_key_multibase(),
+        ) {
             write!(
                 f,
-                "type={},controller:{},publicKeyMultibase:{}}}",
-                self.method_type().unwrap(),
-                self.controller().unwrap().to_did_string(),
-                self.public_key_multibase().unwrap()
+                ", type={}, controller={}, publicKeyMultibase='{}'",
+                method_type,
+                controller.to_did_string(),
+                public_key
             )?;
         }
-        Ok(())
+        f.write_str("}")
     }
 }
 
@@ -172,22 +226,63 @@ pub struct Entity {
     #[serde(rename = "id")]
     id: String,
 
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type",
+        default, skip_serializing_if = "Option::is_none")]
     method_type: Option<VerificationMethodType>,
 
     #[serde(
         rename = "controller",
-        serialize_with = "crate::utils::codec::id_opt::serialize",
-        deserialize_with = "crate::utils::codec::id_opt::deserialize",
+        default,
+        serialize_with = "controller_serde::serialize",
+        deserialize_with = "controller_serde::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     controller: Option<Id>,
 
     #[serde(
         rename = "publicKeyMultibase",
-        skip_serializing_if = "utils::is_default"
+        default,
+        skip_serializing_if = "codec::is_default"
     )]
     public_key_multibase: Option<String>,
+}
+
+// Text formats use the `did:boson:<id>` form; other formats keep the raw id.
+mod controller_serde {
+    use super::*;
+
+    pub(super) fn serialize<S>(value: &Option<Id>, se: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(v) if se.is_human_readable() => se.serialize_str(&v.to_did_string()),
+            _ => codec::id_opt::serialize(value, se),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D>(de: D) -> std::result::Result<Option<Id>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if !de.is_human_readable() {
+            return codec::id_opt::deserialize(de);
+        }
+
+        Option::<String>::deserialize(de)?
+            .map(|value| {
+                if value.starts_with("did:") {
+                    DIDUrl::parse(&value)
+                        .map_err(serde::de::Error::custom)?
+                        .id()
+                        .copied()
+                        .ok_or_else(|| serde::de::Error::custom("DID URL has no identifier"))
+                } else {
+                    Id::try_from(value.as_str()).map_err(serde::de::Error::custom)
+                }
+            })
+            .transpose()
+    }
 }
 
 impl Entity {
@@ -225,7 +320,7 @@ impl Hash for Entity {
     }
 }
 
-#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq)]
 pub struct Reference {
     id: String,
     entity: Option<Entity>,
@@ -287,3 +382,7 @@ impl PartialEq for Reference {
         self.id == other.id
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_verification_method.rs"]
+mod test_verification_method;

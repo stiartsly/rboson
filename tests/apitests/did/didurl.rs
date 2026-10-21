@@ -25,16 +25,16 @@ mod tests {
         let url1 = rc.unwrap();
         println!("Parsed URL: {}", url1);
 
-        assert_eq!(url1.scheme(), DID_SCHEME);
-        assert_eq!(url1.method(), DID_METHOD);
+        assert_eq!(url1.scheme(), Some(DID_SCHEME));
+        assert_eq!(url1.method(), Some(DID_METHOD));
         assert_eq!(url1.id(), Some(&id));
         assert_eq!(url1.path(), None);
         assert_eq!(url1.query(), None);
         assert_eq!(url1.fragment(), None);
 
         let url2 = DIDUrl::from_id(&id);
-        assert_eq!(url1.scheme(), DID_SCHEME);
-        assert_eq!(url1.method(), DID_METHOD);
+        assert_eq!(url1.scheme(), Some(DID_SCHEME));
+        assert_eq!(url1.method(), Some(DID_METHOD));
         assert_eq!(url1.id(), Some(&id));
         assert_eq!(url1.path(), None);
         assert_eq!(url1.query(), None);
@@ -46,8 +46,8 @@ mod tests {
     fn test_from_id() {
         let id = Id::random();
         let url = DIDUrl::from(&id);
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), None);
         assert_eq!(url.query(), None);
@@ -61,8 +61,8 @@ mod tests {
         assert!(rc.is_ok());
 
         let url = rc.unwrap();
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), None);
         assert_eq!(url.query(), None);
@@ -77,10 +77,10 @@ mod tests {
         assert!(rc.is_ok());
 
         let url = rc.unwrap();
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
-        assert_eq!(url.path(), Some("path"));
+        assert_eq!(url.path(), Some("/path"));
         assert_eq!(url.query(), Some("query"));
         assert_eq!(url.fragment(), Some("key-1"));
 
@@ -98,10 +98,10 @@ mod tests {
         assert!(rc.is_ok());
 
         let url = rc.unwrap();
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
-        assert_eq!(url.path(), Some("path"));
+        assert_eq!(url.path(), Some("/path"));
         assert_eq!(url.query(), None);
         assert_eq!(url.fragment(), None);
 
@@ -119,8 +119,8 @@ mod tests {
         assert!(rc.is_ok());
 
         let url = rc.unwrap();
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), None);
         assert_eq!(url.query(), Some("query"));
@@ -140,8 +140,8 @@ mod tests {
         assert!(rc.is_ok());
 
         let url = rc.unwrap();
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), None);
         assert_eq!(url.query(), None);

@@ -219,6 +219,14 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
         if self.claims.is_empty() {
             return Err(ArgumentError::new("VC Claims can not be empty"));
         }
+        if self.claims.keys().any(|key| key.is_empty()) {
+            return Err(ArgumentError::new("Claim name cannot be empty"));
+        }
+        if self.claims.contains_key("id") {
+            return Err(ArgumentError::new(
+                "Claims must not contain the reserved key: id",
+            ));
+        }
 
         let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
             let url = id.parse::<DIDUrl>()?;
@@ -248,10 +256,14 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
             self.claims.clone(),
         );
 
-        let signature = self.identity().sign_into(&unsigned.to_sign_data())?;
+        let signed_at = VerifiableCredentialBuilder::now();
+        let view = unsigned
+            .to_unsigned_boson_credential()
+            .stamp_signed_at(signed_at);
+        let signature = self.identity().sign_into(&view.to_sign_data())?;
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
-            VerifiableCredentialBuilder::now(),
+            signed_at,
             VerificationMethod::default_reference(self.identity().id()),
             ProofPurpose::AssertionMethod,
             signature,

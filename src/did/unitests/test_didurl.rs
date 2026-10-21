@@ -11,8 +11,8 @@ mod tests {
     fn test_didurl() {
         let id = Id::random();
         let url = DIDUrl::new(&id, None, None, None);
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), None);
         assert_eq!(url.query(), None);
@@ -29,8 +29,8 @@ mod tests {
         let query = "query=param";
         let fragment = "fragment";
         let url = DIDUrl::new(&id, Some(path), Some(query), Some(fragment));
-        assert_eq!(url.scheme(), DID_SCHEME);
-        assert_eq!(url.method(), DID_METHOD);
+        assert_eq!(url.scheme(), Some(DID_SCHEME));
+        assert_eq!(url.method(), Some(DID_METHOD));
         assert_eq!(url.id(), Some(&id));
         assert_eq!(url.path(), Some(path));
         assert_eq!(url.query(), Some(query));
@@ -40,9 +40,9 @@ mod tests {
 
         let rc = DIDUrl::parse(&url.to_string());
         println!("Parsed DIDUrl: {:?}", rc);
-        //assert!(rc.is_ok());
+        assert!(rc.is_ok());
 
-        //let url2 = rc.unwrap();
-        //assert_eq!(url, url2);
+        let url2 = rc.unwrap();
+        assert_eq!(url, url2);
     }
 }

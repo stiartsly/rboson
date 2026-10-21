@@ -82,6 +82,12 @@ impl CryptoIdentity {
     }
 }
 
+impl Default for CryptoIdentity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Identity for CryptoIdentity {
     fn id(&self) -> &Id {
         &self.id

@@ -1,13 +1,20 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
+use crate::{
+    Result,
+    errors::ArgumentError,
+    CryptoIdentity,
+    Identity
+};
 
 use crate::did::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{VerifiableCredential, VerifiablePresentation as VP},
-    BosonIdentityObjectBuilder, DIDUrl, VerificationMethod,
+    BosonIdentityObjectBuilder,
+    VerificationMethod,
 };
 
 pub struct VerifiablePresentationBuilder {
@@ -16,7 +23,7 @@ pub struct VerifiablePresentationBuilder {
     contexts: Vec<String>,
     id: Option<String>,
     types: Vec<String>,
-    credentials: HashMap<String, VerifiableCredential>,
+    credentials: IndexMap<String, VerifiableCredential>,
 }
 
 impl VerifiablePresentationBuilder {
@@ -40,28 +47,16 @@ impl VerifiablePresentationBuilder {
             contexts,
             id: None,
             types,
-            credentials: HashMap::new(),
+            credentials: IndexMap::new(),
         }
     }
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            return Err(ArgumentError::new("Credential Id cannot be empty"));
+            self.id = None;
+            return Ok(self);
         }
-
-        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            let url = DIDUrl::parse(&id).map_err(|_| {
-                ArgumentError::new(format!("Id must has the fragment part: {}", id))
-            })?;
-            if url.fragment().is_none() {
-                Err(ArgumentError::new("Id must has the fragment part"))?;
-            }
-            url
-        } else {
-            DIDUrl::new(self.holder.id(), None, None, Some(id))
-        };
-
-        self.id = Some(did_url.to_string());
+        self.id = Some(Self::normalize_subject_id(self.holder.id(), id)?.to_string());
         Ok(self)
     }
 
@@ -152,10 +147,12 @@ impl BosonIdentityObjectBuilder for VerifiablePresentationBuilder {
             self.credentials.values().cloned().collect(),
         );
 
-        let signature = self.holder.sign_into(&unsigned.to_sign_data())?;
+        let signed_at = Self::now();
+        let view = unsigned.to_unsigned_boson_vouch().stamp_signed_at(signed_at);
+        let signature = self.holder.sign_into(&view.to_sign_data())?;
         let proof = Proof::new(
             ProofType::Ed25519Signature2020,
-            Self::now(),
+            signed_at,
             VerificationMethod::default_reference(self.identity().id()),
             ProofPurpose::AssertionMethod,
             signature,

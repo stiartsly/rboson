@@ -1,43 +1,72 @@
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    str::FromStr,
+    collections::HashMap,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 
 use crate::{
+    Error,
+    Result,
     errors::{ArgumentError, SignatureError},
-    utils, CryptoIdentity, Error, Id, Result,
+    utils::codec,
+    CryptoIdentity,
+    Id,
 };
 
 use crate::did::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
-    w3c::{VerifiableCredential as VC, VerifiablePresentationBuilder},
-    DIDUrl, VerificationMethod, Vouch,
+    w3c::{
+        VerifiableCredential as VC,
+        VerifiablePresentationBuilder as VPBuilder
+    },
+    DIDUrl,
+    VerificationMethod,
+    Vouch,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiablePresentation {
-    #[serde(rename = "@context")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "@context",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     contexts: Option<Vec<String>>,
 
-    #[serde(rename = "id")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "id",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     id: Option<String>,
 
-    #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "type",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     types: Option<Vec<String>>,
 
-    #[serde(rename = "holder")]
+    #[serde(
+        rename = "holder",
+        serialize_with = "codec::id::serialize",
+        deserialize_with = "codec::id::deserialize"
+    )]
     holder: Id,
 
     #[serde(rename = "verifiableCredential")]
-    #[serde(skip_serializing_if = "utils::is_default")]
+    #[serde(skip_serializing_if = "codec::is_default")]
     credentials: Vec<VC>,
 
-    #[serde(rename = "proof", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "proof",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     proof: Option<Proof>,
 }
 
@@ -201,8 +230,9 @@ impl VerifiablePresentation {
     pub fn is_genuine(&self) -> bool {
         self.proof
             .as_ref()
-            .map(|v| v.verify(self.holder(), &self.to_sign_data()))
+            .map(|proof| proof.verify(self.holder(), &self.to_sign_data()))
             .unwrap_or(false)
+            && self.credentials.iter().all(VC::is_genuine)
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
@@ -247,6 +277,10 @@ impl VerifiablePresentation {
         )
     }
 
+    pub fn to_vouch(&self) -> Vouch {
+        self.to_boson_vouch()
+    }
+
     pub fn to_boson_vouch(&self) -> Vouch {
         Vouch::signed(
             self.to_unsigned_boson_vouch(),
@@ -255,8 +289,30 @@ impl VerifiablePresentation {
         )
     }
 
-    pub fn builder(holder: CryptoIdentity) -> VerifiablePresentationBuilder {
-        VerifiablePresentationBuilder::new(holder)
+    pub fn parse(json: &str) -> Result<Self> {
+        Self::try_from(json)
+    }
+
+    pub fn parse_bytes(cbor: &[u8]) -> Result<Self> {
+        Self::try_from(cbor)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode VerifiablePresentation: {error}"))
+                .into()
+        })
+    }
+
+    pub fn to_pretty_string(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode VerifiablePresentation: {error}"))
+                .into()
+        })
+    }
+
+    pub fn builder(holder: CryptoIdentity) -> VPBuilder {
+        VPBuilder::new(holder)
     }
 }
 

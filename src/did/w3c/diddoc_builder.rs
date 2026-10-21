@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
@@ -8,17 +9,17 @@ use crate::did::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{diddoc::Service, DIDDocument, VerifiableCredential as VC},
-    BosonIdentityObjectBuilder, Card, DIDUrl, VerificationMethod as VM,
+    BosonIdentityObjectBuilder, Card, VerificationMethod as VM,
 };
 
 pub struct DIDDocumentBuilder {
     identity: CryptoIdentity,
     contexts: Vec<String>,
-    verification_methods: HashMap<String, VM>,
-    authentications: Vec<VM>,
-    assertions: Vec<VM>,
+    verification_methods: IndexMap<String, VM>,
+    authentications: IndexMap<String, VM>,
+    assertions: IndexMap<String, VM>,
     credentials: Vec<VC>,
-    services: HashMap<String, Service>,
+    services: IndexMap<String, Service>,
 
     def_method_ref: Option<VM>,
 }
@@ -37,11 +38,11 @@ impl DIDDocumentBuilder {
         let mut builder = Self {
             identity,
             contexts,
-            verification_methods: HashMap::new(),
-            authentications: Vec::new(),
-            assertions: Vec::new(),
+            verification_methods: IndexMap::new(),
+            authentications: IndexMap::new(),
+            assertions: IndexMap::new(),
             credentials: Vec::new(),
-            services: HashMap::new(),
+            services: IndexMap::new(),
             def_method_ref: None,
         };
 
@@ -70,7 +71,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_contexts(&mut self, contexts: Vec<&str>) -> Result<&mut Self> {
         if contexts.is_empty() {
-            Err(ArgumentError::new("Contexts cannot be empty"))?;
+            return Ok(self);
         }
         for context in contexts {
             if context.is_empty() {
@@ -95,10 +96,10 @@ impl DIDDocumentBuilder {
                 return self;
             };
             _ = vm.update_reference(existing.clone());
-            self.authentications.push(vm);
+            self.authentications.insert(vm.id().to_string(), vm);
         } else {
-            self.with_authentication(vm.clone());
-            self.authentications.push(vm);
+            self.with_verification_method(vm.clone());
+            self.authentications.insert(vm.id().to_string(), vm.to_reference());
         }
         self
     }
@@ -109,10 +110,10 @@ impl DIDDocumentBuilder {
                 return self;
             };
             _ = vm.update_reference(existing.clone());
-            self.assertions.push(vm);
+            self.assertions.insert(vm.id().to_string(), vm);
         } else {
-            self.with_assertion(vm.clone());
-            self.assertions.push(vm);
+            self.with_verification_method(vm.clone());
+            self.assertions.insert(vm.id().to_string(), vm.to_reference());
         }
         self
     }
@@ -170,20 +171,7 @@ impl DIDDocumentBuilder {
     where
         T: Serialize + DeserializeOwned,
     {
-        let did_url = if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
-            let url = id
-                .parse::<DIDUrl>()
-                .map_err(|_| ArgumentError::new("Invalid DID URL format"))?;
-            if url.id() != Some(self.identity.id()) {
-                Err(ArgumentError::new("DID URL id does not match subject id"))?;
-            }
-            if url.fragment().is_none() {
-                Err(ArgumentError::new("DID URL must have a fragment part"))?;
-            }
-            url
-        } else {
-            DIDUrl::new(self.identity.id(), None, None, Some(id))
-        };
+        let did_url = Self::normalize_subject_id(self.identity.id(), id)?;
 
         if service_type.is_empty() {
             Err(ArgumentError::new("Service type cannot be empty"))?;
@@ -239,8 +227,8 @@ impl BosonIdentityObjectBuilder for DIDDocumentBuilder {
             self.contexts.clone(),
             self.identity.id().clone(),
             self.verification_methods.values().cloned().collect(),
-            self.authentications.clone(),
-            self.assertions.clone(),
+            self.authentications.values().cloned().collect(),
+            self.assertions.values().cloned().collect(),
             self.credentials.clone(),
             self.services.values().cloned().collect(),
         );

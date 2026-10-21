@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
+use crate::did::date;
 use crate::{
-    as_secs,
     errors::{ArgumentError, Error, Result, SignatureError},
     signature, utils, CryptoIdentity, Id,
 };
@@ -13,10 +13,12 @@ use crate::did::{w3c::VerifiablePresentation as VP, Credential, VouchBuilder};
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
-    #[serde(rename = "id", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "id",
+        default, skip_serializing_if = "utils::is_default")]
     id: Option<String>,
 
-    #[serde(rename = "t", skip_serializing_if = "utils::is_default")]
+    #[serde(rename = "t",
+        default, skip_serializing_if = "utils::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
@@ -25,13 +27,21 @@ pub struct Vouch {
     #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
     credentials: Vec<Credential>,
 
-    #[serde(rename = "sat", skip_serializing_if = "Option::is_none")]
-    signed_at: Option<u64>,
+    #[serde(
+        rename = "sat",
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "date::serialize_opt",
+        deserialize_with = "date::deserialize_opt"
+    )]
+    signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::codec::bytes::serialize",
-        deserialize_with = "utils::codec::bytes::deserialize"
+        default,
+        serialize_with = "crate::did::did_bytes::serialize",
+        deserialize_with = "crate::did::did_bytes::deserialize",
+        skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,
 
@@ -58,13 +68,21 @@ impl Vouch {
         }
     }
 
+    /// Stamps the signing time before the signature is computed.
+    pub(crate) fn stamp_signed_at(mut self, signed_at: SystemTime) -> Self {
+        self.signed_at = Some(signed_at);
+        self
+    }
+
     pub(crate) fn signed(
         mut unsigned: Self,
         signed_at: Option<SystemTime>,
         signature: Option<Vec<u8>>,
     ) -> Self {
-        unsigned.signed_at = signed_at.map(|v| as_secs!(v));
-        unsigned.signature = signature.unwrap_or_else(|| vec![]);
+        if signed_at.is_some() {
+            unsigned.signed_at = signed_at;
+        }
+        unsigned.signature = signature.unwrap_or_default();
         unsigned
     }
 
@@ -94,13 +112,16 @@ impl Vouch {
             .collect()
     }
 
+    pub fn credential(&self, id: &str) -> Option<&Credential> {
+        self.credentials.iter().find(|credential| credential.id() == id)
+    }
+
     pub fn credentials_by_id(&self, id: &str) -> Vec<&Credential> {
         self.credentials.iter().filter(|c| c.id() == id).collect()
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
         self.signed_at
-            .map(|v| SystemTime::UNIX_EPOCH + Duration::from_secs(v))
     }
 
     pub fn signature(&self) -> &[u8] {
@@ -118,6 +139,7 @@ impl Vouch {
             &self.holder.to_signature_key(),
         )
         .is_ok()
+            && self.credentials.iter().all(Credential::is_genuine)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -132,15 +154,33 @@ impl Vouch {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        if self.signature.is_empty() {
-            self.into()
-        } else {
-            Vec::from(&Self::signed(self.clone(), None, None))
-        }
+        let mut unsigned = self.clone();
+        unsigned.signature.clear();
+        serde_cbor::to_vec(&unsigned).unwrap_or_default()
     }
 
     pub fn vp(&self) -> Option<&VP> {
         self.vp.as_ref()
+    }
+
+    pub fn parse(json: &str) -> Result<Self> {
+        Self::try_from(json)
+    }
+
+    pub fn parse_bytes(cbor: &[u8]) -> Result<Self> {
+        Self::try_from(cbor)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode Vouch: {error}")).into()
+        })
+    }
+
+    pub fn to_pretty_string(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|error| {
+            ArgumentError::new(format!("Failed to encode Vouch: {error}")).into()
+        })
     }
 
     pub fn builder(holder: CryptoIdentity) -> VouchBuilder {

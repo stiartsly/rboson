@@ -8,21 +8,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_verification_method_deserde_entity() {
+    fn test_verification_method_deserializes_entity_object() {
         let json = "{\
-            \"Entity\":{\
-                \"id\":\"did:boson:D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv#key-1\",\
-                \"type\":\"Ed25519VerificationKey2020\",\
-                \"controller\":\"D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv\",\
-                \"publicKeyMultibase\":\"D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv\"\
-            }\
+            \"id\":\"did:boson:D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv#key-1\",\
+            \"type\":\"Ed25519VerificationKey2020\",\
+            \"controller\":\"did:boson:D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv\",\
+            \"publicKeyMultibase\":\"D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv\"\
         }";
 
-        let rc = serde_json::from_str::<VerificationMethod>(&json);
-        assert!(rc.is_ok());
-
-        let vm = rc.unwrap();
-        assert_eq!(vm.is_reference(), false);
+        let vm: VerificationMethod = serde_json::from_str(json).unwrap();
+        assert!(!vm.is_reference());
 
         let controller = Id::try_from("D43CcXZPpR81qA1eBTfmALNvXpswLp3gMDPUsowjGtSv").unwrap();
         let id = format!("{}#key-1", controller.to_did_string());
@@ -36,58 +31,43 @@ mod tests {
             vm.public_key_multibase(),
             Some(controller.to_base58().as_str())
         );
+
+        let wire = serde_json::to_value(&vm).unwrap();
+        assert!(wire.is_object());
+        assert_eq!(wire["id"], id);
+        assert_eq!(wire["controller"], controller.to_did_string());
     }
 
     #[test]
-    fn test_verification_method_deserde_reference() {
-        let json = "{\
-            \"Reference\":{\
-                \"id\":\"did:boson:4K6hgZPEAcQT1hLkADbapDAoPhnfhbWUtcEYseQ1i8as#key-1\",\
-                \"entity\":null\
-            }\
-        }";
-
-        let rc = serde_json::from_str::<VerificationMethod>(&json);
-        assert!(rc.is_ok());
-
+    fn test_verification_method_deserializes_reference_string() {
         let id = "did:boson:4K6hgZPEAcQT1hLkADbapDAoPhnfhbWUtcEYseQ1i8as#key-1";
-        let vmr = rc.unwrap();
-        assert_eq!(vmr.is_reference(), true);
-        assert_eq!(vmr.id(), id);
-        assert_eq!(vmr.method_type(), None);
-        assert_eq!(vmr.controller(), None);
+        let vm: VerificationMethod = serde_json::from_str(&format!("\"{id}\"")).unwrap();
+
+        assert!(vm.is_reference());
+        assert_eq!(vm.id(), id);
+        assert_eq!(vm.method_type(), None);
+        assert_eq!(vm.controller(), None);
+
+        assert_eq!(serde_json::to_value(&vm).unwrap(), serde_json::json!(id));
     }
 
     #[test]
-    fn test_verification_method_deserde_reference_with_entity() {
-        let json = "{\
-            \"Reference\":{\
-                \"id\":\"did:boson:BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng#key-1\",\
-                \"entity\":{\
-                    \"id\":\"did:boson:BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng#key-1\",\
-                    \"type\":\"Ed25519VerificationKey2020\",\
-                    \"controller\":\"BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng\",\
-                    \"publicKeyMultibase\":\"BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng\"\
-                }\
-            }\
-        }";
-
-        let rc = serde_json::from_str::<VerificationMethod>(&json);
-        assert!(rc.is_ok());
-
-        let controller = Id::try_from("BkRUPtGbaz3aGEHyJnRc7oFrdBt1LiYduycRUmNr76ng").unwrap();
+    fn test_verification_method_reference_serializes_as_id() {
+        let controller = Id::random();
         let id = format!("{}#key-1", controller.to_did_string());
-        let vmr = rc.unwrap();
-        assert_eq!(vmr.is_reference(), true);
-        assert_eq!(vmr.id(), id);
-        assert_eq!(
-            vmr.method_type(),
-            Some(VerificationMethodType::Ed25519VerificationKey2020)
+        let vm = VerificationMethod::entity(
+            &id,
+            VerificationMethodType::Ed25519VerificationKey2020,
+            &controller,
+            controller.to_base58(),
         );
-        assert_eq!(vmr.controller(), Some(&controller));
+        let reference = vm.to_reference();
+
+        assert!(reference.is_reference());
+        assert_eq!(reference.id(), id);
         assert_eq!(
-            vmr.public_key_multibase(),
-            Some(controller.to_base58().as_str())
+            serde_json::to_value(&reference).unwrap(),
+            serde_json::json!(id)
         );
     }
 }

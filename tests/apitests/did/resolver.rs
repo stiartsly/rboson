@@ -25,7 +25,7 @@ mod tests {
         assert_eq!(result.result, Some("value"));
         assert!(result.succeeded());
         assert!(!result.failed());
-        assert!(result.result_metadata.is_some());
+        assert!(result.metadata.is_some());
     }
 
     #[test]

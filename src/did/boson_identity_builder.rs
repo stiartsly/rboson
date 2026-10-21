@@ -2,7 +2,12 @@ use serde_json::{Map, Value};
 use std::time::{Duration, SystemTime};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{as_secs, core::Result, CryptoIdentity};
+use crate::did::{did_constants, DIDUrl};
+use crate::{
+    as_secs,
+    errors::StateError,
+    Id, Result, CryptoIdentity,
+};
 
 pub(crate) trait BosonIdentityObjectBuilder {
     type BosonIdentityObject;
@@ -39,6 +44,32 @@ pub(crate) trait BosonIdentityObjectBuilder {
             }
             _ => object,
         }
+    }
+
+    /// Normalizes an object id relative to a subject.
+    ///
+    /// Bare ids become a DID URL fragment; full DID URLs must belong to the
+    /// subject and include a fragment, matching the Java builder base class.
+    fn normalize_subject_id(subject: &Id, id: &str) -> Result<DIDUrl> {
+        if id.is_empty() {
+            return Err(StateError::new("id must not be empty").into());
+        }
+        if !id.starts_with(did_constants::DID_SUFFIXED_SCHEME) {
+            return Ok(DIDUrl::new(subject, None, None, Some(id)));
+        }
+
+        let url = DIDUrl::parse(id)?;
+        if url.id() != Some(subject) {
+            return Err(StateError::new(format!(
+                "id DID URL subject part must be did:boson:{subject}: {id}"
+            )));
+        }
+        if url.fragment().is_none() {
+            return Err(StateError::new(format!(
+                "id DID URL must include a fragment: {id}"
+            )));
+        }
+        Ok(url)
     }
 
     fn identity(&self) -> &CryptoIdentity;

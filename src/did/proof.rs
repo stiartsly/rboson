@@ -1,9 +1,9 @@
-use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use crate::{as_secs, signature, utils, Id};
+use crate::did::date;
+use crate::{signature, Id};
 
 use crate::did::{DIDUrl, VerificationMethod};
 
@@ -22,30 +22,34 @@ impl fmt::Display for ProofType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProofPurpose {
+    #[serde(rename = "assertionMethod")]
     AssertionMethod,
+    #[serde(rename = "authentication")]
     Authentication,
+    #[serde(rename = "capabilityInvocation")]
     CapabilityInvocation,
+    #[serde(rename = "capabilityDelegation")]
     CapabilityDelegation,
 }
 
 impl fmt::Display for ProofPurpose {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match *self {
-            ProofPurpose::AssertionMethod => "AssertionMethod",
-            ProofPurpose::Authentication => "Authentication",
-            ProofPurpose::CapabilityInvocation => "CapabilityInvocation",
-            ProofPurpose::CapabilityDelegation => "CapabilityDelegation",
+            ProofPurpose::AssertionMethod => "assertionMethod",
+            ProofPurpose::Authentication => "authentication",
+            ProofPurpose::CapabilityInvocation => "capabilityInvocation",
+            ProofPurpose::CapabilityDelegation => "capabilityDelegation",
         })
     }
 }
 
-#[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Proof {
     #[serde(rename = "type")]
     proof_type: ProofType,
 
-    #[serde(rename = "created")]
-    created: u64,
+    #[serde(rename = "created", with = "date")]
+    created: SystemTime,
 
     #[serde(rename = "verificationMethod")]
     verification_method: VerificationMethod,
@@ -55,8 +59,8 @@ pub struct Proof {
 
     #[serde(
         rename = "proofValue",
-        serialize_with = "utils::codec::bytes::serialize",
-        deserialize_with = "utils::codec::bytes::deserialize"
+        serialize_with = "crate::did::did_bytes::serialize",
+        deserialize_with = "crate::did::did_bytes::deserialize"
     )]
     proof_value: Vec<u8>,
 }
@@ -71,7 +75,7 @@ impl Proof {
     ) -> Self {
         Self {
             proof_type,
-            created: as_secs!(created),
+            created,
             verification_method,
             proof_purpose,
             proof_value,
@@ -83,7 +87,7 @@ impl Proof {
     }
 
     pub fn created(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.created)
+        self.created
     }
 
     pub fn verification_method(&self) -> &VerificationMethod {
@@ -112,7 +116,7 @@ impl Proof {
         let Ok(url) = DIDUrl::try_from(self.verification_method.id()) else {
             return false;
         };
-        if url.id().unwrap() != subject {
+        if url.id() != Some(subject) {
             return false;
         }
 
@@ -120,28 +124,20 @@ impl Proof {
     }
 }
 
-impl PartialEq<Self> for Proof {
-    fn eq(&self, other: &Self) -> bool {
-        self.proof_type == other.proof_type
-            && self.created == other.created
-            && self.verification_method == other.verification_method
-            && self.proof_purpose == other.proof_purpose
-            && self.proof_value == other.proof_value
-    }
-}
-
 impl fmt::Display for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "proof{{type={},created={},verificationMethod:{},proofPurpose={},proofValue={}}}",
+            "Proof{{type={}, created={}, verificationMethod={}, proofPurpose={}, proofValue={}}}",
             self.proof_type,
-            self.created,
+            date::to_millis(self.created),
             self.verification_method,
             self.proof_purpose,
-            general_purpose::URL_SAFE_NO_PAD
-                .encode(self.proof_value.as_slice())
-                .as_str()
+            hex::encode(&self.proof_value)
         )
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_proof.rs"]
+mod test_proof;

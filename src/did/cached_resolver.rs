@@ -20,6 +20,11 @@ impl<R> CachedResolver<R> {
             persistent,
         }
     }
+
+    /// Drops a cached answer for `id`.
+    pub fn invalidate(&self, id: &Id) {
+        self.cache.lock().unwrap().remove(id);
+    }
 }
 
 impl<R: Resolver> Resolver for CachedResolver<R> {
@@ -36,7 +41,7 @@ impl<R: Resolver> Resolver for CachedResolver<R> {
             if let Some(p) = &self.persistent {
                 if let Some(v) = p.get(id)? {
                     if opts.valid_ttl == 0
-                        || v.result_metadata
+                        || v.metadata
                             .as_ref()
                             .and_then(|m| m.resolved.elapsed().ok())
                             .map(|d| d.as_secs() < opts.valid_ttl)

@@ -1,0 +1,44 @@
+[package]
+name = "boson"
+description = "Boson network: identities, DHT nodes and client libraries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+full = ["identifier", "http", "dht", "higgs", "director", "ion-store", "active-proxy", "messaging"]
+identifier = ["dep:boson-identifier"]
+http = ["dep:boson-http"]
+dht = ["dep:boson-dht"]
+higgs = ["dep:boson-higgs", "http"]
+director = ["dep:boson-director-client", "http"]
+ion-store = ["dep:boson-ion-store-client", "http"]
+active-proxy = ["dep:boson-active-proxy-client"]
+messaging = ["dep:boson-messaging-client", "http"]
+
+[dependencies]
+boson-crypto.workspace = true
+boson-api.workspace = true
+boson-identifier = { workspace = true, optional = true }
+boson-http = { workspace = true, optional = true }
+boson-dht = { workspace = true, optional = true }
+boson-higgs = { workspace = true, optional = true }
+boson-director-client = { workspace = true, optional = true }
+boson-ion-store-client = { workspace = true, optional = true }
+boson-active-proxy-client = { workspace = true, optional = true }
+boson-messaging-client = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

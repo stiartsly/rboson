@@ -1,0 +1,20 @@
+[package]
+name = "boson-api"
+description = "Boson core API: Id, Value, PeerInfo, NodeInfo, the Node trait, CWT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson-api"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+boson-crypto.workspace = true
+
+[lints]
+workspace = true

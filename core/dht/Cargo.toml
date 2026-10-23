@@ -1,0 +1,21 @@
+[package]
+name = "boson-dht"
+description = "Boson regular DHT node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson-dht"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+boson-crypto.workspace = true
+boson-api.workspace = true
+
+[lints]
+workspace = true

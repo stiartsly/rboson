@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+    "boson",
+    "core/*",
+    "clients/*",
+    "tools/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/bosonnetwork/Boson.Rust"
+homepage = "https://bosonnetwork.io"
+documentation = "https://docs.bosonnetwork.io"
+authors = ["Boson Network <support@bosonnetwork.io>"]
+readme = "README.md"
+# crates.io allows at most 5 keywords and 5 categories; a crate may override them.
+keywords = ["boson", "p2p", "dht", "decentralized", "identity"]
+categories = ["network-programming", "cryptography"]
+
+[workspace.dependencies]
+# Workspace crates: members depend on them with `<name>.workspace = true`.
+# Published crates need a version requirement next to the path, and Cargo cannot take it from
+# workspace.package.version, so change all of them together with `cargo set-version` (cargo-edit).
+# Unpublished crates (publish = false) need no version.
+boson = { path = "boson", version = "0.1.0" }
+boson-crypto = { path = "core/crypto", version = "0.1.0" }
+boson-api = { path = "core/api", version = "0.1.0" }
+boson-identifier = { path = "core/identifier", version = "0.1.0" }
+boson-dht = { path = "core/dht", version = "0.1.0" }
+boson-http = { path = "core/http", version = "0.1.0" }
+boson-higgs = { path = "clients/higgs", version = "0.1.0" }
+boson-director-client = { path = "clients/director", version = "0.1.0" }
+boson-ion-store-client = { path = "clients/ion-store", version = "0.1.0" }
+boson-active-proxy-client = { path = "clients/active-proxy", version = "0.1.0" }
+boson-messaging-client = { path = "clients/messaging", version = "0.1.0" }
+boson-tools-common = { path = "tools/common", version = "0.1.0" }
+
+# Third-party crates: the only place their versions are set.
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = "1"
+tracing = "0.1"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

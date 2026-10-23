@@ -1,0 +1,22 @@
+[package]
+name = "boson-tools-common"
+description = "Shared code of the Boson tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+boson-crypto.workspace = true
+boson-api.workspace = true
+
+[lints]
+workspace = true

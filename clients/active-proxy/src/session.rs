@@ -17,7 +17,7 @@ use super::{
     connection_registry::ConnectionRegistry, options::AnnouncePeerHandler,
     verticle::VerticleOptions, LocalBoxHandler, LocalBoxTimerClient as TimerClient,
 };
-use crate::{
+use boson_api::{
     cryptobox, elapsed_ms,
     errors::{ArgumentError, NetworkError, StateError},
     crypto_identity::CryptoIdentity,

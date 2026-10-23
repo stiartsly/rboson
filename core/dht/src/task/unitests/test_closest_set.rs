@@ -1,6 +1,9 @@
 use crate::{
-    dht::task::{candidate_node::CandidateNode, closest_set::ClosestSet},
-    Id, NodeInfo,
+    task::{candidate_node::CandidateNode, closest_set::ClosestSet},
+};
+use boson_api::{
+    Id,
+    NodeInfo,
 };
 use std::{cell::RefCell, rc::Rc};
 

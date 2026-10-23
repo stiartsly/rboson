@@ -11,15 +11,15 @@ use base64::{
     Engine as _
 };
 use crate::{
-    core::cryptobox::Nonce,
+    cryptobox::Nonce,
     Id,
-    dht::version,
+    version,
 };
 
-pub(crate) mod id {
+pub mod id {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Id, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Id, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -30,7 +30,7 @@ pub(crate) mod id {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Id, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<Id, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -38,10 +38,10 @@ pub(crate) mod id {
     }
 }
 
-pub(crate) mod id_opt {
+pub mod id_opt {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Option<Id>, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Option<Id>, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -51,7 +51,7 @@ pub(crate) mod id_opt {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<Id>, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<Option<Id>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -59,10 +59,10 @@ pub(crate) mod id_opt {
     }
 }
 
-pub(crate) mod nonce_opt {
+pub mod nonce_opt {
     use super::*;
 
-    pub(crate) fn serialize<S>(nonce: &Option<Nonce>, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(nonce: &Option<Nonce>, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -78,7 +78,7 @@ pub(crate) mod nonce_opt {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<Nonce>, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<Option<Nonce>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -108,10 +108,10 @@ pub(crate) mod nonce_opt {
     }
 }
 
-pub(crate) mod bytes_opt {
+pub mod bytes_opt {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Option<Vec<u8>>, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Option<Vec<u8>>, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -121,7 +121,7 @@ pub(crate) mod bytes_opt {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<Vec<u8>>, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<Option<Vec<u8>>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -139,10 +139,10 @@ pub(crate) mod bytes_opt {
     }
 }
 
-pub(crate) mod bytes {
+pub mod bytes {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Vec<u8>, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Vec<u8>, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -153,7 +153,7 @@ pub(crate) mod bytes {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -221,10 +221,10 @@ impl<'de> Visitor<'de> for OptionalBytesVisitor {
     }
 }
 
-pub(crate) mod seq {
+pub mod seq {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -237,7 +237,7 @@ pub(crate) mod seq {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -256,10 +256,10 @@ pub(crate) mod seq {
     }
 }
 
-pub(crate) mod expected_seq {
+pub mod expected_seq {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -272,7 +272,7 @@ pub(crate) mod expected_seq {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -291,10 +291,10 @@ pub(crate) mod expected_seq {
     }
 }
 
-pub(crate) mod ver {
+pub mod ver {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -305,7 +305,7 @@ pub(crate) mod ver {
         }
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
+    pub fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -313,11 +313,11 @@ pub(crate) mod ver {
     }
 }
 
-pub(crate) fn is_default<T: IsDefault>(v: &T) -> bool {
+pub fn is_default<T: IsDefault>(v: &T) -> bool {
     v.is_default()
 }
 
-pub(crate) trait IsDefault {
+pub trait IsDefault {
     fn is_default(&self) -> bool;
 }
 

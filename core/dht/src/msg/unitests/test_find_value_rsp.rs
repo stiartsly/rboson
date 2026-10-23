@@ -1,7 +1,12 @@
+use boson_api::{
+    ImmutableBuilder as ValueBuilder,
+    Id,
+    Network,
+    NodeInfo,
+    Value,
+};
 use crate::{
-    core::ImmutableBuilder as ValueBuilder,
-    dht::msg::{find_value_rsp::FindValueResponse, lookup_rsp::LookupResponse},
-    Id, Network, NodeInfo, Value,
+    msg::{find_value_rsp::FindValueResponse, lookup_rsp::LookupResponse},
 };
 use std::net::SocketAddr;
 

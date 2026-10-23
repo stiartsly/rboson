@@ -1,4 +1,4 @@
-# `src/core/id.rs`
+# `core/api/src/id.rs`
 
 `Id` is the canonical 32-byte identifier type used across Boson for nodes, peers, users, devices, values, and DIDs.
 

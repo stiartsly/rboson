@@ -1,10 +1,10 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     msg::{msg, Body, LookupResponse},
     rpc::RpcCall,
     task::{LookupTask, LookupTaskData, Task, TaskData},
 };
-use crate::{EasyHandler, Id, NodeInfo};
+use boson_api::{EasyHandler, Id, NodeInfo};
 use std::{any::Any, rc::Rc};
 
 pub(crate) struct NodeLookupTask {

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_cbor::{self, value};
 
-use crate::{
+use boson_api::{
     Id,
     Error,
-    core::Result,
-    messaging::channel,
+    Result,
+};
+use crate::{
+    channel,
 };
 
 pub(crate) mod events {

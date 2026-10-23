@@ -1,4 +1,4 @@
-use crate::{core::Result, Id, PeerInfo, Value};
+use boson_api::{Result, Id, PeerInfo, Value};
 use std::time::Duration;
 
 pub(crate) trait DataStorage: Send {

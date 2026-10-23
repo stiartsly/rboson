@@ -1,6 +1,6 @@
 use blake2b_simd::Params;
 
-use crate::{errors::ArgumentError, signature::KeyPair, Id, Result};
+use boson_api::{errors::ArgumentError, signature::KeyPair, Id, Result};
 
 const MAX_LIST_SIZE: usize = 1 << 22;
 

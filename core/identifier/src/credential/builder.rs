@@ -5,11 +5,11 @@ use std::{
 use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Result},
     CryptoIdentity, Id, Identity,
 };
-use crate::did::{
+use crate::{
     BosonIdentityObjectBuilder,
     Credential
 };

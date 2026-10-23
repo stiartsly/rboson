@@ -1,9 +1,9 @@
 use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::channel::Permission;
-use crate::messaging::internal::codec;
-use crate::{utils, Id};
+use crate::channel::Permission;
+use crate::internal::codec;
+use boson_api::{utils, Id};
 
 use super::ChannelMember;
 
@@ -20,8 +20,8 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "crate::utils::codec::bytes_opt::serialize",
-        deserialize_with = "crate::utils::codec::bytes_opt::deserialize",
+        serialize_with = "boson_api::utils::codec::bytes_opt::serialize",
+        deserialize_with = "boson_api::utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "is_bytes_none_or_empty"
     )]
     session_key: Option<Vec<u8>>,

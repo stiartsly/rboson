@@ -1,11 +1,11 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     eligible_peers::EligiblePeers,
     msg::{msg, Body, LookupResponse},
     rpc::RpcCall,
     task::{LookupTask, LookupTaskData, Task, TaskData},
 };
-use crate::{EasyHandler, Id, PeerInfo};
+use boson_api::{EasyHandler, Id, PeerInfo};
 use std::{any::Any, rc::Rc};
 
 pub(crate) struct PeerLookupTask {

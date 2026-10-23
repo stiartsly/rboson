@@ -8,8 +8,8 @@ use std::{
     rc::Rc,
 };
 
-use crate::dht::{rpc::TargetInfo, task::candidate_node::CandidateNode};
-use crate::Id;
+use crate::{rpc::TargetInfo, task::candidate_node::CandidateNode};
+use boson_api::Id;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum DedupKey {

@@ -16,7 +16,7 @@ use crate::{
     EncryptedBuilder
 };
 
-use crate::dht::{
+use crate::{
     data_storage::DataStorage,
     sqlite_storage::SqliteStorage,
 };

@@ -3,8 +3,8 @@ use std::str::FromStr;
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::did::{DID_METHOD, DID_SCHEME};
-use crate::{
+use crate::{DID_METHOD, DID_SCHEME};
+use boson_api::{
     errors::{MalformedError, StateError},
     Error, Id, Result,
 };
@@ -150,7 +150,7 @@ impl DIDUrl {
     /// Converts this DID URL to a generic [`url::Url`].
     pub fn to_uri(&self) -> Result<url::Url> {
         url::Url::parse(&self.to_string()).map_err(|error| {
-            crate::errors::MalformedError::new(format!("Invalid DIDURL: {error}")).into()
+            boson_api::errors::MalformedError::new(format!("Invalid DIDURL: {error}")).into()
         })
     }
 

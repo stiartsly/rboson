@@ -1,10 +1,10 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     msg::{msg::TxId, Message},
     rpc::{listener::Listener, rpccall, RpcCall, Target},
     task::task_listener::TaskListener,
 };
-use crate::{core::Network, EasyHandler};
+use boson_api::{Network, EasyHandler};
 use log::{debug, warn};
 use std::{
     any::Any,

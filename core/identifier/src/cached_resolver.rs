@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{Card, ResolutionCache, ResolutionOptions, ResolutionResult, Resolver};
-use crate::{Id, Result};
+use boson_api::{Id, Result};
 
 pub struct CachedResolver<R> {
     inner: R,

@@ -18,7 +18,7 @@ use tokio::{
     task,
 };
 
-use crate::dht::{
+use crate::{
     dht::DHT,
     lookup_option::LookupOption,
     rpc::rpc_server::RpcServer,
@@ -26,7 +26,7 @@ use crate::dht::{
     token_manager::TokenManager,
     ConnectionStatusListener,
 };
-use crate::{
+use boson_api::{
     Id,
     errors::StateError,
     CryptoIdentity,

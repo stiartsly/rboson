@@ -17,9 +17,9 @@ use rumqttc::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_cbor::Value;
 
-use crate::{CryptoIdentity, Id, Identity};
-use crate::errors::{ArgumentError, Result, StateError};
-use crate::messaging::{
+use boson_api::{CryptoIdentity, Id, Identity};
+use boson_api::errors::{ArgumentError, Result, StateError};
+use crate::{
     options::Options,
     errors::{AuthenticationError, EncodingError},
 };
@@ -255,7 +255,7 @@ impl MqttClient {
     /// The nonce makes every connection's proof unique, which is what stops a
     /// captured password from being replayed on the next reconnect.
     pub(crate) fn password(&self) -> Result<String> {
-        let nonce = crate::random_bytes(16);
+        let nonce = boson_api::random_bytes(16);
         let signature = self.device_identity
             .sign_into(&nonce)
             .map_err(|error| AuthenticationError::new(error.to_string()))?;
@@ -336,7 +336,7 @@ impl MqttClient {
             return Ok(());
         };
         client.disconnect().await
-            .map_err(|error| -> crate::Error {
+            .map_err(|error| -> boson_api::Error {
                 StateError::new(format!("Disconnecting MQTT client failed: {error}"))
             })
     }

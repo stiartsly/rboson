@@ -1,9 +1,9 @@
 use std::{fmt, time::SystemTime};
 use serde::{Deserialize, Serialize};
-use crate::Id;
-use crate::{Result, errors::ArgumentError};
-use crate::messaging::contact::ContactOps;
-use crate::messaging::channel_member::ChannelMember;
+use boson_api::Id;
+use boson_api::{Result, errors::ArgumentError};
+use crate::contact::ContactOps;
+use crate::channel_member::ChannelMember;
 
 
 /// Controls who may invite new members to a channel.
@@ -22,7 +22,7 @@ pub enum Permission {
 }
 
 impl TryFrom<i32> for Permission {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(value: i32) -> Result<Self> {
         match value {
@@ -75,7 +75,7 @@ impl Role {
 }
 
 impl TryFrom<i32> for Role {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(value: i32) -> Result<Self> {
         match value {
@@ -89,7 +89,7 @@ impl TryFrom<i32> for Role {
 }
 
 impl TryFrom<&str> for Role {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(value: &str) -> Result<Self> {
         match value {

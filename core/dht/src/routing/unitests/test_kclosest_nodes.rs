@@ -1,12 +1,15 @@
 use std::{net::SocketAddr, rc::Rc};
 
 use crate::{
-    dht::routing::{
+    routing::{
         kbucket::KBucket, kbucket_entry::KBucketEntry, kclosest_nodes::KClosestNodes,
         routing_table::RoutingTable,
     },
-    dht::rpc::TargetInfo,
-    Id, NodeInfo,
+    rpc::TargetInfo,
+};
+use boson_api::{
+    Id,
+    NodeInfo,
 };
 
 fn make_id(first_byte: u8, last_byte: u8) -> Id {

@@ -1,11 +1,11 @@
 use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
-use crate::dht::{
+use crate::{
     dht::DHT,
     msg::msg,
     task::{CandidateNode, ClosestSet, Task, TaskData},
 };
-use crate::{EasyHandler, Value};
+use boson_api::{EasyHandler, Value};
 
 const MAX_TODO_ENTRIES: usize = 24;
 

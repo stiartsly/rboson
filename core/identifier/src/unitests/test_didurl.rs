@@ -1,5 +1,7 @@
 use crate::{
-    did::{DIDUrl, DID_METHOD, DID_SCHEME},
+    {DIDUrl, DID_METHOD, DID_SCHEME},
+};
+use boson_api::{
     Id,
 };
 

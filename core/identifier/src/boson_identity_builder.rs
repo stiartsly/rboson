@@ -2,8 +2,8 @@ use serde_json::{Map, Value};
 use std::time::{Duration, SystemTime};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::did::{did_constants, DIDUrl};
-use crate::{
+use crate::{did_constants, DIDUrl};
+use boson_api::{
     as_secs,
     errors::StateError,
     Id, Result, CryptoIdentity,

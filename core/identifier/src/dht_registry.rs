@@ -4,7 +4,8 @@ use super::{
     CachedResolver, Card, DHTResolver, PublishedCard, Registry, RegistryResolver, ResolutionCache,
     ResolutionOptions, ResolutionResult, Resolver,
 };
-use crate::{dht::Node, CryptoIdentity, Id, Identity, Result, SignedBuilder};
+use boson_dht::{Node};
+use boson_api::{CryptoIdentity, Id, Identity, Result, SignedBuilder};
 
 pub struct DHTRegistry {
     node: Arc<Node>,
@@ -77,7 +78,7 @@ impl Registry for DHTRegistry {
             .max(found.map(|value| value.sequence_number()).unwrap_or(-1));
         let version = highest
             .checked_add(1)
-            .ok_or_else(|| crate::errors::ArgumentError::new("card version is exhausted"))?;
+            .ok_or_else(|| boson_api::errors::ArgumentError::new("card version is exhausted"))?;
 
         self.register(identity, card, version).await?;
         self.resolver.invalidate(card.id());

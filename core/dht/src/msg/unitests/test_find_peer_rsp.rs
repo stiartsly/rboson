@@ -1,6 +1,13 @@
 use crate::{
-    dht::msg::{find_peer_rsp::FindPeerResponse, lookup_rsp::LookupResponse},
-    signature, Id, Network, NodeInfo, PeerBuilder, PeerInfo,
+    msg::{find_peer_rsp::FindPeerResponse, lookup_rsp::LookupResponse},
+};
+use boson_api::{
+    signature,
+    Id,
+    Network,
+    NodeInfo,
+    PeerBuilder,
+    PeerInfo,
 };
 use std::net::SocketAddr;
 

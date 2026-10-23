@@ -1,4 +1,4 @@
-use crate::{Id, Value};
+use boson_api::{Id, Value};
 
 pub(crate) struct EligibleValue {
     target: Id,

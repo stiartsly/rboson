@@ -3,8 +3,8 @@ use std::{
     future::Future
 };
 
-use crate::{Id, signature, errors::Result};
-use crate::messaging::{
+use boson_api::{Id, signature, errors::Result};
+use crate::{
     channel::{Channel, Permission, Role},
     contact::Contact,
     session_info::SessionInfo,

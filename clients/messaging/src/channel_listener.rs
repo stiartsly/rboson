@@ -1,5 +1,5 @@
-use crate::Id;
-use crate::messaging::{
+use boson_api::Id;
+use crate::{
     Channel,
     ChannelMember
 };

@@ -31,13 +31,13 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::{Id, core::logger, signature};
-use crate::errors::{
+use boson_api::{Id, logger, signature};
+use boson_api::errors::{
     Result,
     StateError,
     ArgumentError,
 };
-use crate::messaging::{
+use crate::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,

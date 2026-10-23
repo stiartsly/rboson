@@ -1,13 +1,13 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::dht::{
+use crate::{
     msg::{Body, LookupResponse},
     routing::{KBucket, KBucketEntry, KClosestNodes},
     rpc::{rpc_target::TargetInfo, RpcCall, Target},
     task::{CandidateNode, ClosestCandidates, ClosestSet, Task, TaskData},
     utils::{is_any_unicast, is_bogon},
 };
-use crate::Id;
+use boson_api::Id;
 
 const MAX_ITERATIONS: usize = 3 * KBucket::MAX_ENTRIES;
 

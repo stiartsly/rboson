@@ -1,5 +1,5 @@
-use crate::{Id};
-use crate::messaging::channel::Role;
+use boson_api::{Id};
+use crate::channel::Role;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]

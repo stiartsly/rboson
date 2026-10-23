@@ -1,5 +1,5 @@
 use super::lookup_req::{Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK};
-use crate::{
+use boson_api::{
     errors::{Error, Result},
     utils, Id,
 };

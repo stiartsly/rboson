@@ -1,5 +1,5 @@
-use crate::dht::msg::lookup_rsp::{Data as LookupData, LookupResponse};
-use crate::{utils, NodeInfo};
+use crate::msg::lookup_rsp::{Data as LookupData, LookupResponse};
+use boson_api::{utils, NodeInfo};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -1,5 +1,5 @@
-use crate::dht::ConnectionStatus;
-use crate::Network;
+use crate::ConnectionStatus;
+use boson_api::Network;
 
 /// A listener for connection status changes in the DHT network.
 ///

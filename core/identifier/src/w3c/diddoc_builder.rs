@@ -3,9 +3,9 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{errors::ArgumentError, unwrap, CryptoIdentity, Identity, Result};
+use boson_api::{errors::ArgumentError, unwrap, CryptoIdentity, Identity, Result};
 
-use crate::did::{
+use crate::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{diddoc::Service, DIDDocument, VerifiableCredential as VC},

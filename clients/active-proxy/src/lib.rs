@@ -1,3 +1,8 @@
+// Migrated code: it calls libsodium directly and is not documented yet. Remove these allows as the
+// crate is brought in line with the workspace lints.
+#![allow(unsafe_code)]
+#![allow(missing_docs)]
+
 mod connection;
 mod connection_handler;
 mod connection_registry;
@@ -7,7 +12,7 @@ mod session;
 mod state;
 mod verticle;
 
-pub(crate) use crate::utils::{
+pub(crate) use boson_api::utils::{
     handler::LocalBoxHandler,
     timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},
     timer_manager::LocalBoxTimerManager,

@@ -1,4 +1,4 @@
-use crate::{Network, NodeInfo};
+use boson_api::{Network, NodeInfo};
 
 #[derive(Clone)]
 pub(crate) struct Data {

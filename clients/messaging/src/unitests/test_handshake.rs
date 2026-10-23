@@ -1,4 +1,4 @@
-use crate::messaging::internal::handshake::*;
+use crate::internal::handshake::*;
 
 #[cfg(test)]
 mod tests {
@@ -11,7 +11,7 @@ mod tests {
             HandshakeType::FriendRequest(Some("hello".into())),
             HandshakeType::FriendRequest(Some(String::new())),
             HandshakeType::FriendRequest(None),
-            HandshakeType::FriendRequestAccept(vec![7; crate::signature::PrivateKey::BYTES]),
+            HandshakeType::FriendRequestAccept(vec![7; boson_api::signature::PrivateKey::BYTES]),
         ] {
             let mut handshake = Handshake::new(42, body).unwrap();
             handshake.from = Some(Id::random());

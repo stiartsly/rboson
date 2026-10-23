@@ -1,4 +1,4 @@
-use crate::dht::msg::error::Error;
+use crate::msg::error::Error;
 
 #[cfg(test)]
 mod tests {

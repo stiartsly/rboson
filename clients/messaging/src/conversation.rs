@@ -3,11 +3,11 @@ use std::{
     sync::Arc,
     time::SystemTime
 };
-use crate::{
+use boson_api::{
     Id,
     errors::{ArgumentError, Result}
 };
-use crate::messaging::{
+use crate::{
     contact::{Contact, ContactOps, ContactType},
     invite_ticket::InviteTicket,
     message::Message,

@@ -1,8 +1,8 @@
 use moka::sync::Cache;
 use std::sync::{Arc, Mutex};
 
-use crate::{
-    core::{CryptoContext, CryptoIdentity, Result},
+use boson_api::{
+    {CryptoContext, CryptoIdentity, Result},
     Id, Identity,
 };
 

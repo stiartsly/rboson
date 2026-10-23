@@ -1,9 +1,9 @@
 use super::test_utils::make_test_dht;
-use crate::dht::{
+use crate::{
     dht::DHT,
     task::{lookup_task::LookupTask, value_lookup::ValueLookupTask},
 };
-use crate::{Id, Network};
+use boson_api::{Id, Network};
 use std::rc::Rc;
 
 fn make_dht() -> Rc<DHT> {

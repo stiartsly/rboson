@@ -17,19 +17,19 @@ use serde::Deserialize;
 use serde_cbor::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{
+use boson_api::{
     Id,
     Identity,
     signature,
     CryptoIdentity,
 };
-use crate::errors::{
+use boson_api::errors::{
     Result,
     ArgumentError,
     NotImplemented,
     StateError
 };
-use crate::messaging::{
+use crate::{
     options::Options,
     verticle::VerticleOptions,
     channel::{Channel, Permission, Role},
@@ -1026,7 +1026,7 @@ impl RpcServer {
         message.received_at = if outbox { None } else { Some(SystemTime::now()) };
         message.sent_at = if outbox { Some(SystemTime::now()) } else { None };
         message.payload_bytes = content_bytes;
-        message.content = Some(crate::messaging::message::Content::_new(headers, body));
+        message.content = Some(crate::message::Content::_new(headers, body));
         let created_at = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let conversation_contact = self.contacts.borrow().get(&contact_id).cloned()
@@ -1468,7 +1468,7 @@ impl RpcServer {
         self.friend_sessions.lock().unwrap().insert(*user_id, session_identity);
 
         let now_ms = SystemTime::now();
-        let mut data = ContactData::new(*user_id, ContactType::Friend as u8, crate::as_ms!(now_ms) as i64);
+        let mut data = ContactData::new(*user_id, ContactType::Friend as u8, boson_api::as_ms!(now_ms) as i64);
         data.remark = remark;
         data.revision = 1;
         let contact = Contact::try_from(data)?;
@@ -2443,7 +2443,7 @@ impl MessageBuilder for SessionMessageBuilder {
             wire.from = Some(*self.user_identity.id());
             wire.sent_at = Some(SystemTime::now());
             wire.payload_bytes = content_bytes;
-            wire.content = Some(crate::messaging::message::Content::_new(headers, body));
+            wire.content = Some(crate::message::Content::_new(headers, body));
             let contact = self.conversation_contact.unwrap_or_else(|| Contact::new(
                 recipient, ContactType::Auto, timestamp,
             ));
@@ -2531,13 +2531,13 @@ impl Message for ConversationMessage {
     fn rid(&self) -> i64 { self.message.rid() }
     fn conversation_id(&self) -> Option<&Id> { Some(&self.conversation_id) }
     fn recipient(&self) -> &Id { self.message.recipient() }
-    fn message_type(&self) -> crate::messaging::message::MessageType { self.message.message_type() }
+    fn message_type(&self) -> crate::message::MessageType { self.message.message_type() }
     fn from(&self) -> Option<&Id> { self.message.from() }
     fn created_at(&self) -> SystemTime { self.message.created_at() }
     fn received_at(&self) -> Option<SystemTime> { self.message.received_at() }
     fn sent_at(&self) -> Option<SystemTime> { self.message.sent_at() }
     fn payload_as_bytes(&self) -> &[u8] { self.message.payload_as_bytes() }
-    fn payload_as_content(&self) -> Option<&crate::messaging::message::Content> {
+    fn payload_as_content(&self) -> Option<&crate::message::Content> {
         self.message.payload_as_content()
     }
 }

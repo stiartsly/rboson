@@ -1,10 +1,12 @@
 use std::{fs, net::SocketAddr, path::PathBuf, rc::Rc, time::SystemTime};
 
 use crate::{
-    dht::{
+    {
         routing::{kbucket::KBucket, kbucket_entry::KBucketEntry, routing_table::RoutingTable},
         rpc::TargetInfo,
     },
+};
+use boson_api::{
     Id,
 };
 
@@ -42,7 +44,7 @@ fn cache_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "boson-routing-table-{name}-{}-{}",
         std::process::id(),
-        crate::as_ms!(SystemTime::now()),
+        boson_api::as_ms!(SystemTime::now()),
     ))
 }
 

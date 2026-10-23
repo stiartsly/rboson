@@ -1,8 +1,8 @@
 use std::fmt;
 use std::future::Future;
 
-use crate::did::{w3c::DIDDocument, Card, ResolutionResult, Resolver};
-use crate::{CryptoIdentity, Id, Result};
+use crate::{w3c::DIDDocument, Card, ResolutionResult, Resolver};
+use boson_api::{CryptoIdentity, Id, Result};
 
 /// A card a registry publisher keeps: its version and the parsed card.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::task;
 
-use crate::dht::{
+use crate::{
     cached_identity::CachedIdentity,
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
@@ -27,8 +27,8 @@ use crate::dht::{
     LookupOption, NodeOptions,
     version,
 };
-use crate::{
-    core::logger,
+use boson_api::{
+    logger,
     errors::{ArgumentError, IOError, Result, StateError},
     signature, BoxHandler, CryptoContext, CryptoIdentity, Id, Identity, Network, NodeInfo,
     PeerInfo, Value,
@@ -203,7 +203,7 @@ impl Node {
         let mut handles = FuturesUnordered::<task::JoinHandle<()>>::new();
 
         // Re-announce values
-        let before = crate::as_ms!(SystemTime::now()) as u64 - MAX_VALUE_AGE.as_millis() as u64
+        let before = boson_api::as_ms!(SystemTime::now()) as u64 - MAX_VALUE_AGE.as_millis() as u64
             + RE_ANNOUNCE_INTERVAL * 2;
 
         let values = match storage
@@ -235,7 +235,7 @@ impl Node {
         }
 
         // Re-announce peers
-        let before_peer = crate::as_ms!(SystemTime::now()) as u64 - MAX_PEER_AGE.as_millis() as u64
+        let before_peer = boson_api::as_ms!(SystemTime::now()) as u64 - MAX_PEER_AGE.as_millis() as u64
             + RE_ANNOUNCE_INTERVAL * 2;
 
         let peers = match storage
@@ -824,32 +824,32 @@ impl Node {
 
     pub fn value(&self, value_id: Id) -> Result<Option<Value>> {
         self.check_running()?;
-        crate::locked!(self.storage).get_value(&value_id)
+        boson_api::locked!(self.storage).get_value(&value_id)
     }
 
     pub fn remove_value(&self, value_id: Id) -> Result<()> {
         self.check_running()?;
-        crate::locked!(self.storage).remove_value(&value_id)
+        boson_api::locked!(self.storage).remove_value(&value_id)
     }
 
     pub async fn peers(&self, peer_id: Id) -> Result<Vec<PeerInfo>> {
         self.check_running()?;
-        crate::locked!(self.storage).get_peers(&peer_id)
+        boson_api::locked!(self.storage).get_peers(&peer_id)
     }
 
     pub async fn remove_peers(&self, peer_id: Id) -> Result<()> {
         self.check_running()?;
-        crate::locked!(self.storage).remove_peers(&peer_id)
+        boson_api::locked!(self.storage).remove_peers(&peer_id)
     }
 
     pub async fn peer(&self, peer_id: Id, finger_print: u64) -> Result<Option<PeerInfo>> {
         self.check_running()?;
-        crate::locked!(self.storage).get_peer(&peer_id, finger_print)
+        boson_api::locked!(self.storage).get_peer(&peer_id, finger_print)
     }
 
     pub async fn remove_peer(&self, peer_id: Id, finger_print: u64) -> Result<()> {
         self.check_running()?;
-        crate::locked!(self.storage).remove_peer(&peer_id, finger_print)
+        boson_api::locked!(self.storage).remove_peer(&peer_id, finger_print)
     }
 
     pub fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {

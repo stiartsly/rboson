@@ -1,4 +1,4 @@
-use crate::core::{
+use crate::{
     signature,
     signature::KeyPair,
     CryptoIdentity,

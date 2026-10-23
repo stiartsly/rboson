@@ -3,9 +3,9 @@ use std::{cell::RefCell, collections::HashMap, future::Future, pin::Pin, task::{
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
-use crate::{Id, Promise, PromiseFuture, Result};
-use crate::errors::StateError;
-use crate::messaging::errors::{AuthenticationError, EncodingError};
+use boson_api::{Id, Promise, PromiseFuture, Result};
+use boson_api::errors::StateError;
+use crate::errors::{AuthenticationError, EncodingError};
 use super::{error::RPCError, method::Method};
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use tokio_util::time::{delay_queue::Key, DelayQueue};
 
 use super::handler::{BoxHandler, Callable, LocalBoxHandler};
 
-pub(crate) type TimerId = u64;
+pub type TimerId = u64;
 
 struct TimerEntry<H> {
     interval: Option<Duration>,
@@ -39,24 +39,24 @@ impl<H: Callable<()>> TimerManager<H> {
         self.timers.insert(id, entry);
     }
 
-    pub(crate) fn add_timer(&mut self, id: TimerId, delay: u64, interval: Option<u64>, cb: H) {
+    pub fn add_timer(&mut self, id: TimerId, delay: u64, interval: Option<u64>, cb: H) {
         let delay = Duration::from_millis(delay);
         let interval = interval.map(Duration::from_millis);
         self._add_timer(id, delay, interval, cb);
     }
 
-    pub(crate) fn cancel_timer(&mut self, id: TimerId) {
+    pub fn cancel_timer(&mut self, id: TimerId) {
         if let Some(entry) = self.timers.remove(&id) {
             let _ = self.delay_queue.remove(&entry.key);
         }
     }
 
-    pub(crate) fn stop_all(&mut self) {
+    pub fn stop_all(&mut self) {
         self.delay_queue.clear();
         self.timers.clear();
     }
 
-    pub(crate) async fn fire_expired(&mut self, id: TimerId) {
+    pub async fn fire_expired(&mut self, id: TimerId) {
         let Some(entry) = self.timers.remove(&id) else {
             return;
         };
@@ -68,18 +68,18 @@ impl<H: Callable<()>> TimerManager<H> {
         }
     }
 
-    pub(crate) async fn next_expired(&mut self) -> Option<TimerId> {
+    pub async fn next_expired(&mut self) -> Option<TimerId> {
         let expired = self.delay_queue.next().await;
         expired.map(|e| e.into_inner())
     }
 
-    pub(crate) fn is_idle(&self) -> bool {
+    pub fn is_idle(&self) -> bool {
         self.timers.is_empty()
     }
 }
 
 // Alias for standard (thread-safe Send) timer manager
-pub(crate) type BoxTimerManager = TimerManager<BoxHandler<()>>;
+pub type BoxTimerManager = TimerManager<BoxHandler<()>>;
 
 // Alias for local (not Send) timer manager
-pub(crate) type LocalBoxTimerManager = TimerManager<LocalBoxHandler<()>>;
+pub type LocalBoxTimerManager = TimerManager<LocalBoxHandler<()>>;

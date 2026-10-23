@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, thread, time::Duration};
 
-use crate::{dht::token_manager::TokenManager, Id};
+use crate::{token_manager::TokenManager};
+use boson_api::{Id};
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::channel::Role;
-use crate::messaging::internal::codec;
-use crate::Id;
+use crate::channel::Role;
+use crate::internal::codec;
+use boson_api::Id;
 
 /// A single member of a channel, combining identity and role.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

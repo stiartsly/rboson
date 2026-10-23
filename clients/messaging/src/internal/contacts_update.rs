@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::messaging::{
+use crate::{
     Contact
 };
 

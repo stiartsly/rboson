@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
-use crate::errors::Result;
-use crate::messaging::errors::EncodingError;
+use boson_api::errors::Result;
+use crate::errors::EncodingError;
 
 /// Encoding of the message body carried by [`MessageContent`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +46,7 @@ struct MessageContentData {
 }
 
 impl TryFrom<MessageContentData> for MessageContent {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(data: MessageContentData) -> Result<Self> {
         Self::new(data.headers, data.format, data.body)

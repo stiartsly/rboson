@@ -19,7 +19,7 @@ use super::{
     LocalBoxTimerCmd as TimerCmd,
     LocalBoxTimerManager as TimerManager,
 };
-use crate::{
+use boson_api::{
     errors::{Result, StateError},
     signature, Id,
 };

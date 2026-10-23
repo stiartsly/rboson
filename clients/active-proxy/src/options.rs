@@ -6,7 +6,7 @@ use std::{
     sync::Arc
 };
 use serde::Deserialize;
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Error, IOError, Result},
     signature::{KeyPair, PrivateKey},
     Id, PeerInfo,

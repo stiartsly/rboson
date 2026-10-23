@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
-use crate::messaging::errors::{AuthenticationError, EncodingError};
-use crate::{CryptoIdentity, Id, Identity, Result};
+use crate::errors::{AuthenticationError, EncodingError};
+use boson_api::{CryptoIdentity, Id, Identity, Result};
 
 use super::ContactData;
 

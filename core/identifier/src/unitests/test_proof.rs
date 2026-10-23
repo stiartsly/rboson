@@ -1,10 +1,12 @@
-use crate::{
+use boson_api::{
     as_secs,
-    did::{
+    signature,
+};
+use crate::{
+    {
         proof::{ProofPurpose, ProofType},
         Proof, VerificationMethod,
     },
-    signature,
 };
 use std::time::{Duration, SystemTime};
 

@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::{
+use boson_api::{
     errors::ArgumentError, Result,
     utils::codec,
     Id

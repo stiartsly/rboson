@@ -1,4 +1,5 @@
-use crate::{dht::version, dht::rpc::TargetInfo, Id, NodeInfo};
+use crate::{version, rpc::TargetInfo};
+use boson_api::{Id, NodeInfo};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},
@@ -107,7 +108,7 @@ impl KBucketEntry {
 
     #[allow(unused)]
     fn within_backoff_window_at(&self, _: &SystemTime) -> bool {
-        self.failed_reqs != 0 && crate::elapsed_ms!(&self.last_sent) < self.backoff() as u128
+        self.failed_reqs != 0 && boson_api::elapsed_ms!(&self.last_sent) < self.backoff() as u128
     }
 
     #[allow(unused)]
@@ -135,19 +136,19 @@ impl KBucketEntry {
         // don't ping if recently seen to allow NAT entries to time out
         // see https://arxiv.org/pdf/1605.05606v1.pdf for numbers
         // and do exponential backoff after failures to reduce traffic
-        if crate::elapsed_ms!(self.last_seen) < 30 * 1000
+        if boson_api::elapsed_ms!(self.last_seen) < 30 * 1000
             || self.within_backoff_window_at(&self.last_seen)
         {
             return false;
         }
 
         self.failed_reqs != 0
-            || crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
+            || boson_api::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
     pub(crate) fn old_and_stale(&self) -> bool {
         self.failed_reqs > Self::OLD_AND_STALE_FAILURES
-            && crate::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
+            && boson_api::elapsed_ms!(self.last_seen) > Self::OLD_AND_STALE_TIME as u128
     }
 
     ///Determines if this entry can be removed from the routing table without needing replacement.
@@ -281,9 +282,9 @@ impl Into<SerdeKbucketEntry> for KBucketEntry {
     fn into(self) -> SerdeKbucketEntry {
         SerdeKbucketEntry {
             ni: self.ni,
-            created: crate::as_ms!(self.created) as u64,
-            last_seen: crate::as_ms!(self.last_seen) as u64,
-            last_sent: crate::as_ms!(self.last_sent) as u64,
+            created: boson_api::as_ms!(self.created) as u64,
+            last_seen: boson_api::as_ms!(self.last_seen) as u64,
+            last_sent: boson_api::as_ms!(self.last_sent) as u64,
             reachable: self.reachable,
             ver: self.ver,
         }
@@ -313,12 +314,12 @@ impl fmt::Display for KBucketEntry {
             "{}@{};seen:{}; age:{}",
             self.ni.id(),
             self.ni.address(),
-            crate::as_secs!(self.last_seen),
-            crate::as_secs!(self.created)
+            boson_api::as_secs!(self.last_seen),
+            boson_api::as_secs!(self.created)
         )?;
 
         if self.last_sent.elapsed().is_ok() {
-            write!(f, "; sent:{}", crate::as_secs!(self.last_sent))?;
+            write!(f, "; sent:{}", boson_api::as_secs!(self.last_sent))?;
         }
         if self.failed_reqs > 0 {
             write!(f, "; fail: {}", self.failed_reqs - 0)?;

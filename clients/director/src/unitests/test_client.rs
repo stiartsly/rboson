@@ -1,5 +1,5 @@
-use crate::director::{self, Client};
-use crate::{signature::KeyPair, Id};
+use crate::{self as director, Client};
+use boson_api::{signature::KeyPair, Id};
 use base64::Engine;
 use serde_json::{json, Value};
 use tokio::{
@@ -184,7 +184,7 @@ async fn test_client_close_state() {
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
-        .downcast_ref::<crate::errors::StateError>()
+        .downcast_ref::<boson_api::errors::StateError>()
         .is_some());
 }
 

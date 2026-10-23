@@ -4,7 +4,7 @@ use serde::{
     Deserializer,
     Serializer
 };
-use crate::messaging::channel::{Permission, Role};
+use crate::channel::{Permission, Role};
 
 pub(crate) mod role {
     use super::*;

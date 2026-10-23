@@ -1,3 +1,8 @@
+// Migrated code: it calls libsodium directly and is not documented yet. Remove these allows as the
+// crate is brought in line with the workspace lints.
+#![allow(unsafe_code)]
+#![allow(missing_docs)]
+
 mod msg {
     pub(crate) mod announce_peer_req;
     pub(crate) mod error;
@@ -132,7 +137,7 @@ mod storage;
 mod suspicious_node_detector;
 mod token_manager;
 
-pub mod version;
+pub use boson_api::version;
 pub mod connection_status;
 pub mod connection_status_listener;
 pub mod errors;
@@ -140,7 +145,7 @@ pub mod lookup_option;
 pub mod node;
 pub mod node_options;
 
-pub use crate::dht::{
+pub use crate::{
     connection_status::ConnectionStatus,
     connection_status_listener::ConnectionStatusListener,
     lookup_option::LookupOption,
@@ -232,7 +237,6 @@ mod unitests {
     mod test_node;
     mod test_rpccall;
     mod test_token_manager;
-    mod test_version;
 
     // storage
     mod test_storage;

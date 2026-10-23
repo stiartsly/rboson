@@ -1,9 +1,9 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     msg::msg,
     task::{CandidateNode, ClosestSet, Task, TaskData},
 };
-use crate::{EasyHandler, PeerInfo};
+use boson_api::{EasyHandler, PeerInfo};
 use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
 pub(crate) struct PeerAnnounceTask {

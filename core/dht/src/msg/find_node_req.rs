@@ -1,8 +1,11 @@
 use crate::{
-    dht::msg::lookup_req::{
+    msg::lookup_req::{
         Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK, WANT_TOKEN_MASK,
     },
-    utils, Id,
+};
+use boson_api::{
+    utils,
+    Id,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;

@@ -1,4 +1,4 @@
-use crate::core::Id;
+use boson_api::Id;
 use std::{cmp::Ordering, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

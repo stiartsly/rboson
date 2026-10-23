@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use crate::core::Id;
+use crate::Id;
 
 #[cfg(test)]
 mod tests {

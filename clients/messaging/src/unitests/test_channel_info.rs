@@ -1,5 +1,5 @@
-use crate::Id;
-use crate::messaging::{
+use boson_api::Id;
+use crate::{
     channel::Permission,
     internal::ChannelInfo,
 };
@@ -8,7 +8,7 @@ use super::ChannelMember;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messaging::channel::Role;
+    use crate::channel::Role;
     use serde_cbor::Value;
 
     #[test]

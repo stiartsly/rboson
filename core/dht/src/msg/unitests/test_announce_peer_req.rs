@@ -1,4 +1,5 @@
-use crate::{dht::msg::announce_peer_req::AnnouncePeerRequest, Id, PeerInfo};
+use crate::{msg::announce_peer_req::AnnouncePeerRequest};
+use boson_api::{Id, PeerInfo};
 
 fn make_peer() -> PeerInfo {
     PeerInfo::packed(

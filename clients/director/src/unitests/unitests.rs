@@ -1,7 +1,7 @@
-use crate::director::{
+use crate::{
     base64url, sign_nonce, Client, Options, ProfileUpdate, UserRegistration,
 };
-use crate::{errors::ArgumentError, signature::KeyPair, Id};
+use boson_api::{errors::ArgumentError, signature::KeyPair, Id};
 
 #[test]
 fn builder_rejects_incomplete_device_identity() {

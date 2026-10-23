@@ -12,7 +12,7 @@ use serde::{
     Serialize,
     Serializer,
 };
-use crate::core::{
+use crate::{
     errors::{ArgumentError, Error, Result},
     Id,
     Network,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::errors::EncodingError;
-use crate::{
+use crate::errors::EncodingError;
+use boson_api::{
     errors::{Error, Result},
     Id,
 };
@@ -55,7 +55,7 @@ impl Handshake {
             return Err(EncodingError::new("Handshake timestamp is negative"));
         }
         if let HandshakeType::FriendRequestAccept(key) = &body {
-            if key.len() != crate::signature::PrivateKey::BYTES {
+            if key.len() != boson_api::signature::PrivateKey::BYTES {
                 return Err(EncodingError::new(format!(
                     "Invalid friend session key length: {}",
                     key.len()

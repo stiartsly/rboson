@@ -3,13 +3,13 @@ use std::path::Path;
 use std::fs;
 use log::error;
 
-use crate::{
+use boson_api::{
     Id,
     Error,
-    core::Result,
+    Result,
 };
 
-use crate::messaging::{
+use crate::{
     messaging_repository::MessagingRepository,
     message::Message,
     channel::Channel,

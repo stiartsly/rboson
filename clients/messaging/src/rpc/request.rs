@@ -1,10 +1,10 @@
 use serde::{Serialize, Deserialize};
 use serde_cbor::{self};
 
-use crate::{
+use boson_api::{
     Id,
     Error,
-    core::Result
+    Result
 };
 use super::{
     method::RPCMethod,

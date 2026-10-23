@@ -3,11 +3,11 @@ use log::info;
 use rbtree::RBTree;
 use std::{fmt, time::SystemTime};
 
-use crate::dht::{
+use crate::{
     routing::{KBucketEntry, Prefix},
     rpc::TargetInfo,
 };
-use crate::{EasyHandler, Id};
+use boson_api::{EasyHandler, Id};
 
 /**
  * A KBucket is just a list of KBucketEntry objects.
@@ -112,7 +112,7 @@ impl KBucket {
         let needs_ping = self.entries.iter().any(|(_, v)| v.needs_ping());
         let needs_refresh = self
             .last_refreshed
-            .map_or(true, |v| crate::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL);
+            .map_or(true, |v| boson_api::elapsed_ms!(v) > KBucket::REFRESH_INTERVAL);
         needs_refresh && needs_ping
     }
 

@@ -6,12 +6,12 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Result, SignatureError},
     utils::codec, CryptoIdentity, Id,
 };
 
-use crate::did::{
+use crate::{
     card::{Card, Service as CardService},
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
@@ -514,7 +514,7 @@ impl TryFrom<&str> for DIDDocument {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &str) -> Result<Self> {
-        let document: Self = serde_json::from_str(data).map_err(|e| -> crate::Error {
+        let document: Self = serde_json::from_str(data).map_err(|e| -> boson_api::Error {
             ArgumentError::new(format!("Failed to parse DIDDocument from string: {}", e)).into()
         })?;
         document.validate_structure()?;
@@ -534,7 +534,7 @@ impl TryFrom<&[u8]> for DIDDocument {
     type Error = Box<dyn Error>;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        let document: Self = serde_cbor::from_slice(data).map_err(|e| -> crate::Error {
+        let document: Self = serde_cbor::from_slice(data).map_err(|e| -> boson_api::Error {
             ArgumentError::new(format!("Failed to parse DIDDocument from bytes: {}", e)).into()
         })?;
         document.validate_structure()?;

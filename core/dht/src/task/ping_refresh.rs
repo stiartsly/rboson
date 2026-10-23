@@ -1,11 +1,11 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     msg::msg,
     routing::{KBucket, KBucketEntry},
     rpc::RpcCall,
     task::{Task, TaskData},
 };
-use crate::EasyHandler;
+use boson_api::EasyHandler;
 use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
 #[allow(unused)]

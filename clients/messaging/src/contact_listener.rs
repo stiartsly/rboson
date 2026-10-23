@@ -1,5 +1,5 @@
-use crate::Id;
-use crate::messaging::contact::Contact;
+use boson_api::Id;
+use crate::contact::Contact;
 
 /// The listener to handle events related to the contact list change events.
 pub trait ContactListener: Send + Sync {

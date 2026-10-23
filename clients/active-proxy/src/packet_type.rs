@@ -1,4 +1,4 @@
-use crate::{core::errors::StateError, Result};
+use boson_api::{errors::StateError, Result};
 use std::fmt;
 
 const ACK_MASK: u8 = 0x80;

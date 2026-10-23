@@ -5,9 +5,9 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use crate::core::errors::Result;
+use crate::errors::Result;
 
-pub(crate) struct Data<T> {
+pub struct Data<T> {
     result: Option<Result<T>>,
     waker: Option<Waker>,
     completed: bool,
@@ -44,7 +44,7 @@ impl<T> Data<T> {
     }
 }
 
-pub(crate) struct PromiseFuture<T>(Arc<Mutex<Data<T>>>);
+pub struct PromiseFuture<T>(Arc<Mutex<Data<T>>>);
 
 impl<T> Unpin for PromiseFuture<T> {}
 impl<T> Clone for PromiseFuture<T> {
@@ -74,7 +74,7 @@ impl<T> Future for PromiseFuture<T> {
 }
 
 #[derive(Clone)]
-pub(crate) struct Promise<T> {
+pub struct Promise<T> {
     result: Arc<Mutex<Data<T>>>,
 }
 
@@ -89,13 +89,13 @@ impl<T> Promise<T> {
         PromiseFuture(self.result.clone())
     }
 
-    pub(crate) fn pair() -> (Self, PromiseFuture<T>) {
+    pub fn pair() -> (Self, PromiseFuture<T>) {
         let promise = Self::new();
         let future = promise.future();
         (promise, future)
     }
 
-    pub(crate) fn complete(&self, result: Result<T>) {
+    pub fn complete(&self, result: Result<T>) {
         self.result.lock().unwrap().complete(result);
     }
 }

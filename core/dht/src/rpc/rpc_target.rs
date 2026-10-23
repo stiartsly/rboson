@@ -1,7 +1,7 @@
 use std::{cell::RefCell, net::SocketAddr, rc::Rc};
 
-use crate::dht::{routing::KBucketEntry, task::CandidateNode};
-use crate::{Id, NodeInfo};
+use crate::{routing::KBucketEntry, task::CandidateNode};
+use boson_api::{Id, NodeInfo};
 
 impl Into<Target> for NodeInfo {
     fn into(self) -> Target {

@@ -1,5 +1,5 @@
-use crate::dht::msg::{FindNodeRequest, LookupRequest};
-use crate::Id;
+use crate::msg::{FindNodeRequest, LookupRequest};
+use boson_api::Id;
 
 #[cfg(test)]
 mod tests {

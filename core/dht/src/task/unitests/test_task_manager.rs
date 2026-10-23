@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::dht::{
+use crate::{
     dht::DHT,
     task::{task_listener::TaskListener, task_manager::TaskManager, Task, TaskData},
 };

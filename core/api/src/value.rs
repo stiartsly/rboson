@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt, result::Result as StdResult};
 
-use crate::core::{
+use crate::{
     cryptobox,
     cryptobox::Nonce,
     errors::{ArgumentError, Error, StateError},
@@ -220,7 +220,8 @@ impl Value {
         Ok(value)
     }
 
-    pub(crate) fn packed(
+    #[doc(hidden)]
+    pub fn packed(
         pk: Option<Id>,
         recipient: Option<Id>,
         nonce: Option<Nonce>,

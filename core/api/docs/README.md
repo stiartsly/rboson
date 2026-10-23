@@ -1,6 +1,6 @@
 # Core developer documents
 
-This directory contains developer notes for the public building blocks in `src/core`.
+This directory contains developer notes for the public building blocks in `core/api/src`.
 
 - [signature](./signature.md): Ed25519 signing keys, signatures, and streaming signatures.
 - [cryptobox](./cryptobox.md): X25519 public-key encryption helpers and nonce handling.

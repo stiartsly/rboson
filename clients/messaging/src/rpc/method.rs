@@ -48,9 +48,9 @@ impl Method {
 }
 
 impl TryFrom<i32> for Method {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
-    fn try_from(value: i32) -> crate::Result<Self> {
+    fn try_from(value: i32) -> boson_api::Result<Self> {
         use Method::*;
         [
             SessionList, SessionRevoke, ContactMutate, ContactSync, ChannelCreate,
@@ -60,6 +60,6 @@ impl TryFrom<i32> for Method {
         ]
         .into_iter()
         .find(|method| method.value() == value)
-        .ok_or_else(|| crate::core::errors::ProtocolError::new(format!("Invalid RPC method: {value}")).into())
+        .ok_or_else(|| boson_api::errors::ProtocolError::new(format!("Invalid RPC method: {value}")).into())
     }
 }

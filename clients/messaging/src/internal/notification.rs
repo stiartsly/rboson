@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::errors::EncodingError;
-use crate::messaging::SessionInfo;
-use crate::{
+use crate::errors::EncodingError;
+use crate::SessionInfo;
+use boson_api::{
     errors::{Error, Result},
     Id,
 };

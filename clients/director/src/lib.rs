@@ -1,3 +1,7 @@
+// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
+// with the workspace lints.
+#![allow(missing_docs)]
+
 mod client;
 mod device;
 mod errors;
@@ -40,8 +44,8 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn sign_nonce(
-    key: &crate::signature::PrivateKey,
+    key: &boson_api::signature::PrivateKey,
     nonce: &[u8],
-) -> Result<String, crate::Error> {
+) -> Result<String, boson_api::Error> {
     Ok(base64url(&key.sign_into(nonce)?))
 }

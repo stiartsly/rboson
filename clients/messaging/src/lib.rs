@@ -1,3 +1,7 @@
+// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
+// with the workspace lints.
+#![allow(missing_docs)]
+
 pub(crate) mod internal;
 pub(crate) mod rpc;
 

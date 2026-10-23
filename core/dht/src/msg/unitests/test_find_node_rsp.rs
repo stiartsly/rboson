@@ -1,6 +1,10 @@
 use crate::{
-    dht::msg::{FindNodeResponse, LookupResponse},
-    Id, Network, NodeInfo,
+    msg::{FindNodeResponse, LookupResponse},
+};
+use boson_api::{
+    Id,
+    Network,
+    NodeInfo,
 };
 use std::net::SocketAddr;
 

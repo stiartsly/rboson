@@ -1,13 +1,13 @@
 use std::{fmt, str, time::SystemTime};
 use serde::{Deserialize, Serialize};
 
-use crate::did::date;
-use crate::{
+use crate::date;
+use boson_api::{
     errors::{ArgumentError, Error, Result, SignatureError},
     signature, utils::codec, CryptoIdentity, Id,
 };
 
-use crate::did::{
+use crate::{
     w3c::VerifiablePresentation as VP,
     Credential,
     VouchBuilder

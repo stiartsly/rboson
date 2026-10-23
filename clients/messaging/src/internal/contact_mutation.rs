@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
-use crate::{errors::{ArgumentError, Error, Result}};
-use crate::Id;
+use boson_api::{errors::{ArgumentError, Error, Result}};
+use boson_api::Id;
 use super::OpaqueContact;
 
 #[cfg(test)]

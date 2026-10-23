@@ -3,8 +3,8 @@ use log::warn;
 use std::cell::UnsafeCell;
 use std::time::{Duration, SystemTime};
 
-use crate::core::cryptobox::Nonce;
-use crate::dht::storage::{
+use boson_api::cryptobox::Nonce;
+use crate::storage::{
     create_tbs,
     data_storage::DataStorage,
     drop_tbs,
@@ -33,7 +33,7 @@ use crate::dht::storage::{
     update_value_announced_time,
     user_version,
 };
-use crate::{
+use boson_api::{
     as_ms,
     errors::{ArgumentError, StateError},
     Error, Id, PeerInfo, Result, Value,

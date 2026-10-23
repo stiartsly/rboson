@@ -1,5 +1,5 @@
 use super::test_utils::make_test_dht;
-use crate::dht::{
+use crate::{
     dht::DHT,
     task::{
         candidate_node::CandidateNode,
@@ -8,7 +8,7 @@ use crate::dht::{
         value_announce::ValueAnnounceTask,
     },
 };
-use crate::{Id, Network, NodeInfo, Value};
+use boson_api::{Id, Network, NodeInfo, Value};
 use std::{cell::RefCell, rc::Rc};
 
 fn make_dht() -> Rc<DHT> {

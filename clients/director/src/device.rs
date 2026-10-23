@@ -1,4 +1,4 @@
-use crate::Id;
+use boson_api::Id;
 use serde::Deserialize;
 use std::fmt;
 

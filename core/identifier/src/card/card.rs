@@ -7,8 +7,8 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use crate::did::date;
-use crate::{
+use crate::date;
+use boson_api::{
     errors::{ArgumentError, SignatureError},
     Result,
     Error,
@@ -18,7 +18,7 @@ use crate::{
     utils::codec,
 };
 
-use crate::did::{w3c::DIDDocument, CardBuilder, Credential};
+use crate::{w3c::DIDDocument, CardBuilder, Credential};
 
 const DEFAULT_PROFILE_CREDENTIAL_ID: &str = "profile";
 const DEFAULT_PROFILE_CREDENTIAL_TYPE: &str = "BosonProfile";

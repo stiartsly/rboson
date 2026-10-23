@@ -4,8 +4,8 @@ use std::{
     pin::Pin,
     time::SystemTime,
 };
-use crate::errors::{Error, Result, ArgumentError};
-use crate::Id;
+use boson_api::errors::{Error, Result, ArgumentError};
+use boson_api::Id;
 
 pub use super::content_type;
 pub use super::content_disposition::{

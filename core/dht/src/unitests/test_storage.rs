@@ -2,8 +2,8 @@ use serial_test::serial;
 use std::fs;
 use std::time::Duration;
 
-use crate::dht::storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage};
-use crate::{
+use crate::storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage};
+use boson_api::{
     random_bytes, signature::KeyPair, CryptoIdentity, EncryptedBuilder, Id, Identity,
     ImmutableBuilder as ValueBuilder, PeerInfo, SignedBuilder, Value,
 };

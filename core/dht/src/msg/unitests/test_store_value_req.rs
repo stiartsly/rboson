@@ -1,4 +1,5 @@
-use crate::{cryptobox::Nonce, dht::msg::store_value_req::StoreValueRequest, Id, Value};
+use boson_api::{cryptobox::Nonce, Id, Value};
+use crate::{msg::store_value_req::StoreValueRequest};
 
 fn make_value() -> Value {
     Value::packed(

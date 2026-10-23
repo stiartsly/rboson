@@ -1,4 +1,4 @@
-use crate::messaging::message::ContentDisposition;
+use crate::message::ContentDisposition;
 
 #[cfg(test)]
 mod tests {

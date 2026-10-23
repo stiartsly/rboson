@@ -4,13 +4,13 @@ mod schema;
 mod sql;
 pub(crate) mod sqlite_storage;
 
-use crate::dht::storage::models::{NewPeer, NewValore, Peer, Valore};
+use crate::storage::models::{NewPeer, NewValore, Peer, Valore};
 
-use crate::dht::storage::schema::valores::{
+use crate::storage::schema::valores::{
     dsl::valores, id as val_id, persistent as val_persistent, updated as val_updated,
 };
 
-use crate::dht::storage::schema::peers::{
+use crate::storage::schema::peers::{
     dsl::peers, fingerprint as peer_fingerprint, id as peer_id, nodeId as peer_node_id,
     persistent as peer_persistent, sequenceNumber as peer_seq, updated as peer_updated,
 };
@@ -76,7 +76,7 @@ fn create_tbs(conn: &mut SqliteConnection) -> bool {
 
 // INSERT OR REPLACE INTO valores(...)
 pub(crate) fn put_value(conn: &mut SqliteConnection, v: NewValore) -> Result<bool, Error> {
-    use crate::dht::storage::schema::valores;
+    use crate::storage::schema::valores;
     diesel::replace_into(valores::table)
         .values(&v)
         .execute(conn)
@@ -160,7 +160,7 @@ pub(crate) fn remove_expired_values(
 // Peer queries
 // ─────────────────────────────────────────────────────────────────────────────
 pub(crate) fn put_peer(conn: &mut SqliteConnection, peer: NewPeer) -> Result<bool, Error> {
-    use crate::dht::storage::schema::peers;
+    use crate::storage::schema::peers;
     diesel::replace_into(peers::table)
         .values(&peer)
         .execute(conn)
@@ -170,7 +170,7 @@ pub(crate) fn put_peer(conn: &mut SqliteConnection, peer: NewPeer) -> Result<boo
 // INSERT OR REPLACE INTO peers(...)
 #[allow(unused)]
 pub(crate) fn put_peers(conn: &mut SqliteConnection, _peers: Vec<NewPeer>) -> Result<bool, Error> {
-    use crate::dht::storage::schema::peers;
+    use crate::storage::schema::peers;
     diesel::replace_into(peers::table)
         .values(&_peers)
         .execute(conn)

@@ -1,5 +1,5 @@
-use crate::dht::{routing::KBucketEntry, rpc::TargetInfo};
-use crate::{Id, NodeInfo};
+use crate::{routing::KBucketEntry, rpc::TargetInfo};
+use boson_api::{Id, NodeInfo};
 use std::{net::SocketAddr, time::SystemTime};
 
 const MAX_PINGS: i32 = 3;

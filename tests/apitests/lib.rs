@@ -47,7 +47,6 @@ mod messaging {
     mod message_builder;
     mod options;
 }
-
 // helper function
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
     unsafe {
@@ -56,10 +55,9 @@ fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
 }
 
 fn create_random_bytes(len: usize) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(len);
+    let mut bytes = vec![0u8; len];
     unsafe {
         libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, len);
-        bytes.set_len(len);
     }
     bytes
 }

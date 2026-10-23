@@ -20,7 +20,7 @@ use super::{
 use crate::{
     cryptobox, elapsed_ms,
     errors::{ArgumentError, NetworkError, StateError},
-    identity::CryptoIdentity,
+    crypto_identity::CryptoIdentity,
     signature, CryptoContext, Id, Identity, PeerBuilder, PeerInfo, Result,
 };
 
@@ -527,7 +527,7 @@ impl ProxySession {
                 );
             } else {
                 let mut builder = PeerBuilder::new(advertised)
-                    .with_key(self.device_identity.signature_keypair().clone());
+                    .with_key(self.device_identity.signature_key().clone());
                 if named_endpoint.is_some() {
                     builder = builder.with_extra(format!("altEndpoint={endpoint}").as_bytes());
                 }

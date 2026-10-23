@@ -1169,7 +1169,7 @@ impl RpcServer {
         let revision = self.contacts_revision.get();
         let mut data = ContactData::new(*user_id, ContactType::Friend as u8, Self::current_timestamp()?);
         data.set_session_key(self.user_identity.encrypt_into(
-            self.user_id(), session.signature_keypair().private_key().as_ref(),
+            self.user_id(), session.signature_key().private_key().as_ref(),
         )?);
         let mutation = ContactMutation::add(
             revision,
@@ -1504,7 +1504,7 @@ impl RpcServer {
        // let _requests = self.requests.lock().await;
 
         let session = CryptoIdentity::new();
-        let private_key = session.signature_keypair().private_key().as_bytes();
+        let private_key = session.signature_key().private_key().as_bytes();
         let encoded_key = self.user_identity.encrypt_into(
             self.user_id(),
             private_key,
@@ -1630,7 +1630,7 @@ impl RpcServer {
         }
         let session = self.friend_sessions.lock().unwrap().get(channel_id).cloned()
             .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-        let key = session.signature_keypair().private_key().as_ref().to_vec();
+        let key = session.signature_key().private_key().as_ref().to_vec();
         let key = match invitee {
             Some(id) => self.user_identity.encrypt_into(&id, &key)?,
             None => key,
@@ -1698,7 +1698,7 @@ impl RpcServer {
     }
 
     async fn store_channel(&self, mut channel: PhotonChannel, session: CryptoIdentity) -> Result<()> {
-        let key = self.user_identity.encrypt_into(self.user_id(), session.signature_keypair().private_key().as_ref())?;
+        let key = self.user_identity.encrypt_into(self.user_id(), session.signature_key().private_key().as_ref())?;
         let mut data = ContactData::new(*channel.id(), ContactType::Channel as u8, channel.contact.created_at());
         data.set_session_key(key.clone());
         data.name = channel.contact.name().map(ToString::to_string);
@@ -2003,7 +2003,7 @@ impl RpcServer {
         data.revision = next_revision;
         let session = self.friend_sessions.lock().unwrap().get(contact.id()).cloned();
         let key = session.as_ref().map(|session| self.user_identity.encrypt_into(
-            self.user_id(), session.signature_keypair().private_key().as_ref(),
+            self.user_id(), session.signature_key().private_key().as_ref(),
         )).transpose()?;
         if let Some(key) = &key {
             data.set_session_key(key.clone());

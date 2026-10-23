@@ -34,7 +34,7 @@ impl Prefix {
     }
 
     pub(crate) fn is_prefix_of(&self, id: &Id) -> bool {
-        Id::bits_equal(&self.id, id, self.depth)
+        self.depth < 0 || Id::bits_equal(&self.id, id, self.depth)
     }
 
     pub(crate) const fn is_splittable(&self) -> bool {
@@ -85,7 +85,8 @@ impl Prefix {
 
     #[allow(unused)]
     pub(crate) fn is_sibling_of(&self, other: &Prefix) -> bool {
-        self.depth == other.depth && Id::bits_equal(&self.id, &other.id, self.depth - 1)
+        self.depth == other.depth
+            && (self.depth <= 0 || Id::bits_equal(&self.id, &other.id, self.depth - 1))
     }
 
     pub(crate) fn random_id(&self) -> Id {

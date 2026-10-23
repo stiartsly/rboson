@@ -1,4 +1,7 @@
-use crate::core::{signature, CryptoIdentity, Id, Identity};
+use crate::core::{
+    cryptobox::{CryptoBox, Nonce},
+    signature, CryptoIdentity, Id, Identity,
+};
 /*
 Testcases for critical methods:
 - test_sign(..)
@@ -113,9 +116,9 @@ mod tests {
         let identity = CryptoIdentity::try_from(kp.private_key().as_bytes()).unwrap();
 
         assert_eq!(identity.id(), &Id::from(kp.public_key()));
-        assert_eq!(identity.signature_keypair().public_key(), kp.public_key());
+        assert_eq!(identity.signature_key().public_key(), kp.public_key());
         assert_eq!(
-            identity.encryption_keypair().public_key().as_bytes(),
+            identity.encryption_key().public_key().as_bytes(),
             crate::core::cryptobox::KeyPair::from(&kp)
                 .public_key()
                 .as_bytes()
@@ -127,7 +130,7 @@ mod tests {
         let kp = signature::KeyPair::random();
         let identity = CryptoIdentity::from(signature::KeyPair::from(kp.private_key().clone()));
         assert_eq!(identity.id(), &Id::from(kp.public_key()));
-        assert_eq!(identity.signature_keypair().public_key(), kp.public_key());
+        assert_eq!(identity.signature_key().public_key(), kp.public_key());
     }
 
     #[test]
@@ -194,6 +197,41 @@ mod tests {
 
         let result = receiver.decrypt_into(sender.id(), &cipher);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_prepends_nonce() {
+        let sender = CryptoIdentity::new();
+        let receiver = CryptoIdentity::new();
+        let plain = b"Hello, explicit nonce!";
+
+        let cipher = sender.encrypt_into(receiver.id(), plain).unwrap();
+        assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES);
+        assert_eq!(receiver.decrypt_into(sender.id(), &cipher).unwrap(), plain);
+    }
+
+    #[test]
+    fn test_encrypt_with_nonce_is_raw_ciphertext() {
+        let sender = CryptoIdentity::new();
+        let receiver = CryptoIdentity::new();
+        let nonce = Nonce::random();
+        let plain = b"Hello, raw ciphertext!";
+
+        let cipher = sender
+            .encrypt_with_nonce_into(receiver.id(), nonce.as_bytes(), plain)
+            .unwrap();
+        assert_eq!(cipher.len(), plain.len() + CryptoBox::MAC_BYTES);
+        assert_eq!(
+            receiver
+                .decrypt_with_nonce_into(sender.id(), nonce.as_bytes(), &cipher)
+                .unwrap(),
+            plain
+        );
+
+        let wrong_nonce = Nonce::random();
+        assert!(receiver
+            .decrypt_with_nonce_into(sender.id(), wrong_nonce.as_bytes(), &cipher)
+            .is_err());
     }
 
     #[test]

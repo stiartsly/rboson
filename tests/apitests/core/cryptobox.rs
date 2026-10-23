@@ -253,17 +253,17 @@ mod tests {
         let cipher_len = result.unwrap();
         assert_eq!(
             cipher_len,
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
         let bx2 = bx2.unwrap();
         let mut decrypted = vec![0u8; 1024];
-        let result = bx2.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice());
+        let result = bx2.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice(), &nonce);
         assert_eq!(result.is_ok(), true);
         let decrypted_len = result.unwrap();
         assert_eq!(
             decrypted_len,
-            cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher_len - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted_len, plain.len());
         assert_eq!(decrypted[..decrypted_len], plain);
@@ -286,16 +286,16 @@ mod tests {
         let cipher = result.unwrap();
         assert_eq!(
             cipher.len(),
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
         let bx = bx2.unwrap();
-        let result = bx.decrypt_into(&cipher);
+        let result = bx.decrypt_into(&cipher, &nonce);
         assert_eq!(result.is_ok(), true);
         let decrypted = result.unwrap();
         assert_eq!(
             decrypted.len(),
-            cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher.len() - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted.len(), plain.len());
         assert_eq!(plain, decrypted);
@@ -338,13 +338,14 @@ mod tests {
         let cipher_len = result.unwrap();
         assert_eq!(
             cipher_len,
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
         let mut decrypted = vec![0u8; 1024];
         let result = boson::cryptobox::decrypt(
             &cipher[..cipher_len],
             &mut decrypted.as_mut(),
+            &nonce,
             kp2.public_key(),
             kp1.private_key(),
         );
@@ -352,7 +353,7 @@ mod tests {
         let decrypted_len = result.unwrap();
         assert_eq!(
             decrypted_len,
-            cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher_len - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted_len, plain.len());
         assert_eq!(decrypted[..decrypted_len], plain);
@@ -370,15 +371,15 @@ mod tests {
         let cipher = result.unwrap();
         assert_eq!(
             cipher.len(),
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
-        let result = boson::cryptobox::decrypt_into(&cipher, kp2.public_key(), kp1.private_key());
+        let result = boson::cryptobox::decrypt_into(&cipher, &nonce, kp2.public_key(), kp1.private_key());
         assert_eq!(result.is_ok(), true);
         let decrypted = result.unwrap();
         assert_eq!(
             decrypted.len(),
-            cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher.len() - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted.len(), plain.len());
         assert_eq!(decrypted, plain);
@@ -403,7 +404,7 @@ mod tests {
         let cipher_len = result.unwrap();
         assert_eq!(
             cipher_len,
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
         let result = CryptoBox::try_from((kp1.public_key(), kp2.private_key()));
@@ -411,12 +412,12 @@ mod tests {
         let bx = result.unwrap();
 
         let mut decrypted = vec![0u8; 1024];
-        let result = bx.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice());
+        let result = bx.decrypt(&cipher[..cipher_len], &mut decrypted.as_mut_slice(), &nonce);
         assert_eq!(result.is_ok(), true);
         let decrypted_len = result.unwrap();
         assert_eq!(
             decrypted_len,
-            cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher_len - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted_len, plain.len());
         assert_eq!(decrypted[..decrypted_len], plain);
@@ -439,13 +440,14 @@ mod tests {
         let cipher_len = result.unwrap();
         assert_eq!(
             cipher_len,
-            plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES
+            plain.len() + CryptoBox::MAC_BYTES
         );
 
         let mut decrypted = vec![0u8; 1024];
         let result = boson::cryptobox::decrypt(
             &cipher[..cipher_len],
             &mut decrypted.as_mut(),
+            &nonce,
             kp2.public_key(),
             kp1.private_key(),
         );
@@ -453,7 +455,7 @@ mod tests {
         let decrypted_len = result.unwrap();
         assert_eq!(
             decrypted_len,
-            cipher_len - CryptoBox::MAC_BYTES - Nonce::BYTES
+            cipher_len - CryptoBox::MAC_BYTES
         );
         assert_eq!(decrypted_len, plain.len());
         assert_eq!(decrypted[..decrypted_len], plain);

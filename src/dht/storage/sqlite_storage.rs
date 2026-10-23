@@ -212,7 +212,7 @@ impl DataStorage for SqliteStorage {
         let p = NewPeer {
             id: peer.id().as_bytes(),
             fingerprint: peer.fingerprint() as i64,
-            privateKey: peer.private_key().map(|sk| sk.as_bytes()),
+            privateKey: peer.private_key(),
             sequenceNumber: peer.sequence_number(),
             nodeId: peer.nodeid().map(|n| n.as_bytes()),
             nodeSignature: peer.node_signature(),

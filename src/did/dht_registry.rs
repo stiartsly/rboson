@@ -43,7 +43,7 @@ impl DHTRegistry {
 
         let data: Vec<u8> = card.into();
         let value = SignedBuilder::new(&data)
-            .with_keypair(identity.signature_keypair())
+            .with_keypair(identity.signature_key())
             .with_sequence_number(version)
             .build()?;
 

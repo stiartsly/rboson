@@ -64,6 +64,7 @@ mod tests {
         let decrypted = result.unwrap();
         assert_eq!(plain, decrypted.as_slice());
 
+        ctx1.reset_nonce();
         // testing encrypt and decrypt methods
         let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
         let result = ctx2.encrypt(plain, &mut cipher);
@@ -76,6 +77,7 @@ mod tests {
         let decrypted = result.unwrap();
         assert_eq!(plain, decrypted.as_slice());
 
+        ctx1.reset_nonce();
         let mut decrypted = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
         let result = ctx1.decrypt(&cipher, &mut decrypted);
         assert!(result.is_ok());
@@ -101,6 +103,7 @@ mod tests {
         let decrypted = result.unwrap();
         assert_eq!(plain, decrypted.as_slice());
 
+        ctx1.reset_nonce();
         // testing encrypt and decrypt methods
         let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
         let result = ctx2.encrypt(plain, &mut cipher);
@@ -113,6 +116,7 @@ mod tests {
         let decrypted = result.unwrap();
         assert_eq!(plain, decrypted.as_slice());
 
+        ctx1.reset_nonce();
         let mut decrypted = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
         let result = ctx1.decrypt(&cipher, &mut decrypted);
         assert!(result.is_ok());

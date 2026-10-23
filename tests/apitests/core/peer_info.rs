@@ -1,5 +1,4 @@
 use boson::{signature, CryptoIdentity, Id, Identity, PeerBuilder, PeerInfo};
-use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 mod tests {
@@ -16,7 +15,7 @@ mod tests {
         assert_eq!(peer.private_key().is_some(), true);
         assert_eq!(peer.endpoint(), endpoint);
         assert_eq!(peer.sequence_number(), 0);
-        assert_eq!(peer.fingerprint(), 0);
+        assert_ne!(peer.fingerprint(), 0);
         assert_eq!(peer.nodeid(), None);
         assert_eq!(peer.is_authenticated(), false);
         assert_eq!(peer.has_extra(), false);
@@ -37,7 +36,7 @@ mod tests {
         assert_eq!(peer.id(), &Id::from(keypair.public_key()));
         assert_eq!(peer.has_private_key(), true);
         assert_eq!(peer.private_key().is_some(), true);
-        assert_eq!(peer.private_key(), Some(keypair.private_key()));
+        assert_eq!(peer.private_key(), Some(keypair.private_key().as_bytes()));
         assert_eq!(peer.nodeid(), None);
         assert_eq!(peer.node_signature(), None);
         assert_eq!(peer.is_authenticated(), false);
@@ -55,9 +54,9 @@ mod tests {
         let endpoint = "http://localhost:8080";
         let keypair = signature::KeyPair::random();
         let identity = CryptoIdentity::from(keypair);
-        let node = Arc::new(Mutex::new(identity));
+        let node = identity;
         let rc = PeerBuilder::new(endpoint)
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();
@@ -65,7 +64,7 @@ mod tests {
 
         assert_eq!(peer.has_private_key(), true);
         assert_eq!(peer.private_key().is_some(), true);
-        assert_eq!(peer.nodeid(), Some(node.lock().unwrap().id()));
+        assert_eq!(peer.nodeid(), Some(node.id()));
         assert_eq!(peer.node_signature().is_some(), true);
         assert_eq!(peer.node_signature().unwrap().len(), 64);
         assert_eq!(peer.is_authenticated(), true);
@@ -83,11 +82,11 @@ mod tests {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
         let node_identity = CryptoIdentity::from(node_kp);
-        let node = Arc::new(Mutex::new(node_identity));
+        let node = node_identity;
         let peer_kp = signature::KeyPair::random();
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();
@@ -96,8 +95,8 @@ mod tests {
         assert_eq!(peer.id(), &Id::from(peer_kp.public_key()));
         assert_eq!(peer.has_private_key(), true);
         assert_eq!(peer.private_key().is_some(), true);
-        assert_eq!(peer.private_key(), Some(peer_kp.private_key()));
-        assert_eq!(peer.nodeid(), Some(node.lock().unwrap().id()));
+        assert_eq!(peer.private_key(), Some(peer_kp.private_key().as_bytes()));
+        assert_eq!(peer.nodeid(), Some(node.id()));
         assert_eq!(peer.node_signature().is_some(), true);
         assert_eq!(peer.node_signature().unwrap().len(), 64);
         assert_eq!(peer.is_authenticated(), true);
@@ -116,10 +115,16 @@ mod tests {
         let kp = signature::KeyPair::random();
         let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
         rand::fill(&mut nonce);
-        let rc1 = PeerBuilder::new(endpoint).with_key(kp.clone()).build();
+        let rc1 = PeerBuilder::new(endpoint)
+            .with_key(kp.clone())
+            .with_fingerprint(42)
+            .build();
         let peer1 = rc1.unwrap();
 
-        let rc2 = PeerBuilder::new(endpoint).with_key(kp).build();
+        let rc2 = PeerBuilder::new(endpoint)
+            .with_key(kp)
+            .with_fingerprint(42)
+            .build();
         let peer2 = rc2.unwrap();
 
         assert_eq!(peer1.id(), peer2.id());
@@ -139,13 +144,13 @@ mod tests {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
         let node_identity = CryptoIdentity::from(node_kp);
-        let node = Arc::new(Mutex::new(node_identity));
+        let node = node_identity;
         let peer_kp = signature::KeyPair::random();
         let mut nonce = vec![0u8; PeerInfo::NONCE_BYTES];
         rand::fill(&mut nonce);
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();
@@ -153,7 +158,7 @@ mod tests {
 
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();
@@ -167,7 +172,7 @@ mod tests {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
         let node_identity = CryptoIdentity::from(node_kp);
-        let node = Arc::new(Mutex::new(node_identity));
+        let node = node_identity;
         let peer_kp = signature::KeyPair::random();
 
         let rc = PeerBuilder::new(endpoint).build();
@@ -175,7 +180,7 @@ mod tests {
 
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();
@@ -216,11 +221,11 @@ mod tests {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
         let node_identity = CryptoIdentity::from(node_kp);
-        let node = Arc::new(Mutex::new(node_identity));
+        let node = node_identity;
         let peer_kp = signature::KeyPair::random();
         let peer = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build()

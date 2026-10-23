@@ -67,7 +67,7 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_some(), false);
         assert_eq!(val.sequence_number(), 0);
         assert_eq!(val.data(), &data);
         assert_eq!(val.id(), value::value_id(&val));
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_some(), false);
         assert_eq!(val.sequence_number(), 0);
         assert_eq!(val.data(), &data);
         assert_eq!(val.id(), value::value_id(&val));
@@ -117,12 +117,12 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_some(), false);
         assert_eq!(val.sequence_number(), 55);
         assert_eq!(val.data(), &data);
         assert_eq!(val.id(), value::value_id(&val));
 
-        assert_eq!(val.nonce(), Some(&nonce));
+        assert_eq!(val.nonce(), None);
     }
 
     #[test]
@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_some(), false);
         assert_eq!(val.sequence_number(), 55);
         assert_eq!(val.data(), &data);
         assert_eq!(val.id(), value::value_id(&val));
@@ -168,14 +168,14 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_some(), false);
         assert_eq!(val.sequence_number(), seq);
         assert_eq!(val.data(), &data);
         assert_eq!(val.id(), value::value_id(&val));
 
         assert_eq!(val.public_key(), Some(kp.public_key().into()).as_ref());
         assert_eq!(val.private_key(), Some(kp.private_key()));
-        assert_eq!(val.nonce(), Some(&nonce));
+        assert_eq!(val.nonce(), None);
     }
 
     #[test]

@@ -1,5 +1,4 @@
 use crate::core::{signature, signature::KeyPair, CryptoIdentity, Id, PeerBuilder, PeerInfo};
-use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 mod tests {
@@ -72,7 +71,7 @@ mod tests {
         assert_eq!(peer.endpoint(), des.endpoint());
         assert_eq!(peer.signature(), des.signature());
         assert_eq!(des.sequence_number(), 0);
-        assert_eq!(des.fingerprint(), 0);
+        assert_eq!(des.fingerprint(), peer.fingerprint());
         assert_eq!(des.nodeid(), None);
         assert_eq!(des.node_signature(), None);
         assert_eq!(des.extra_data(), None);
@@ -85,12 +84,11 @@ mod tests {
     fn test_serde_full() {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
-        let node_identity = CryptoIdentity::from(node_kp);
-        let node = Arc::new(Mutex::new(node_identity));
+        let node = CryptoIdentity::from(node_kp);
         let peer_kp = signature::KeyPair::random();
         let rc = PeerBuilder::new(endpoint)
             .with_key(peer_kp.clone())
-            .with_node(node.clone())
+            .with_node(&node)
             .with_sequence_number(101)
             .with_fingerprint(100)
             .build();

@@ -1,22 +1,25 @@
+use std::{
+    str::FromStr,
+    fmt, mem,
+};
 use bs58::decode;
 use hex::FromHexError;
 use static_assertions::const_assert;
-use std::str::FromStr;
-use std::{fmt, mem};
 
 use libsodium_sys::{
     crypto_sign_BYTES, crypto_sign_PUBLICKEYBYTES, crypto_sign_SECRETKEYBYTES,
     crypto_sign_SEEDBYTES, crypto_sign_detached, crypto_sign_ed25519_sk_to_pk,
     crypto_sign_final_create, crypto_sign_final_verify, crypto_sign_init, crypto_sign_keypair,
-    crypto_sign_seed_keypair, crypto_sign_state, crypto_sign_update, crypto_sign_verify_detached,
+    crypto_sign_ed25519_sk_to_seed, crypto_sign_seed_keypair, crypto_sign_state,
+    crypto_sign_update, crypto_sign_verify_detached,
     randombytes_buf,
 };
 
-use super::{
+use crate::core::{
     errors::{ArgumentError, CryptoError},
     Error, Result,
 };
-use crate::{as_uchar_ptr, as_uchar_ptr_mut};
+use crate::core::{as_uchar_ptr, as_uchar_ptr_mut};
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
 const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);
@@ -39,6 +42,38 @@ impl PrivateKey {
 
     pub fn clear(&mut self) {
         self.0.fill(0);
+    }
+
+    /// Returns the 32-byte Ed25519 seed embedded in this private key.
+    pub fn seed(&self) -> [u8; 32] {
+        let mut seed = [0u8; 32];
+        unsafe {
+            crypto_sign_ed25519_sk_to_seed(as_uchar_ptr_mut!(seed), as_uchar_ptr!(self.0));
+        }
+        seed
+    }
+
+    /// Creates a private key from an Ed25519 seed.
+    pub fn from_seed(seed: &[u8]) -> Result<Self> {
+        KeyPair::try_from_seed(seed).map(|keypair| keypair.to_private_key())
+    }
+
+    /// Derives a subkey with an 8-byte KDF context.
+    pub fn derive(&self, sub_key_id: u64, context: &[u8]) -> Result<Self> {
+        let seed = self.seed();
+        let sub_seed = crate::core::key_derivation::derive_key(
+            &seed,
+            sub_key_id,
+            context,
+            KeyPair::SEED_BYTES,
+        )?;
+        Self::from_seed(&sub_seed)
+    }
+
+    /// Derives a subkey from a string context.
+    pub fn derive_with_context(&self, sub_key_id: u64, context: &str) -> Result<Self> {
+        let context = crate::core::key_derivation::context_bytes(context)?;
+        self.derive(sub_key_id, &context)
     }
 
     pub fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {

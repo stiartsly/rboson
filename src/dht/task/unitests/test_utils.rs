@@ -35,5 +35,5 @@ pub(super) fn make_test_dht(network: Network, host: &str) -> Rc<DHT> {
     let (tx, _rx) = mpsc::unbounded_channel::<LocalBoxTimerCmd>();
     let timer_client = Rc::new(LocalBoxTimerClient::new(tx));
 
-    DHT::new(options, network, host.to_string(), 0, None, timer_client)
+    DHT::new(options, network, host.to_string(), 39001, None, timer_client)
 }

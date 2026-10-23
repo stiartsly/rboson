@@ -1,6 +1,5 @@
 use serial_test::serial;
 use std::fs;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::dht::storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage};
@@ -78,11 +77,11 @@ fn make_peer_with_key(kp: KeyPair, endpoint: &str, fingerprint: u64, seq: i32) -
 }
 
 fn make_authenticated_peer(endpoint: &str, fingerprint: u64) -> (PeerInfo, Id) {
-    let node_identity = Arc::new(Mutex::new(CryptoIdentity::new()));
-    let node_id = node_identity.lock().unwrap().id().clone();
+    let node_identity = CryptoIdentity::new();
+    let node_id = node_identity.id().clone();
     let rc = PeerInfo::builder(endpoint)
         .with_fingerprint(fingerprint)
-        .with_node(node_identity)
+        .with_node(&node_identity)
         .build();
     assert!(rc.is_ok());
     let peer = rc.unwrap();

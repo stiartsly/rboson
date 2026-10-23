@@ -35,7 +35,7 @@ pub(super) fn make_dht(
         developer_mode: false,
     };
 
-    let dht = DHT::new(options, network, host.to_string(), 0, None, timer_client);
+    let dht = DHT::new(options, network, host.to_string(), 39001, None, timer_client);
     (dht, rx)
 }
 

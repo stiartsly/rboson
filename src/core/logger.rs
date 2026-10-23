@@ -150,3 +150,7 @@ pub(crate) fn revert_console_output() {
 fn abbreviate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
+
+#[cfg(test)]
+#[path = "unitests/test_logger.rs"]
+mod test_logger;

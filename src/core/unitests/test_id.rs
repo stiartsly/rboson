@@ -1,5 +1,5 @@
-use crate::core::Id;
 use std::cmp::Ordering;
+use crate::core::Id;
 
 #[cfg(test)]
 mod tests {
@@ -106,5 +106,27 @@ mod tests {
         let b58 = id.to_base58();
         let parsed = Id::try_from_base58(&b58).expect("valid base58 should parse");
         assert_eq!(id, parsed);
+    }
+
+    #[test]
+    fn test_bit_metrics() {
+        let a = Id::try_from("0x0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let b = Id::try_from("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap();
+        assert_eq!(a.add(&b).to_hexstr(), "0x0000000000000000000000000000000000000000000000000000000000000003");
+        assert_eq!(a.distance(&b).get_trailing_zeros(), 0);
+        assert_eq!(a.get_leading_zeros(), 255);
+        assert_eq!(a.approx_distance(&b), 2);
+        assert_eq!(a.get_int(28).unwrap(), 1);
+        assert_eq!(a.to_binary_string().len(), Id::BITS);
+        assert_eq!(a.to_binary_string_with_spaces().split(' ').count(), Id::BYTES);
+    }
+
+    #[test]
+    fn test_parses_hexstr() {
+        let id = Id::random();
+        assert_eq!(Id::try_from(id.to_did_string().as_str()).unwrap(), id);
+        assert_eq!(Id::try_from_hexstr(&id.to_hexstr()).unwrap(), id);
+        assert_eq!(Id::try_from_base58(&id.to_base58()).unwrap(), id);
+        assert_eq!(Id::try_from_bytes_at(&[0u8; 4].iter().chain(id.as_bytes()).copied().collect::<Vec<_>>(), 4).unwrap(), id);
     }
 }

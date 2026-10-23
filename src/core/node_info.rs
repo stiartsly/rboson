@@ -1,20 +1,23 @@
-use super::{
-    errors::{ArgumentError, Error},
-    Id, Network, Result,
-};
-use serde::{
-    de::{self, SeqAccess, Visitor},
-    ser::SerializeTuple,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
 use std::{
     fmt,
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     result::Result as StdResult,
 };
+use serde::{
+    de::{self, SeqAccess, Visitor},
+    ser::SerializeTuple,
+    Deserialize,
+    Deserializer,
+    Serialize,
+    Serializer,
+};
+use crate::core::{
+    errors::{ArgumentError, Error, Result},
+    Id,
+    Network,
+};
 
-/// Node network information in the Boson network.
 #[derive(Serialize, Deserialize)]
 #[serde(into = "SerdeNodeInfo", try_from = "SerdeNodeInfo")]
 #[derive(Debug, Clone)]
@@ -27,18 +30,24 @@ pub struct NodeInfo {
 
 impl NodeInfo {
     pub fn new(id: Id, addr: SocketAddr) -> Self {
+        Self::try_new(id, addr).expect("Invalid port: 0")
+    }
+
+    pub fn try_new(id: Id, addr: SocketAddr) -> Result<Self> {
+        if addr.port() == 0 {
+            return Err(ArgumentError::new("Invalid port: 0"));
+        }
         let default_family = Network::from(&addr);
         let addrs = match default_family {
             Network::IPv4 => (Some(addr), None),
             Network::IPv6 => (None, Some(addr)),
         };
-
-        Self {
+        Ok(Self {
             id,
             addr4: addrs.0,
             addr6: addrs.1,
             default_family,
-        }
+        })
     }
 
     /// Constructs a `NodeInfo` with an optional IPv4 and an optional IPv6 socket address.
@@ -92,21 +101,21 @@ impl NodeInfo {
     /// Returns a view of this node narrowed to a single protocol family,
     /// dropping any address of the other family.
     ///
-    /// # Panics
-    /// Panics if no address of the requested family is available.
-    pub fn narrow_down(&self, family: Network) -> NodeInfo {
+    pub fn narrow_down(&self, family: Network) -> Result<NodeInfo> {
         let addr = match family {
             Network::IPv4 => self.addr4,
             Network::IPv6 => self.addr6,
         };
 
-        let addr = addr.unwrap_or_else(|| panic!("No {} address is available", family));
+        let addr = addr.ok_or_else(|| {
+            ArgumentError::new(format!("No {} address is available", family))
+        })?;
 
         if !self.has_multi_addresses() {
-            return self.clone();
+            return Ok(self.clone());
         }
 
-        Self::new(self.id.clone(), addr)
+        Self::try_new(self.id, addr)
     }
 
     pub fn has_address(&self, family: Network) -> bool {
@@ -265,10 +274,8 @@ impl fmt::Display for NodeInfo {
 
 struct SerdeNodeInfo {
     id: Id,
-
     addr4: Option<EncodedIpAddr>,
     port4: Option<u16>,
-
     addr6: Option<EncodedIpAddr>,
     port6: Option<u16>,
 }
@@ -276,23 +283,23 @@ struct SerdeNodeInfo {
 struct EncodedIpAddr(IpAddr);
 
 impl Serialize for EncodedIpAddr {
-    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if serializer.is_human_readable() {
-            return serializer.serialize_str(&self.0.to_string());
-        }
-
-        match self.0 {
-            IpAddr::V4(addr) => serializer.serialize_bytes(&addr.octets()),
-            IpAddr::V6(addr) => serializer.serialize_bytes(&addr.octets()),
+        if se.is_human_readable() {
+            se.serialize_str(&self.0.to_string())
+        } else {
+            match self.0 {
+                IpAddr::V4(addr) => se.serialize_bytes(&addr.octets()),
+                IpAddr::V6(addr) => se.serialize_bytes(&addr.octets()),
+            }
         }
     }
 }
 
 impl<'de> Deserialize<'de> for EncodedIpAddr {
-    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+    fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -358,7 +365,7 @@ impl<'de> Deserialize<'de> for EncodedIpAddr {
             }
         }
 
-        deserializer.deserialize_any(IpAddrVisitor)
+        de.deserialize_any(IpAddrVisitor)
     }
 }
 
@@ -378,7 +385,7 @@ impl TryFrom<SerdeNodeInfo> for NodeInfo {
     type Error = Error;
 
     fn try_from(s: SerdeNodeInfo) -> StdResult<Self, Self::Error> {
-        NodeInfo::with_addresses(
+        Self::with_addresses(
             s.id,
             s.addr4
                 .zip(s.port4)
@@ -463,21 +470,16 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
                         }
                     }
                 }
-
                 if addr4.is_none() && addr6.is_none() {
                     return Err(bad_length());
                 }
-
-                Ok(SerdeNodeInfo {
-                    id,
-                    addr4,
-                    port4,
-                    addr6,
-                    port6,
-                })
+                Ok(SerdeNodeInfo {id, addr4, port4, addr6, port6})
             }
         }
-
         de.deserialize_tuple(5, ImplVisitor)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_node_info.rs"]
+mod test_node_info;

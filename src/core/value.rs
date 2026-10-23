@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt, result::Result as StdResult};
 
-use super::{
+use crate::core::{
     cryptobox,
     cryptobox::Nonce,
-    errors::{ArgumentError, Error},
+    errors::{ArgumentError, Error, StateError},
     signature,
     signature::{KeyPair, PrivateKey},
-    Id, Result,
+    CryptoIdentity, Id, Identity, Result,
 };
 use crate::utils::codec;
 
@@ -118,7 +118,7 @@ impl<'a> EncryptedBuilder<'a> {
 
 #[derive(Serialize, Deserialize)]
 #[serde(into = "SerdeValue", try_from = "SerdeValue")]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct Value {
     pk: Option<Id>,
     sk: Option<PrivateKey>,
@@ -130,6 +130,11 @@ pub struct Value {
 }
 
 impl Value {
+    pub const NONCE_BYTES: usize = Nonce::BYTES;
+    pub const MAX_IMMUTABLE_DATA_BYTES: usize = 1024;
+    pub const MAX_MUTABLE_DATA_BYTES: usize = 896;
+    pub const MAX_ENCRYPTED_DATA_BYTES: usize = 832;
+
     fn new(b: &ImmutableBuilder) -> Value {
         assert!(!b.data.is_empty());
 
@@ -155,7 +160,7 @@ impl Value {
             pk: Some(Id::from(kp.public_key())),
             sk: Some(kp.to_private_key()),
             recipient: None,
-            nonce: Some(b.nonce.map_or(Nonce::random(), |v| v.clone())),
+            nonce: None,
             sig: None,
             data: b.data.to_vec(),
             seq: b.seq,
@@ -194,13 +199,17 @@ impl Value {
 
         let encryption_sk = cryptobox::PrivateKey::try_from(value.sk.as_ref().unwrap())?;
 
-        // encrypt data.
-        value.data = cryptobox::encrypt_into(
+        // encrypt data; the nonce is stored separately on the value.
+        let nonce = value.nonce.as_ref().unwrap();
+        let mut cipher = vec![0u8; value.data.len() + cryptobox::CryptoBox::MAC_BYTES];
+        cryptobox::encrypt(
             value.data.as_ref(),
-            value.nonce.as_ref().unwrap(),
+            &mut cipher,
+            nonce,
             &value.recipient.as_ref().unwrap().to_encryption_key(),
             &encryption_sk,
         )?;
+        value.data = cipher;
 
         // sign data
         let sig = signature::sign_into(
@@ -293,23 +302,97 @@ impl Value {
     }
 
     pub fn is_valid(&self) -> bool {
-        if self.data.is_empty() {
+        if self.data.is_empty() || self.data.len() > self.max_data_bytes() {
             return false;
         }
-        if !self.is_mutable() {
-            return true;
-        }
 
-        if self.pk.is_none() || self.sig.is_none() || self.nonce.is_none() {
+        let Some(public_key) = self.pk.as_ref() else {
+            return self.recipient.is_none()
+                && self.nonce.is_none()
+                && self.seq >= 0
+                && self.sig.is_none()
+                && self.id() == Self::immutable_id(&self.data);
+        };
+
+        let Some(signature) = self.sig.as_ref() else {
+            return false;
+        };
+        if signature.len() != signature::Signature::BYTES || self.seq < 0 {
+            return false;
+        }
+        match (self.recipient.is_some(), self.nonce.is_some()) {
+            (true, true) | (false, false) => {}
+            _ => return false,
+        }
+        if self.recipient.is_some() && self.data.len() < cryptobox::CryptoBox::MAC_BYTES {
             return false;
         }
 
         signature::verify(
             self.serialize_signature_data().as_slice(),
-            self.sig.as_ref().unwrap().as_slice(),
-            &self.pk.as_ref().unwrap().to_signature_key(),
+            signature,
+            &public_key.to_signature_key(),
         )
-        .is_ok()
+        .unwrap_or(false)
+    }
+
+    fn immutable_id(data: &[u8]) -> Id {
+        let mut sha256 = Sha256::new();
+        sha256.update(data);
+        Id::try_from_bytes(sha256.finalize().as_slice()).expect("SHA-256 is 32 bytes")
+    }
+
+    pub fn is_immutable(&self) -> bool {
+        self.pk.is_none()
+    }
+
+    pub fn data_size(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn max_data_bytes(&self) -> usize {
+        if self.is_encrypted() {
+            Self::MAX_ENCRYPTED_DATA_BYTES
+        } else if self.is_mutable() {
+            Self::MAX_MUTABLE_DATA_BYTES
+        } else {
+            Self::MAX_IMMUTABLE_DATA_BYTES
+        }
+    }
+
+    /// Decrypts an encrypted value for its intended recipient.
+    pub fn decrypt_data(&self, recipient: &CryptoIdentity) -> Result<Vec<u8>> {
+        let Some(pk) = self.pk.as_ref() else {
+            return Err(StateError::new("Cannot decrypt: value is immutable"));
+        };
+        let Some(expected) = self.recipient.as_ref() else {
+            return Err(StateError::new("Cannot decrypt: value is not encrypted"));
+        };
+        if recipient.id() != expected {
+            return Err(ArgumentError::new(
+                "Recipient identity does not match value recipient",
+            ));
+        }
+        if !self.is_valid() {
+            return Err(ArgumentError::new("Cannot decrypt: value failed validation"));
+        }
+
+        let nonce = self
+            .nonce
+            .as_ref()
+            .ok_or_else(|| ArgumentError::new("Cannot decrypt: value has no nonce"))?;
+        if self.data.len() < cryptobox::CryptoBox::MAC_BYTES {
+            return Err(ArgumentError::new("Cannot decrypt: ciphertext is too short"));
+        }
+        let mut plain = vec![0u8; self.data.len() - cryptobox::CryptoBox::MAC_BYTES];
+        cryptobox::decrypt(
+            &self.data,
+            &mut plain,
+            nonce,
+            &pk.to_encryption_key(),
+            recipient.encryption_key().private_key(),
+        )?;
+        Ok(plain)
     }
 
     pub(crate) fn serialize_signature_data(&self) -> Vec<u8> {
@@ -319,12 +402,36 @@ impl Value {
 
             if let Some(rec) = self.recipient.as_ref() {
                 sha256.update(rec.as_bytes());
+                if let Some(nonce) = self.nonce.as_ref() {
+                    sha256.update(nonce.as_bytes());
+                }
             }
-            sha256.update(self.nonce.as_ref().unwrap().as_bytes());
             sha256.update(self.seq.to_le_bytes().as_ref());
         }
         sha256.update(self.data.as_slice());
         sha256.finalize().to_vec()
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.pk == other.pk
+            && self.recipient == other.recipient
+            && self.nonce == other.nonce
+            && self.sig == other.sig
+            && self.data == other.data
+            && self.seq == other.seq
+    }
+}
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.pk.hash(state);
+        self.recipient.hash(state);
+        self.nonce.as_ref().map(|nonce| nonce.as_bytes()).hash(state);
+        self.sig.hash(state);
+        self.data.hash(state);
+        self.seq.hash(state);
     }
 }
 
@@ -337,7 +444,10 @@ impl fmt::Display for Value {
                 f,
                 ",publicKey:{}, nonce:{}",
                 self.pk.as_ref().unwrap(),
-                self.nonce.as_ref().unwrap()
+                self.nonce
+                    .as_ref()
+                    .map(|nonce| nonce.to_string())
+                    .unwrap_or_else(|| "null".to_string())
             )?;
         }
         if self.is_encrypted() {
@@ -392,7 +502,7 @@ struct SerdeValue {
     nonce: Option<Nonce>,
 
     #[serde(
-        rename = "s",
+        rename = "sig",
         default,
         serialize_with = "codec::bytes_opt::serialize",
         deserialize_with = "codec::bytes_opt::deserialize",
@@ -407,7 +517,12 @@ struct SerdeValue {
     )]
     data: Vec<u8>,
 
-    #[serde(rename = "seq", deserialize_with = "codec::seq::deserialize")]
+    #[serde(
+        rename = "seq",
+        default,
+        deserialize_with = "codec::seq::deserialize",
+        skip_serializing_if = "crate::utils::is_default"
+    )]
     seq: i32,
 }
 
@@ -433,21 +548,22 @@ impl TryFrom<SerdeValue> for Value {
         }
 
         let mutable = v.pk.is_some();
-        if mutable && (v.sig.is_none() || v.nonce.is_none()) {
-            return Err(ArgumentError::new(
-                "mutable value requires both signature and nonce",
-            ));
+        if mutable && v.sig.is_none() {
+            return Err(ArgumentError::new("mutable value requires a signature"));
         }
         if v.recipient.is_some() && !mutable {
             return Err(ArgumentError::new("encrypted value requires a public key"));
         }
-
-        let value = Value::packed(v.pk, v.recipient, v.nonce, v.sig, v.data, v.seq);
-        if !value.is_valid() {
+        if v.recipient.is_some() != v.nonce.is_some() {
             return Err(ArgumentError::new(
-                "invalid value: signature verification failed",
+                "encrypted value requires a nonce, plain value must not carry one",
             ));
         }
-        Ok(value)
+
+        Ok(Value::packed(v.pk, v.recipient, v.nonce, v.sig, v.data, v.seq))
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_value.rs"]
+mod test_value;

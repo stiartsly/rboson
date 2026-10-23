@@ -914,6 +914,44 @@ impl Identity for Node {
         self.identity.decrypt_into(sender, data)
     }
 
+    fn encrypt_with_nonce(
+        &self,
+        receiver: &Id,
+        nonce: &[u8],
+        data: &[u8],
+        cipher: &mut [u8],
+    ) -> Result<usize> {
+        self.identity.encrypt_with_nonce(receiver, nonce, data, cipher)
+    }
+
+    fn decrypt_with_nonce(
+        &self,
+        sender: &Id,
+        nonce: &[u8],
+        data: &[u8],
+        plain: &mut [u8],
+    ) -> Result<usize> {
+        self.identity.decrypt_with_nonce(sender, nonce, data, plain)
+    }
+
+    fn encrypt_with_nonce_into(
+        &self,
+        receiver: &Id,
+        nonce: &[u8],
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.identity.encrypt_with_nonce_into(receiver, nonce, data)
+    }
+
+    fn decrypt_with_nonce_into(
+        &self,
+        sender: &Id,
+        nonce: &[u8],
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.identity.decrypt_with_nonce_into(sender, nonce, data)
+    }
+
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         self.identity.create_crypto_context(id)
     }

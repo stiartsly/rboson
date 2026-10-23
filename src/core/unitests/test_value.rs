@@ -1,5 +1,13 @@
 use crate::core::{
-    cryptobox, signature, EncryptedBuilder, Id, ImmutableBuilder as ValueBuilder, SignedBuilder,
+    cryptobox,
+    cryptobox::CryptoBox,
+    signature,
+    CryptoIdentity,
+    EncryptedBuilder,
+    Id,
+    Identity,
+    ImmutableBuilder as ValueBuilder,
+    SignedBuilder,
     Value,
 };
 
@@ -47,12 +55,10 @@ mod tests {
     fn test_signed() {
         let data = crate::random_bytes(32);
         let kp = signature::KeyPair::random();
-        let nonce = cryptobox::Nonce::random();
         let seq = 55;
         let rc = SignedBuilder::new(&data)
             .with_keypair(&kp)
             .with_sequence_number(seq)
-            .with_nonce(&nonce)
             .build();
         assert_eq!(rc.is_ok(), true);
 
@@ -65,13 +71,13 @@ mod tests {
         assert_eq!(val.private_key().is_some(), true);
         assert_eq!(val.recipient().is_some(), false);
         assert_eq!(val.signature().is_some(), true);
-        assert_eq!(val.nonce().is_some(), true);
+        assert_eq!(val.nonce().is_none(), true);
         assert_eq!(val.sequence_number(), seq);
         assert_eq!(val.data(), &data);
 
         assert_eq!(val.public_key(), Some(kp.public_key().into()).as_ref());
         assert_eq!(val.private_key(), Some(kp.private_key()));
-        assert_eq!(val.nonce(), Some(&nonce));
+        assert_eq!(val.nonce(), None);
 
         let ser = serde_cbor::to_vec(&val).expect("Failed to serialize value");
         let des: Value = serde_cbor::from_slice(&ser).expect("Failed to deserialize value");
@@ -84,7 +90,7 @@ mod tests {
         assert_eq!(des.private_key(), None);
         assert_eq!(des.recipient().is_none(), true);
         assert_eq!(des.signature(), val.signature());
-        assert_eq!(des.nonce(), Some(&nonce));
+        assert_eq!(des.nonce(), None);
         assert_eq!(des.sequence_number(), seq);
         assert_eq!(des.data(), &data);
     }
@@ -94,7 +100,8 @@ mod tests {
         let data = crate::random_bytes(32);
         let kp = signature::KeyPair::random();
         let nonce = cryptobox::Nonce::random();
-        let rec: Id = signature::KeyPair::random().public_key().into();
+        let recipient_identity = CryptoIdentity::random();
+        let rec: Id = recipient_identity.id().clone();
         let rc = EncryptedBuilder::new(&data, &rec)
             .with_keypair(&kp)
             .with_nonce(&nonce)
@@ -114,6 +121,7 @@ mod tests {
         assert_eq!(val.signature().is_some(), true);
         assert_eq!(val.sequence_number(), 55);
         assert_ne!(val.data(), &data);
+        assert_eq!(val.data().len(), data.len() + CryptoBox::MAC_BYTES);
         assert_eq!(val.recipient(), Some(rec).as_ref());
         assert_eq!(val.nonce(), Some(&nonce));
         assert_eq!(val.public_key(), Some(&kp.public_key().into()));
@@ -133,5 +141,10 @@ mod tests {
         assert_eq!(des.signature(), val.signature());
         assert_eq!(des.sequence_number(), 55);
         assert_eq!(des.data(), val.data());
+
+        let plain = des
+            .decrypt_data(&recipient_identity)
+            .expect("recipient should decrypt the value");
+        assert_eq!(plain, data);
     }
 }

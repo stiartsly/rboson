@@ -1,4 +1,8 @@
-use crate::{core::CryptoIdentity, dht::cached_identity::CachedIdentity, Identity};
+use crate::{
+    core::CryptoIdentity,
+    dht::cached_identity::CachedIdentity,
+    Identity
+};
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -7,7 +11,7 @@ mod tests {
 
     #[test]
     fn test_identity() {
-        let identity = CryptoIdentity::new();
+        let identity = CryptoIdentity::random();
         let expected_id = identity.id().clone();
         let cached = CachedIdentity::new(identity);
 
@@ -20,8 +24,8 @@ mod tests {
 
     #[test]
     fn test_context_with_same_key() {
-        let cached = CachedIdentity::new(CryptoIdentity::new());
-        let peer_id = CryptoIdentity::new().id().clone();
+        let cached = CachedIdentity::new(CryptoIdentity::random());
+        let peer_id = CryptoIdentity::random().id().clone();
 
         let first = cached.context(&peer_id);
         let second = cached.context(&peer_id);
@@ -32,9 +36,9 @@ mod tests {
 
     #[test]
     fn test_context_different_keys() {
-        let cached = CachedIdentity::new(CryptoIdentity::new());
-        let peer_a = CryptoIdentity::new().id().clone();
-        let peer_b = CryptoIdentity::new().id().clone();
+        let cached = CachedIdentity::new(CryptoIdentity::random());
+        let peer_a = CryptoIdentity::random().id().clone();
+        let peer_b = CryptoIdentity::random().id().clone();
 
         let ctx_a = cached.context(&peer_a);
         let ctx_b = cached.context(&peer_b);
@@ -46,8 +50,8 @@ mod tests {
 
     #[test]
     fn test_clear_cache() {
-        let cached = CachedIdentity::new(CryptoIdentity::new());
-        let peer_id = CryptoIdentity::new().id().clone();
+        let cached = CachedIdentity::new(CryptoIdentity::random());
+        let peer_id = CryptoIdentity::random().id().clone();
 
         let first = cached.context(&peer_id);
         cached.clear_cache();
@@ -59,7 +63,7 @@ mod tests {
 
     #[test]
     fn test_sign_and_verify() {
-        let cached = CachedIdentity::new(CryptoIdentity::new());
+        let cached = CachedIdentity::new(CryptoIdentity::random());
         let data = b"Hello, Boson!";
 
         let sig = cached.sign_into(data).unwrap();
@@ -69,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_sign_tampered_data() {
-        let cached = CachedIdentity::new(CryptoIdentity::new());
+        let cached = CachedIdentity::new(CryptoIdentity::random());
         let data = b"Hello, Boson!";
         let tampered = b"Hello, World!";
 
@@ -80,8 +84,8 @@ mod tests {
 
     #[test]
     fn test_sign_wrong_identity() {
-        let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob = CachedIdentity::new(CryptoIdentity::new());
+        let alice = CachedIdentity::new(CryptoIdentity::random());
+        let bob = CachedIdentity::new(CryptoIdentity::random());
         let data = b"Hello, Boson!";
 
         let sig = alice.sign_into(data).unwrap();
@@ -92,8 +96,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob = CachedIdentity::new(CryptoIdentity::new());
+        let alice = CachedIdentity::new(CryptoIdentity::random());
+        let bob = CachedIdentity::new(CryptoIdentity::random());
         let plain = b"Hello, Boson!";
 
         let cipher = alice.encrypt_into(bob.id(), plain).unwrap();
@@ -104,8 +108,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_multiple_messages() {
-        let alice = CachedIdentity::new(CryptoIdentity::new());
-        let bob = CachedIdentity::new(CryptoIdentity::new());
+        let alice = CachedIdentity::new(CryptoIdentity::random());
+        let bob = CachedIdentity::new(CryptoIdentity::random());
 
         for i in 0u8..5 {
             let plain = vec![i; 32];

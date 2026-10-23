@@ -1,22 +1,30 @@
-pub(crate) mod crypto_context;
+//! Core Boson protocol primitives.
 
-pub mod logger;
-pub mod cryptobox;
-pub mod signature;
+pub mod crypto_identity;
 pub mod errors;
 pub mod id;
 pub mod identity;
+pub mod logger;
 pub mod network;
 pub mod node_info;
 pub mod peer_info;
 pub mod value;
 
+pub(crate) mod crypto_context;
+pub(crate) mod crypto {
+    pub mod cryptobox;
+    pub mod signature;
+    pub mod key_derivation;
+    pub mod random;
+}
+
 pub use crate::core::{
-    crypto_context::CryptoContext,
+    crypto::{cryptobox, key_derivation, random, signature},
     cryptobox::CryptoBox,
-    errors::{Error, Result},
+    crypto_identity::CryptoIdentity,
+    errors::{Error, Result, *},
     id::{Id, DID_PREFIX},
-    identity::{CryptoIdentity, Identity},
+    identity::Identity,
     network::Network,
     node_info::NodeInfo,
     peer_info::{PeerBuilder, PeerInfo},
@@ -24,27 +32,22 @@ pub use crate::core::{
     value::{EncryptedBuilder, ImmutableBuilder, SignedBuilder, Value},
 };
 
-#[cfg(test)]
-mod unitests {
-    mod test_crypto_context;
-    mod test_crypto_identity;
-    mod test_id;
-    mod test_logger;
-    mod test_node_info;
-    mod test_peer_info;
-    mod test_value;
-}
+pub(crate) use crate::core::{
+    crypto_context::CryptoContext,
+};
 
-#[macro_export]
 macro_rules! as_uchar_ptr {
-    ($val:expr) => {{
-        $val.as_ptr() as *const libc::c_uchar
-    }};
+    ($val:expr) => {
+        $val.as_ptr().cast::<libc::c_uchar>()
+    };
+}
+macro_rules! as_uchar_ptr_mut {
+    ($val:expr) => {
+        $val.as_mut_ptr().cast::<libc::c_uchar>()
+    };
 }
 
-#[macro_export]
-macro_rules! as_uchar_ptr_mut {
-    ($val:expr) => {{
-        $val.as_mut_ptr() as *mut libc::c_uchar
-    }};
-}
+pub(crate) use {
+    as_uchar_ptr,
+    as_uchar_ptr_mut
+};

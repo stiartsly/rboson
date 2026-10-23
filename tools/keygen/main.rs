@@ -38,7 +38,7 @@ fn main() {
 
 fn generate_user_identity() {
     let identity = CryptoIdentity::new();
-    let keypair = identity.signature_keypair();
+    let keypair = identity.signature_key();
     let id = identity.id();
 
     println!("+--------------------------------------------------------------+");

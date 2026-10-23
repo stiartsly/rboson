@@ -44,7 +44,8 @@ use crate::{
     LocalBoxHandler,
     LocalBoxTimerClient as TimerClient,
     errors::{Result, StateError},
-    identity::{CryptoIdentity, Identity},
+    crypto_identity::CryptoIdentity,
+    identity::Identity,
     Id, Network, NodeInfo, PeerInfo, Promise, Value,
 };
 

@@ -6,7 +6,7 @@ use std::{
 
 use boson::{
     dht::{Node, NodeOptions},
-    did::{DHTRegistry, Registry},
+    did::{DHTRegistry},
     CryptoIdentity,
 };
 use serial_test::serial;
@@ -27,7 +27,7 @@ fn create_node() -> (Arc<Node>, std::path::PathBuf) {
         .to_string();
     let config_path = path.join("node.yaml");
     let yaml = format!(
-        "ipv4: true\nport: 0\nprivateKey: \"{private_key}\"\ndataDir: {}\ndatabaseUri: jdbc:sqlite:node.db\nlogLevel: \"error\"\n",
+        "ipv4: true\nport: 39001\nprivateKey: \"{private_key}\"\ndataDir: {}\ndatabaseUri: jdbc:sqlite:node.db\nlogLevel: \"error\"\n",
         path.display()
     );
     fs::write(&config_path, yaml).unwrap();

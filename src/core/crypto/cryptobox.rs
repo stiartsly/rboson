@@ -1,17 +1,28 @@
 use libsodium_sys::{
-    crypto_box_BEFORENMBYTES, crypto_box_MACBYTES, crypto_box_NONCEBYTES,
-    crypto_box_PUBLICKEYBYTES, crypto_box_SECRETKEYBYTES, crypto_box_SEEDBYTES,
-    crypto_box_beforenm, crypto_box_easy, crypto_box_easy_afternm, crypto_box_keypair,
-    crypto_box_open_easy, crypto_box_open_easy_afternm, crypto_box_seed_keypair,
-    crypto_scalarmult_base, crypto_sign_ed25519_pk_to_curve25519,
-    crypto_sign_ed25519_sk_to_curve25519, sodium_increment,
+    crypto_box_BEFORENMBYTES,
+    crypto_box_MACBYTES,
+    crypto_box_NONCEBYTES,
+    crypto_box_PUBLICKEYBYTES,
+    crypto_box_SECRETKEYBYTES,
+    crypto_box_SEEDBYTES,
+    crypto_box_beforenm,
+    crypto_box_easy,
+    crypto_box_easy_afternm,
+    crypto_box_keypair,
+    crypto_box_open_easy,
+    crypto_box_open_easy_afternm,
+    crypto_box_seed_keypair,
+    crypto_scalarmult_base,
+    crypto_sign_ed25519_pk_to_curve25519,
+    crypto_sign_ed25519_sk_to_curve25519,
+    sodium_increment,
 };
 use static_assertions::const_assert;
 use std::fmt;
 
-use crate::{as_uchar_ptr, as_uchar_ptr_mut};
+use crate::core::{as_uchar_ptr, as_uchar_ptr_mut};
 
-use super::{
+use crate::core::{
     errors::{ArgumentError, CryptoError},
     signature, Error, Result,
 };
@@ -398,20 +409,19 @@ impl CryptoBox {
     }
 
     pub fn encrypt(&self, plain: &[u8], cipher: &mut [u8], nonce: &Nonce) -> Result<usize> {
-        let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
+        let expected_len = plain.len() + CryptoBox::MAC_BYTES;
         if cipher.len() < expected_len {
             return Err(ArgumentError::new(format!(
                 "The input buffer is insufficient."
             )));
         }
 
-        cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
         let rc = unsafe {
             crypto_box_easy_afternm(
-                as_uchar_ptr_mut!(cipher[Nonce::BYTES..expected_len]),
+                as_uchar_ptr_mut!(cipher[..expected_len]),
                 as_uchar_ptr!(plain),
                 plain.len() as libc::c_ulonglong,
-                as_uchar_ptr!(cipher[..Nonce::BYTES]),
+                as_uchar_ptr!(nonce.as_bytes()),
                 as_uchar_ptr!(self.0),
             )
         };
@@ -422,13 +432,8 @@ impl CryptoBox {
         }
     }
 
-    pub fn encrypt_into(&self, plain: &[u8], nonce: &Nonce) -> Result<Vec<u8>> {
-        let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
-        self.encrypt(plain, cipher.as_mut(), nonce).map(|_| cipher)
-    }
-
-    pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+    pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8], nonce: &Nonce) -> Result<usize> {
+        let overhead = CryptoBox::MAC_BYTES;
         if cipher.len() < overhead {
             return Err(ArgumentError::new(format!(
                 "Cipher text length {} is smaller than required overhead {}",
@@ -443,14 +448,12 @@ impl CryptoBox {
             )));
         }
 
-        let cipher_len = cipher.len() - Nonce::BYTES;
-        //  Extract the nonce from the cipher text
         let rc = unsafe {
             crypto_box_open_easy_afternm(
                 as_uchar_ptr_mut!(plain[..expected_len]),
-                as_uchar_ptr!(cipher[Nonce::BYTES..]),
-                cipher_len as libc::c_ulonglong,
-                as_uchar_ptr!(cipher[..Nonce::BYTES]),
+                as_uchar_ptr!(cipher),
+                cipher.len() as libc::c_ulonglong,
+                as_uchar_ptr!(nonce.as_bytes()),
                 as_uchar_ptr!(self.0),
             )
         };
@@ -461,17 +464,16 @@ impl CryptoBox {
         }
     }
 
-    pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
-        let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
-        if cipher.len() < overhead {
-            return Err(ArgumentError::new(format!(
-                "Cipher text length {} is smaller than required overhead {}",
-                cipher.len(),
-                overhead
-            )));
-        }
-        let mut plain = vec![0u8; cipher.len() - overhead];
-        self.decrypt(cipher, plain.as_mut()).map(|_| plain)
+    /// Encrypts with an explicit nonce and returns raw ciphertext (no nonce prefix).
+    pub fn encrypt_into(&self, plain: &[u8], nonce: &Nonce) -> Result<Vec<u8>> {
+        let mut cipher = vec![0u8; plain.len() + Self::MAC_BYTES];
+        self.encrypt(plain, &mut cipher, nonce).map(|_| cipher)
+    }
+
+    /// Decrypts raw ciphertext with an explicit nonce.
+    pub fn decrypt_into(&self, cipher: &[u8], nonce: &Nonce) -> Result<Vec<u8>> {
+        let mut plain = vec![0u8; cipher.len().saturating_sub(Self::MAC_BYTES)];
+        self.decrypt(cipher, &mut plain, nonce).map(|_| plain)
     }
 }
 
@@ -502,27 +504,25 @@ impl Drop for CryptoBox {
     }
 }
 
-pub fn encrypt(
-    plain: &[u8],
-    cipher: &mut [u8],
-    nonce: &Nonce,
-    pk: &PublicKey,
-    sk: &PrivateKey,
-) -> Result<usize> {
-    let expected_len = plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES;
+// ---------------------------------------------------------------------------
+// Nonce-supplied variants (the nonce is carried separately by the caller)
+// ---------------------------------------------------------------------------
+pub fn encrypt(plain: &[u8], cipher: &mut [u8], nonce: &Nonce,
+    pk: &PublicKey, sk: &PrivateKey) -> Result<usize> {
+
+    let expected_len = plain.len() + CryptoBox::MAC_BYTES;
     if cipher.len() < expected_len {
         return Err(ArgumentError::new(format!(
             "The input buffer is insufficient."
         )));
     }
 
-    cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
     let rc = unsafe {
         crypto_box_easy(
-            as_uchar_ptr_mut!(cipher[Nonce::BYTES..expected_len]),
+            as_uchar_ptr_mut!(cipher[..expected_len]),
             as_uchar_ptr!(plain),
             plain.len() as libc::c_ulonglong,
-            as_uchar_ptr!(cipher[..Nonce::BYTES]),
+            as_uchar_ptr!(nonce.as_bytes()),
             as_uchar_ptr!(pk.as_bytes()),
             as_uchar_ptr!(sk.as_bytes()),
         )
@@ -533,18 +533,10 @@ pub fn encrypt(
     }
 }
 
-pub fn encrypt_into(
-    plain: &[u8],
-    nonce: &Nonce,
-    pk: &PublicKey,
-    sk: &PrivateKey,
-) -> Result<Vec<u8>> {
-    let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
-    encrypt(plain, cipher.as_mut(), nonce, pk, sk).map(|_| cipher)
-}
+pub fn decrypt(cipher: &[u8], plain: &mut [u8], nonce: &Nonce,
+        pk: &PublicKey, sk: &PrivateKey) -> Result<usize> {
 
-pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey) -> Result<usize> {
-    let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
+    let overhead = CryptoBox::MAC_BYTES;
     if cipher.len() < overhead {
         return Err(ArgumentError::new(format!(
             "Cipher text length {} is smaller than required overhead {}",
@@ -559,14 +551,12 @@ pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey)
         )));
     }
 
-    let cipher_len = cipher.len() - Nonce::BYTES;
-    //  Extract the nonce from the cipher text
     let rc = unsafe {
         crypto_box_open_easy(
             as_uchar_ptr_mut!(plain[..expected_len]),
-            as_uchar_ptr!(cipher[Nonce::BYTES..]),
-            cipher_len as libc::c_ulonglong,
-            as_uchar_ptr!(cipher[..Nonce::BYTES]),
+            as_uchar_ptr!(cipher),
+            cipher.len() as libc::c_ulonglong,
+            as_uchar_ptr!(nonce.as_bytes()),
             as_uchar_ptr!(pk.as_bytes()),
             as_uchar_ptr!(sk.as_bytes()),
         )
@@ -578,15 +568,24 @@ pub fn decrypt(cipher: &[u8], plain: &mut [u8], pk: &PublicKey, sk: &PrivateKey)
     }
 }
 
-pub fn decrypt_into(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
-    let overhead = CryptoBox::MAC_BYTES + Nonce::BYTES;
-    if cipher.len() < overhead {
-        return Err(ArgumentError::new(format!(
-            "Cipher text length {} is smaller than required overhead {}",
-            cipher.len(),
-            overhead
-        )));
-    }
-    let mut plain = vec![0u8; cipher.len() - overhead];
-    decrypt(cipher, plain.as_mut(), pk, sk).map(|_| plain)
+/// Encrypts with an explicit nonce and returns raw ciphertext (no nonce prefix).
+pub fn encrypt_into(
+    plain: &[u8],
+    nonce: &Nonce,
+    pk: &PublicKey,
+    sk: &PrivateKey,
+) -> Result<Vec<u8>> {
+    let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES];
+    encrypt(plain, &mut cipher, nonce, pk, sk).map(|_| cipher)
+}
+
+/// Decrypts raw ciphertext with an explicit nonce.
+pub fn decrypt_into(
+    cipher: &[u8],
+    nonce: &Nonce,
+    pk: &PublicKey,
+    sk: &PrivateKey,
+) -> Result<Vec<u8>> {
+    let mut plain = vec![0u8; cipher.len().saturating_sub(CryptoBox::MAC_BYTES)];
+    decrypt(cipher, &mut plain, nonce, pk, sk).map(|_| plain)
 }

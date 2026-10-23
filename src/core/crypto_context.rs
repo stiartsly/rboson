@@ -1,32 +1,53 @@
+use std::sync::Mutex;
+
 use crate::{
-    cryptobox::{CryptoBox, Nonce, PrivateKey},
+    cryptobox::{self as crypto_box, CryptoBox, Nonce, PrivateKey},
     errors::CryptoError,
     Id, Result,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CryptoContext {
     id: Id,
     crypto_box: CryptoBox,
     next_nonce: Nonce,
-    last_peer_nonce: Option<Nonce>,
+    last_peer_nonce: Mutex<Option<Nonce>>,
+}
+
+impl Clone for CryptoContext {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            crypto_box: self.crypto_box.clone(),
+            next_nonce: self.next_nonce.clone(),
+            last_peer_nonce: Mutex::new(self.last_peer_nonce.lock().unwrap().clone()),
+        }
+    }
 }
 
 impl CryptoContext {
-    pub(crate) fn new(id: Id, crypto_box: CryptoBox) -> CryptoContext {
+    const OVERHEAD: usize = Nonce::BYTES + CryptoBox::MAC_BYTES;
+
+    pub fn new(id: Id, crypto_box: CryptoBox) -> Self {
         Self {
             id,
             crypto_box,
             next_nonce: Nonce::random(),
-            last_peer_nonce: None,
+            last_peer_nonce: Mutex::new(None),
         }
     }
 
-    pub(crate) fn from_private_key(id: Id, sk: &PrivateKey) -> CryptoContext {
-        Self::new(
-            id,
-            CryptoBox::try_from((&id.to_encryption_key(), sk)).unwrap(),
-        )
+    pub fn from_keys(
+        id: Id,
+        pk: &crypto_box::PublicKey,
+        sk: &PrivateKey,
+    ) -> Self {
+        Self::new(id, CryptoBox::try_from((pk, sk)).unwrap())
+    }
+
+    pub fn from_private_key(id: Id, sk: &PrivateKey) -> Self {
+        let pk = id.to_encryption_key();
+        Self::new(id, CryptoBox::try_from((&pk, sk)).unwrap())
     }
 
     pub fn id(&self) -> &Id {
@@ -40,53 +61,67 @@ impl CryptoContext {
     }
 
     pub fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        if cipher.len() < plain.len() + Self::OVERHEAD {
+            return Err(CryptoError::new("The output buffer is insufficient"));
+        }
+
         let nonce = self.increment_nonce();
-        self.crypto_box.encrypt(plain, cipher, &nonce)
+        cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
+
+        let cipher  = &mut cipher[Nonce::BYTES..];
+        let written = self.crypto_box.encrypt(plain, cipher, &nonce)?;
+        Ok(Nonce::BYTES + written)
     }
 
     pub fn encrypt_into(&mut self, plain: &[u8]) -> Result<Vec<u8>> {
-        let nonce = self.increment_nonce();
-        self.crypto_box.encrypt_into(plain, &nonce)
+        let mut cipher = vec![0u8; plain.len() + Self::OVERHEAD];
+        self.encrypt(plain, &mut cipher).map(|_| cipher)
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        let overhead = Nonce::BYTES + CryptoBox::MAC_BYTES;
-        if cipher.len() < overhead {
+        if cipher.len() < Self::OVERHEAD {
             return Err(CryptoError::new(format!(
                 "Cipher text length {} is smaller than required overhead {}",
                 cipher.len(),
-                overhead
+                Self::OVERHEAD
             )));
         }
-        let nonce = &cipher[..Nonce::BYTES];
-        if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
-            if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new(
-                    "Using inconsistent nonce with risking of replay attacks",
-                ));
-            }
+        if plain.len() < cipher.len() - Self::OVERHEAD {
+            return Err(CryptoError::new("The output buffer for plain text is insufficient"));
         }
-        self.crypto_box.decrypt(cipher, plain)
+
+        let nonce = Nonce::try_from(&cipher[..Nonce::BYTES])?;
+        let mut last_nonce = self.last_peer_nonce.lock().unwrap();
+        if last_nonce.as_ref().is_some_and(|last| last == &nonce) {
+            return Err(CryptoError::new("Duplicated nonce"));
+        }
+        *last_nonce = Some(nonce.clone());
+
+        let cipher = &cipher[Nonce::BYTES..];
+        self.crypto_box.decrypt(cipher, plain, &nonce)
+    }
+
+    /// Clears the last peer nonce, allowing it to be received again.
+    pub fn reset_nonce(&self) {
+        *self.last_peer_nonce.lock().unwrap() = None;
+    }
+
+    /// Wipes the context's shared key; idempotent.
+    pub fn close(&mut self) {
+        self.crypto_box.clear();
+        self.next_nonce.clear();
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
-        let overhead = Nonce::BYTES + CryptoBox::MAC_BYTES;
-        if cipher.len() < overhead {
+        if cipher.len() < Self::OVERHEAD {
             return Err(CryptoError::new(format!(
                 "Cipher text length {} is smaller than required overhead {}",
                 cipher.len(),
-                overhead
+                Self::OVERHEAD
             )));
         }
-        let nonce = &cipher[..Nonce::BYTES];
-        if let Some(last_nonce) = self.last_peer_nonce.as_ref() {
-            if last_nonce.as_bytes() != nonce {
-                return Err(CryptoError::new(
-                    "Using inconsistent nonce with risking of replay attacks",
-                ));
-            }
-        }
-        self.crypto_box.decrypt_into(&cipher)
+        let mut plain = vec![0u8; cipher.len() - Self::OVERHEAD];
+        self.decrypt(cipher, &mut plain).map(|_| plain)
     }
 }
 
@@ -96,3 +131,7 @@ impl Drop for CryptoContext {
         self.next_nonce.clear();
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_crypto_context.rs"]
+mod test_crypto_context;

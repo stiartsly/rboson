@@ -1,6 +1,8 @@
 use crate::core::{
-    cryptobox::{self, CryptoBox, Nonce},
-    signature, CryptoContext, Id,
+    cryptobox,
+    signature,
+    CryptoContext,
+    Id,
 };
 /*
 Testcases for critical methods:
@@ -8,143 +10,143 @@ Testcases for critical methods:
 - from_private_key(..)
 */
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn create_contexts_from_sk() -> (CryptoContext, CryptoContext) {
+    let sig_key1 = signature::KeyPair::random();
+    let sig_key2 = signature::KeyPair::random();
+    let box_kp1 = cryptobox::KeyPair::from(&sig_key1);
+    let box_kp2 = cryptobox::KeyPair::from(&sig_key2);
 
-    fn create_contexts_from_private_key() -> (CryptoContext, CryptoContext) {
-        let sig_kp1 = signature::KeyPair::random();
-        let sig_kp2 = signature::KeyPair::random();
-        let box_kp1 = cryptobox::KeyPair::from(&sig_kp1);
-        let box_kp2 = cryptobox::KeyPair::from(&sig_kp2);
+    let id1 = Id::from(sig_key1.public_key());
+    let id2 = Id::from(sig_key2.public_key());
 
-        let id1 = Id::from(sig_kp1.public_key());
-        let id2 = Id::from(sig_kp2.public_key());
+    let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key());
+    let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key());
 
-        let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key());
-        let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key());
+    (ctx1, ctx2)
+}
 
-        (ctx1, ctx2)
-    }
+fn create_contexts_from_cryptobox() -> (CryptoContext, CryptoContext) {
+    let sig_key1 = signature::KeyPair::random();
+    let sig_key2 = signature::KeyPair::random();
+    let box_kp1 = cryptobox::KeyPair::from(&sig_key1);
+    let box_kp2 = cryptobox::KeyPair::from(&sig_key2);
 
-    fn create_contexts_from_cryptobox() -> (CryptoContext, CryptoContext) {
-        let sig_kp1 = signature::KeyPair::random();
-        let sig_kp2 = signature::KeyPair::random();
-        let box_kp1 = cryptobox::KeyPair::from(&sig_kp1);
-        let box_kp2 = cryptobox::KeyPair::from(&sig_kp2);
+    let id1 = Id::from(sig_key1.public_key());
+    let id2 = Id::from(sig_key2.public_key());
 
-        let id1 = Id::from(sig_kp1.public_key());
-        let id2 = Id::from(sig_kp2.public_key());
+    let box1 = cryptobox::CryptoBox::try_from((
+        box_kp2.public_key(),
+        box_kp1.private_key()
+    )).unwrap();
+    let box2 = cryptobox::CryptoBox::try_from((
+        box_kp1.public_key(),
+        box_kp2.private_key()
+    )).unwrap();
 
-        let box1 =
-            cryptobox::CryptoBox::try_from((box_kp2.public_key(), box_kp1.private_key())).unwrap();
-        let box2 =
-            cryptobox::CryptoBox::try_from((box_kp1.public_key(), box_kp2.private_key())).unwrap();
-        let ctx1 = CryptoContext::new(id2.clone(), box1);
-        let ctx2 = CryptoContext::new(id1, box2);
+    let ctx1 = CryptoContext::new(id2, box1);
+    let ctx2 = CryptoContext::new(id1, box2);
 
-        (ctx1, ctx2)
-    }
+    (ctx1, ctx2)
+}
 
-    #[test]
-    fn test_from_sk() {
-        let (ctx1, mut ctx2) = create_contexts_from_private_key();
-        let plain = b"Hello, World!";
+#[test]
+fn test_from_sk() {
+    let (ctx1, mut ctx2) = create_contexts_from_sk();
+    let plain = b"Hello, World!";
 
-        assert_ne!(ctx1.id(), ctx2.id());
+    assert_ne!(ctx1.id(), ctx2.id());
 
-        // testing encrypt_into and decrypt_into methods
-        let result = ctx2.encrypt_into(plain);
-        assert!(result.is_ok());
+    // testing encrypt_into and decrypt_into methods
+    let result = ctx2.encrypt_into(plain);
+    assert!(result.is_ok());
 
-        let cipher = result.unwrap();
-        let result = ctx1.decrypt_into(&cipher);
-        assert!(result.is_ok());
+    let cipher = result.unwrap();
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
 
-        let decrypted = result.unwrap();
-        assert_eq!(plain, decrypted.as_slice());
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
 
-        ctx1.reset_nonce();
-        // testing encrypt and decrypt methods
-        let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
-        let result = ctx2.encrypt(plain, &mut cipher);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cipher.len());
+    ctx1.reset_nonce();
+    // testing encrypt and decrypt methods
+    let mut cipher = vec![0u8; plain.len() + CryptoContext::OVERHEAD];
+    let result = ctx2.encrypt(plain, &mut cipher);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), cipher.len());
 
-        let result = ctx1.decrypt_into(&cipher);
-        assert!(result.is_ok());
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
 
-        let decrypted = result.unwrap();
-        assert_eq!(plain, decrypted.as_slice());
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
 
-        ctx1.reset_nonce();
-        let mut decrypted = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
-        let result = ctx1.decrypt(&cipher, &mut decrypted);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), decrypted.len());
-        assert_eq!(plain, decrypted.as_slice());
-    }
+    ctx1.reset_nonce();
+    let mut decrypted = vec![0u8; cipher.len() - CryptoContext::OVERHEAD];
+    let result = ctx1.decrypt(&cipher, &mut decrypted);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), decrypted.len());
+    assert_eq!(plain, decrypted.as_slice());
+}
 
-    #[test]
-    fn test_from_cryptobox() {
-        let (ctx1, mut ctx2) = create_contexts_from_cryptobox();
-        let plain = b"Hello, World!";
+#[test]
+fn test_from_cryptobox() {
+    let (ctx1, mut ctx2) = create_contexts_from_cryptobox();
+    let plain = b"Hello, World!";
 
-        assert_ne!(ctx1.id(), ctx2.id());
+    assert_ne!(ctx1.id(), ctx2.id());
 
-        // testing encrypt_into and decrypt_into methods
-        let result = ctx2.encrypt_into(plain);
-        assert!(result.is_ok());
+    // testing encrypt_into and decrypt_into methods
+    let result = ctx2.encrypt_into(plain);
+    assert!(result.is_ok());
 
-        let cipher = result.unwrap();
-        let result = ctx1.decrypt_into(&cipher);
-        assert!(result.is_ok());
+    let cipher = result.unwrap();
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
 
-        let decrypted = result.unwrap();
-        assert_eq!(plain, decrypted.as_slice());
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
 
-        ctx1.reset_nonce();
-        // testing encrypt and decrypt methods
-        let mut cipher = vec![0u8; plain.len() + CryptoBox::MAC_BYTES + Nonce::BYTES];
-        let result = ctx2.encrypt(plain, &mut cipher);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cipher.len());
+    ctx1.reset_nonce();
+    // testing encrypt and decrypt methods
+    let mut cipher = vec![0u8; plain.len() + CryptoContext::OVERHEAD];
+    let result = ctx2.encrypt(plain, &mut cipher);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), cipher.len());
 
-        let result = ctx1.decrypt_into(&cipher);
-        assert!(result.is_ok());
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
 
-        let decrypted = result.unwrap();
-        assert_eq!(plain, decrypted.as_slice());
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
 
-        ctx1.reset_nonce();
-        let mut decrypted = vec![0u8; cipher.len() - CryptoBox::MAC_BYTES - Nonce::BYTES];
-        let result = ctx1.decrypt(&cipher, &mut decrypted);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), decrypted.len());
-        assert_eq!(plain, decrypted.as_slice());
-    }
+    ctx1.reset_nonce();
+    let mut decrypted = vec![0u8; cipher.len() - CryptoContext::OVERHEAD];
+    let result = ctx1.decrypt(&cipher, &mut decrypted);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), decrypted.len());
+    assert_eq!(plain, decrypted.as_slice());
+}
 
-    #[test]
-    fn test_decrypt_tampered_ciphertext() {
-        let (ctx1, mut ctx2) = create_contexts_from_private_key();
-        let plain = b"Hello, World!";
-        let mut cipher = ctx2.encrypt_into(plain).unwrap();
-        let last = cipher.len() - 1;
-        cipher[last] ^= 0x01;
+#[test]
+fn test_decrypt_tampered_ciphertext() {
+    let (ctx1, mut ctx2) = create_contexts_from_sk();
+    let plain = b"Hello, World!";
+    let mut cipher = ctx2.encrypt_into(plain).unwrap();
+    let last = cipher.len() - 1;
+    cipher[last] ^= 0x01;
 
-        let result = ctx1.decrypt_into(&cipher);
-        assert!(result.is_err());
-    }
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_err());
+}
 
-    #[test]
-    fn test_decrypt_short_ciphertext() {
-        let (ctx1, _) = create_contexts_from_private_key();
-        // Ciphertext shorter than Nonce::BYTES + MAC_BYTES (40) must return error, not panic
-        assert!(ctx1.decrypt_into(&[]).is_err());
-        assert!(ctx1.decrypt_into(&[0u8; 10]).is_err());
-        assert!(ctx1.decrypt_into(&[0u8; 39]).is_err());
+#[test]
+fn test_decrypt_short_ciphertext() {
+    let (ctx1, _) = create_contexts_from_sk();
+    // Ciphertext shorter than CryptoContext::OVERHEAD (40) must return error, not panic
+    assert!(ctx1.decrypt_into(&[]).is_err());
+    assert!(ctx1.decrypt_into(&[0u8; 10]).is_err());
+    assert!(ctx1.decrypt_into(&[0u8; 39]).is_err());
 
-        let mut out = [0u8; 10];
-        assert!(ctx1.decrypt(&[0u8; 20], &mut out).is_err());
-    }
+    let mut out = [0u8; 10];
+    assert!(ctx1.decrypt(&[0u8; 20], &mut out).is_err());
 }

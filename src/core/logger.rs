@@ -1,3 +1,4 @@
+use log::{Level, LevelFilter, Metadata, Record};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
@@ -6,74 +7,30 @@ use std::{
         Arc, Mutex, Once,
     },
 };
-use log::{LevelFilter, Metadata, Record};
+
+const CRATE_NAME: &str = "boson";
+const TARGET_WIDTH: usize = 8;
+const LEVEL_WIDTH: usize = 4;
+
+const COLOR_RESET: &str = "\x1b[0m";
+const COLOR_ERR: &str   = "\x1b[31m";         // red
+const COLOR_WARN: &str  = "\x1b[33m";      // yellow
+const COLOR_INFO: &str  = "\x1b[32m";
 
 static LOGGER: Logger = Logger::new();
 static LOGGER_INIT: Once = Once::new();
 
 type ConsoleOutputHandler = Arc<dyn Fn(String) + Send + Sync>;
 
-struct Logger {
-    console_output_enabled: AtomicBool,
-    console_output_handler: Mutex<Option<ConsoleOutputHandler>>,
-    state: Mutex<LoggerState>,
-}
-
 struct LoggerState {
     max_level: LevelFilter,
     fp: Option<File>,
 }
 
-impl log::Log for Logger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= self.state.lock().unwrap().max_level
-    }
-
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            let parts = record.target().split("::").collect::<Vec<_>>();
-            let module = parts.first().unwrap_or(&"N/A");
-            let target = parts.last().unwrap_or(&"N/A");
-            if module != &"boson" {
-                return;
-            }
-
-            let target = abbreviate(target, 8);
-            let level = format!("{}", record.level());
-            let level = abbreviate(&level, 4);
-            let log = format!("[{target:<8}] [{level:^4}] {}", record.args());
-
-            {
-                let mut state = self.state.lock().unwrap();
-                if let Some(fp) = state.fp.as_mut() {
-                    _ = writeln!(fp, "{log}");
-                }
-            }
-
-            if !self.console_output_enabled.load(Ordering::Acquire) {
-                return;
-            }
-
-            let console_log = match record.level() {
-                log::Level::Error => format!("\x1b[31m{log}\x1b[0m"),
-                log::Level::Warn => format!("\x1b[33m{log}\x1b[0m"),
-                log::Level::Info => format!("\x1b[32m{log}\x1b[0m"),
-                _ => log,
-            };
-            let handler = self.console_output_handler.lock().unwrap().clone();
-            if let Some(cb) = handler {
-                cb(console_log);
-            } else {
-                println!("{console_log}");
-            }
-        }
-    }
-    fn flush(&self) {
-        _ = io::stdout().flush();
-        if let Some(fp) = self.state.lock().unwrap().fp.as_mut() {
-            _ = fp.flush();
-        }
-    }
+struct Logger {
+    console_output_enabled: AtomicBool,
+    console_output_handler: Mutex<Option<ConsoleOutputHandler>>,
+    state: Mutex<LoggerState>,
 }
 
 impl Logger {
@@ -90,26 +47,104 @@ impl Logger {
 
     fn configure(&self, max_level: LevelFilter, logfile: Option<&str>) {
         let fp = logfile.and_then(|file| {
-            let rc = OpenOptions::new().append(true).create(true).open(file);
-            match rc {
-                Ok(fp) => Some(fp),
-                Err(e) => {
-                    println!("Failed to open log file {file}: {e}. Unable to log output to file.");
-                    None
-                }
-            }
+            OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(file)
+                .map_err(|e| {
+                    println!("Failed to open log file {file}: {e}. Unable to log output to file.")
+                }).ok()
         });
 
         let mut state = self.state.lock().unwrap();
         state.max_level = max_level;
         state.fp = fp;
     }
+
+    fn set_console_output(&self, enabled: bool) {
+        self.console_output_enabled.store(enabled, Ordering::Release);
+    }
+
+    fn set_console_handler(&self, handler: Option<ConsoleOutputHandler>) {
+        *self.console_output_handler.lock().unwrap() = handler;
+    }
+
+    /// Restores the console defaults: output enabled and no custom handler.
+    fn reset_console(&self) {
+        self.set_console_output(true);
+        self.set_console_handler(None);
+    }
+
+    /// Builds the plain log line, or `None` when the record is not from this crate.
+    fn format(record: &Record) -> Option<String> {
+        let mut parts = record.target().split("::");
+        if parts.next() != Some(CRATE_NAME) {
+            return None;
+        }
+
+        let target = record.target().rsplit("::").next().unwrap_or("N/A");
+        let target = abbreviate(target, TARGET_WIDTH);
+        let level = abbreviate(record.level().as_str(), LEVEL_WIDTH);
+        Some(format!(
+            "[{target:<TARGET_WIDTH$}] [{level:^LEVEL_WIDTH$}] {}",
+            record.args()
+        ))
+    }
+
+    fn colorize(level: Level, line: String) -> String {
+        match level {
+            Level::Error => format!("{COLOR_ERR}{line}{COLOR_RESET}"),
+            Level::Warn => format!("{COLOR_WARN}{line}{COLOR_RESET}"),
+            Level::Info => format!("{COLOR_INFO}{line}{COLOR_RESET}"),
+            _ => line,
+        }
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= self.state.lock().unwrap().max_level
+    }
+
+    fn log(&self, record: &Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let Some(line) = Self::format(record) else {
+            return;
+        };
+
+        if let Some(fp) = self.state.lock().unwrap().fp.as_mut() {
+            _ = writeln!(fp, "{line}");
+        }
+
+        if !self.console_output_enabled.load(Ordering::Acquire) {
+            return;
+        }
+
+        let line = Self::colorize(record.level(), line);
+        let handler = self.console_output_handler.lock().unwrap().clone();
+        match handler {
+            Some(handler) => handler(line),
+            _ => println!("{line}"),
+        }
+    }
+
+    fn flush(&self) {
+        _ = io::stdout().flush();
+        if let Some(fp) = self.state.lock().unwrap().fp.as_mut() {
+            _ = fp.flush();
+        }
+    }
+}
+
+fn abbreviate(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
 }
 
 pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     LOGGER.configure(max_level, logfile);
-    LOGGER.console_output_enabled.store(true, Ordering::Release);
-    *LOGGER.console_output_handler.lock().unwrap() = None;
+    LOGGER.reset_console();
 
     LOGGER_INIT.call_once(|| {
         _ = log::set_logger(&LOGGER);
@@ -117,38 +152,23 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     log::set_max_level(max_level);
 }
 
-#[allow(unused)]
-pub fn enable_console_output() {
-    LOGGER.console_output_enabled.store(true, Ordering::Release);
-}
-
-#[allow(unused)]
-pub fn disable_console_output() {
-    LOGGER
-        .console_output_enabled
-        .store(false, Ordering::Release);
-}
-
-pub fn set_console_output_handler(handler: impl Fn(String) + Send + Sync + 'static) {
-    *LOGGER.console_output_handler.lock().unwrap() = Some(Arc::new(handler));
-}
-
 pub(crate) fn cleanup() {
     log::set_max_level(LevelFilter::Off);
     LOGGER.configure(LevelFilter::Off, None);
-    *LOGGER.console_output_handler.lock().unwrap() = None;
-    LOGGER.console_output_enabled.store(true, Ordering::Release);
+    LOGGER.reset_console();
 }
 
-#[allow(unused)]
-pub(crate) fn revert_console_output() {
-    LOGGER
-        .console_output_enabled
-        .fetch_xor(true, Ordering::AcqRel);
+// The following functions are used by the applications built on top of this crate.
+pub fn enable_console_output() {
+    LOGGER.set_console_output(true);
 }
 
-fn abbreviate(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
+pub fn disable_console_output() {
+    LOGGER.set_console_output(false);
+}
+
+pub fn set_console_output_handler(handler: impl Fn(String) + Send + Sync + 'static) {
+    LOGGER.set_console_handler(Some(Arc::new(handler)));
 }
 
 #[cfg(test)]

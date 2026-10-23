@@ -16,8 +16,8 @@ pub struct CryptoIdentity {
 }
 
 impl CryptoIdentity {
-    const OVERHEAD_WITH_NONCE:  usize = CryptoBox::MAC_BYTES + Nonce::BYTES;
-    const OVERHEAD_NO_NONCE:    usize = CryptoBox::MAC_BYTES;
+    pub const OVERHEAD_BASE: usize = CryptoBox::MAC_BYTES;
+    pub const OVERHEAD_PADDED_NONCE: usize = Self::OVERHEAD_BASE + Nonce::BYTES;
 
     fn from_keypair(keypair: signature::KeyPair) -> CryptoIdentity {
         Self {
@@ -122,11 +122,12 @@ impl Identity for CryptoIdentity {
     }
 
     fn encrypt(&self, recipient: &Id, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        if cipher.len() < plain.len() + Self::OVERHEAD_WITH_NONCE {
+        if cipher.len() < plain.len() + Self::OVERHEAD_PADDED_NONCE {
             return Err(ArgumentError::new("The output buffer is insufficient."));
         }
         let nonce = Nonce::random();
         cipher[..Nonce::BYTES].copy_from_slice(nonce.as_bytes());
+
         let written = self.encrypt_with_nonce(
             recipient,
             nonce.as_bytes(),
@@ -137,16 +138,23 @@ impl Identity for CryptoIdentity {
     }
 
     fn encrypt_into(&self, rec: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        let mut cipher = vec![0u8; plain.len() + Self::OVERHEAD_WITH_NONCE];
+        let mut cipher = vec![0u8; plain.len() + Self::OVERHEAD_PADDED_NONCE];
         self.encrypt(rec, plain, &mut cipher).map(|_| cipher)
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if cipher.len() < Self::OVERHEAD_WITH_NONCE {
+        if cipher.len() < Self::OVERHEAD_PADDED_NONCE {
             return Err(ArgumentError::new(format!(
                 "Ciphertext length {} is smaller than the required overhead {}",
                 cipher.len(),
-                Self::OVERHEAD_WITH_NONCE
+                Self::OVERHEAD_PADDED_NONCE
+            )));
+        }
+        if plain.len() < cipher.len() - Self::OVERHEAD_PADDED_NONCE {
+            return Err(ArgumentError::new(format!(
+                "Plaintext buffer length {} is smaller than the required {}",
+                plain.len(),
+                cipher.len() - Self::OVERHEAD_PADDED_NONCE
             )));
         }
         let nonce = &cipher[..Nonce::BYTES];
@@ -154,14 +162,14 @@ impl Identity for CryptoIdentity {
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        if cipher.len() < Self::OVERHEAD_WITH_NONCE {
+        if cipher.len() < Self::OVERHEAD_PADDED_NONCE {
             return Err(ArgumentError::new(format!(
                 "Ciphertext length {} is smaller than the required overhead {}",
                 cipher.len(),
-                Self::OVERHEAD_WITH_NONCE
+                Self::OVERHEAD_PADDED_NONCE
             )));
         }
-        let mut plain = vec![0u8; cipher.len() - Self::OVERHEAD_WITH_NONCE];
+        let mut plain = vec![0u8; cipher.len() - Self::OVERHEAD_PADDED_NONCE];
         self.decrypt(sender, cipher, &mut plain).map(|_| plain)
     }
 
@@ -172,7 +180,7 @@ impl Identity for CryptoIdentity {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if cipher.len() < plain.len() + Self::OVERHEAD_NO_NONCE {
+        if cipher.len() < plain.len() + Self::OVERHEAD_BASE {
             return Err(ArgumentError::new("The output buffer is insufficient."));
         }
 
@@ -187,11 +195,18 @@ impl Identity for CryptoIdentity {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if cipher.len() < Self::OVERHEAD_NO_NONCE {
+        if cipher.len() < Self::OVERHEAD_BASE {
             return Err(ArgumentError::new(format!(
                 "Ciphertext length {} is smaller than the required overhead {}",
                 cipher.len(),
-                Self::OVERHEAD_NO_NONCE
+                Self::OVERHEAD_BASE
+            )));
+        }
+        if plain.len() < cipher.len() - Self::OVERHEAD_BASE {
+            return Err(ArgumentError::new(format!(
+                "Plaintext buffer length {} is smaller than the required {}",
+                plain.len(),
+                cipher.len() - Self::OVERHEAD_BASE
             )));
         }
         let nonce = Nonce::try_from(nonce)?;
@@ -204,7 +219,7 @@ impl Identity for CryptoIdentity {
         nonce: &[u8],
         plain: &[u8],
     ) -> Result<Vec<u8>> {
-        let mut cipher = vec![0u8; plain.len() + Self::OVERHEAD_NO_NONCE];
+        let mut cipher = vec![0u8; plain.len() + Self::OVERHEAD_BASE];
         self.encrypt_with_nonce(rec, nonce, plain, &mut cipher)
             .map(|_| cipher)
     }
@@ -215,10 +230,14 @@ impl Identity for CryptoIdentity {
         nonce: &[u8],
         cipher: &[u8],
     ) -> Result<Vec<u8>> {
-        if cipher.len() < Self::OVERHEAD_NO_NONCE {
-            return Err(ArgumentError::new("Invalid cipher length"));
+        if cipher.len() < Self::OVERHEAD_BASE {
+            return Err(ArgumentError::new(format!(
+                "Ciphertext length {} is smaller than the required overhead {}",
+                cipher.len(),
+                Self::OVERHEAD_BASE
+            )));
         }
-        let mut plain = vec![0u8; cipher.len() - Self::OVERHEAD_NO_NONCE];
+        let mut plain = vec![0u8; cipher.len() - Self::OVERHEAD_BASE];
         self.decrypt_with_nonce(sender, nonce, cipher, &mut plain)
             .map(|_| plain)
     }

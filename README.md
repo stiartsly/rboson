@@ -15,25 +15,38 @@ At a high level, this project provides:
 - Director client support for interacting with a Boson super node.
 - Messaging and application-level service integration built on top of the core network components.
 
-## 2. Compiling the project
+## 2. Layout
 
-The project is a Cargo workspace-style Rust crate with the main library exposed from `src/lib.rs`.
+| Folder | Crate | What it is |
+|---|---|---|
+| `boson/` | `boson` | Facade: re-exports the crates below, node and client crates behind features |
+| `core/crypto/` | `boson-crypto` | Signatures, key agreement, crypto box, hashing, key derivation |
+| `core/api/` | `boson-api` | Id, Value, PeerInfo, NodeInfo, the `Node` trait, CWT |
+| `core/identifier/` | `boson-identifier` | DID documents, credentials, cards, vouches, registry |
+| `core/dht/` | `boson-dht` | Regular DHT node |
+| `core/http/` | `boson-http` | HTTPS transport shared by the clients |
+| `clients/higgs/` | `boson-higgs` | `Node` over a super node's web gateway |
+| `clients/director/` | `boson-director-client` | Director client |
+| `clients/ion-store/` | `boson-ion-store-client` | IonStore client |
+| `clients/active-proxy/` | `boson-active-proxy-client` | Active proxy client |
+| `clients/messaging/` | `boson-messaging-client` | Messaging client |
+| `tools/common/` | `boson-tools-common` | Shared code of the tools |
+| `tools/cli/` | `boson-cli` | Command-line client |
+| `tools/director-cli/` | `boson-director-cli` | Director administration |
+| `tools/node/` | `boson-node` | Regular node daemon |
+| `interop/` | | Test vectors and integration tests against the Java implementation |
 
-The top-level source modules are:
+Client crates depend on the `Node` trait only, never on a node implementation: the application
+chooses `boson-dht` or `boson-higgs`.
 
-| Module | Description |
-| --- | --- |
-| `src/core` | Core primitives such as `Id`, signatures, encryption helpers, `NodeInfo`, `PeerInfo`, and `Value`. |
-| `src/did` | DID documents, credentials, resolvers, registries, proofs, and related DID utilities. |
-| `src/dht` | DHT node implementation, routing, storage, UDP server, lookup tasks, and node runtime. |
-| `src/director` | Director options and client APIs for working with a Boson super node. |
-| `src/messaging` | Messaging client configuration, contacts, channels, sessions, and message-related APIs. |
-| `src/activeproxy` | Active proxy configuration, client, connection, and service integration. |
+## 3. Compiling the project
 
 Build the full project:
 
 ```bash
 cargo build
+cargo test
+cargo clippy --all-targets --all-features
 ```
 
 Check the library modules:
@@ -58,7 +71,7 @@ cargo check --bin chat
 
 The default feature set includes development/inspection support as configured in `Cargo.toml`.
 
-## 3. Main applications
+## 4. Main applications
 
 ### Shell
 
@@ -127,7 +140,7 @@ cargo run --bin chat -- \
   --datadir .dev_chat_data/node
 ```
 
-## 4. License
+## 5. License
 
 This project is open source software licensed under the MIT License.
 

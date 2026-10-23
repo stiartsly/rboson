@@ -1,0 +1,26 @@
+[package]
+name = "boson-cli"
+description = "Boson command-line client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+boson-tools-common.workspace = true
+boson-api.workspace = true
+boson-dht.workspace = true
+boson-higgs.workspace = true
+boson-ion-store-client.workspace = true
+boson-active-proxy-client.workspace = true
+
+[lints]
+workspace = true

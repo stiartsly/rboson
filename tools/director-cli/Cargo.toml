@@ -1,0 +1,23 @@
+[package]
+name = "boson-director-cli"
+description = "Boson Director administration tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+boson-tools-common.workspace = true
+boson-api.workspace = true
+boson-director-client.workspace = true
+
+[lints]
+workspace = true

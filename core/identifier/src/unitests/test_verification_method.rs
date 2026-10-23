@@ -1,5 +1,7 @@
 use crate::{
-    did::{VerificationMethod, VerificationMethodType},
+    {VerificationMethod, VerificationMethodType},
+};
+use boson_api::{
     Id,
 };
 

@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Result},
     CryptoIdentity, Id, Identity,
 };
 
-use crate::did::{
+use crate::{
     constants,
     proof::{ProofPurpose, ProofType},
     w3c::VerifiableCredential,

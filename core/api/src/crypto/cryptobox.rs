@@ -20,9 +20,9 @@ use libsodium_sys::{
 use static_assertions::const_assert;
 use std::fmt;
 
-use crate::core::{as_uchar_ptr, as_uchar_ptr_mut};
+use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
-use crate::core::{
+use crate::{
     errors::{ArgumentError, CryptoError},
     signature, Error, Result,
 };

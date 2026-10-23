@@ -1,5 +1,5 @@
-use crate::dht::{rpc::TargetInfo, task::closest_candidates::ClosestCandidates};
-use crate::{Id, NodeInfo};
+use crate::{rpc::TargetInfo, task::closest_candidates::ClosestCandidates};
+use boson_api::{Id, NodeInfo};
 
 fn make_node(distance: usize, host: &str, port: u16) -> NodeInfo {
     NodeInfo::new(

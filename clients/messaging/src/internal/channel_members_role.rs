@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::messaging::channel::Role;
-use crate::messaging::internal::codec;
-use crate::Id;
+use crate::channel::Role;
+use crate::internal::codec;
+use boson_api::Id;
 
 /// Role change request for one or more channel members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

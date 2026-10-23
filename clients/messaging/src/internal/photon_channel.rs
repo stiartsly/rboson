@@ -1,10 +1,10 @@
-use crate::messaging::{
+use crate::{
     channel::{Channel, ChannelEditor, Permission},
     contact::{Contact, ContactOps, ContactType},
     contact_editor::ContactEditor,
     ChannelMember,
 };
-use crate::Id;
+use boson_api::Id;
 
 /// Channel implementation backed by a local contact and its membership list.
 #[derive(Clone)]

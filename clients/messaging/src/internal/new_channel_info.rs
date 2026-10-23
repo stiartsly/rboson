@@ -1,9 +1,9 @@
 use std::fmt;
 use serde::Serialize;
 
-use crate::messaging::internal::codec;
-use crate::messaging::Permission;
-use crate::{utils, Id};
+use crate::internal::codec;
+use crate::Permission;
+use boson_api::{utils, Id};
 
 /// Channel creation request sent to the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]

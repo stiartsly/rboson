@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::Id;
+use boson_api::Id;
 use serde::{Deserialize, Serialize};
 
 /// Information about a single device session for the current user.

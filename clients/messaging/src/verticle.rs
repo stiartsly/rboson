@@ -22,9 +22,9 @@ use tokio::{
     task,
 };
 
-use crate::Id;
-use crate::errors::{Result, StateError};
-use crate::messaging::{
+use boson_api::Id;
+use boson_api::errors::{Result, StateError};
+use crate::{
     options::Options,
     contact::Contact,
     message::Message,

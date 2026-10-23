@@ -28,7 +28,7 @@ mod tests {
         }
     }
 
-    impl crate::messaging::FriendRequestListener for ThreadRecorder {
+    impl crate::FriendRequestListener for ThreadRecorder {
         fn on_friend_request(&self, _user_id: &Id, _hello: Option<&str>) {
             self.record("friend_request");
         }
@@ -44,8 +44,8 @@ mod tests {
         let mut builder = Options::builder();
         builder.with_peer_id(peer_id);
         builder.with_peer_endpoint(endpoint).unwrap();
-        builder.with_user_keypair(crate::signature::KeyPair::random());
-        builder.with_device_keypair(crate::signature::KeyPair::random());
+        builder.with_user_keypair(boson_api::signature::KeyPair::random());
+        builder.with_device_keypair(boson_api::signature::KeyPair::random());
         builder.with_data_dir(std::env::temp_dir());
         builder.with_connection_listener(recorder.clone());
         builder.with_friend_request_listener(recorder.clone());
@@ -184,7 +184,7 @@ mod tests {
                             session_identity = Some(CryptoIdentity::try_from(key.as_slice()).unwrap());
                         } else {
                             assert_eq!(wire.recipient, friend_id);
-                            assert_eq!(wire.message_type, crate::messaging::message::MessageType::ContentMessage as u8);
+                            assert_eq!(wire.message_type, crate::message::MessageType::ContentMessage as u8);
                             let content: MessageContent = serde_cbor::from_slice(
                                 &session_identity.as_ref().unwrap().decrypt_into(&user_id, &payload).unwrap(),
                             ).unwrap();
@@ -261,7 +261,7 @@ mod tests {
         *session.mqtt.lock().unwrap() = Some(mqtt);
         session.add_friend(
             &friend,
-            crate::signature::KeyPair::random().private_key().as_ref().to_vec(),
+            boson_api::signature::KeyPair::random().private_key().as_ref().to_vec(),
             Some("friend".into()),
         ).await.unwrap();
         assert!(session.friend_sessions.lock().unwrap().contains_key(&friend));
@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(request.initiator_id(), session.user_id());
         assert_eq!(request.hello(), Some("outgoing"));
 
-        let key = crate::signature::KeyPair::random();
+        let key = boson_api::signature::KeyPair::random();
         let acceptance = handshake_payload(&session, &peer, &friend, USER_INBOX, Handshake {
             timestamp: 1235,
             handshake_type: HandshakeType::FriendRequestAccept,
@@ -350,7 +350,7 @@ mod tests {
         let duplicate = handshake_payload(&session, &peer, &friend, USER_INBOX, Handshake {
             timestamp: 1236,
             handshake_type: HandshakeType::FriendRequestAccept,
-            body: Value::Bytes(crate::signature::KeyPair::random().private_key().as_ref().to_vec()),
+            body: Value::Bytes(boson_api::signature::KeyPair::random().private_key().as_ref().to_vec()),
         });
         session.handle_user_publish(peer.id(), USER_INBOX, &duplicate).unwrap();
         assert_eq!(session.friend_sessions.lock().unwrap().get(friend.id()).unwrap().id(), &Id::from(key.public_key()));
@@ -382,7 +382,7 @@ mod tests {
         let acceptance = handshake_payload(&session, &peer, &friend, USER_INBOX, Handshake {
             timestamp: 1234,
             handshake_type: HandshakeType::FriendRequestAccept,
-            body: Value::Bytes(crate::signature::KeyPair::random().private_key().as_ref().to_vec()),
+            body: Value::Bytes(boson_api::signature::KeyPair::random().private_key().as_ref().to_vec()),
         });
         assert!(session.handle_user_publish(peer.id(), USER_INBOX, &acceptance).is_err());
         session.on_friend_request(*friend.id(), *friend.id(), "incoming".into(), 1233, false);
@@ -454,14 +454,14 @@ mod protocol_tests {
     }
 
     fn session(observed: &Observed) -> Rc<MqttSession> {
-        let mut options = crate::messaging::verticle::tests::options();
+        let mut options = crate::verticle::tests::options();
         options.message_listener = Arc::new(observed.clone());
         options.contact_listener = Arc::new(observed.clone());
         options.session_listener = Arc::new(observed.clone());
         MqttSession::new(options).unwrap()
     }
 
-    fn opaque(session: &MqttSession, id: Id, revision: i32, key: &crate::signature::KeyPair, blocked: bool) -> OpaqueContact {
+    fn opaque(session: &MqttSession, id: Id, revision: i32, key: &boson_api::signature::KeyPair, blocked: bool) -> OpaqueContact {
         let encrypted_key = session.user_identity.encrypt_into(session.user_id(), key.private_key().as_ref()).unwrap();
         let mut data = ContactData::new(id, 1, 100);
         data.set_session_key(encrypted_key);
@@ -499,7 +499,7 @@ mod protocol_tests {
         let mut wire = WireMessage {
             version: MESSAGE_VERSION, id: Id::random(), recipient: *session.user_id(),
             from: Some(*peer.id()), created_at: 1234,
-            message_type: crate::messaging::message::MessageType::StateMessage as u8,
+            message_type: crate::message::MessageType::StateMessage as u8,
             payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
         };
         let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
@@ -516,7 +516,7 @@ mod protocol_tests {
         session.handle_user_publish(peer.id(), USER_INBOX, &envelope).unwrap();
         assert_eq!(session.contacts_revision.get(), 1);
         wire.from = Some(*CryptoIdentity::new().id());
-        wire.message_type = crate::messaging::message::MessageType::ControlMessage as u8;
+        wire.message_type = crate::message::MessageType::ControlMessage as u8;
         let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
         assert!(session.handle_user_publish(peer.id(), DEVICE_INBOX, &envelope).is_err());
         assert_eq!(*observed.events.lock().unwrap(), vec![("session", other)]);
@@ -563,7 +563,7 @@ mod protocol_tests {
         let observed = Observed::default();
         let session = session(&observed);
         let friend = *CryptoIdentity::new().id();
-        let key = crate::signature::KeyPair::random();
+        let key = boson_api::signature::KeyPair::random();
         session.apply_contact_sync(ContactSync {
             revision: 1, kind: 2, mutations: vec![],
             contacts: vec![opaque(&session, friend, 1, &key, false)],
@@ -615,7 +615,7 @@ mod protocol_tests {
     async fn applies_blocking() {
         let session = session(&Observed::default());
         let friend = *CryptoIdentity::new().id();
-        let key = crate::signature::KeyPair::random();
+        let key = boson_api::signature::KeyPair::random();
         let builder = session.message(Some(friend)).text_body("hello");
         session.apply_contact_sync(ContactSync {
             revision: 1, kind: 2, mutations: vec![],
@@ -633,7 +633,7 @@ mod protocol_tests {
         let session = session(&observed);
         let peer = CryptoIdentity::new();
         let friend = CryptoIdentity::new();
-        let key = crate::signature::KeyPair::random();
+        let key = boson_api::signature::KeyPair::random();
         session.register_friend_session(*friend.id(), key.private_key().as_ref()).unwrap();
         let content = MessageContent { headers: HashMap::new(), format: ContentFormat::Binary, body: Value::Bytes(vec![0, 255]) };
         let plaintext = serde_cbor::to_vec(&content).unwrap();
@@ -648,7 +648,7 @@ mod protocol_tests {
                 version: MESSAGE_VERSION, id: Id::random(),
                 recipient: if outbox { *friend.id() } else { *session.user_id() },
                 from: Some(from), created_at: 1234,
-                message_type: crate::messaging::message::MessageType::ContentMessage as u8,
+                message_type: crate::message::MessageType::ContentMessage as u8,
                 payload: Value::Bytes(payload),
             };
             let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&message).unwrap()).unwrap();
@@ -757,10 +757,10 @@ mod protocol_tests {
                 let mut builder = Options::builder();
                 builder.with_peer_id(*peer.id());
                 builder.with_peer_endpoint(format!("mqtt://{}", listener.local_addr().unwrap())).unwrap();
-                builder.with_user_keypair(crate::signature::KeyPair::random());
-                builder.with_device_keypair(crate::signature::KeyPair::random());
+                builder.with_user_keypair(boson_api::signature::KeyPair::random());
+                builder.with_device_keypair(boson_api::signature::KeyPair::random());
                 builder.with_data_dir(std::env::temp_dir());
-                let mut options = crate::messaging::verticle::tests::options();
+                let mut options = crate::verticle::tests::options();
                 options.options = Arc::new(builder.build().unwrap());
                 options.contact_listener = Arc::new(observed.clone());
                 let session = MqttSession::new(options).unwrap();
@@ -768,7 +768,7 @@ mod protocol_tests {
                 let user = *session.user_id();
                 let other_device = Id::random();
                 let friend = *CryptoIdentity::new().id();
-                let key = crate::signature::KeyPair::random();
+                let key = boson_api::signature::KeyPair::random();
                 let sync = ContactSync {
                     revision: 2, kind: 2, mutations: vec![],
                     contacts: vec![opaque(&session, friend, 2, &key, false)],
@@ -799,7 +799,7 @@ mod protocol_tests {
                         let envelope = peer.decrypt_into(&device, &body[offset + 2..]).unwrap();
                         let message: WireMessage = serde_cbor::from_slice(&envelope).unwrap();
                         assert_eq!(message.recipient, *peer.id());
-                        assert_eq!(message.message_type, crate::messaging::message::MessageType::ControlMessage as u8);
+                        assert_eq!(message.message_type, crate::message::MessageType::ControlMessage as u8);
                         assert!(message.from.is_none());
                         let Value::Bytes(payload) = message.payload else { panic!("RPC payload should be binary") };
                         let request: RpcRequest = serde_cbor::from_slice(&payload).unwrap();
@@ -825,7 +825,7 @@ mod protocol_tests {
                         let wire = WireMessage {
                             version: MESSAGE_VERSION, id: Id::random(), recipient: user,
                             from: Some(*peer.id()), created_at: request.id,
-                            message_type: crate::messaging::message::MessageType::ControlMessage as u8,
+                            message_type: crate::message::MessageType::ControlMessage as u8,
                             payload: Value::Bytes(serde_cbor::to_vec(&response).unwrap()),
                         };
                         let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();
@@ -841,7 +841,7 @@ mod protocol_tests {
                             let wire = WireMessage {
                                 version: MESSAGE_VERSION, id: Id::random(), recipient: user,
                                 from: Some(*peer.id()), created_at: request.id,
-                                message_type: crate::messaging::message::MessageType::StateMessage as u8,
+                                message_type: crate::message::MessageType::StateMessage as u8,
                                 payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
                             };
                             let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();

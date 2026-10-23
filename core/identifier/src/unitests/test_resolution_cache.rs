@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use crate::{did::filesystem_resolution_cache::FileSystemResolutionCache, Id};
+use crate::{filesystem_resolution_cache::FileSystemResolutionCache};
+use boson_api::{Id};
 
 #[test]
 fn file_name_is_derived_from_identifier() {

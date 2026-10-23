@@ -11,14 +11,20 @@ use std::{
 };
 
 use crate::{
-    dht::version,
-    dht::msg::{
+    version,
+    msg::{
         AnnouncePeerRequest, ErrorBody, FindNodeRequest, FindNodeResponse, FindPeerRequest,
         FindPeerResponse, FindValueRequest, FindValueResponse, StoreValueRequest,
     },
-    dht::rpc::RpcCall,
+    rpc::RpcCall,
+};
+use boson_api::{
     errors::{Error, ProtocolError, Result},
-    utils, Id, NodeInfo, PeerInfo, Value,
+    utils,
+    Id,
+    NodeInfo,
+    PeerInfo,
+    Value,
 };
 
 #[derive(Clone, Copy, PartialEq)]

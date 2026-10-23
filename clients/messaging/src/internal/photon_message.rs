@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
-use crate::messaging::message::{Content, Message, MessageType};
-use crate::{utils, Id};
+use crate::message::{Content, Message, MessageType};
+use boson_api::{utils, Id};
 
 /// Message envelope as it appears on the wire.
 ///

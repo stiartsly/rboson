@@ -1,5 +1,5 @@
 use super::lookup_rsp::{Data, LookupResponse};
-use crate::{
+use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
     utils, Id, NodeInfo, Value,

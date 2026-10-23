@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use log::{debug, info, trace};
 
-use crate::core::Id;
+use boson_api::Id;
 
 const SUSPICIOUS_OBSERVATION_HITS: usize = 8;
 const SUSPICIOUS_HITS_THRESHOLD: usize = 32;

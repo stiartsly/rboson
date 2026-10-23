@@ -7,8 +7,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::errors::{Error, Result};
-use crate::{Id, Identity};
+use boson_api::errors::{Error, Result};
+use boson_api::{Id, Identity};
 use super::errors::{AuthenticationError, EncodingError};
 
 /// Default ticket lifetime: seven days in milliseconds.
@@ -227,7 +227,7 @@ impl FromStr for InviteTicket {
 #[cfg(test)]
 mod tests {
     use super::InviteTicket;
-    use crate::{CryptoIdentity, Id};
+    use boson_api::{CryptoIdentity, Id};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

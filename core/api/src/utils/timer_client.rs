@@ -7,9 +7,9 @@ use tokio::sync::{mpsc, oneshot};
 use super::handler::{BoxHandler, LocalBoxHandler};
 use crate::errors::{Result, StateError};
 
-pub(crate) type TimerId = u64;
+pub type TimerId = u64;
 
-pub(crate) enum TimerCmd<H> {
+pub enum TimerCmd<H> {
     Add {
         timer_id: TimerId,
         delay: u64,
@@ -25,13 +25,13 @@ pub(crate) enum TimerCmd<H> {
 }
 
 #[derive(Clone)]
-pub(crate) struct TimerClient<H> {
+pub struct TimerClient<H> {
     sender: mpsc::UnboundedSender<TimerCmd<H>>,
     next_id: Arc<AtomicU64>,
 }
 
 impl<H> TimerClient<H> {
-    pub(crate) fn new(sender: mpsc::UnboundedSender<TimerCmd<H>>) -> Self {
+    pub fn new(sender: mpsc::UnboundedSender<TimerCmd<H>>) -> Self {
         Self {
             sender,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -42,7 +42,7 @@ impl<H> TimerClient<H> {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub(crate) fn add_timer(
+    pub fn add_timer(
         &self,
         delay: u64,
         interval: Option<u64>,
@@ -60,14 +60,14 @@ impl<H> TimerClient<H> {
         Ok(timer_id)
     }
 
-    pub(crate) fn cancel_timer(&self, timer_id: TimerId) -> Result<()> {
+    pub fn cancel_timer(&self, timer_id: TimerId) -> Result<()> {
         self.sender
             .send(TimerCmd::Cancel { timer_id })
             .map_err(|_| StateError::new("timer channel closed"))?;
         Ok(())
     }
 
-    pub(crate) async fn stop_timers(&self) -> Result<()> {
+    pub async fn stop_timers(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(TimerCmd::Stop { complete: tx })
@@ -80,9 +80,9 @@ impl<H> TimerClient<H> {
 }
 
 // Aliases for standard (thread-safe Send) timer client
-pub(crate) type BoxTimerCmd = TimerCmd<BoxHandler<()>>;
-pub(crate) type BoxTimerClient = TimerClient<BoxHandler<()>>;
+pub type BoxTimerCmd = TimerCmd<BoxHandler<()>>;
+pub type BoxTimerClient = TimerClient<BoxHandler<()>>;
 
 // Aliases for local (not Send) timer client
-pub(crate) type LocalBoxTimerCmd = TimerCmd<LocalBoxHandler<()>>;
-pub(crate) type LocalBoxTimerClient = TimerClient<LocalBoxHandler<()>>;
+pub type LocalBoxTimerCmd = TimerCmd<LocalBoxHandler<()>>;
+pub type LocalBoxTimerClient = TimerClient<LocalBoxHandler<()>>;

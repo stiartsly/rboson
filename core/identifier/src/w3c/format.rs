@@ -3,7 +3,7 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::{errors::ArgumentError, Result};
+use boson_api::{errors::ArgumentError, Result};
 
 /// Common serialization surface of W3C DID objects.
 pub trait W3CDIDFormat: Serialize + DeserializeOwned + Sized {

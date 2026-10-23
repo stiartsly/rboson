@@ -2,8 +2,8 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::did::{BosonIdentityObjectBuilder, Credential, Vouch};
-use crate::{errors::ArgumentError, CryptoIdentity, Identity, Result};
+use crate::{BosonIdentityObjectBuilder, Credential, Vouch};
+use boson_api::{errors::ArgumentError, CryptoIdentity, Identity, Result};
 
 pub struct VouchBuilder {
     identity: CryptoIdentity,

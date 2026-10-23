@@ -9,14 +9,14 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use crate::errors::{
+use boson_api::errors::{
     ArgumentError,
     BeforeValidPeriodError,
     ExpiredError,
     SignatureError,
     Result};
-use crate::{signature, utils::codec, CryptoIdentity, Id};
-use crate::did::{
+use boson_api::{signature, utils::codec, CryptoIdentity, Id};
+use crate::{
     date,
     w3c::VerifiableCredential as VC,
     CredentialBuilder

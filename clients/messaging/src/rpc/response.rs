@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::{self, Value};
 use super::error::RPCError;
 
-use crate::{
+use boson_api::{
     Error,
-    core::Result
+    Result
 };
 
 #[allow(unused)]

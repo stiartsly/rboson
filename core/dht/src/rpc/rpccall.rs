@@ -1,8 +1,8 @@
-use crate::dht::{
+use crate::{
     msg::{msg::Kind, msg::TxId, Message},
     rpc::{Listener as CallListener, Target},
 };
-use crate::{EasyHandler, Id, LocalBoxHandler, LocalBoxTimerClient as TimerClient};
+use boson_api::{EasyHandler, Id, LocalBoxHandler, LocalBoxTimerClient as TimerClient};
 use log::error;
 use std::{
     cell::RefCell,

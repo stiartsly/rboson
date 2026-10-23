@@ -3,13 +3,13 @@ use indexmap::IndexMap;
 use serde_json::Map;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
+use boson_api::{
     errors::ArgumentError,
     CryptoIdentity,
     Identity,
     Result
 };
-use crate::did::{
+use crate::{
     card::Service,
     BosonIdentityObjectBuilder,
     Card,

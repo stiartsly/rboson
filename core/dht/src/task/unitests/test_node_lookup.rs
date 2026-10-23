@@ -1,10 +1,10 @@
 use super::test_utils::make_test_dht;
-use crate::dht::{
+use crate::{
     dht::DHT,
     rpc::rpc_target::TargetInfo,
     task::{LookupTask, NodeLookupTask},
 };
-use crate::{Id, Network, NodeInfo};
+use boson_api::{Id, Network, NodeInfo};
 use std::rc::Rc;
 
 fn make_dht() -> Rc<DHT> {

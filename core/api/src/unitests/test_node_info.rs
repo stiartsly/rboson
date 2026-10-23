@@ -4,7 +4,7 @@ use std::net::{
     SocketAddr
 };
 use serde_cbor::Value;
-use crate::core::{
+use crate::{
     Id,
     NodeInfo,
     Network

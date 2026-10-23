@@ -1,4 +1,4 @@
-use crate::director::errors::DirectorError;
+use crate::errors::DirectorError;
 use std::{error::Error, fmt};
 #[derive(Debug)]
 pub struct InvalidRequestError {

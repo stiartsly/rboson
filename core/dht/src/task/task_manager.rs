@@ -6,11 +6,11 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::dht::task::{
+use crate::task::{
     task::{State, TaskId},
     Task,
 };
-use crate::EasyHandler;
+use boson_api::EasyHandler;
 
 const MAX_ACTIVE_TASKS: usize = 8;
 

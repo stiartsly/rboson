@@ -1,11 +1,11 @@
-use crate::dht::{
+use crate::{
     dht::DHT,
     eligible_value::EligibleValue,
     msg::{msg, Body, LookupResponse},
     rpc::RpcCall,
     task::{LookupTask, LookupTaskData, Task, TaskData},
 };
-use crate::{EasyHandler, Id, Value};
+use boson_api::{EasyHandler, Id, Value};
 use std::{any::Any, rc::Rc};
 
 pub(crate) struct ValueLookupTask {

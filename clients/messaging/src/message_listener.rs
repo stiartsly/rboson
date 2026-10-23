@@ -1,4 +1,4 @@
-use crate::messaging::message::Message;
+use crate::message::Message;
 
 /// Receives message delivery events.
 pub trait MessageListener: Send + Sync {

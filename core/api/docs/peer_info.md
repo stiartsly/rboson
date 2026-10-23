@@ -1,4 +1,4 @@
-# `src/core/peer_info.rs`
+# `core/api/src/peer_info.rs`
 
 `PeerInfo` is a signed service advertisement. It tells the DHT and other nodes where a higher-level service can be reached and proves ownership with an Ed25519 signature.
 

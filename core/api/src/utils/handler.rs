@@ -1,29 +1,29 @@
 use futures::future;
 
-pub(crate) struct EasyHandler<T> {
+pub struct EasyHandler<T> {
     cb: Box<dyn Fn(&T)>,
 }
 
 impl<T: 'static> EasyHandler<T> {
-    pub(crate) fn new<F>(cb: F) -> Self
+    pub fn new<F>(cb: F) -> Self
     where
         F: Fn(&T) + 'static,
     {
         Self { cb: Box::new(cb) }
     }
 
-    pub(crate) fn cb(&self, value: &T) {
+    pub fn cb(&self, value: &T) {
         (self.cb)(value);
     }
 }
 
-pub(crate) type BoxFuture = future::BoxFuture<'static, ()>;
-pub(crate) struct BoxHandler<T> {
+pub type BoxFuture = future::BoxFuture<'static, ()>;
+pub struct BoxHandler<T> {
     cb: Box<dyn Fn(T) -> BoxFuture + Send + 'static>,
 }
 
 impl<T: 'static> BoxHandler<T> {
-    pub(crate) fn new<F>(handler: F) -> Self
+    pub fn new<F>(handler: F) -> Self
     where
         F: Fn(T) -> BoxFuture + Send + 'static,
     {
@@ -33,18 +33,18 @@ impl<T: 'static> BoxHandler<T> {
     }
 
     #[allow(unused)]
-    pub(crate) async fn cb(&self, value: T) {
+    pub async fn cb(&self, value: T) {
         (self.cb)(value).await;
     }
 }
 
 type LocalBoxFuture = future::LocalBoxFuture<'static, ()>;
-pub(crate) struct LocalBoxHandler<T> {
+pub struct LocalBoxHandler<T> {
     cb: Box<dyn Fn(T) -> LocalBoxFuture + 'static>,
 }
 
 impl<T: 'static> LocalBoxHandler<T> {
-    pub(crate) fn new<F>(handler: F) -> Self
+    pub fn new<F>(handler: F) -> Self
     where
         F: Fn(T) -> LocalBoxFuture + 'static,
     {
@@ -53,12 +53,12 @@ impl<T: 'static> LocalBoxHandler<T> {
         }
     }
 
-    pub(crate) async fn cb(&self, value: T) {
+    pub async fn cb(&self, value: T) {
         (self.cb)(value).await;
     }
 }
 
-pub(crate) trait Callable<T: 'static>: 'static {
+pub trait Callable<T: 'static>: 'static {
     fn call_boxed(&self, value: T) -> future::LocalBoxFuture<'static, ()>;
 }
 

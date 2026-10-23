@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::{Card, ResolutionCache, ResolutionResult};
-use crate::{Id, Result};
+use boson_api::{Id, Result};
 pub struct FileSystemResolutionCache {
     dir: PathBuf,
     expiration: Duration,

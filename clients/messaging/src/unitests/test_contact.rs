@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::Id;
-    use crate::messaging::{
+    use boson_api::Id;
+    use crate::{
         internal::contact::ContactData,
         contact::{Contact, ContactOps},
         contact_editor::ContactEditorOps,

@@ -14,7 +14,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, error, info, trace, warn};
 use tokio::task;
 
-use crate::dht::{
+use crate::{
     dht_verticle::VerticleOptions,
     lookup_option::LookupOption,
     msg::{
@@ -39,7 +39,7 @@ use crate::dht::{
     utils::{is_any_unicast, is_bogon},
     ConnectionStatus, ConnectionStatusListener,
 };
-use crate::{
+use boson_api::{
     EasyHandler,
     LocalBoxHandler,
     LocalBoxTimerClient as TimerClient,
@@ -300,7 +300,7 @@ impl DHT {
     }
 
     fn routing_table_maintenance(self: &Rc<Self>) {
-        if crate::elapsed_ms!(*self.last_maintenance.borrow())
+        if boson_api::elapsed_ms!(*self.last_maintenance.borrow())
             < Self::ROUTING_TABLE_MAINTENANCE_INTERVAL
         {
             return;
@@ -340,7 +340,7 @@ impl DHT {
             if !reachable {
                 self.bootstrap_nodes.borrow().clone()
             } else if entry_sz >= Self::BOOTSTRAP_IF_LESS_THAN_X_ENTRIES
-                && crate::elapsed_ms!(*self.last_bootstrap.borrow()) <= Self::SELF_LOOKUP_INTERVAL
+                && boson_api::elapsed_ms!(*self.last_bootstrap.borrow()) <= Self::SELF_LOOKUP_INTERVAL
             {
                 return;
             } else if entry_sz < Self::USE_BOOTSTRAP_NODES_IF_LESS_THAN_X_ENTRIES {
@@ -1320,7 +1320,7 @@ impl DHT {
     }
 
     async fn do_bootstrap(dht: Rc<Self>, nodes: Vec<NodeInfo>) {
-        if crate::elapsed_ms!(*dht.last_bootstrap.borrow()) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
+        if boson_api::elapsed_ms!(*dht.last_bootstrap.borrow()) < Self::BOOTSTRAP_MIN_INTERVAL as u128 {
             return;
         }
 

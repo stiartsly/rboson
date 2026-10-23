@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use crate::errors::{ArgumentError, Error, Result};
+use boson_api::errors::{ArgumentError, Error, Result};
 use super::{ContactMutation, OpaqueContact};
 
 #[derive(Serialize_repr, Deserialize_repr)]
@@ -48,9 +48,9 @@ struct ContactSyncData {
     revision: i32,
     #[serde(rename = "t")]
     kind: SyncType,
-    #[serde(rename = "d", default, skip_serializing_if = "crate::utils::is_default")]
+    #[serde(rename = "d", default, skip_serializing_if = "boson_api::utils::is_default")]
     mutations: Option<Vec<ContactMutation>>,
-    #[serde(rename = "s", default, skip_serializing_if = "crate::utils::is_default")]
+    #[serde(rename = "s", default, skip_serializing_if = "boson_api::utils::is_default")]
     contacts: Option<Vec<OpaqueContact>>,
 }
 

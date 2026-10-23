@@ -11,11 +11,11 @@ use std::{
     time::SystemTime,
 };
 
-use crate::dht::{
+use crate::{
     routing::{KBucket, KBucketEntry, Prefix},
     rpc::TargetInfo,
 };
-use crate::{EasyHandler, Id, Result};
+use boson_api::{EasyHandler, Id, Result};
 
 #[derive(Serialize, Deserialize)]
 struct SerdeRoutingTable {
@@ -383,7 +383,7 @@ impl RoutingTable {
         let saved = SystemTime::now();
         let persisted = SerdeRoutingTable {
             nodeid: self.nodeid,
-            timestamp: crate::as_ms!(saved) as u64,
+            timestamp: boson_api::as_ms!(saved) as u64,
             entries,
         };
 
@@ -417,7 +417,7 @@ impl RoutingTable {
             return Ok(());
         }
 
-        let now = crate::as_ms!(SystemTime::now()) as u64;
+        let now = boson_api::as_ms!(SystemTime::now()) as u64;
         if now - rt.timestamp > MAX_AGE {
             return Ok(());
         }

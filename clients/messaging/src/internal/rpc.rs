@@ -4,8 +4,8 @@ use std::{cell::RefCell, collections::HashMap};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 use tokio::sync::oneshot;
-use crate::{Id, errors::{Result, StateError}};
-use crate::messaging::errors::{AuthenticationError, EncodingError};
+use boson_api::{Id, errors::{Result, StateError}};
+use crate::errors::{AuthenticationError, EncodingError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Method {

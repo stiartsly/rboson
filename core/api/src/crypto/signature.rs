@@ -15,11 +15,11 @@ use libsodium_sys::{
     randombytes_buf,
 };
 
-use crate::core::{
+use crate::{
     errors::{ArgumentError, CryptoError},
     Error, Result,
 };
-use crate::core::{as_uchar_ptr, as_uchar_ptr_mut};
+use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
 const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
 const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);
@@ -61,7 +61,7 @@ impl PrivateKey {
     /// Derives a subkey with an 8-byte KDF context.
     pub fn derive(&self, sub_key_id: u64, context: &[u8]) -> Result<Self> {
         let seed = self.seed();
-        let sub_seed = crate::core::key_derivation::derive_key(
+        let sub_seed = crate::key_derivation::derive_key(
             &seed,
             sub_key_id,
             context,
@@ -72,7 +72,7 @@ impl PrivateKey {
 
     /// Derives a subkey from a string context.
     pub fn derive_with_context(&self, sub_key_id: u64, context: &str) -> Result<Self> {
-        let context = crate::core::key_derivation::context_bytes(context)?;
+        let context = crate::key_derivation::context_bytes(context)?;
         self.derive(sub_key_id, &context)
     }
 

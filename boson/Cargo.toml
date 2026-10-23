@@ -2,7 +2,9 @@
 name = "boson"
 description = "Boson network: identities, DHT nodes and client libraries"
 version.workspace = true
-edition.workspace = true
+# The API tests migrated from the single rboson crate are edition 2021; moving to the workspace
+# edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -36,6 +38,25 @@ boson-director-client = { workspace = true, optional = true }
 boson-ion-store-client = { workspace = true, optional = true }
 boson-active-proxy-client = { workspace = true, optional = true }
 boson-messaging-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+base64.workspace = true
+libc.workspace = true
+libsodium-sys-stable.workspace = true
+log.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+serial_test.workspace = true
+tokio.workspace = true
+url.workspace = true
+
+# API tests of the whole stack, migrated from the single rboson crate.
+[[test]]
+name = "apitests"
+path = "tests/apitests/lib.rs"
+required-features = ["full"]
 
 [package.metadata.docs.rs]
 all-features = true

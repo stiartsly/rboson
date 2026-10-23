@@ -6,7 +6,7 @@ use std::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use boson_api::{
     Error,
     Result,
     errors::{ArgumentError, SignatureError},
@@ -15,7 +15,7 @@ use crate::{
     Id,
 };
 
-use crate::did::{
+use crate::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{

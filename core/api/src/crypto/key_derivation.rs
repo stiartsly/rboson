@@ -2,7 +2,7 @@ use libsodium_sys::crypto_kdf_derive_from_key;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    core::{as_uchar_ptr, as_uchar_ptr_mut},
+    {as_uchar_ptr, as_uchar_ptr_mut},
     errors::{ArgumentError, CryptoError, Result},
 };
 

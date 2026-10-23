@@ -1,7 +1,9 @@
+use boson_api::{
+    CryptoIdentity,
+    Identity,
+};
 use crate::{
-    core::CryptoIdentity,
-    dht::cached_identity::CachedIdentity,
-    Identity
+    cached_identity::CachedIdentity,
 };
 use std::sync::Arc;
 

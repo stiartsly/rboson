@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::SystemTime;
 
-use crate::did::date;
-use crate::{signature, Id, utils::codec};
+use crate::date;
+use boson_api::{signature, Id, utils::codec};
 
-use crate::did::{DIDUrl, VerificationMethod};
+use crate::{DIDUrl, VerificationMethod};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProofType {

@@ -4,7 +4,7 @@ use serde::{
     Deserialize, Deserializer,
     Serialize, Serializer
 };
-use crate::{Id, core::version};
+use boson_api::{Id, version};
 
 pub(crate) fn serialize_ver<S>(ver: &i32, se: S) -> StdResult<S::Ok, S::Error>
 where S: Serializer,

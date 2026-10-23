@@ -5,7 +5,7 @@ use std::{
 };
 use serde::Deserialize;
 
-use crate::{
+use boson_api::{
     Id,
     PeerInfo,
     signature::{KeyPair, PrivateKey},

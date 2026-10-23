@@ -1,10 +1,10 @@
 use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
-use crate::dht::{
+use crate::{
     routing::{KBucket, KBucketEntry, RoutingTable},
     rpc::TargetInfo,
 };
-use crate::{Id, NodeInfo};
+use boson_api::{Id, NodeInfo};
 
 pub(crate) struct KClosestNodes {
     local_id: Id,

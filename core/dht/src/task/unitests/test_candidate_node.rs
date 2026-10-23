@@ -1,5 +1,5 @@
-use crate::dht::{routing::KBucketEntry, rpc::TargetInfo, task::CandidateNode};
-use crate::{Id, NodeInfo};
+use crate::{routing::KBucketEntry, rpc::TargetInfo, task::CandidateNode};
+use boson_api::{Id, NodeInfo};
 
 fn make_node() -> NodeInfo {
     NodeInfo::new(Id::random(), "1.1.1.1:39011".parse().unwrap())

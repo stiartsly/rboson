@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::future::Future;
 
-use crate::{
-    core::Result,
+use boson_api::{
+    Result,
 };
 
-use crate::messaging::{
+use crate::{
     client_device::ClientDevice,
     channel::Channel,
 };

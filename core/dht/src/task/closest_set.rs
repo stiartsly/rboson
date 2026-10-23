@@ -2,8 +2,8 @@ use indexmap::map::IndexMap;
 use log::debug;
 use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 
-use crate::dht::task::candidate_node::CandidateNode;
-use crate::Id;
+use crate::task::candidate_node::CandidateNode;
+use boson_api::Id;
 
 #[derive(Clone)]
 pub(crate) struct ClosestSet {

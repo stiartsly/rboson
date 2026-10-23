@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 use serde::Deserialize;
-use crate::Id;
+use boson_api::Id;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct NodeStatus {

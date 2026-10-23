@@ -1,4 +1,4 @@
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Error, IOError, Result},
     signature::{KeyPair, PrivateKey},
     NodeInfo,
@@ -77,7 +77,7 @@ impl NodeOptions {
     }
 
     pub fn enable_host4(self) -> Result<Self> {
-        let host = crate::local_addr(true).map(|v| v.to_string())?;
+        let host = boson_api::local_addr(true).map(|v| v.to_string())?;
         Ok(self.with_host4(host))
     }
 
@@ -87,7 +87,7 @@ impl NodeOptions {
     }
 
     pub fn enable_host6(self) -> Result<Self> {
-        let host = crate::local_addr(false).map(|v| v.to_string())?;
+        let host = boson_api::local_addr(false).map(|v| v.to_string())?;
         Ok(self.with_host6(host))
     }
 
@@ -294,10 +294,10 @@ impl TryFrom<SerdeNodeOptions> for NodeOptions {
 }
 
 #[derive(Debug, Deserialize)]
-struct SerdeNodeEntry(crate::Id, String, u16);
+struct SerdeNodeEntry(boson_api::Id, String, u16);
 
 impl TryFrom<SerdeNodeEntry> for NodeInfo {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(value: SerdeNodeEntry) -> Result<Self> {
         let SerdeNodeEntry(id, host, port) = value;

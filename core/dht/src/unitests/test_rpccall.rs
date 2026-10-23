@@ -1,12 +1,12 @@
 use std::{cell::RefCell, net::SocketAddr, rc::Rc};
 use tokio::sync::mpsc;
 
-use crate::dht::{
+use crate::{
     msg::{msg, msg::Method},
     routing::KBucketEntry,
     rpc::{rpccall::State, Listener, RpcCall, TargetInfo},
 };
-use crate::{Id, LocalBoxTimerClient, LocalBoxTimerCmd, NodeInfo};
+use boson_api::{Id, LocalBoxTimerClient, LocalBoxTimerCmd, NodeInfo};
 
 fn make_nodeinfo(addr: &str) -> NodeInfo {
     NodeInfo::new(Id::random(), addr.parse::<SocketAddr>().unwrap())

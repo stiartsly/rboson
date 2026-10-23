@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::messaging::ConnectionListener;
+use crate::ConnectionListener;
 
 /// Forwards lifecycle callbacks to the user listener and updates client state.
 pub(crate) struct ClientConnectionListener {

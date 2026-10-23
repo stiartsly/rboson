@@ -1,9 +1,11 @@
 use crate::{
-    dht::msg::{
+    msg::{
         msg,
         msg::{Kind, Method},
         Message,
     },
+};
+use boson_api::{
     Id,
 };
 use std::net::SocketAddr;

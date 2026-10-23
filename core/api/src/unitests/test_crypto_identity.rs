@@ -1,4 +1,4 @@
-use crate::core::{
+use crate::{
     cryptobox::{CryptoBox, Nonce},
     signature, CryptoIdentity, Id, Identity,
 };
@@ -116,7 +116,7 @@ fn test_from_sk_bytes() {
     assert_eq!(identity.signature_key().public_key(), kp.public_key());
     assert_eq!(
         identity.encryption_key().public_key().as_bytes(),
-        crate::core::cryptobox::KeyPair::from(&kp)
+        crate::cryptobox::KeyPair::from(&kp)
             .public_key()
             .as_bytes()
     );

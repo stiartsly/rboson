@@ -1,12 +1,12 @@
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
+use boson_api::{
     Id,
-    core::Result,
+    Result,
     Error,
 };
 
-use crate::messaging::{
+use crate::{
     message::Message,
     channel::Channel,
 };

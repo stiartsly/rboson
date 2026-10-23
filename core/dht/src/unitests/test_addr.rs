@@ -1,4 +1,4 @@
-use crate::dht::utils::{is_any_unicast, is_bogon, is_global_unicast};
+use crate::utils::{is_any_unicast, is_bogon, is_global_unicast};
 use std::net::{IpAddr, SocketAddr};
 
 #[cfg(test)]

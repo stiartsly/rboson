@@ -1,8 +1,8 @@
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::{
-    core::errors::MalformedError,
+use boson_api::{
+    errors::MalformedError,
     cryptobox,
     signature, Signature,
     CryptoContext,

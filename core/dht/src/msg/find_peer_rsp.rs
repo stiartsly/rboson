@@ -1,5 +1,5 @@
-use crate::dht::msg::lookup_rsp::{Data, LookupResponse};
-use crate::{
+use crate::msg::lookup_rsp::{Data, LookupResponse};
+use boson_api::{
     errors::{Error, ProtocolError, Result},
     utils, NodeInfo, PeerInfo,
 };

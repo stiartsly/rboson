@@ -1,3 +1,6 @@
+// The API tests call libsodium directly; the workspace denies unsafe code elsewhere.
+#![allow(unsafe_code)]
+
 #[cfg(test)]
 mod core {
     mod cryptobox;

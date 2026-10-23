@@ -1,4 +1,4 @@
-use crate::messaging::contact::{
+use crate::contact::{
     Contact,
 };
 

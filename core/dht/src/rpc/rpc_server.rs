@@ -1,9 +1,9 @@
-use crate::dht::{
+use crate::{
     msg::{msg::Method, msg::TxId, Message},
     rpc::RpcCall,
     suspicious_node_detector::SuspiciousNodeDetector,
 };
-use crate::{
+use boson_api::{
     cryptobox::Nonce,
     errors::{CryptoError, Error, NetworkError, ProtocolError, Result, StateError},
     CryptoBox, CryptoIdentity, EasyHandler, Id, Identity, LocalBoxHandler,
@@ -92,7 +92,7 @@ impl RpcServer {
             return;
         }
 
-        if crate::elapsed_ms!(*self.last_reachable_check.borrow())
+        if boson_api::elapsed_ms!(*self.last_reachable_check.borrow())
             > Self::REACHABILITY_TIMEOUT as u128
             && *self.recv_packets.borrow() != 0
             && *self.recv_packets_at_last_reachable_check.borrow() != 0

@@ -2,14 +2,14 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{
+use boson_api::{
     Result,
     errors::ArgumentError,
     CryptoIdentity,
     Identity
 };
 
-use crate::did::{
+use crate::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{VerifiableCredential, VerifiablePresentation as VP},

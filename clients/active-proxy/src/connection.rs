@@ -10,8 +10,8 @@ use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
 
-use crate::{
-    core::errors::{MalformedError, ProtocolError, StateError},
+use boson_api::{
+    errors::{MalformedError, ProtocolError, StateError},
     cryptobox, elapsed_ms, CryptoContext, Id, Result,
 };
 

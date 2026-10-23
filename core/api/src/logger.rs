@@ -142,7 +142,8 @@ fn abbreviate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
+#[doc(hidden)]
+pub fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     LOGGER.configure(max_level, logfile);
     LOGGER.reset_console();
 
@@ -152,7 +153,8 @@ pub(crate) fn setup(max_level: LevelFilter, logfile: Option<&str>) {
     log::set_max_level(max_level);
 }
 
-pub(crate) fn cleanup() {
+#[doc(hidden)]
+pub fn cleanup() {
     log::set_max_level(LevelFilter::Off);
     LOGGER.configure(LevelFilter::Off, None);
     LOGGER.reset_console();

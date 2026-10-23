@@ -1,5 +1,5 @@
 use std::fmt;
-use crate::core::msg::msg;
+use boson_api::msg::msg;
 
 pub(crate) struct Stats {
     // TODO;

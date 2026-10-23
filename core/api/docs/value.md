@@ -1,4 +1,4 @@
-# `src/core/value.rs`
+# `core/api/src/value.rs`
 
 `Value` is the DHT value payload type. It supports immutable values, signed mutable values, and encrypted signed mutable values.
 

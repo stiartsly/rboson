@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{future::Future, time::SystemTime};
 
-use crate::did::date;
-use crate::errors::ArgumentError;
+use crate::date;
+use boson_api::errors::ArgumentError;
 use super::{w3c::DIDDocument, Card};
-use crate::{Id, Result};
+use boson_api::{Id, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
@@ -23,7 +23,7 @@ impl ResolutionStatus {
 }
 
 impl TryFrom<i32> for ResolutionStatus {
-    type Error = crate::Error;
+    type Error = boson_api::Error;
 
     fn try_from(code: i32) -> Result<Self> {
         match code {

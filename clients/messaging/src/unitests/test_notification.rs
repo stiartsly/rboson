@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use serde_cbor::Value;
-    use crate::messaging::channel::{Permission, Role};
-    use crate::messaging::internal::{
+    use crate::channel::{Permission, Role};
+    use crate::internal::{
         notification::*,
         notification::Body as NotificationBody,
         notification::Event as NotificationEvent,

@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::core::{
+use boson_api::{
     DefaultSuspiciousNodeDetector,
     Id,
     SuspiciousNodeDetector,

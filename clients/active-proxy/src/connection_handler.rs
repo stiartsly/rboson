@@ -3,7 +3,7 @@ use futures::future::LocalBoxFuture;
 use tokio::net::TcpStream;
 
 use super::connection::ProxyConnection;
-use crate::{cryptobox, CryptoContext, Result};
+use boson_api::{cryptobox, CryptoContext, Result};
 
 pub(crate) trait ConnectionHandler {
     fn challenge(&self, connection: &Rc<ProxyConnection>, challenge: &[u8]);

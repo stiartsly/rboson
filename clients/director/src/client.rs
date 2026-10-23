@@ -7,7 +7,7 @@ use url::Url;
 use serde_json::{json, Value};
 use reqwest::{self, Method, StatusCode};
 
-use crate::{
+use boson_api::{
     errors::{MalformedError, NetworkError, Result, StateError},
     signature, Id,
 };
@@ -236,7 +236,7 @@ impl Client {
             ));
         }
 
-        let nonce = crate::random_array::<AUTH_NONCE_BYTES>();
+        let nonce = boson_api::random_array::<AUTH_NONCE_BYTES>();
         let signature = sign_nonce(key.private_key(), &nonce).map_err(|e|
             MalformedError::new(e.to_string())
         )?;
@@ -671,7 +671,7 @@ impl Client {
             (4, Cbor::Integer(issued_at + SIGN_IN_TOKEN_LIFETIME_SECS)),
             (5, Cbor::Integer(issued_at)),
             (6, Cbor::Integer(issued_at)),
-            (7, Cbor::Bytes(crate::random_array::<16>().to_vec())),
+            (7, Cbor::Bytes(boson_api::random_array::<16>().to_vec())),
             (9, Cbor::Text("api:client".into())),
         ]);
         if self.options.user_key().is_none() {

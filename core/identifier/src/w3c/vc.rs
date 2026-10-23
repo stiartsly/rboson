@@ -8,7 +8,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::errors::{
+use boson_api::errors::{
     ArgumentError,
     BeforeValidPeriodError,
     ExpiredError,
@@ -16,8 +16,8 @@ use crate::errors::{
     Result,
     Error,
 };
-use crate::{utils::codec, CryptoIdentity, Id};
-use crate::did::{
+use boson_api::{utils::codec, CryptoIdentity, Id};
+use crate::{
     date,
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},

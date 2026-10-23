@@ -4,7 +4,7 @@ mod session_tests {
     use super::*;
 
     fn agent() -> Rc<SessionAgent> {
-        Session::new(crate::messaging::verticle::tests::options()).unwrap()
+        Session::new(crate::verticle::tests::options()).unwrap()
     }
 
     #[tokio::test]

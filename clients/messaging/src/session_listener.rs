@@ -1,4 +1,4 @@
-use crate::messaging::SessionInfo;
+use crate::SessionInfo;
 
 /// A listener interface for monitoring the creation of new sessions.
 /// Classes that are interested in being notified about new sessions

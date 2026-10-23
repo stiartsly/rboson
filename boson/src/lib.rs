@@ -52,3 +52,47 @@ pub use boson_active_proxy_client as active_proxy;
 
 #[cfg(feature = "messaging")]
 pub use boson_messaging_client as messaging;
+
+// The public API of the single rboson crate (`boson::Id`, `boson::dht::Node`, `boson::did`, ...),
+// kept so applications written against it build unchanged.
+pub use boson_api::{
+    crypto_identity::{self, CryptoIdentity},
+    cryptobox::{self, CryptoBox},
+    errors::{self, Error, Result},
+    id::{self, Id, DID_PREFIX},
+    identity::{self, Identity},
+    network::{self, Network},
+    node_info::{self, NodeInfo},
+    peer_info::{self, PeerBuilder, PeerInfo},
+    signature::{self, Signature},
+    value::{self, EncryptedBuilder, ImmutableBuilder, SignedBuilder, Value},
+};
+pub use boson_api::{as_ms, as_secs, elapsed_ms, locked, unwrap, unwrap_mut};
+
+#[doc(hidden)]
+pub use boson_api as core;
+
+#[cfg(feature = "identifier")]
+#[doc(hidden)]
+pub use boson_identifier as did;
+
+#[cfg(feature = "identifier")]
+pub use boson_identifier::{
+    cached_resolver, card, card_builder, credential, credential_builder, dht_registry,
+    dht_resolver, didurl, filesystem_resolution_cache, proof, registry, resolution_cache,
+    resolution_errors, resolver, verification_method, vouch, vouch_builder, w3c,
+};
+
+#[cfg(feature = "dht")]
+pub use boson_dht::{
+    connection_status::{self, ConnectionStatus},
+    connection_status_listener::{self, ConnectionStatusListener},
+    node::{self, Node},
+};
+
+#[cfg(feature = "active-proxy")]
+#[doc(hidden)]
+pub use boson_active_proxy_client as activeproxy;
+
+#[cfg(feature = "active-proxy")]
+pub use boson_active_proxy_client::{Client, Options};

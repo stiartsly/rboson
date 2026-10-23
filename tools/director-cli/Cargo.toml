@@ -2,7 +2,8 @@
 name = "boson-director-cli"
 description = "Boson Director administration tool"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,6 +19,10 @@ publish = false
 boson-tools-common.workspace = true
 boson-api.workspace = true
 boson-director-client.workspace = true
+boson = { workspace = true, features = ["director"] }
+clap.workspace = true
+hex.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

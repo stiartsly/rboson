@@ -2,9 +2,9 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::core::CryptoContext;
-use crate::errors::ArgumentError;
-use crate::{CryptoIdentity, Id, Identity, Result};
+use boson_api::CryptoContext;
+use boson_api::errors::ArgumentError;
+use boson_api::{CryptoIdentity, Id, Identity, Result};
 
 /// Distinguishes one-to-one sessions from channel sessions, which keep a
 /// separate crypto context per sending member.

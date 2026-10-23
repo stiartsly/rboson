@@ -1,5 +1,5 @@
-use crate::dht::{routing::kbucket_entry::KBucketEntry, rpc::TargetInfo};
-use crate::Id;
+use crate::{routing::kbucket_entry::KBucketEntry, rpc::TargetInfo};
+use boson_api::Id;
 use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},

@@ -1,9 +1,12 @@
 use std::{sync::Arc, time::SystemTime};
 
 use super::{Card, ResolutionMetadata, ResolutionOptions, ResolutionResult, Resolver};
-use crate::{
-    dht::{LookupOption, Node},
-    Id, Result,
+use boson_dht::{
+    {LookupOption, Node},
+};
+use boson_api::{
+    Id,
+    Result,
 };
 
 pub struct DHTResolver {

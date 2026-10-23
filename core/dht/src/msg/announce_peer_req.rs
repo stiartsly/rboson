@@ -1,4 +1,4 @@
-use crate::{
+use boson_api::{
     errors::{Error, Result},
     utils, Id, PeerInfo,
 };

@@ -1,4 +1,4 @@
-# `src/core/cryptobox.rs`
+# `core/api/src/crypto/cryptobox.rs`
 
 The `cryptobox` module wraps libsodium `crypto_box` primitives for public-key authenticated encryption. It uses X25519 key exchange, a 24-byte nonce, and a 16-byte MAC.
 

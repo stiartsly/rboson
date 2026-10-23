@@ -1,4 +1,4 @@
-# `src/core/node_info.rs`
+# `core/api/src/node_info.rs`
 
 `NodeInfo` describes a DHT node's stable identity and reachable socket addresses.
 

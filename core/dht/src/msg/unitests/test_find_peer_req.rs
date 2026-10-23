@@ -1,5 +1,7 @@
 use crate::{
-    dht::msg::{FindPeerRequest, LookupRequest},
+    msg::{FindPeerRequest, LookupRequest},
+};
+use boson_api::{
     Id,
 };
 

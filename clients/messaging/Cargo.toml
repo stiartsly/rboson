@@ -2,7 +2,8 @@
 name = "boson-messaging-client"
 description = "Boson messaging client"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -17,6 +18,22 @@ categories.workspace = true
 boson-crypto.workspace = true
 boson-api.workspace = true
 boson-http.workspace = true
+base64.workspace = true
+bs58.workspace = true
+futures.workspace = true
+log.workspace = true
+once_cell.workspace = true
+rumqttc.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+serde_repr.workspace = true
+serde_with.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

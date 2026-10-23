@@ -1,7 +1,7 @@
 use std::fmt;
 use url::Url;
 
-use crate::{
+use boson_api::{
     errors::{ArgumentError, Result},
     signature::{KeyPair, PrivateKey},
     Id,

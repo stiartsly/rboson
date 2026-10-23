@@ -2,16 +2,16 @@
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::{CryptoIdentity, Identity};
-    use crate::messaging::options::OptionsBuilder;
+    use boson_api::{CryptoIdentity, Identity};
+    use crate::options::OptionsBuilder;
     use std::{collections::HashMap, time::Duration};
 
-    pub(in crate::messaging) fn options() -> VerticleOptions {
+    pub(in crate) fn options() -> VerticleOptions {
         let mut builder = OptionsBuilder::new();
         builder.with_peer_id(*CryptoIdentity::new().id());
         builder.with_peer_endpoint("mqtt://127.0.0.1:1883").unwrap();
-        builder.with_user_keypair(crate::signature::KeyPair::random());
-        builder.with_device_keypair(crate::signature::KeyPair::random());
+        builder.with_user_keypair(boson_api::signature::KeyPair::random());
+        builder.with_device_keypair(boson_api::signature::KeyPair::random());
         builder.with_data_dir(std::env::temp_dir());
         let options = Arc::new(builder.build().unwrap());
         VerticleOptions {
@@ -38,7 +38,7 @@ pub(super) mod tests {
             let (get_tx, get_rx) = oneshot::channel();
             client.sender().send(VerticleEvent::RegisterFriendSession {
                 user_id: friend,
-                session_key: crate::signature::KeyPair::random().private_key().as_ref().to_vec(),
+                session_key: boson_api::signature::KeyPair::random().private_key().as_ref().to_vec(),
                 remark: Some("friend".into()),
                 complete: add_tx,
             }).unwrap();
@@ -172,7 +172,7 @@ pub(super) mod tests {
             builder.with_user_keypair(options.user_key().clone());
             builder.with_device_keypair(options.device_key().clone());
             builder.with_data_dir(std::env::temp_dir());
-            let client = crate::messaging::client::Client::new(builder.build().unwrap());
+            let client = crate::client::Client::new(builder.build().unwrap());
             client.start().await.unwrap();
             while !client.is_ready() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -185,7 +185,7 @@ pub(super) mod tests {
             assert_eq!(request.initiator_id(), client.user_id());
             client.add_friend(
                 friend,
-                crate::signature::KeyPair::random().private_key().as_ref().to_vec(),
+                boson_api::signature::KeyPair::random().private_key().as_ref().to_vec(),
                 None,
             ).await.unwrap();
             let message = client.message(Some(friend))

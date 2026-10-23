@@ -5,8 +5,8 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    core::logger,
+use boson_api::{
+    logger,
     errors::{ArgumentError, NetworkError},
     Id, Result,
 };

@@ -1,5 +1,5 @@
 use std::time::SystemTime;
-use crate::Id;
+use boson_api::Id;
 
 /// A pending or resolved friend request.
 ///
@@ -80,7 +80,7 @@ impl FriendRequest {
 	 */
 	pub(crate) fn is_expired_at(&self, time: SystemTime) -> bool {
         !self.accepted &&
-            crate::elapsed_ms!(time) >= Self::EXPIRATION_SECS * 1000
+            boson_api::elapsed_ms!(time) >= Self::EXPIRATION_SECS * 1000
     }
 
     pub fn created_at(&self) -> SystemTime {

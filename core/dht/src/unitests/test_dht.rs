@@ -1,11 +1,11 @@
-use crate::dht::{
+use crate::{
     connection_status_listener::ConnectionStatusListener,
     dht::DHT,
     dht_verticle::VerticleOptions,
     storage::{data_storage::DataStorage, sqlite_storage::SqliteStorage},
     token_manager::TokenManager,
 };
-use crate::{CryptoIdentity, Identity, LocalBoxTimerClient, LocalBoxTimerCmd, Network, Promise};
+use boson_api::{CryptoIdentity, Identity, LocalBoxTimerClient, LocalBoxTimerCmd, Network, Promise};
 use std::{
     rc::Rc,
     sync::{Arc, Mutex},

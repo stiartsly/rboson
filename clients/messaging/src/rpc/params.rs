@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use crate::Id;
-use crate::messaging::{
+use boson_api::Id;
+use crate::{
     channel,
     invite_ticket::InviteTicket,
 };

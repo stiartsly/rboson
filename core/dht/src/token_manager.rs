@@ -1,4 +1,4 @@
-use crate::Id;
+use boson_api::Id;
 use sha2::{Digest, Sha256};
 use std::{
     mem,
@@ -17,7 +17,7 @@ impl TokenManager {
     pub(crate) const TOKEN_TIMEOUT: u64 = 5 * 60 * 1000; // 5 minutes
 
     pub(crate) fn new() -> Self {
-        let session_secret = crate::random_array::<32>();
+        let session_secret = boson_api::random_array::<32>();
 
         Self {
             session_secret,
@@ -27,8 +27,8 @@ impl TokenManager {
     }
 
     pub(crate) fn update_token_timestamp(&self) {
-        let mut tm = crate::locked!(self.timestamp);
-        if crate::elapsed_ms!(tm) > Self::TOKEN_TIMEOUT as u128 {
+        let mut tm = boson_api::locked!(self.timestamp);
+        if boson_api::elapsed_ms!(tm) > Self::TOKEN_TIMEOUT as u128 {
             *self.previous_timestamp.lock().unwrap() = *tm;
             *tm = SystemTime::now();
         }

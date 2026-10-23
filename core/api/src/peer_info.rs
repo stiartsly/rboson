@@ -8,13 +8,13 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use serde::{Deserialize, Serialize};
 
-use crate::core::errors::{
+use crate::errors::{
     Error,
     Result,
     StateError,
     ArgumentError,
 };
-use crate::core::{
+use crate::{
     CryptoIdentity,
     Id,
     Identity,
@@ -274,7 +274,8 @@ impl PeerInfo {
     }
 
     // Nothing is verified here; call [`PeerInfo::is_valid`] on untrusted input.
-    pub(crate) fn packed(
+    #[doc(hidden)]
+    pub fn packed(
         pk: Id,
         seq: i32,
         node_id: Option<Id>,

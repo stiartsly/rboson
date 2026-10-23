@@ -1,3 +1,7 @@
+// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
+// with the workspace lints.
+#![allow(missing_docs)]
+
 mod date;
 
 pub mod did_constants;
@@ -37,9 +41,9 @@ pub mod resolver;
 pub mod vouch;
 pub mod vouch_builder;
 
-pub(crate) use crate::did::boson_identity_builder::BosonIdentityObjectBuilder;
+pub(crate) use crate::boson_identity_builder::BosonIdentityObjectBuilder;
 
-pub use crate::did::{
+pub use crate::{
     cached_resolver::CachedResolver,
     card::Card,
     card_builder::CardBuilder,

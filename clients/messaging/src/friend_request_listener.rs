@@ -1,4 +1,4 @@
-use crate::Id;
+use boson_api::Id;
 
 /// Receives events related to friend requests.
 pub trait FriendRequestListener: Send + Sync {

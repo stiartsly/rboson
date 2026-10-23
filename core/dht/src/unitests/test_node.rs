@@ -4,7 +4,9 @@ use std::{
 };
 
 use crate::{
-    dht::{Node, NodeOptions},
+    {Node, NodeOptions},
+};
+use boson_api::{
     signature::KeyPair,
 };
 

@@ -2,7 +2,8 @@
 name = "boson-dht"
 description = "Boson regular DHT node"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,9 +14,35 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# Kept from the single rboson crate: `devp` lets bogon addresses through (developer mode) and is on
+# by default; `inspect` is an alias of it.
+devp = ["inspect"]
+inspect = ["devp"]
+default = ["devp"]
+
 [dependencies]
 boson-crypto.workspace = true
 boson-api.workspace = true
+diesel.workspace = true
+futures.workspace = true
+get_if_addrs.workspace = true
+hex.workspace = true
+indexmap.workspace = true
+libsodium-sys-stable.workspace = true
+log.workspace = true
+moka.workspace = true
+rand.workspace = true
+rbtree.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serial_test.workspace = true
 
 [lints]
 workspace = true

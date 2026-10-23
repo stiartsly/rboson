@@ -1,4 +1,4 @@
-use crate::{
+use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
     utils, Id, Value,

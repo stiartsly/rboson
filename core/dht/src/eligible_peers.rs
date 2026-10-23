@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap};
 
-use crate::{Id, PeerInfo};
+use boson_api::{Id, PeerInfo};
 
 pub(crate) struct EligiblePeers {
     target: Id,

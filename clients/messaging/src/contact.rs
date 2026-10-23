@@ -1,9 +1,9 @@
-use crate::{
+use boson_api::{
     Id,
     errors::{Result, Error, ArgumentError}
 };
 use serde::{Deserialize, Serialize};
-use crate::messaging::{
+use crate::{
     errors::EncodingError,
     contact_editor::{ContactEditor, ContactEditorOps},
     internal::{

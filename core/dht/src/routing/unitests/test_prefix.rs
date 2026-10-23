@@ -1,4 +1,5 @@
-use crate::{dht::routing::prefix::Prefix, Id};
+use crate::{routing::prefix::Prefix};
+use boson_api::{Id};
 
 /*
 * APIs for testcases.

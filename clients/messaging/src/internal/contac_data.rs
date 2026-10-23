@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
-use crate::messaging::{
+use crate::{
     contact::{Contact, ContactOps, ContactType},
     errors::{AuthenticationError, EncodingError},
 };
-use crate::{CryptoIdentity, Id, Identity, Result};
+use boson_api::{CryptoIdentity, Id, Identity, Result};
 use super::OpaqueContact;
 
 
@@ -21,8 +21,8 @@ pub(crate) struct ContactData {
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "crate::utils::codec::bytes_opt::serialize",
-        deserialize_with = "crate::utils::codec::bytes_opt::deserialize",
+        serialize_with = "boson_api::utils::codec::bytes_opt::serialize",
+        deserialize_with = "boson_api::utils::codec::bytes_opt::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     session_key: Option<Vec<u8>>,
@@ -51,14 +51,14 @@ pub(crate) struct ContactData {
     #[serde(
         rename = "m",
         default,
-        skip_serializing_if = "crate::utils::is_default"
+        skip_serializing_if = "boson_api::utils::is_default"
     )]
     pub(crate) muted: bool,
 
     #[serde(
         rename = "b",
         default,
-        skip_serializing_if = "crate::utils::is_default"
+        skip_serializing_if = "boson_api::utils::is_default"
     )]
     pub(crate) blocked: bool,
 

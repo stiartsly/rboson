@@ -197,7 +197,8 @@ impl Id {
     }
 
     #[allow(unused)]
-    pub(crate) fn update(&mut self, cb: impl Fn(&mut [u8])) {
+    #[doc(hidden)]
+    pub fn update(&mut self, cb: impl Fn(&mut [u8])) {
         cb(self.0.as_mut_slice());
     }
 
@@ -254,7 +255,8 @@ impl Id {
         }
     }
 
-    pub(crate) fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
+    #[doc(hidden)]
+    pub fn bits_copy(src: &Id, dst: &mut Id, depth: i32) {
         if depth == -1 {
             return;
         }

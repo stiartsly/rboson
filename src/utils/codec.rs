@@ -241,11 +241,18 @@ pub(crate) mod seq {
     where
         D: Deserializer<'de>,
     {
-        let seq = Option::<i32>::deserialize(de)?.unwrap_or(0);
+        let seq = if de.is_human_readable() {
+            String::deserialize(de)?
+                .parse()
+                .map_err(D::Error::custom)?
+        } else {
+            i32::deserialize(de)?
+        };
+
         if seq < 0 {
-            return Err(Error::custom("seq must be larger than or equal to 0"));
+            return Err(D::Error::custom("seq must be larger than or equal to 0"));
         }
-        Ok(seq)
+        return Ok(seq);
     }
 }
 
@@ -269,11 +276,18 @@ pub(crate) mod expected_seq {
     where
         D: Deserializer<'de>,
     {
-        let seq = Option::<i32>::deserialize(de)?.unwrap_or(-1);
+        let seq = if de.is_human_readable() {
+            String::deserialize(de)?
+                .parse()
+                .map_err(D::Error::custom)?
+        } else {
+            i32::deserialize(de)?
+        };
+
         if seq < -1 {
-            return Err(Error::custom("seq must be larger than or equal to -1"));
+            return Err(D::Error::custom("expected seq must be larger than or equal to -1"));
         }
-        Ok(seq)
+        return Ok(seq);
     }
 }
 

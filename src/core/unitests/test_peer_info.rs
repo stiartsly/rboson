@@ -1,4 +1,11 @@
-use crate::core::{signature, signature::KeyPair, CryptoIdentity, Id, PeerBuilder, PeerInfo};
+use crate::core::{
+    signature,
+    signature::KeyPair,
+    CryptoIdentity,
+    Id,
+    PeerBuilder,
+    PeerInfo
+};
 
 #[cfg(test)]
 mod tests {
@@ -7,16 +14,17 @@ mod tests {
     #[test]
     fn test_peer_builder() {
         let endpoint = "https://example.com:8080";
-        let kp = KeyPair::random();
+        let key = KeyPair::random();
+        let id = Id::from(key.public_key());
 
         let peer = PeerBuilder::new(endpoint)
-            .with_key(kp.clone())
+            .with_key(key.clone())
             .build()
             .expect("Failed to build peer info");
 
         assert_eq!(peer.endpoint(), endpoint);
-        assert_eq!(peer.id(), &Id::from(kp.public_key()));
-        assert_eq!(peer.has_private_key(), true);
+        assert_eq!(peer.id(), &id);
+        assert!(peer.has_private_key());
         assert!(peer.is_valid());
         assert!(!peer.is_authenticated()); // No node associated
     }
@@ -56,32 +64,34 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_simple() {
+    fn test_serialize_simple() {
         let endpoint = "https://example.com:8080";
-        let kp = KeyPair::random();
+        let key = KeyPair::random();
         let peer = PeerBuilder::new(endpoint)
-            .with_key(kp.clone())
+            .with_key(key.clone())
             .build()
             .expect("Failed to build peer info");
 
-        let ser = serde_cbor::to_vec(&peer).expect("Failed to serialize PeerInfo");
-        let des: PeerInfo = serde_cbor::from_slice(&ser).expect("Failed to deserialize PeerInfo");
+        let encoded = serde_cbor::to_vec(&peer)
+            .expect("Failed to serialize PeerInfo");
+        let decoded = serde_cbor::from_slice::<PeerInfo>(&encoded)
+            .expect("Failed to deserialize PeerInfo");
 
-        assert_eq!(peer.id(), des.id());
-        assert_eq!(peer.endpoint(), des.endpoint());
-        assert_eq!(peer.signature(), des.signature());
-        assert_eq!(des.sequence_number(), 0);
-        assert_eq!(des.fingerprint(), peer.fingerprint());
-        assert_eq!(des.nodeid(), None);
-        assert_eq!(des.node_signature(), None);
-        assert_eq!(des.extra_data(), None);
-        assert_eq!(des.has_private_key(), false);
+        assert_eq!(peer.id(), decoded.id());
+        assert_eq!(peer.endpoint(), decoded.endpoint());
+        assert_eq!(peer.signature(), decoded.signature());
+        assert_eq!(decoded.sequence_number(), 0);
+        assert_eq!(decoded.fingerprint(), peer.fingerprint());
+        assert_eq!(decoded.nodeid(), None);
+        assert_eq!(decoded.node_signature(), None);
+        assert_eq!(decoded.extra_data(), None);
 
-        assert!(des.is_valid());
+        assert!(!decoded.has_private_key());
+        assert!(decoded.is_valid());
     }
 
     #[test] // case6
-    fn test_serde_full() {
+    fn test_serialize_full() {
         let endpoint = "http://localhost:8080";
         let node_kp = signature::KeyPair::random();
         let node = CryptoIdentity::from(node_kp);
@@ -109,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_with_extra() {
+    fn test_serialize_with_extra() {
         let endpoint = "https://example.com:8080";
         let extra = vec![0u8, 1, 2, 3, 255];
         let kp = KeyPair::random();
@@ -140,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_json() {
+    fn test_serialize_json() {
         let endpoint = "https://example.com:8080";
         let kp = KeyPair::random();
         let peer = PeerBuilder::new(endpoint)
@@ -164,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_rejects_invalid() {
+    fn test_serialize_invalid_peer() {
         let endpoint = "https://example.com:8080";
         let kp = KeyPair::random();
         let valid = PeerBuilder::new(endpoint)
@@ -196,17 +206,123 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_rejects_empty_endpoint() {
+    fn test_serialize_peer_with_empty_endpoint() {
         let pk = Id::random();
         let sig = crate::random_bytes(64);
 
         let invalid = PeerInfo::packed(pk, 0, None, None, sig, 0, String::new(), None);
 
-        let encoded = serde_cbor::to_vec(&invalid).expect("Failed to serialize invalid PeerInfo");
-        let result: Result<PeerInfo, _> = serde_cbor::from_slice(&encoded);
-        assert!(
-            result.is_err(),
-            "Deserializing a PeerInfo with empty endpoint should fail"
+        let encoded = serde_cbor::to_vec(&invalid)
+            .expect("Failed to serialize invalid PeerInfo");
+
+        let rc: Result<PeerInfo, _> = serde_cbor::from_slice(&encoded);
+        assert!(rc.is_err());
+    }
+
+    fn signed_peer(node: Option<&CryptoIdentity>) -> PeerInfo {
+        let builder = PeerBuilder::new("tcp://1.2.3.4:9000")
+            .with_fingerprint(7);
+
+        let builder = if let Some(node) = node {
+            builder.with_node(node)
+        } else {
+            builder
+        };
+        builder.build().unwrap()
+    }
+
+    fn repack(peer: &PeerInfo) -> PeerInfo {
+        PeerInfo::packed(
+            peer.id().clone(),
+            peer.sequence_number(),
+            peer.nodeid().cloned(),
+            peer.node_signature().map(|s| s.to_vec()),
+            peer.signature().to_vec(),
+            peer.fingerprint(),
+            peer.endpoint().to_string(),
+            peer.extra_data().map(|e| e.to_vec()),
+        )
+    }
+
+    #[test]
+    fn test_packed_roundtrip_is_valid_and_keyless() {
+        let node = CryptoIdentity::random();
+        for peer in [signed_peer(None), signed_peer(Some(&node))] {
+            assert!(peer.has_private_key());
+            let packed = repack(&peer);
+            assert!(!packed.has_private_key());
+            assert!(packed.is_valid());
+            assert_eq!(packed, peer);
+            assert_eq!(packed.is_authenticated(), peer.is_authenticated());
+        }
+    }
+
+    #[test]
+    fn test_packed_does_not_verify() {
+        let packed = PeerInfo::packed(
+            Id::random(), 0, None, None, vec![0; 64], 0, "tcp://x:1".into(), None,
         );
+        assert!(!packed.is_valid());
+    }
+
+    #[test]
+    fn test_digest() {
+        let pk = [1u8; 32];
+        let base = PeerInfo::digest(&pk, 1, None, None, 2, "e", None);
+        assert_eq!(base.len(), 32);
+        assert_eq!(base, PeerInfo::digest(&pk, 1, None, None, 2, "e", None));
+
+        assert_ne!(base, PeerInfo::digest(&pk, 2, None, None, 2, "e", None));
+        assert_ne!(base, PeerInfo::digest(&pk, 1, None, None, 3, "e", None));
+        assert_ne!(base, PeerInfo::digest(&pk, 1, None, None, 2, "f", None));
+        assert_ne!(base, PeerInfo::digest(&pk, 1, None, None, 2, "e", Some(&[1])));
+
+        let nid = [9u8; 32];
+        let sig = [8u8; 64];
+        let with_node = PeerInfo::digest(&pk, 1, Some(&nid), Some(&sig), 2, "e", None);
+        assert_ne!(base, with_node);
+        // Without a node signature the node id is ignored.
+        assert_eq!(base, PeerInfo::digest(&pk, 1, Some(&nid), None, 2, "e", None));
+    }
+
+    #[test]
+    fn test_node_digest() {
+        let pk = [1u8; 32];
+        let nid = [2u8; 32];
+        let base = PeerInfo::node_digest(&pk, &nid, 5, 1);
+        assert_eq!(base.len(), 32);
+        assert_eq!(base, PeerInfo::node_digest(&pk, &nid, 5, 1));
+        assert_ne!(base, PeerInfo::node_digest(&[3u8; 32], &nid, 5, 1));
+        assert_ne!(base, PeerInfo::node_digest(&pk, &[3u8; 32], 5, 1));
+        assert_ne!(base, PeerInfo::node_digest(&pk, &nid, 6, 1));
+        assert_ne!(base, PeerInfo::node_digest(&pk, &nid, 5, 2));
+    }
+
+    #[test]
+    fn test_without_private_key() {
+        let peer = signed_peer(None);
+        let stripped = peer.without_private_key();
+        assert!(!stripped.has_private_key());
+        assert!(stripped.is_valid());
+        assert_eq!(stripped, peer);
+        assert!(!stripped.without_private_key().has_private_key());
+    }
+
+    #[test]
+    fn test_update() {
+        let node = CryptoIdentity::random();
+        let peer = signed_peer(None);
+
+        assert!(peer.update().build().is_err());
+
+        let updated = peer.update().with_node(&node).build().unwrap();
+        assert!(updated.is_valid());
+        assert!(updated.is_authenticated());
+        assert_eq!(updated.sequence_number(), peer.sequence_number() + 1);
+        assert_eq!(updated.fingerprint(), peer.fingerprint());
+        assert_eq!(updated.id(), peer.id());
+
+        // Authenticated peers cannot be updated again.
+        assert!(updated.update().with_node(&node).build().is_err());
     }
 }

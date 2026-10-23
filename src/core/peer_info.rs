@@ -207,7 +207,7 @@ impl<'a> PeerBuilder<'a> {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(into = "SerdePeerInfo", try_from = "SerdePeerInfo")]
+#[serde(into = "PeerInfoRaw", try_from = "PeerInfoRaw")]
 #[derive(Clone, Debug)]
 pub struct PeerInfo {
     pk: Id,
@@ -261,7 +261,7 @@ impl PeerInfo {
             sk: private_key,
             seq,
             nodeid: node_id,
-            node_sig: node_sig,
+            node_sig,
             fingerprint,
             endpoint,
             sig: peer.sign_into(digest.as_slice())?,
@@ -273,6 +273,7 @@ impl PeerInfo {
         PeerBuilder::new(endpoint)
     }
 
+    // Nothing is verified here; call [`PeerInfo::is_valid`] on untrusted input.
     pub(crate) fn packed(
         pk: Id,
         seq: i32,
@@ -406,30 +407,27 @@ impl PeerInfo {
         if self.payload_size() > PeerBuilder::MAX_PAYLOAD_BYTES {
             return false;
         }
-
-        if let Some(nodeid) = self.nodeid.as_ref() {
-            if self.node_sig.is_none() {
-                return false;
-            }
-            let Some(node_sig) = self.node_sig.as_ref() else {
-                return false;
-            };
+        if let Some(node_sig) = &self.node_sig {
             if node_sig.len() != signature::Signature::BYTES {
                 return false;
             }
+            let Some(nodeid) = &self.nodeid else {
+                return false;
+            };
 
-            let node_pk = nodeid.to_signature_key();
             let digest = Self::node_digest(
                 self.pk.as_bytes(),
                 nodeid,
                 self.fingerprint,
-                self.seq
+                self.seq,
             );
-            if !signature::verify(&digest, &node_sig, &node_pk).unwrap_or(false) {
+
+            let pk = nodeid.to_signature_key();
+            if !signature::verify(&digest, node_sig, &pk).unwrap_or(false) {
                 return false;
             }
-        } else if self.node_sig.is_some() {
-            return false;
+        } else {
+
         }
 
         let digest = Self::digest(
@@ -458,9 +456,9 @@ impl PeerInfo {
         let mut sha = Sha256::new();
         sha.update(pk);
         sha.update(seq.to_be_bytes().as_ref());
-        if let Some(nodeid) = nodeid {
+        if let (Some(nodeid), Some(node_sig)) = (nodeid, node_sig) {
             sha.update(nodeid);
-            sha.update(node_sig.unwrap());
+            sha.update(node_sig);
         }
         sha.update(fingerprint.to_be_bytes().as_ref());
         sha.update(endpoint.as_bytes());
@@ -540,27 +538,22 @@ impl fmt::Display for PeerInfo {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdePeerInfo {
-    #[serde(
-        rename = "id",
-        serialize_with = "codec::id::serialize",
-        deserialize_with = "codec::id::deserialize"
-    )]
+struct PeerInfoRaw {
+    #[serde(rename = "id", with = "codec::id")]
     pk: Id,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "codec::seq::deserialize",
-        skip_serializing_if = "crate::utils::is_default"
+        with = "codec::seq",
+        skip_serializing_if = "codec::is_default"
     )]
     seq: i32,
 
     #[serde(
         rename = "o",
         default,
-        serialize_with = "codec::id_opt::serialize",
-        deserialize_with = "codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     nodeid: Option<Id>,
@@ -568,16 +561,14 @@ struct SerdePeerInfo {
     #[serde(
         rename = "os",
         default,
-        serialize_with = "codec::bytes_opt::serialize",
-        deserialize_with = "codec::bytes_opt::deserialize",
+        with = "codec::bytes_opt",
         skip_serializing_if = "codec::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize"
+        with = "codec::bytes"
     )]
     sig: Vec<u8>,
 
@@ -588,20 +579,22 @@ struct SerdePeerInfo {
     )]
     fingerprint: u64,
 
-    #[serde(rename = "e", skip_serializing_if = "codec::is_default")]
+    #[serde(
+        rename = "e",
+        skip_serializing_if = "codec::is_default"
+    )]
     endpoint: String,
 
     #[serde(
         rename = "ex",
         default,
-        serialize_with = "codec::bytes_opt::serialize",
-        deserialize_with = "codec::bytes_opt::deserialize",
+        with = "codec::bytes_opt",
         skip_serializing_if = "codec::is_default"
     )]
     extra: Option<Vec<u8>>,
 }
 
-impl From<PeerInfo> for SerdePeerInfo {
+impl From<PeerInfo> for PeerInfoRaw {
     fn from(peer: PeerInfo) -> Self {
         Self {
             pk: peer.pk,
@@ -616,10 +609,10 @@ impl From<PeerInfo> for SerdePeerInfo {
     }
 }
 
-impl TryFrom<SerdePeerInfo> for PeerInfo {
+impl TryFrom<PeerInfoRaw> for PeerInfo {
     type Error = Error;
 
-    fn try_from(sp: SerdePeerInfo) -> StdResult<Self, Self::Error> {
+    fn try_from(sp: PeerInfoRaw) -> StdResult<Self, Self::Error> {
         if sp.endpoint.is_empty() {
             return Err(StateError::new("invalid peer: missing endpoint"));
         }

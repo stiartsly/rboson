@@ -2,7 +2,7 @@ use boson::dht::Node;
 use clap::{arg, value_parser, ArgMatches, Command};
 
 pub(crate) fn command() -> Command {
-    Command::new("findpeer")
+    Command::new("peer")
         .about("Look up peers announced under an id")
         .arg(arg!(<ID> "Target peer id (base58)"))
         .arg(

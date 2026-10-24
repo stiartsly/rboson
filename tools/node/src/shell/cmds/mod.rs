@@ -2,28 +2,28 @@ use std::sync::{Arc, Mutex};
 
 macro_rules! println {
     () => {
-        $crate::cmds::print_result(String::new())
+        $crate::shell::cmds::print_result(String::new())
     };
     ($($arg:tt)*) => {
-        $crate::cmds::print_result(format!($($arg)*))
+        $crate::shell::cmds::print_result(format!($($arg)*))
     };
 }
 
 macro_rules! green_println {
     () => {
-        $crate::cmds::print_result("\x1b[32m\x1b[0m".to_string())
+        $crate::shell::cmds::print_result("\x1b[32m\x1b[0m".to_string())
     };
     ($($arg:tt)*) => {
-        $crate::cmds::print_result(format!("\x1b[32m{}\x1b[0m", format_args!($($arg)*)))
+        $crate::shell::cmds::print_result(format!("\x1b[32m{}\x1b[0m", format_args!($($arg)*)))
     };
 }
 
 macro_rules! red_print {
     () => {
-        $crate::cmds::print_result("\x1b[31m\x1b[0m".to_string())
+        $crate::shell::cmds::print_result("\x1b[31m\x1b[0m".to_string())
     };
     ($($arg:tt)*) => {
-        $crate::cmds::print_result(format!("\x1b[31m{}\x1b[0m", format_args!($($arg)*)))
+        $crate::shell::cmds::print_result(format!("\x1b[31m{}\x1b[0m", format_args!($($arg)*)))
     };
 }
 

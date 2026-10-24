@@ -2,7 +2,8 @@
 name = "boson-cli"
 description = "Boson command-line client"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,11 +17,10 @@ publish = false
 
 [dependencies]
 boson-tools-common.workspace = true
-boson-api.workspace = true
-boson-dht.workspace = true
-boson-higgs.workspace = true
-boson-ion-store-client.workspace = true
-boson-active-proxy-client.workspace = true
+boson = { workspace = true, features = ["director", "active-proxy"] }
+clap.workspace = true
+hex.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

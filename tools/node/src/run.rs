@@ -1,7 +1,7 @@
 use boson::{dht::NodeOptions, signature, Id, Node, NodeInfo};
 use get_if_addrs::get_if_addrs;
 use std::{
-    env, fs,
+    fs,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
@@ -33,23 +33,24 @@ fn print_usage(program: &str) {
     println!(
         "\
 Usage:
-  {program} [--datadir DIR] [--port PORT] [--bootstrap NODEID@IP:PORT]
+  {program} [-d DIR] [-p PORT] [-b NODEID@IP:PORT]
 
 Options:
-  --datadir DIR              Directory used to keep the sample node key and DHT database.
+  -d, --data-dir DIR         Directory used to keep the sample node key and DHT database.
                              Default: {DEFAULT_DATA_DIR}
-  --port PORT                UDP port used by the DHT node.
+  -p, --port PORT            UDP port used by the DHT node.
                              Default: {DEFAULT_PORT}
-  --bootstrap NODEID@IP:PORT Add an existing DHT node as an entry point.
+  -b, --bootstrap NODEID@IP:PORT
+                             Add an existing DHT node as an entry point.
                              Can be repeated.
   --verbose                  Enable verbose logging (TRACE level).
   -h, --help                 Print this help.
 
 Example:
-  cargo run --bin anode -- \\
-    --datadir .sample_node \\
-    --port 39088 \\
-    --bootstrap FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo@155.138.245.211:39001
+  cargo run -p boson-node -- run \\
+    -d .sample_node \\
+    -p 39088 \\
+    -b FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo@155.138.245.211:39001
 "
     );
 }
@@ -110,9 +111,8 @@ fn parse_bootstrap(value: &str) -> Result<NodeInfo, String> {
     Ok(ni)
 }
 
-fn parse_args() -> Result<Option<SampleConfig>, String> {
+fn parse_args(args: Vec<String>) -> Result<Option<SampleConfig>, String> {
     let mut config = SampleConfig::default();
-    let args = env::args().collect::<Vec<_>>();
     let mut iter = args.iter().skip(1);
 
     while let Some(argv) = iter.next() {
@@ -121,13 +121,13 @@ fn parse_args() -> Result<Option<SampleConfig>, String> {
                 print_usage(args.first().map(String::as_str).unwrap_or("anode"));
                 return Ok(None);
             }
-            "--datadir" => {
+            "-d" | "--data-dir" | "--datadir" => {
                 let Some(arg) = iter.next() else {
                     return Err("Missing --datadir value".to_string());
                 };
                 config.data_dir = PathBuf::from(arg);
             }
-            "--port" => {
+            "-p" | "--port" => {
                 let Some(arg) = iter.next() else {
                     return Err("Missing --port value".to_string());
                 };
@@ -135,7 +135,7 @@ fn parse_args() -> Result<Option<SampleConfig>, String> {
                     .parse::<u16>()
                     .map_err(|e| format!("Invalid --port value '{arg}': {e}"))?;
             }
-            "--bootstrap" => {
+            "-b" | "--bootstrap" => {
                 let Some(arg) = iter.next() else {
                     return Err("Missing --bootstrap value; expected NODEID@IP:PORT".to_string());
                 };
@@ -156,9 +156,8 @@ fn parse_args() -> Result<Option<SampleConfig>, String> {
     Ok(Some(config))
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let Some(config) = (match parse_args() {
+pub(crate) async fn run(args: Vec<String>) {
+    let Some(config) = (match parse_args(args) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("{e}");

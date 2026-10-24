@@ -1,3 +1,6 @@
+// The terminal handling calls libc directly; the workspace denies unsafe code elsewhere.
+#![allow(unsafe_code)]
+
 use std::{
     collections::VecDeque,
     io::{self, Write},

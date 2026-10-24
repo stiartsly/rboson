@@ -2,7 +2,8 @@
 name = "boson-node"
 description = "Boson regular node daemon"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,8 +17,14 @@ publish = false
 
 [dependencies]
 boson-tools-common.workspace = true
-boson-api.workspace = true
-boson-dht.workspace = true
+boson = { workspace = true, features = ["dht"] }
+clap.workspace = true
+get_if_addrs.workspace = true
+libc.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

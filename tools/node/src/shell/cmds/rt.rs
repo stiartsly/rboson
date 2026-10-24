@@ -34,7 +34,8 @@ pub(crate) struct CachedRoutingTable {
 }
 
 pub(crate) fn command() -> Command {
-    Command::new("rt")
+    Command::new("routing")
+        .aliases(["rt", "routingtable"])
         .about("Display nodes in the routing table for dht4 and dht6")
         .arg(
             Arg::new("ipv4")

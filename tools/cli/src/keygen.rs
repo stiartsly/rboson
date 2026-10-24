@@ -1,15 +1,10 @@
-use clap::Parser;
+use clap::Args;
 
 use boson::signature::KeyPair;
 use boson::{CryptoIdentity, Id, Identity};
 
-#[derive(Parser, Debug)]
-#[command(name = "keygen")]
-#[command(
-    about = "Boson user and device identity generation tool",
-    long_about = None
-)]
-struct Options {
+#[derive(Args, Debug)]
+pub(crate) struct Options {
     /// Generate a Boson user identity (default)
     #[arg(short = 'u', long = "user")]
     user: bool,
@@ -19,8 +14,7 @@ struct Options {
     device: bool,
 }
 
-fn main() {
-    let options = Options::parse();
+pub(crate) fn run(options: Options) {
     let generate_device = options.device;
     let generate_user = options.user || !options.device;
 

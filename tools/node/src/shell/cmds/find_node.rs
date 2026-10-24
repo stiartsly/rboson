@@ -2,7 +2,7 @@ use boson::dht::Node;
 use clap::{arg, ArgMatches, Command};
 
 pub(crate) fn command() -> Command {
-    Command::new("findnode")
+    Command::new("node")
         .about("Look up a node by id")
         .arg(arg!(<ID> "Target node id (base58)"))
 }

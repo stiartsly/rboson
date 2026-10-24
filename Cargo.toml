@@ -1,85 +1,87 @@
-[package]
-name = "rboson"
+[workspace]
+resolver = "3"
+members = [
+    "boson",
+    "core/*",
+    "clients/*",
+    "tools/*",
+]
+
+[workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/bosonnetwork/Boson.Rust"
+homepage = "https://bosonnetwork.io"
+documentation = "https://docs.bosonnetwork.io"
+authors = ["Boson Network <support@bosonnetwork.io>"]
+readme = "README.md"
+# crates.io allows at most 5 keywords and 5 categories; a crate may override them.
+keywords = ["boson", "p2p", "dht", "decentralized", "identity"]
+categories = ["network-programming", "cryptography"]
 
-[profile.dev]
-opt-level = 0
-debug = true
+[workspace.dependencies]
+# Workspace crates: members depend on them with `<name>.workspace = true`.
+# Published crates need a version requirement next to the path, and Cargo cannot take it from
+# workspace.package.version, so change all of them together with `cargo set-version` (cargo-edit).
+# Unpublished crates (publish = false) need no version.
+boson = { path = "boson", version = "0.1.0" }
+boson-crypto = { path = "core/crypto", version = "0.1.0" }
+boson-api = { path = "core/api", version = "0.1.0" }
+boson-identifier = { path = "core/identifier", version = "0.1.0" }
+boson-dht = { path = "core/dht", version = "0.1.0" }
+boson-http = { path = "core/http", version = "0.1.0" }
+boson-higgs = { path = "clients/higgs", version = "0.1.0" }
+boson-director-client = { path = "clients/director", version = "0.1.0" }
+boson-ion-store-client = { path = "clients/ion-store", version = "0.1.0" }
+boson-active-proxy-client = { path = "clients/active-proxy", version = "0.1.0" }
+boson-messaging-client = { path = "clients/messaging", version = "0.1.0" }
+boson-tools-common = { path = "tools/common", version = "0.1.0" }
 
-[lib]
-name = "boson"
-path = "src/lib.rs"
-
-[[test]]
-name = "apitests"
-path = "tests/apitests/lib.rs"
-
-[[bin]]
-name = "anode"
-path = "samples/node/main.rs"
-
-[[bin]]
-name = "shell"
-path = "apps/shell/main.rs"
-
-[[bin]]
-name = "launcher"
-path = "apps/launcher/main.rs"
-
-[[bin]]
-name = "chat"
-path = "apps/chat/main.rs"
-
-[[bin]]
-name = "keygen"
-path = "tools/keygen/main.rs"
-
-[[bin]]
-name = "director"
-path = "tools/director/main.rs"
-
-[features]
-devp        = ["inspect"]
-inspect     = ["devp"]
-default     = ["devp"]
-
-[dependencies]
-diesel      = { version = "2.2.3",  features = ["sqlite"]   }
-tokio       = { version = "1.35.1", features = ["full"]     }
-tokio-util  = { version = "0.7.13", features = ["time"] }
-clap        = { version = "4.0",    features = ["derive"]   }
-reqwest     = { version = "0.13.1", features = ["json"]     }
-moka        = { version = "0.12.15",features = ["sync"]     }
-reedline    = { version = "0.47.0", features = ["external_printer"] }
-
-log                     = "0.4.22"
-bs58                    = "0.5.0"
-base64                  = "0.22.1"
-hex                     = "0.4"
-libc                    = "0.2.151"
-sha2                    = "0.11.0"
-rbtree                  = "0.2.0"
-rand                    = "0.10.1"
-futures                 = "0.3"
-url                     = "2.5.4"
-ciborium                = "0.2.1"
-ciborium-io             = "0.2.1"
-serde                   = "1.0"
-serde_json              = { version = "1.0", features = ["preserve_order"] }
-serde_yaml              = "0.9"
-serde_cbor              = "0.11"
-serde_with              = "3.12.0"
-serde_repr              = "0.1"
-libsodium-sys-stable    = "1.20.4"
-static_assertions       = "1.1.0"
-unicode-normalization   = "0.1.22"
-get_if_addrs            = "0.5.3"
-once_cell               = "1.17"
-rumqttc                 = "0.25.1"
-md5                     = "0.8.0"
-indexmap                = "2.13.0"
-blake2b_simd            = "1.0.3"
-
-[dev-dependencies]
+# Third-party crates: the only place their versions are set.
+async-trait = "0.1"
+base64 = "0.22.1"
+blake2b_simd = "1.0.3"
+bs58 = "0.5.0"
+ciborium = "0.2.1"
+ciborium-io = "0.2.1"
+clap = { version = "4.0", features = ["derive"] }
+diesel = { version = "2.2.3", features = ["sqlite"] }
+futures = "0.3"
+get_if_addrs = "0.5.3"
+hex = "0.4"
+indexmap = "2.13.0"
+libc = "0.2.151"
+libsodium-sys-stable = "1.20.4"
+log = "0.4.22"
+md5 = "0.8.0"
+moka = { version = "0.12.15", features = ["sync"] }
+once_cell = "1.17"
+rand = "0.10.1"
+rbtree = "0.2.0"
+reedline = { version = "0.47.0", features = ["external_printer"] }
+reqwest = { version = "0.13.1", features = ["json"] }
+rumqttc = "0.25.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_cbor = "0.11"
+serde_json = { version = "1.0", features = ["preserve_order"] }
+serde_repr = "0.1"
+serde_with = "3.12.0"
+serde_yaml = "0.9"
 serial_test = "2.0"
+sha2 = "0.11.0"
+static_assertions = "1.1.0"
+thiserror = "2"
+tokio = { version = "1.35.1", features = ["full"] }
+tokio-util = { version = "0.7.13", features = ["time"] }
+tracing = "0.1"
+unicode-normalization = "0.1.22"
+url = "2.5.4"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

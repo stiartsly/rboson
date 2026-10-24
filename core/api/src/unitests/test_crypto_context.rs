@@ -1,0 +1,172 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use crate::{
+    cryptobox,
+    signature,
+    CryptoContext,
+    Id,
+};
+/*
+Testcases for critical methods:
+- new(..)
+- from_private_key(..)
+*/
+
+fn create_contexts_from_sk() -> (CryptoContext, CryptoContext) {
+    let sig_key1 = signature::KeyPair::random();
+    let sig_key2 = signature::KeyPair::random();
+    let box_kp1 = cryptobox::KeyPair::from(&sig_key1);
+    let box_kp2 = cryptobox::KeyPair::from(&sig_key2);
+
+    let id1 = Id::from(sig_key1.public_key());
+    let id2 = Id::from(sig_key2.public_key());
+
+    let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key());
+    let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key());
+
+    (ctx1, ctx2)
+}
+
+fn create_contexts_from_cryptobox() -> (CryptoContext, CryptoContext) {
+    let sig_key1 = signature::KeyPair::random();
+    let sig_key2 = signature::KeyPair::random();
+    let box_kp1 = cryptobox::KeyPair::from(&sig_key1);
+    let box_kp2 = cryptobox::KeyPair::from(&sig_key2);
+
+    let id1 = Id::from(sig_key1.public_key());
+    let id2 = Id::from(sig_key2.public_key());
+
+    let box1 = cryptobox::CryptoBox::try_from((
+        box_kp2.public_key(),
+        box_kp1.private_key()
+    )).unwrap();
+    let box2 = cryptobox::CryptoBox::try_from((
+        box_kp1.public_key(),
+        box_kp2.private_key()
+    )).unwrap();
+
+    let ctx1 = CryptoContext::new(id2, box1);
+    let ctx2 = CryptoContext::new(id1, box2);
+
+    (ctx1, ctx2)
+}
+
+#[test]
+fn test_from_sk() {
+    let (ctx1, mut ctx2) = create_contexts_from_sk();
+    let plain = b"Hello, World!";
+
+    assert_ne!(ctx1.id(), ctx2.id());
+
+    // testing encrypt_into and decrypt_into methods
+    let result = ctx2.encrypt_into(plain);
+    assert!(result.is_ok());
+
+    let cipher = result.unwrap();
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
+
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
+
+    ctx1.reset_nonce();
+    // testing encrypt and decrypt methods
+    let mut cipher = vec![0u8; plain.len() + CryptoContext::OVERHEAD];
+    let result = ctx2.encrypt(plain, &mut cipher);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), cipher.len());
+
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
+
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
+
+    ctx1.reset_nonce();
+    let mut decrypted = vec![0u8; cipher.len() - CryptoContext::OVERHEAD];
+    let result = ctx1.decrypt(&cipher, &mut decrypted);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), decrypted.len());
+    assert_eq!(plain, decrypted.as_slice());
+}
+
+#[test]
+fn test_from_cryptobox() {
+    let (ctx1, mut ctx2) = create_contexts_from_cryptobox();
+    let plain = b"Hello, World!";
+
+    assert_ne!(ctx1.id(), ctx2.id());
+
+    // testing encrypt_into and decrypt_into methods
+    let result = ctx2.encrypt_into(plain);
+    assert!(result.is_ok());
+
+    let cipher = result.unwrap();
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
+
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
+
+    ctx1.reset_nonce();
+    // testing encrypt and decrypt methods
+    let mut cipher = vec![0u8; plain.len() + CryptoContext::OVERHEAD];
+    let result = ctx2.encrypt(plain, &mut cipher);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), cipher.len());
+
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_ok());
+
+    let decrypted = result.unwrap();
+    assert_eq!(plain, decrypted.as_slice());
+
+    ctx1.reset_nonce();
+    let mut decrypted = vec![0u8; cipher.len() - CryptoContext::OVERHEAD];
+    let result = ctx1.decrypt(&cipher, &mut decrypted);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), decrypted.len());
+    assert_eq!(plain, decrypted.as_slice());
+}
+
+#[test]
+fn test_decrypt_tampered_ciphertext() {
+    let (ctx1, mut ctx2) = create_contexts_from_sk();
+    let plain = b"Hello, World!";
+    let mut cipher = ctx2.encrypt_into(plain).unwrap();
+    let last = cipher.len() - 1;
+    cipher[last] ^= 0x01;
+
+    let result = ctx1.decrypt_into(&cipher);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_decrypt_short_ciphertext() {
+    let (ctx1, _) = create_contexts_from_sk();
+    // Ciphertext shorter than CryptoContext::OVERHEAD (40) must return error, not panic
+    assert!(ctx1.decrypt_into(&[]).is_err());
+    assert!(ctx1.decrypt_into(&[0u8; 10]).is_err());
+    assert!(ctx1.decrypt_into(&[0u8; 39]).is_err());
+
+    let mut out = [0u8; 10];
+    assert!(ctx1.decrypt(&[0u8; 20], &mut out).is_err());
+}

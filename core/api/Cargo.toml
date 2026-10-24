@@ -1,0 +1,37 @@
+[package]
+name = "boson-api"
+description = "Boson core API: Id, Value, PeerInfo, NodeInfo, the Node trait, CWT"
+version.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson-api"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+boson-crypto.workspace = true
+base64.workspace = true
+bs58.workspace = true
+diesel.workspace = true
+futures.workspace = true
+get_if_addrs.workspace = true
+hex.workspace = true
+log.workspace = true
+once_cell.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+unicode-normalization.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,65 @@
+[package]
+name = "boson"
+description = "Boson network: identities, DHT nodes and client libraries"
+version.workspace = true
+# The API tests migrated from the single rboson crate are edition 2021; moving to the workspace
+# edition is a separate step.
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+full = ["identifier", "http", "dht", "higgs", "director", "ion-store", "active-proxy", "messaging"]
+identifier = ["dep:boson-identifier"]
+http = ["dep:boson-http"]
+dht = ["dep:boson-dht"]
+higgs = ["dep:boson-higgs", "http"]
+director = ["dep:boson-director-client", "http"]
+ion-store = ["dep:boson-ion-store-client", "http"]
+active-proxy = ["dep:boson-active-proxy-client"]
+messaging = ["dep:boson-messaging-client", "http"]
+
+[dependencies]
+boson-crypto.workspace = true
+boson-api.workspace = true
+boson-identifier = { workspace = true, optional = true }
+boson-http = { workspace = true, optional = true }
+boson-dht = { workspace = true, optional = true }
+boson-higgs = { workspace = true, optional = true }
+boson-director-client = { workspace = true, optional = true }
+boson-ion-store-client = { workspace = true, optional = true }
+boson-active-proxy-client = { workspace = true, optional = true }
+boson-messaging-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+base64.workspace = true
+libc.workspace = true
+libsodium-sys-stable.workspace = true
+log.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+serial_test.workspace = true
+tokio.workspace = true
+url.workspace = true
+
+# API tests of the whole stack, migrated from the single rboson crate.
+[[test]]
+name = "apitests"
+path = "tests/apitests/lib.rs"
+required-features = ["full"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

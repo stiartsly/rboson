@@ -1,0 +1,28 @@
+[package]
+name = "boson-active-proxy-client"
+description = "Boson active proxy client"
+version.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/boson-active-proxy-client"
+authors.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+boson-crypto.workspace = true
+boson-api.workspace = true
+futures.workspace = true
+libsodium-sys-stable.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

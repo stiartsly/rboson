@@ -1,0 +1,146 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use std::{cell::RefCell, net::SocketAddr, rc::Rc};
+
+use crate::{routing::KBucketEntry, task::CandidateNode};
+use boson_api::{Id, NodeInfo};
+
+impl Into<Target> for NodeInfo {
+    fn into(self) -> Target {
+        Target::NodeInfo(self)
+    }
+}
+
+impl Into<Target> for KBucketEntry {
+    fn into(self) -> Target {
+        Target::KBucketEntry(self)
+    }
+}
+
+impl Into<Target> for Rc<RefCell<CandidateNode>> {
+    fn into(self) -> Target {
+        Target::Candidate(self)
+    }
+}
+
+pub(crate) trait TargetInfo {
+    fn is_reachable(&self) -> bool {
+        false
+    }
+    fn is_unreachable(&self) -> bool {
+        false
+    }
+    fn set_reachable(&mut self, _: bool) {}
+
+    fn ni(&self) -> NodeInfo;
+    fn addr(&self) -> &SocketAddr;
+}
+
+#[derive(Clone)]
+pub(crate) enum Target {
+    Candidate(Rc<RefCell<CandidateNode>>),
+    KBucketEntry(KBucketEntry),
+    NodeInfo(NodeInfo),
+}
+
+impl Target {
+    /*
+    pub(crate) fn ni(&self) -> NodeInfo {
+        match self {
+            Target::Candidate(v) => v.borrow().ni(),
+            Target::KBucketEntry(v) => v.ni(),
+            Target::NodeInfo(v) => v.ni()
+        }
+    }
+    */
+
+    pub(crate) fn id(&self) -> Id {
+        match self {
+            Target::Candidate(v) => *v.borrow().id(),
+            Target::KBucketEntry(v) => *v.id(),
+            Target::NodeInfo(v) => *v.id(),
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn socket_addr(&self) -> SocketAddr {
+        match self {
+            Target::Candidate(v) => *v.borrow().addr(),
+            Target::KBucketEntry(v) => *v.addr(),
+            Target::NodeInfo(v) => *v.address(),
+        }
+    }
+}
+
+impl TargetInfo for Target {
+    fn is_reachable(&self) -> bool {
+        match self {
+            Target::Candidate(v) => v.borrow().is_reachable(),
+            Target::KBucketEntry(v) => v.is_reachable(),
+            _ => false,
+        }
+    }
+
+    fn is_unreachable(&self) -> bool {
+        match self {
+            Target::Candidate(v) => v.borrow().is_unreachable(),
+            Target::KBucketEntry(v) => v.is_unreachable(),
+            _ => false,
+        }
+    }
+
+    fn set_reachable(&mut self, reachable: bool) {
+        match self {
+            Target::Candidate(v) => v.borrow_mut().set_reachable(reachable),
+            Target::KBucketEntry(v) => v.set_reachable(reachable),
+            _ => {}
+        }
+    }
+
+    fn ni(&self) -> NodeInfo {
+        match self {
+            Target::Candidate(v) => v.borrow().ni(),
+            Target::KBucketEntry(v) => v.ni(),
+            Target::NodeInfo(v) => v.clone(),
+        }
+    }
+
+    fn addr(&self) -> &SocketAddr {
+        match self {
+            Target::Candidate(_v) => {
+                panic!("N/A");
+                #[allow(unused)]
+                _v.borrow().addr()
+            }
+            Target::KBucketEntry(v) => v.addr(),
+            Target::NodeInfo(v) => v.address(),
+        }
+    }
+}
+
+impl TargetInfo for NodeInfo {
+    fn ni(&self) -> NodeInfo {
+        self.clone()
+    }
+    fn addr(&self) -> &SocketAddr {
+        self.address()
+    }
+}

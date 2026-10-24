@@ -1,0 +1,18 @@
+# Configuration of the chat example for Alice. The ${...} values are read from environment
+# variables when the file is loaded; set them, or replace them here:
+# - the peer id and endpoint (mqtt:// or mqtts://, such as mqtts://host:9083) of the messaging service;
+# - Alice's user and device private keys: `boson-cli util keygen --user` and
+#   `boson-cli util keygen --device` generate them.
+service:
+  peerId: ${MESSAGING_SERVICE_PEER_ID}
+  endpoint: ${MESSAGING_SERVICE_ENDPOINT}
+
+client:
+  userPrivateKey: ${ALICE_USER_PRIVATE_KEY}
+  devicePrivateKey: ${ALICE_DEVICE_PRIVATE_KEY}
+
+dataDir: .chat_alice
+
+database:
+  uri: jdbc:sqlite:messaging.db
+  poolSize: 1

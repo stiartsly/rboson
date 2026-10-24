@@ -1,0 +1,145 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use crate::{routing::KBucketEntry, rpc::TargetInfo};
+use boson_api::{Id, NodeInfo};
+use std::{net::SocketAddr, time::SystemTime};
+
+const MAX_PINGS: i32 = 3;
+
+#[derive(Clone)]
+pub(crate) struct CandidateNode {
+    ni: NodeInfo,
+
+    last_sent: Option<SystemTime>,
+    last_replied: Option<SystemTime>,
+
+    acked: bool,
+    pinged: i32,
+
+    reachable: bool,
+    token: i32,
+}
+
+impl CandidateNode {
+    fn new(ni: NodeInfo, reachable: bool) -> Self {
+        Self {
+            ni,
+            last_sent: None,
+            last_replied: None,
+            acked: false,
+            pinged: 0,
+            reachable,
+            token: 0,
+        }
+    }
+
+    pub(crate) fn id(&self) -> &Id {
+        self.ni.id()
+    }
+
+    pub(crate) fn set_sent(&mut self) {
+        self.last_sent = Some(SystemTime::now());
+        self.pinged += 1;
+    }
+
+    pub(crate) fn clear_sent(&mut self) {
+        self.last_sent = None;
+    }
+
+    #[allow(unused)]
+    pub(crate) fn is_sent(&self) -> bool {
+        self.last_sent.is_some()
+    }
+
+    pub(crate) fn pinged(&self) -> i32 {
+        self.pinged
+    }
+
+    pub(crate) fn set_replied(&mut self) {
+        self.last_sent = None;
+        self.last_replied = Some(SystemTime::now());
+    }
+
+    #[allow(unused)]
+    pub(crate) fn is_replied(&self) -> bool {
+        self.last_replied.is_some()
+    }
+
+    pub(crate) fn set_token(&mut self, token: i32) {
+        self.token = token
+    }
+
+    pub(crate) fn token(&self) -> i32 {
+        self.token
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set_acked(&mut self) {
+        self.acked = true;
+    }
+
+    #[allow(unused)]
+    pub(crate) fn is_acked(&self) -> bool {
+        self.acked
+    }
+
+    pub(crate) fn is_inflight(&self) -> bool {
+        self.last_sent.is_some()
+    }
+
+    pub(crate) fn is_eligible(&self) -> bool {
+        self.last_sent.is_none() && self.pinged < MAX_PINGS
+    }
+}
+
+impl Into<CandidateNode> for NodeInfo {
+    fn into(self) -> CandidateNode {
+        CandidateNode::new(self, false)
+    }
+}
+
+impl Into<CandidateNode> for KBucketEntry {
+    fn into(self) -> CandidateNode {
+        CandidateNode::new(self.ni(), self.is_reachable())
+    }
+}
+
+impl TargetInfo for CandidateNode {
+    fn is_reachable(&self) -> bool {
+        self.reachable
+    }
+
+    fn is_unreachable(&self) -> bool {
+        self.pinged >= MAX_PINGS
+    }
+
+    fn set_reachable(&mut self, reachable: bool) {
+        self.reachable = reachable
+    }
+
+    fn ni(&self) -> NodeInfo {
+        self.ni.clone()
+    }
+
+    fn addr(&self) -> &SocketAddr {
+        self.ni.address()
+    }
+}

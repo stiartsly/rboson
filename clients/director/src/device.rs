@@ -1,0 +1,102 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use boson_api::Id;
+use serde::Deserialize;
+use std::fmt;
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Device {
+    #[serde(rename = "id")]
+    pub id: Id,
+
+    #[serde(rename = "userId")]
+    pub user_id: Id,
+
+    #[serde(default)]
+    pub name: Option<String>,
+
+    #[serde(default)]
+    pub app: Option<String>,
+
+    #[serde(default)]
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<u64>,
+
+    #[serde(default)]
+    #[serde(rename = "updatedAt")]
+    pub updated_at: Option<u64>,
+
+    #[serde(default)]
+    #[serde(rename = "lastSeen")]
+    pub last_seen: Option<u64>,
+
+    #[serde(default)]
+    #[serde(rename = "lastAddress")]
+    pub last_address: Option<String>,
+}
+
+impl Device {
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub fn user_id(&self) -> &Id {
+        &self.user_id
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn app(&self) -> Option<&str> {
+        self.app.as_deref()
+    }
+
+    pub fn created_at(&self) -> u64 {
+        self.created_at.unwrap_or(0)
+    }
+
+    pub fn updated_at(&self) -> u64 {
+        self.updated_at.unwrap_or(0)
+    }
+
+    pub fn last_seen(&self) -> u64 {
+        self.last_seen.unwrap_or(0)
+    }
+
+    pub fn last_address(&self) -> Option<&str> {
+        self.last_address.as_deref()
+    }
+}
+
+impl fmt::Display for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Device {{ id: {}, user_id: {}, name: {:?}, app: {:?}, last_seen: {}}}",
+            self.id,
+            self.user_id,
+            self.name,
+            self.app,
+            self.last_seen(),
+        )
+    }
+}

@@ -1,0 +1,148 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use boson_api::{
+    ImmutableBuilder as ValueBuilder,
+    Id,
+    Network,
+    NodeInfo,
+    Value,
+};
+use crate::{
+    msg::{find_value_rsp::FindValueResponse, lookup_rsp::LookupResponse},
+};
+use std::net::SocketAddr;
+
+fn make_node_info4() -> NodeInfo {
+    let addr = format!("127.0.0.1:{}", 39011)
+        .parse::<SocketAddr>()
+        .unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_node_info6() -> NodeInfo {
+    let addr = format!("[::1]:{}", 39011).parse::<SocketAddr>().unwrap();
+    NodeInfo::new(Id::random(), addr)
+}
+
+fn make_value() -> Value {
+    let data = vec![1, 2, 3, 4, 5];
+    ValueBuilder::new(&data)
+        .build()
+        .expect("Failed to build value")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_with_nodes() {
+        let node4 = make_node_info4();
+        let node6 = make_node_info6();
+
+        let rsp =
+            FindValueResponse::with_nodes(Some(vec![node4.clone()]), Some(vec![node6.clone()]));
+
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.value().is_none());
+
+        assert_eq!(rsp.value(), None);
+        assert_eq!(rsp.nodes4().unwrap().len(), 1);
+        assert_eq!(rsp.nodes6().unwrap().len(), 1);
+
+        assert_eq!(rsp.nodes4(), Some([node4.clone()].as_slice()));
+        assert_eq!(rsp.nodes6(), Some([node6.clone()].as_slice()));
+        assert_eq!(rsp.nodes4(), rsp.nodes(Network::IPv4));
+        assert_eq!(rsp.nodes6(), rsp.nodes(Network::IPv6));
+
+        // println!("nodes4: {}", rsp);
+    }
+
+    #[test]
+    fn test_with_value() {
+        let value = make_value();
+        let rsp = FindValueResponse::with_value(value.clone());
+
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.value().is_some());
+
+        assert_eq!(rsp.value(), Some(&value));
+    }
+
+    #[test]
+    fn test_serde_with_nodes() {
+        let ni4 = make_node_info4();
+        let ni6 = make_node_info6();
+        let rsp = FindValueResponse::with_nodes(Some(vec![ni4.clone()]), Some(vec![ni6.clone()]));
+
+        assert!(rsp.nodes4().is_some());
+        assert!(rsp.nodes6().is_some());
+        assert!(rsp.value().is_none());
+
+        assert_eq!(rsp.nodes4().unwrap().len(), 1);
+        assert_eq!(rsp.nodes6().unwrap().len(), 1);
+
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
+        let decoded: FindValueResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
+
+        assert_eq!(decoded.token(), 0);
+        assert!(decoded.nodes4().is_some());
+        assert!(decoded.nodes6().is_some());
+        assert!(decoded.value().is_none());
+
+        let nodes4 = decoded.nodes4().unwrap();
+        assert_eq!(nodes4.len(), 1);
+        assert_eq!(nodes4[0], ni4);
+
+        let nodes6 = decoded.nodes6().unwrap();
+        assert_eq!(nodes6.len(), 1);
+        assert_eq!(nodes6[0], ni6);
+    }
+
+    #[test]
+    fn test_serde_with_value() {
+        let value = make_value();
+        let rsp = FindValueResponse::with_value(value.clone());
+
+        assert!(rsp.nodes4().is_none());
+        assert!(rsp.nodes6().is_none());
+        assert!(rsp.value().is_some());
+
+        assert_eq!(rsp.token(), 0);
+        assert_eq!(rsp.value().unwrap(), &value);
+
+        let encoded = serde_cbor::to_vec(&rsp).expect("Serialization failed");
+        // println!("encoded: {}", hex::encode(&encoded));
+        let decoded: FindValueResponse =
+            serde_cbor::from_slice(encoded.as_slice()).expect("Deserialization failed");
+
+        assert!(decoded.nodes4().is_none());
+        assert!(decoded.nodes6().is_none());
+        assert!(decoded.value().is_some());
+
+        assert_eq!(decoded.token(), 0);
+        assert_eq!(decoded.value().unwrap(), &value);
+    }
+}

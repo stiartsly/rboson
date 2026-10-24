@@ -1,0 +1,1083 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use futures::{stream::FuturesUnordered, StreamExt};
+use log::{debug, info, warn};
+use std::{
+    fs,
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak},
+    time::{Duration, SystemTime},
+};
+use tokio::task;
+
+use crate::{
+    cached_identity::CachedIdentity,
+    connection_status::ConnectionStatus,
+    connection_status_listener::ConnectionStatusListener,
+    dht_verticle::{self, VerticleClient as DHTVerticleClient},
+    eligible_peers::EligiblePeers,
+    eligible_value::EligibleValue,
+    errors::{ImmutableSubstitutionError, NotOwnerError, SeqNotExpected, SeqNotMonotonic},
+    node_verticle,
+    storage::{
+        data_storage::{self, DataStorage},
+        sqlite_storage::SqliteStorage,
+    },
+    token_manager::TokenManager,
+    LookupOption, NodeOptions,
+    version,
+};
+use boson_api::{
+    logger,
+    errors::{ArgumentError, IOError, Result, StateError},
+    signature, BoxHandler, CryptoContext, CryptoIdentity, Id, Identity, Network, NodeInfo,
+    PeerInfo, Value,
+};
+
+const MAX_PEER_AGE: Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
+const MAX_VALUE_AGE: Duration = Duration::from_millis(120 * 60 * 1000); // 2 hours in milliseconds
+
+const RE_ANNOUNCE_INTERVAL: u64 = 5 * 60 * 1000; // 5 minutes in milliseconds
+const STORAGE_EXPIRE_INTERVAL: u64 = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+pub struct Node {
+    options: NodeOptions,
+    identity: CachedIdentity,
+
+    lookup_option: Mutex<LookupOption>,
+
+    dht4: Mutex<Option<Arc<DHTVerticleClient>>>,
+    dht6: Mutex<Option<Arc<DHTVerticleClient>>>,
+
+    database_uri: PathBuf,
+
+    running: Mutex<bool>,
+    lifecycle: tokio::sync::Mutex<()>,
+    listeners: Arc<Mutex<Vec<Arc<dyn ConnectionStatusListener>>>>,
+
+    timer_verticle: Mutex<Option<Arc<node_verticle::VerticleClient>>>,
+
+    storage: Arc<Mutex<dyn DataStorage>>,
+    token_man: Arc<TokenManager>,
+    weak: Weak<Self>,
+}
+
+impl Node {
+    pub fn new(options: NodeOptions) -> Result<Arc<Self>> {
+        Self::check_options(&options)?;
+
+        let path: Option<PathBuf> = options
+            .log_file()
+            .map(|v| {
+                let mut path = PathBuf::from(options.data_dir());
+                path.push(v);
+                Some(path)
+            })
+            .unwrap_or(None);
+
+        logger::setup(
+            options.log_level(),
+            path.as_ref().and_then(|path| path.to_str()),
+        );
+
+        if options.log_console() {
+            logger::enable_console_output();
+        } else {
+            logger::disable_console_output();
+        }
+
+        if options.developer_mode() {
+            info!("DHT node running in development mode!!!");
+        }
+
+        let data_dir = PathBuf::from(options.data_dir());
+        let database_uri = data_dir.join(data_storage::database_name(options.database_uri()));
+
+        let identity = CachedIdentity::new({
+            let kp = signature::KeyPair::from(options.private_key());
+            CryptoIdentity::from(kp)
+        });
+
+        // Cache the node id to a file for convinient access.
+        let bs58 = identity.id().to_base58();
+        let path = data_dir.join("id");
+        File::create(&path)
+            .map_err(|e| IOError::new(format!("Creating node id cache file error: {e}")))?
+            .write_all(bs58.as_bytes())
+            .map_err(|e| IOError::new(format!("Writing node id cache file error: {e}")))?;
+
+        info!("The Kademlia node ID: {}", identity.id());
+
+        Ok(Arc::new_cyclic(|weak| Self {
+            options,
+            identity,
+            database_uri,
+            lookup_option: Mutex::new(LookupOption::Conservative),
+            dht4: Mutex::new(None),
+            dht6: Mutex::new(None),
+
+            running: Mutex::new(false),
+            lifecycle: tokio::sync::Mutex::new(()),
+            listeners: Arc::new(Mutex::new(Vec::new())),
+
+            timer_verticle: Mutex::new(None),
+
+            storage: Arc::new(Mutex::new(SqliteStorage::new())),
+            token_man: Arc::new(TokenManager::new()),
+            weak: weak.clone(),
+        }))
+    }
+
+    fn check_options(opts: &NodeOptions) -> Result<()> {
+        if opts.host4().is_none() && opts.host6().is_none() {
+            return Err(ArgumentError::new(
+                "At least one host/address must be specified",
+            ));
+        }
+
+        if opts.data_dir().is_empty() {
+            return Err(ArgumentError::new("Data directory cannot be empty"));
+        }
+
+        let data_dir = opts.data_dir();
+        let path = Path::new(data_dir);
+        if path.exists() {
+            if !path.is_dir() {
+                return Err(ArgumentError::new(format!(
+                    "Data path {} is not a directory",
+                    data_dir
+                )));
+            }
+        } else {
+            fs::create_dir_all(path).map_err(|e| {
+                ArgumentError::new(format!("Data path {} can not be created: {}", data_dir, e))
+            })?;
+        };
+
+        let database_uri = opts.database_uri();
+        if database_uri.is_empty() {
+            return Err(ArgumentError::new("Database URI cannot be empty"));
+        }
+        if database_uri.contains("/") {
+            return Err(ArgumentError::new(
+                "Database URI cannot contain path separator '/'",
+            ));
+        }
+        if !data_storage::supports(database_uri) {
+            return Err(ArgumentError::new(format!(
+                "Unsupported database URI: {}",
+                database_uri
+            )));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn lookup_option(&self, option: Option<LookupOption>) -> LookupOption {
+        option.unwrap_or_else(|| self.default_lookup_option())
+    }
+
+    #[inline]
+    fn check_running(&self) -> Result<()> {
+        if self.is_running() {
+            Ok(())
+        } else {
+            Err(StateError::new("kadNode is not running"))
+        }
+    }
+
+    #[inline]
+    fn timer_verticle(&self) -> Arc<node_verticle::VerticleClient> {
+        self.timer_verticle
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("Timer verticle is not initialized")
+            .clone()
+    }
+
+    async fn persistent_announce(self: Arc<Self>) {
+        info!("Re-announcing persistent values and peers...");
+
+        let storage = self.storage.clone();
+        let mut handles = FuturesUnordered::<task::JoinHandle<()>>::new();
+
+        // Re-announce values
+        let before = boson_api::as_ms!(SystemTime::now()) as u64 - MAX_VALUE_AGE.as_millis() as u64
+            + RE_ANNOUNCE_INTERVAL * 2;
+
+        let values = match storage
+            .lock()
+            .unwrap()
+            .get_values_announced_before(true, before)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Failed to fetch values for re-announcement: {}", e);
+                Vec::new()
+            }
+        };
+
+        for value in values {
+            info!("Re-announcing value: {}", value.id());
+            let node = self.clone();
+            let handle = task::spawn_local(async move {
+                let value_id = value.id();
+                match node
+                    .store_value(&value, value.sequence_number(), true)
+                    .await
+                {
+                    Ok(_) => info!("Re-announced value {} successfully", value_id),
+                    Err(e) => warn!("Failed to re-announce value {}: {}", value_id, e),
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Re-announce peers
+        let before_peer = boson_api::as_ms!(SystemTime::now()) as u64 - MAX_PEER_AGE.as_millis() as u64
+            + RE_ANNOUNCE_INTERVAL * 2;
+
+        let peers = match storage
+            .lock()
+            .unwrap()
+            .get_peers_announced_before(true, before_peer)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Failed to fetch peers for re-announcement: {}", e);
+                Vec::new()
+            }
+        };
+
+        for peer in peers {
+            info!("Re-announcing peer: {}", peer.id());
+            let node = self.clone();
+            let handle = task::spawn_local(async move {
+                let peer_id = peer.id().clone();
+                match node.announce_peer(&peer, -1, true).await {
+                    Ok(_) => info!("Re-announced peer {} successfully", peer_id),
+                    Err(e) => warn!("Failed to re-announce peer {}: {}", peer_id, e),
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Await all announcement tasks
+        while let Some(result) = handles.next().await {
+            if let Err(e) = result {
+                warn!("Announcement task panicked: {}", e);
+            }
+        }
+    }
+
+    async fn setup_periodic_tasks(&self) -> Result<()> {
+        let client = self.timer_verticle();
+
+        let storage = self.storage.clone();
+        let _ = client.add_timer(
+            30_000,
+            Some(STORAGE_EXPIRE_INTERVAL),
+            BoxHandler::new(move |_| {
+                let storage = storage.clone();
+                Box::pin(async move {
+                    storage.lock().unwrap().purge();
+                })
+            }),
+        )?;
+
+        let weak = self.weak.clone();
+        let _ = client.add_timer(
+            60_000,
+            Some(RE_ANNOUNCE_INTERVAL),
+            BoxHandler::new(move |_| {
+                let weak = weak.clone();
+                let Some(node) = weak.upgrade() else {
+                    return Box::pin(async move {});
+                };
+                Box::pin(async move {
+                    node.persistent_announce().await;
+                })
+            }),
+        )?;
+
+        let token_man = self.token_man.clone();
+        let _ = client.add_timer(
+            TokenManager::TOKEN_TIMEOUT,
+            Some(TokenManager::TOKEN_TIMEOUT),
+            BoxHandler::new(move |_| {
+                let token_man = token_man.clone();
+                Box::pin(async move {
+                    token_man.update_token_timestamp();
+                })
+            }),
+        )?;
+        Ok(())
+    }
+
+    async fn shutdown_components(&self) {
+        let dht4 = self.dht4.lock().unwrap().take();
+        let dht6 = self.dht6.lock().unwrap().take();
+        tokio::join!(
+            async {
+                if let Some(dht) = dht4 {
+                    dht.stop().await;
+                }
+            },
+            async {
+                if let Some(dht) = dht6 {
+                    dht.stop().await;
+                }
+            }
+        );
+
+        let timer = self.timer_verticle.lock().unwrap().take();
+        if let Some(timer) = timer {
+            if let Err(e) = timer.stop().await {
+                warn!("Failed to stop node timer verticle: {e}");
+            }
+        }
+
+        self.storage.lock().unwrap().close();
+    }
+
+    pub fn add_listener(&self, listener: impl ConnectionStatusListener + 'static) {
+        self.listeners.lock().unwrap().push(Arc::new(listener));
+    }
+
+    pub async fn start(&self) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Err(StateError::new("KadNode is already running."));
+        };
+
+        {
+            let dbpath = self
+                .database_uri
+                .to_str()
+                .ok_or_else(|| IOError::new("Database path contains invalid UTF-8"))?;
+            let mut locked = self.storage.lock().unwrap();
+            locked.open(dbpath)?;
+            locked.initialize(MAX_VALUE_AGE, MAX_PEER_AGE)?
+        }
+
+        let options = node_verticle::VerticleOptions::default();
+        let client = node_verticle::deploy(options)?;
+        *self.timer_verticle.lock().unwrap() = Some(Arc::new(client));
+
+        if let Err(e) = self.setup_periodic_tasks().await {
+            self.shutdown_components().await;
+            return Err(e);
+        }
+
+        let listener = Arc::new(DefaultConnectionStatusListener {
+            listeners: self.listeners.clone(),
+        });
+
+        let options = dht_verticle::VerticleOptions {
+            identity: self.identity.identity(),
+            storage: self.storage.clone(),
+            token_man: self.token_man.clone(),
+            bootstrap_nodes: self.options.bootstrap_nodes().to_vec(),
+            listener,
+            developer_mode: self.options.developer_mode(),
+        };
+        let data_dir = self.options.data_dir();
+        let port = self.options.port();
+        let host4 = self.options.host4();
+        let host6 = self.options.host6();
+
+        let cb = async move |host: Option<&str>| {
+            if let Some(host) = host {
+                dht_verticle::deploy(options.clone(), data_dir, Network::IPv4, host.into(), port)
+                    .await
+                    .map(|v| Some(v))
+            } else {
+                Ok(None)
+            }
+        };
+
+        let result = tokio::join!(cb(host4), cb(host6));
+
+        let mut deployment_error = None;
+        match result.0 {
+            Ok(Some(v)) => {
+                *self.dht4.lock().unwrap() = Some(Arc::new(v));
+            }
+            Err(e) => deployment_error = Some(e),
+            _ => {}
+        }
+        match result.1 {
+            Ok(Some(v)) => {
+                *self.dht6.lock().unwrap() = Some(Arc::new(v));
+            }
+            Err(e) if deployment_error.is_none() => deployment_error = Some(e),
+            _ => {}
+        }
+        if let Some(e) = deployment_error {
+            self.shutdown_components().await;
+            return Err(e);
+        }
+
+        *self.running.lock().unwrap() = true;
+        info!("Kademlia node started.");
+        Ok(())
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+
+        debug!("Kademlia node is stopping ....");
+        if !self.is_running() {
+            return Ok(());
+        }
+        *self.running.lock().unwrap() = false;
+
+        self.shutdown_components().await;
+
+        info!("Kademlia node stopped.");
+        logger::cleanup();
+
+        Ok(())
+    }
+
+    pub fn options(&self) -> &NodeOptions {
+        &self.options
+    }
+
+    pub fn id(&self) -> &Id {
+        self.identity.id()
+    }
+
+    pub fn node_info(&self) -> Result<NodeInfo> {
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        if let Some(dht) = dht4 {
+            return Ok(dht.ni());
+        }
+        if let Some(dht) = dht6 {
+            return Ok(dht.ni());
+        }
+
+        Err(StateError::new("KadNode is not running"))
+    }
+
+    pub fn version(&self) -> String {
+        version::format_version(version::ver())
+    }
+
+    pub fn set_default_lookup_option(&self, option: LookupOption) {
+        *self.lookup_option.lock().unwrap() = option;
+    }
+
+    pub fn default_lookup_option(&self) -> LookupOption {
+        self.lookup_option.lock().unwrap().clone()
+    }
+
+    pub fn is_running(&self) -> bool {
+        *self.running.lock().unwrap()
+    }
+
+    pub async fn bootstrap_one(&self, node: &NodeInfo) -> Result<()> {
+        self.bootstrap(&[node.clone()]).await
+    }
+
+    pub async fn bootstrap(&self, nodes: &[NodeInfo]) -> Result<()> {
+        self.check_running()?;
+
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            let nodes = nodes.to_vec();
+
+            if let Some(dht) = dht {
+                dht.bootstrap(nodes).await
+            } else {
+                Ok(())
+            }
+        };
+
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let result = tokio::join!(cb(dht4), cb(dht6));
+        for item in [result.0, result.1] {
+            item?;
+        }
+        Ok(())
+    }
+
+    pub async fn find_node(
+        &self,
+        target: &Id,
+        lookup_option: Option<LookupOption>,
+    ) -> Result<Option<NodeInfo>> {
+        self.check_running()?;
+
+        let option = self.lookup_option(lookup_option);
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            let target = target.clone();
+            if let Some(dht) = dht {
+                dht.find_node(target, option).await
+            } else {
+                Ok(None)
+            }
+        };
+
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        if option == LookupOption::Conservative {
+            let result = tokio::join!(cb(dht4), cb(dht6));
+
+            let mut addr4 = None;
+            let mut addr6 = None;
+            if let Some(n4) = result.0? {
+                addr4 = n4.address4().map(|v| v.clone());
+            }
+            if let Some(n6) = result.1? {
+                addr6 = n6.address6().map(|v| v.clone());
+            }
+
+            if addr4.is_none() && addr6.is_none() {
+                return Ok(None);
+            }
+
+            let id = target.clone();
+            NodeInfo::with_addresses(id, addr4, addr6).map(|v| Some(v))
+        } else {
+            tokio::select!(
+                v = cb(dht4), if dht4.is_some() => v,
+                v = cb(dht6), if dht6.is_some() => v,
+            )
+        }
+    }
+
+    pub async fn find_value(
+        &self,
+        value_id: &Id,
+        expected_seq: i32,
+        lookup_option: Option<LookupOption>,
+    ) -> Result<Option<Value>> {
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
+        }
+
+        self.check_running()?;
+
+        let target = value_id.clone();
+        let option = self.lookup_option(lookup_option);
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let mut ev = EligibleValue::new(target, expected_seq);
+
+        let value = self.storage.lock().unwrap().get_value(&target)?;
+        if let Some(v) = value {
+            let is_mutable = v.is_mutable();
+            ev.update(v, false);
+
+            if !is_mutable {
+                return Ok(ev.value());
+            }
+            if option != LookupOption::Conservative && !ev.is_empty() {
+                return Ok(ev.value());
+            }
+        }
+
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            if let Some(dht) = dht {
+                dht.find_value(target, expected_seq, option).await
+            } else {
+                Ok(None)
+            }
+        };
+
+        let rc = tokio::select!(
+            v = cb(dht4), if dht4.is_some() => v,
+            v = cb(dht6), if dht6.is_some() => v,
+        );
+
+        if let Some(value) = rc? {
+            ev.update(value, true);
+        }
+
+        if !ev.is_empty() && ev.is_latest() {
+            if let Err(e) = self
+                .storage
+                .lock()
+                .unwrap()
+                .put_value(ev.value().unwrap(), false)
+            {
+                warn!("Failed to cache value {} from lookup: {e}", target);
+            }
+        }
+
+        Ok(ev.value())
+    }
+
+    pub async fn find_peer(
+        &self,
+        peer_id: &Id,
+        expected_seq: i32,
+        expected_count: usize,
+        lookup_option: Option<LookupOption>,
+    ) -> Result<Vec<PeerInfo>> {
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
+        }
+        if expected_count == 0 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected count: {expected_count}, must be larger than 0"
+            )));
+        }
+        if expected_count > i32::MAX as usize {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected count: {expected_count}, must be less than or equal to {}",
+                i32::MAX
+            )));
+        }
+        self.check_running()?;
+
+        let target = peer_id.clone();
+        let option = self.lookup_option(lookup_option);
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let mut ep = EligiblePeers::new(target, expected_seq, expected_count);
+
+        let peers = self.storage.lock().unwrap().get_peers_with_expected_seq(
+            &target,
+            expected_seq,
+            expected_count as i32,
+        )?;
+
+        ep.add(peers, false);
+        ep.prune();
+
+        if !ep.is_empty() {
+            if option == LookupOption::Local {
+                return Ok(ep.peers());
+            }
+            if option != LookupOption::Conservative && expected_seq >= 0 && ep.reached_capacity() {
+                return Ok(ep.peers());
+            }
+        }
+
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            if let Some(dht) = dht {
+                dht.find_peer(target, expected_seq, expected_count, option)
+                    .await
+            } else {
+                Ok(Vec::new())
+            }
+        };
+
+        let rc = tokio::select!(
+            v = cb(dht4), if dht4.is_some() => v,
+            v = cb(dht6), if dht6.is_some() => v,
+        );
+
+        ep.add(rc?, true);
+        ep.prune();
+
+        if !ep.is_empty() && ep.is_latest() {
+            if let Err(e) = self.storage.lock().unwrap().put_peers(ep.peers()) {
+                warn!("Failed to cache peers for {} from lookup: {e}", target);
+            }
+        }
+        Ok(ep.peers())
+    }
+
+    pub async fn store_value(
+        &self,
+        value: &Value,
+        expected_seq: i32,
+        persistent: bool,
+    ) -> Result<()> {
+        if !value.is_valid() {
+            return Err(ArgumentError::new("The value failed validation."));
+        }
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}, must be larger than or equal to -1")));
+        }
+        if value.sequence_number() < 0 {
+            return Err(ArgumentError::new(format!(
+                "Invalid value sequence number: {}, must be larger than or equal to 0",
+                value.sequence_number()
+            )));
+        }
+        self.check_running()?;
+
+        let value_id = value.id();
+        let result = self.storage.lock().unwrap().get_value(&value_id)?;
+        if let Some(ref existing) = result {
+            let _ = check_value_validity(existing, value, expected_seq)?;
+        };
+
+        // store the value in local node.
+        self.storage
+            .lock()
+            .unwrap()
+            .put_value(value.clone(), persistent)?;
+
+        // store the value to the network.
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            let value = value.clone();
+
+            if let Some(dht) = dht {
+                dht.store_value(value, expected_seq).await
+            } else {
+                Ok(())
+            }
+        };
+        let result = tokio::join!(cb(dht4), cb(dht6),);
+
+        for item in [result.0, result.1] {
+            item?;
+        }
+
+        if let Err(e) = self
+            .storage
+            .lock()
+            .unwrap()
+            .update_value_announced_time(&value_id)
+        {
+            warn!(
+                "Stored value {} but failed to update its announcement time: {e}",
+                value_id
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn announce_peer(
+        &self,
+        peer: &PeerInfo,
+        expected_seq: i32,
+        persistent: bool,
+    ) -> Result<()> {
+        if !peer.is_valid() {
+            return Err(ArgumentError::new("The peer is verified to be invalid."));
+        }
+        if expected_seq < -1 {
+            return Err(ArgumentError::new(format!(
+                "Invalid expected sequence number: {expected_seq}"
+            )));
+        }
+        self.check_running()?;
+
+        let result = self
+            .storage
+            .lock()
+            .unwrap()
+            .get_peer(peer.id(), peer.fingerprint())?;
+
+        // check the peer validity.
+        if let Some(ref existing) = result {
+            let _ = check_peer_validity(existing, peer, expected_seq)?;
+        }
+
+        // store the new peer locally.
+        self.storage
+            .lock()
+            .unwrap()
+            .put_peer(peer.clone(), persistent)?;
+
+        // announce the peer to the network.
+        let dht4 = self.dht4.lock().unwrap().clone();
+        let dht6 = self.dht6.lock().unwrap().clone();
+
+        let cb = async move |dht: Option<Arc<DHTVerticleClient>>| {
+            let peer = peer.clone();
+
+            if let Some(dht) = dht {
+                dht.announce_peer(peer, expected_seq).await
+            } else {
+                Ok(())
+            }
+        };
+
+        let result = tokio::join!(cb(dht4), cb(dht6),);
+        for item in [result.0, result.1] {
+            item?;
+        }
+
+        if let Err(e) = self
+            .storage
+            .lock()
+            .unwrap()
+            .update_peer_announced_time(peer.id(), peer.fingerprint())
+        {
+            warn!(
+                "Stored peer {} but failed to update its announcement time: {e}",
+                peer.id()
+            );
+        }
+        Ok(())
+    }
+
+    pub fn value(&self, value_id: Id) -> Result<Option<Value>> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).get_value(&value_id)
+    }
+
+    pub fn remove_value(&self, value_id: Id) -> Result<()> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).remove_value(&value_id)
+    }
+
+    pub async fn peers(&self, peer_id: Id) -> Result<Vec<PeerInfo>> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).get_peers(&peer_id)
+    }
+
+    pub async fn remove_peers(&self, peer_id: Id) -> Result<()> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).remove_peers(&peer_id)
+    }
+
+    pub async fn peer(&self, peer_id: Id, finger_print: u64) -> Result<Option<PeerInfo>> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).get_peer(&peer_id, finger_print)
+    }
+
+    pub async fn remove_peer(&self, peer_id: Id, finger_print: u64) -> Result<()> {
+        self.check_running()?;
+        boson_api::locked!(self.storage).remove_peer(&peer_id, finger_print)
+    }
+
+    pub fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
+        Identity::sign(self, data, signature)
+    }
+
+    pub fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Identity::sign_into(self, data)
+    }
+
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
+        Identity::verify(self, data, signature)
+    }
+
+    pub fn encrypt(&self, receiver: &Id, data: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        Identity::encrypt(self, receiver, data, cipher)
+    }
+
+    pub fn encrypt_into(&self, receiver: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        Identity::encrypt_into(self, receiver, data)
+    }
+
+    pub fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
+        Identity::decrypt(self, sender, data, plain)
+    }
+
+    pub fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        Identity::decrypt_into(self, sender, data)
+    }
+}
+
+impl Identity for Node {
+    fn id(&self) -> &Id {
+        self.identity.id()
+    }
+
+    fn sign(&self, data: &[u8], signature: &mut [u8]) -> Result<usize> {
+        self.identity.sign(data, signature)
+    }
+
+    fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.sign_into(data)
+    }
+
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool> {
+        self.identity.verify(data, signature)
+    }
+
+    fn encrypt(&self, receiver: &Id, data: &[u8], cipher: &mut [u8]) -> Result<usize> {
+        self.identity.encrypt(receiver, data, cipher)
+    }
+
+    fn encrypt_into(&self, receiver: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.encrypt_into(receiver, data)
+    }
+
+    fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
+        self.identity.decrypt(sender, data, plain)
+    }
+
+    fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
+        self.identity.decrypt_into(sender, data)
+    }
+
+    fn encrypt_with_nonce(
+        &self,
+        receiver: &Id,
+        nonce: &[u8],
+        data: &[u8],
+        cipher: &mut [u8],
+    ) -> Result<usize> {
+        self.identity.encrypt_with_nonce(receiver, nonce, data, cipher)
+    }
+
+    fn decrypt_with_nonce(
+        &self,
+        sender: &Id,
+        nonce: &[u8],
+        data: &[u8],
+        plain: &mut [u8],
+    ) -> Result<usize> {
+        self.identity.decrypt_with_nonce(sender, nonce, data, plain)
+    }
+
+    fn encrypt_with_nonce_into(
+        &self,
+        receiver: &Id,
+        nonce: &[u8],
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.identity.encrypt_with_nonce_into(receiver, nonce, data)
+    }
+
+    fn decrypt_with_nonce_into(
+        &self,
+        sender: &Id,
+        nonce: &[u8],
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.identity.decrypt_with_nonce_into(sender, nonce, data)
+    }
+
+    fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
+        self.identity.create_crypto_context(id)
+    }
+}
+
+fn check_value_validity(old: &Value, new: &Value, expected_seq: i32) -> Result<()> {
+    let valueid = new.id();
+    if old.is_mutable() != new.is_mutable() {
+        warn!(
+            "Rejecting value {} with mutability changed from {} to {}",
+            valueid,
+            old.is_mutable(),
+            new.is_mutable()
+        );
+        return Err(ImmutableSubstitutionError::new());
+    }
+    if new.sequence_number() < old.sequence_number() {
+        warn!(
+            "Rejecting value {} with old sequence number {} < {}",
+            valueid,
+            new.sequence_number(),
+            old.sequence_number()
+        );
+        return Err(SeqNotMonotonic::new());
+    }
+    if expected_seq >= 0 && old.sequence_number() > expected_seq {
+        warn!(
+            "Rejecting value {} with unexpected sequence number {} > {}",
+            valueid,
+            old.sequence_number(),
+            expected_seq
+        );
+        return Err(SeqNotExpected::new());
+    }
+    if old.has_private_key() && !new.has_private_key() {
+        warn!("Rejecting value {} with private key lost", valueid);
+        return Err(NotOwnerError::new());
+    }
+    Ok(())
+}
+
+fn check_peer_validity(old: &PeerInfo, new: &PeerInfo, expected_seq: i32) -> Result<()> {
+    if new.sequence_number() < old.sequence_number() {
+        warn!(
+            "Rejecting peer {} with old sequence number {} < {}",
+            new.id(),
+            new.sequence_number(),
+            old.sequence_number()
+        );
+        return Err(SeqNotMonotonic::new());
+    }
+    if expected_seq >= 0 && old.sequence_number() > expected_seq {
+        warn!(
+            "Rejecting peer {} with unexpected sequence number {} > {}",
+            new.id(),
+            old.sequence_number(),
+            expected_seq
+        );
+        return Err(SeqNotExpected::new());
+    }
+    if old.has_private_key() && !new.has_private_key() {
+        warn!("Rejecting peer {} with private key lost", new.id());
+        return Err(NotOwnerError::new());
+    }
+    Ok(())
+}
+
+struct DefaultConnectionStatusListener {
+    listeners: Arc<Mutex<Vec<Arc<dyn ConnectionStatusListener>>>>,
+}
+
+impl ConnectionStatusListener for DefaultConnectionStatusListener {
+    fn status_changed(
+        &self,
+        network: Network,
+        new_status: ConnectionStatus,
+        old_status: ConnectionStatus,
+    ) {
+        info!(
+            "Connection status changed for DHT{{{}}}: {}->{}",
+            network, old_status, new_status
+        );
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
+            l.status_changed(network, new_status, old_status);
+        }
+    }
+    fn connecting(&self, network: Network) {
+        info!("Connecting to DHT{{{}}}...", network);
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
+            l.connecting(network);
+        }
+    }
+    fn connected(&self, network: Network) {
+        info!("Connected to DHT{{{}}}.", network);
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
+            l.connected(network);
+        }
+    }
+    fn disconnected(&self, network: Network) {
+        info!("Disconnected from DHT{{{}}}.", network);
+        let listeners = self.listeners.lock().unwrap().clone();
+        for l in listeners {
+            l.disconnected(network);
+        }
+    }
+}

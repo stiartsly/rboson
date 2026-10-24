@@ -1,0 +1,180 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use boson_api::{
+    cryptobox::Nonce,
+    errors::{Error, ProtocolError, Result},
+    utils, Id, Value,
+};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(into = "SerdeStoreValueRequest", try_from = "SerdeStoreValueRequest")]
+pub(crate) struct StoreValueRequest {
+    token: i32,
+    expected_seq: i32,
+    value: Value,
+}
+
+impl StoreValueRequest {
+    pub(crate) fn new(value: Value, token: i32, expected_seq: i32) -> Self {
+        Self {
+            token,
+            expected_seq,
+            value,
+        }
+    }
+
+    pub(crate) fn token(&self) -> i32 {
+        self.token
+    }
+
+    pub(crate) fn expected_seq(&self) -> i32 {
+        self.expected_seq
+    }
+
+    pub(crate) fn value(&self) -> &Value {
+        &self.value
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerdeStoreValueRequest {
+    #[serde(rename = "tok")]
+    token: i32,
+
+    #[serde(
+        rename = "cas",
+        default = "default_expected_seq",
+        deserialize_with = "utils::codec::expected_seq::deserialize",
+        skip_serializing_if = "is_default_expected_seq"
+    )]
+    expected_seq: i32,
+
+    #[serde(
+        rename = "seq",
+        default,
+        deserialize_with = "utils::codec::seq::deserialize",
+        skip_serializing_if = "utils::is_default"
+    )]
+    seq: i32,
+
+    #[serde(
+        rename = "k",
+        default,
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    public_key: Option<Id>,
+
+    #[serde(
+        rename = "rec",
+        default,
+        serialize_with = "utils::codec::id_opt::serialize",
+        deserialize_with = "utils::codec::id_opt::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    recipient: Option<Id>,
+
+    #[serde(
+        rename = "n",
+        default,
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
+        skip_serializing_if = "utils::is_default"
+    )]
+    nonce: Option<Vec<u8>>,
+
+    #[serde(
+        rename = "sig",
+        default,
+        serialize_with = "utils::codec::bytes_opt::serialize",
+        deserialize_with = "utils::codec::bytes_opt::deserialize",
+        skip_serializing_if = "utils::is_default"
+    )]
+    signature: Option<Vec<u8>>,
+
+    #[serde(
+        rename = "v",
+        serialize_with = "utils::codec::bytes::serialize",
+        deserialize_with = "utils::codec::bytes::deserialize",
+        skip_serializing_if = "utils::is_default"
+    )]
+    data: Vec<u8>,
+}
+
+fn default_expected_seq() -> i32 {
+    -1
+}
+
+fn is_default_expected_seq(value: &i32) -> bool {
+    *value == -1
+}
+
+impl Into<SerdeStoreValueRequest> for StoreValueRequest {
+    fn into(self) -> SerdeStoreValueRequest {
+        let value = self.value;
+        SerdeStoreValueRequest {
+            token: self.token,
+            expected_seq: self.expected_seq,
+            seq: value.sequence_number(),
+            public_key: value.public_key().cloned(),
+            recipient: value.recipient().cloned(),
+            nonce: value.nonce().map(|n| n.as_bytes().to_vec()),
+            signature: value.signature().map(|v| v.to_vec()),
+            data: value.data().to_vec(),
+        }
+    }
+}
+
+impl TryFrom<SerdeStoreValueRequest> for StoreValueRequest {
+    type Error = Error;
+
+    fn try_from(s: SerdeStoreValueRequest) -> Result<Self> {
+        if s.data.is_empty() {
+            return Err(ProtocolError::new("data field \"v\" cannot be empty"));
+        }
+
+        let nonce = s
+            .nonce
+            .map(|v| {
+                Nonce::try_from(v.as_slice())
+                    .map_err(|_| ProtocolError::new("invalid nonce length"))
+            })
+            .transpose()?;
+
+        let value = Value::packed(s.public_key, s.recipient, nonce, s.signature, s.data, s.seq);
+
+        if !value.is_valid() {
+            return Err(ProtocolError::new("The value is invalid"));
+        }
+
+        Ok(StoreValueRequest::new(value, s.token, s.expected_seq))
+    }
+}
+
+impl fmt::Display for StoreValueRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}

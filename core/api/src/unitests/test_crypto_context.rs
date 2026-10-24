@@ -39,8 +39,8 @@ fn create_contexts_from_sk() -> (CryptoContext, CryptoContext) {
     let id1 = Id::from(sig_key1.public_key());
     let id2 = Id::from(sig_key2.public_key());
 
-    let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key());
-    let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key());
+    let ctx1 = CryptoContext::from_private_key(id2.clone(), box_kp1.private_key()).unwrap();
+    let ctx2 = CryptoContext::from_private_key(id1, box_kp2.private_key()).unwrap();
 
     (ctx1, ctx2)
 }

@@ -30,33 +30,25 @@
 
 use std::{
     str::FromStr,
-    fmt, mem,
+    fmt,
 };
 use bs58::decode;
 use hex::FromHexError;
 use static_assertions::const_assert;
 
-use libsodium_sys::{
-    crypto_sign_BYTES, crypto_sign_PUBLICKEYBYTES, crypto_sign_SECRETKEYBYTES,
-    crypto_sign_SEEDBYTES, crypto_sign_detached, crypto_sign_ed25519_sk_to_pk,
-    crypto_sign_final_create, crypto_sign_final_verify, crypto_sign_init, crypto_sign_keypair,
-    crypto_sign_ed25519_sk_to_seed, crypto_sign_seed_keypair, crypto_sign_state,
-    crypto_sign_update, crypto_sign_verify_detached,
-    randombytes_buf,
-};
+use libsodium_rs::crypto_sign as sign;
 
 use crate::{
     errors::{ArgumentError, CryptoError},
     Error, Result,
 };
-use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
-const_assert!(PrivateKey::BYTES == crypto_sign_SECRETKEYBYTES as usize);
-const_assert!(PublicKey::BYTES == crypto_sign_PUBLICKEYBYTES as usize);
-const_assert!(KeyPair::SEED_BYTES == crypto_sign_SEEDBYTES as usize);
-const_assert!(Signature::BYTES == crypto_sign_BYTES as usize);
+const_assert!(PrivateKey::BYTES == sign::SECRETKEYBYTES);
+const_assert!(PublicKey::BYTES == sign::PUBLICKEYBYTES);
+const_assert!(KeyPair::SEED_BYTES == sign::SEEDBYTES);
+const_assert!(Signature::BYTES == sign::BYTES);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PrivateKey([u8; Self::BYTES]);
 
 impl PrivateKey {
@@ -76,11 +68,12 @@ impl PrivateKey {
 
     /// Returns the 32-byte Ed25519 seed embedded in this private key.
     pub fn seed(&self) -> [u8; 32] {
-        let mut seed = [0u8; 32];
-        unsafe {
-            crypto_sign_ed25519_sk_to_seed(as_uchar_ptr_mut!(seed), as_uchar_ptr!(self.0));
-        }
-        seed
+        sign::secret_key_to_seed(&self.raw()).expect("Ed25519 seed extraction never fails")
+    }
+
+    /// This key as a libsodium-rs key.
+    pub(crate) fn raw(&self) -> sign::SecretKey {
+        sign::SecretKey::from(self.0)
     }
 
     /// Creates a private key from an Ed25519 seed.
@@ -115,16 +108,9 @@ impl PrivateKey {
             )));
         }
 
-        unsafe {
-            // Always success
-            crypto_sign_detached(
-                as_uchar_ptr_mut!(signature),
-                std::ptr::null_mut(),
-                as_uchar_ptr!(data),
-                data.len() as libc::c_ulonglong,
-                as_uchar_ptr!(self.0),
-            )
-        };
+        let sig = sign::sign_detached(data, &self.raw())
+            .map_err(|e| CryptoError::new(format!("Signing failed: {e}")))?;
+        signature.copy_from_slice(&sig);
         Ok(Signature::BYTES)
     }
 
@@ -219,10 +205,16 @@ impl AsRef<[u8]> for PrivateKey {
     }
 }
 
+// Private keys never print: to_hexstr() and to_base58() show one on purpose.
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_hexstr())?;
-        Ok(())
+        f.write_str("<redacted>")
+    }
+}
+
+impl fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Signature::PrivateKey(<redacted>)")
     }
 }
 
@@ -256,6 +248,11 @@ impl PublicKey {
 
     pub fn clear(&mut self) {
         crate::memzero(&mut self.0);
+    }
+
+    /// This key as a libsodium-rs key.
+    pub(crate) fn raw(&self) -> sign::PublicKey {
+        sign::PublicKey::from(self.0)
     }
 
     pub fn to_base58(&self) -> String {
@@ -317,15 +314,8 @@ impl PublicKey {
             )));
         }
 
-        let rc = unsafe {
-            crypto_sign_verify_detached(
-                as_uchar_ptr!(signature),
-                as_uchar_ptr!(data),
-                data.len() as libc::c_ulonglong,
-                as_uchar_ptr!(self.0),
-            )
-        };
-        Ok(rc == 0)
+        let signature: &[u8; Signature::BYTES] = signature.try_into().unwrap();
+        Ok(sign::verify_detached(signature, data, &self.raw()))
     }
 }
 
@@ -367,37 +357,17 @@ impl KeyPair {
 
     pub fn new() -> Self {
         crate::ensure_init();
-        let mut sk = [0u8; PrivateKey::BYTES];
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            // Always success
-            crypto_sign_keypair(as_uchar_ptr_mut!(pk), as_uchar_ptr_mut!(sk));
-        }
-
-        KeyPair(PrivateKey(sk), PublicKey(pk))
+        let (pk, sk) = sign::KeyPair::generate()
+            .expect("Ed25519 key generation never fails")
+            .into_tuple();
+        KeyPair(PrivateKey(sk.into()), PublicKey(pk.into()))
     }
 
     pub fn random() -> Self {
-        crate::ensure_init();
-        let mut seed = [0u8; KeyPair::SEED_BYTES];
-        unsafe {
-            randombytes_buf(seed.as_mut_ptr() as *mut libc::c_void, KeyPair::SEED_BYTES);
-        }
-
-        let mut sk = [0u8; PrivateKey::BYTES];
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            // Always success
-            crypto_sign_seed_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk),
-                as_uchar_ptr!(seed),
-            );
-        }
-
-        KeyPair(PrivateKey(sk), PublicKey(pk))
+        let mut seed = crate::random_array::<{ KeyPair::SEED_BYTES }>();
+        let keypair = Self::try_from_seed(&seed).expect("Ed25519 key generation never fails");
+        crate::memzero(&mut seed);
+        keypair
     }
 
     pub fn generate() -> Self {
@@ -413,19 +383,10 @@ impl KeyPair {
             )));
         }
 
-        let mut sk = [0u8; PrivateKey::BYTES];
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            // Always success
-            crypto_sign_seed_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk),
-                as_uchar_ptr!(seed),
-            );
-        }
-
-        Ok(KeyPair(PrivateKey(sk), PublicKey(pk)))
+        let (pk, sk) = sign::KeyPair::from_seed(seed)
+            .map_err(|e| CryptoError::new(format!("Ed25519 key generation failed: {e}")))?
+            .into_tuple();
+        Ok(KeyPair(PrivateKey(sk.into()), PublicKey(pk.into())))
     }
 
     pub const fn private_key(&self) -> &PrivateKey {
@@ -462,25 +423,15 @@ impl TryFrom<&[u8]> for KeyPair {
             )));
         }
 
-        let mut pk = [0u8; PublicKey::BYTES];
-        unsafe {
-            // Always success
-            crypto_sign_ed25519_sk_to_pk(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk));
-        }
-
-        Ok(KeyPair(PrivateKey::try_from(sk).unwrap(), PublicKey(pk)))
+        Ok(KeyPair::from(&PrivateKey::try_from(sk)?))
     }
 }
 
 impl From<&PrivateKey> for KeyPair {
     fn from(sk: &PrivateKey) -> Self {
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            // Always success
-            crypto_sign_ed25519_sk_to_pk(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk.as_bytes()));
-        }
-        KeyPair(sk.clone(), PublicKey(pk))
+        let pk = sign::PublicKey::from_secret_key(&sk.raw())
+            .expect("Ed25519 public key extraction never fails");
+        KeyPair(sk.clone(), PublicKey(pk.into()))
     }
 }
 
@@ -517,48 +468,29 @@ impl AsRef<PublicKey> for KeyPair {
     }
 }
 
-#[repr(transparent)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SignState([u8; std::mem::size_of::<crypto_sign_state>()]);
-
 /// A streaming Ed25519ph signer and verifier, for a message given in parts. Its signatures are not
 /// interchangeable with one-shot signatures; see the module documentation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Signature {
-    state: SignState,
+    state: sign::State,
 }
 
 impl Signature {
     pub const BYTES: usize = 64;
 
     pub fn new() -> Self {
-        let mut signature = Self {
-            state: SignState([0u8; std::mem::size_of::<crypto_sign_state>()]),
-        };
-        signature.reset();
-        signature
+        Self {
+            state: sign::State::new().expect("Ed25519ph state initialization never fails"),
+        }
     }
 
     pub fn reset(&mut self) -> &mut Self {
-        assert!(
-            mem::size_of::<SignState>() >= mem::size_of::<crypto_sign_state>(),
-            "Inappropriate signature state size."
-        );
-
-        let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe {
-            // Always success
-            crypto_sign_init(s);
-        }
+        self.state = sign::State::new().expect("Ed25519ph state initialization never fails");
         self
     }
 
     pub fn update(&mut self, part: &[u8]) -> &mut Self {
-        let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe {
-            // Always success
-            crypto_sign_update(s, as_uchar_ptr!(part), part.len() as libc::c_ulonglong);
-        }
+        self.state.update(part).expect("Ed25519ph update never fails");
         self
     }
 
@@ -571,16 +503,11 @@ impl Signature {
             )));
         }
 
-        let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        unsafe {
-            // Always success
-            crypto_sign_final_create(
-                s,
-                as_uchar_ptr_mut!(signature),
-                std::ptr::null_mut(),
-                as_uchar_ptr!(sk.as_bytes()),
-            );
-        }
+        let sig = self
+            .state
+            .finalize_create(&sk.raw())
+            .map_err(|e| CryptoError::new(format!("Signing failed: {e}")))?;
+        signature.copy_from_slice(&sig);
         Ok(Signature::BYTES)
     }
 
@@ -598,18 +525,8 @@ impl Signature {
             )));
         }
 
-        let s = &mut self.state.0 as *mut _ as *mut crypto_sign_state;
-        let rc = unsafe {
-            crypto_sign_final_verify(s, as_uchar_ptr!(signature), as_uchar_ptr!(pk.as_bytes()))
-        };
-
-        Ok(rc == 0)
-    }
-}
-
-impl Drop for Signature {
-    fn drop(&mut self) {
-        self.reset();
+        let signature: &[u8; Signature::BYTES] = signature.try_into().unwrap();
+        Ok(self.state.finalize_verify(signature, &pk.raw()))
     }
 }
 

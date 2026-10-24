@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn test_parse_options() {
         let private_key = KeyPair::random().to_private_key();
-        let content = yaml(&private_key, "parse-data", "parse.db", "parse.log");
+        let content = yaml(&private_key.to_hexstr(), "parse-data", "parse.db", "parse.log");
         let config = ConfigFile::new(&content);
         let content = fs::read_to_string(config.path()).unwrap();
 
@@ -163,7 +163,7 @@ mod tests {
     fn test_load_then_overridden() {
         let loaded_key = KeyPair::random().to_private_key();
         let replacement_key = KeyPair::random().to_private_key();
-        let config = ConfigFile::new(&yaml(&loaded_key, "loaded-data", "loaded.db", "loaded.log"));
+        let config = ConfigFile::new(&yaml(&loaded_key.to_hexstr(), "loaded-data", "loaded.db", "loaded.log"));
         let replacement_bootstrap = NodeInfo::new(Id::random(), "127.0.0.1:39015".parse().unwrap());
 
         let options = NodeOptions::load(config.path())
@@ -195,7 +195,7 @@ mod tests {
     #[serial]
     fn test_load_expands_environment_variables() {
         let private_key = KeyPair::random().to_private_key();
-        let private_key_value = private_key.to_string();
+        let private_key_value = private_key.to_hexstr();
         let variables = [
             ("BOSON_OPTIONS_TEST_PRIVATE_KEY", private_key_value.as_str()),
             ("BOSON_OPTIONS_TEST_DATA_DIR", "environment-data"),

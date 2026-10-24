@@ -21,9 +21,8 @@
 //! Boson cryptography: Ed25519 signatures, X25519 key agreement, crypto box, secret streams,
 //! hashing, key derivation, password hashing, key backup and registration proof of work.
 
-// Migrated code: it calls libsodium directly and is not documented yet. Remove these allows as the
-// crate is brought in line with the workspace lints.
-#![allow(unsafe_code)]
+// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
+// with the workspace lints.
 #![allow(missing_docs)]
 
 pub mod cryptobox;
@@ -53,10 +52,8 @@ pub use errors::{Error, Result};
 /// Initializes libsodium. The functions of this crate that use its random generator call it
 /// themselves, so applications need not; calling it early only moves the one-time cost.
 pub fn init() -> Result<()> {
-    static INIT: std::sync::OnceLock<libc::c_int> = std::sync::OnceLock::new();
-    // sodium_init returns 0 on the first call, 1 when already initialized and -1 on failure.
-    let rc = *INIT.get_or_init(|| unsafe { libsodium_sys::sodium_init() });
-    if rc < 0 {
+    static INIT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*INIT.get_or_init(|| libsodium_rs::ensure_init().is_ok()) {
         return Err(errors::CryptoError::new("libsodium initialization failed"));
     }
     Ok(())
@@ -69,32 +66,14 @@ pub(crate) fn ensure_init() {
 
 /// Wipes `bytes` in a way the compiler cannot optimize away.
 pub(crate) fn memzero(bytes: &mut [u8]) {
-    unsafe { libsodium_sys::sodium_memzero(bytes.as_mut_ptr() as *mut libc::c_void, bytes.len()) }
+    libsodium_rs::utils::memzero(bytes);
 }
-
-macro_rules! as_uchar_ptr {
-    ($val:expr) => {
-        $val.as_ptr().cast::<libc::c_uchar>()
-    };
-}
-macro_rules! as_uchar_ptr_mut {
-    ($val:expr) => {
-        $val.as_mut_ptr().cast::<libc::c_uchar>()
-    };
-}
-
-pub(crate) use {
-    as_uchar_ptr,
-    as_uchar_ptr_mut
-};
 
 #[doc(hidden)]
 pub fn random_array<const N: usize>() -> [u8; N] {
     ensure_init();
     let mut bytes = [0u8; N];
-    unsafe {
-        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, N);
-    };
+    libsodium_rs::random::fill_bytes(&mut bytes);
     bytes
 }
 
@@ -103,8 +82,6 @@ pub fn random_array<const N: usize>() -> [u8; N] {
 pub fn random_bytes(len: usize) -> Vec<u8> {
     ensure_init();
     let mut bytes = vec![0u8; len];
-    unsafe {
-        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, len);
-    };
+    libsodium_rs::random::fill_bytes(&mut bytes);
     bytes
 }

@@ -18,13 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libsodium_sys::crypto_kdf_derive_from_key;
+use libsodium_rs::crypto_kdf;
 use sha2::{Digest, Sha256};
 
-use crate::{
-    {as_uchar_ptr, as_uchar_ptr_mut},
-    errors::{ArgumentError, CryptoError, Result},
-};
+use crate::errors::{ArgumentError, CryptoError, Result};
 
 pub const MASTER_KEY_BYTES: usize = 32;
 pub const CONTEXT_BYTES: usize = 8;
@@ -54,20 +51,10 @@ pub fn derive_key(
     }
     check_subkey_length(sub_key_length)?;
 
-    let mut subkey = vec![0u8; sub_key_length];
-    let rc = unsafe {
-        crypto_kdf_derive_from_key(
-            as_uchar_ptr_mut!(subkey),
-            sub_key_length,
-            sub_key_id,
-            context.as_ptr() as *const libc::c_char,
-            as_uchar_ptr!(master_key),
-        )
-    };
-    if rc != 0 {
-        return Err(CryptoError::new("Key derivation failed").into());
-    }
-    Ok(subkey)
+    let key = crypto_kdf::Key::from_slice(master_key)
+        .map_err(|_| CryptoError::new("Key derivation failed"))?;
+    crypto_kdf::derive_from_key(sub_key_length, sub_key_id, context, &key)
+        .map_err(|_| CryptoError::new("Key derivation failed").into())
 }
 
 /// Reduces a context string to the fixed 8-byte KDF context, as Java does.

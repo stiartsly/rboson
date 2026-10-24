@@ -18,16 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libsodium_sys::randombytes_buf;
+use libsodium_rs::random;
 
 pub fn random_array_secure<const N: usize>(array: &mut [u8; N]) {
     crate::ensure_init();
-    unsafe {
-        randombytes_buf(
-            array.as_mut_ptr() as *mut libc::c_void,
-            N
-        );
-    }
+    random::fill_bytes(array);
 }
 
 pub fn secure_array<const N: usize>() -> [u8; N] {
@@ -41,12 +36,7 @@ pub fn random_bytes_secure(buffer: &mut [u8]) {
         return;
     }
     crate::ensure_init();
-    unsafe {
-        randombytes_buf(
-            buffer.as_mut_ptr() as *mut libc::c_void,
-            buffer.len(),
-        );
-    }
+    random::fill_bytes(buffer);
 }
 
 pub fn secure_bytes(length: usize) -> Vec<u8> {

@@ -23,7 +23,7 @@ use std::sync::Mutex;
 use crate::{
     cryptobox::{self as crypto_box, CryptoBox, Nonce, PrivateKey},
     errors::CryptoError,
-    Id, Result,
+    signature, Id, Result,
 };
 
 #[derive(Debug)]
@@ -61,13 +61,14 @@ impl CryptoContext {
         id: Id,
         pk: &crypto_box::PublicKey,
         sk: &PrivateKey,
-    ) -> Self {
-        Self::new(id, CryptoBox::try_from((pk, sk)).unwrap())
+    ) -> Result<Self> {
+        Ok(Self::new(id, CryptoBox::try_from((pk, sk))?))
     }
 
-    pub fn from_private_key(id: Id, sk: &PrivateKey) -> Self {
-        let pk = id.to_encryption_key();
-        Self::new(id, CryptoBox::try_from((&pk, sk)).unwrap())
+    /// Fails when `id` is not a usable public key, as an id from the network may not be.
+    pub fn from_private_key(id: Id, sk: &PrivateKey) -> Result<Self> {
+        let pk = crypto_box::PublicKey::try_from(&signature::PublicKey::try_from(id.as_bytes())?)?;
+        Self::from_keys(id, &pk, sk)
     }
 
     pub fn id(&self) -> &Id {
@@ -99,9 +100,9 @@ impl CryptoContext {
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if cipher.len() < Self::OVERHEAD {
+        if cipher.len() <= Self::OVERHEAD {
             return Err(CryptoError::new(format!(
-                "Cipher text length {} is smaller than required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD
             )));
@@ -133,9 +134,9 @@ impl CryptoContext {
     }
 
     pub fn decrypt_into(&self, cipher: &[u8]) -> Result<Vec<u8>> {
-        if cipher.len() < Self::OVERHEAD {
+        if cipher.len() <= Self::OVERHEAD {
             return Err(CryptoError::new(format!(
-                "Cipher text length {} is smaller than required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD
             )));

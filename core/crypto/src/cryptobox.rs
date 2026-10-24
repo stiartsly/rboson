@@ -18,47 +18,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libsodium_sys::{
-    crypto_box_BEFORENMBYTES,
-    crypto_box_MACBYTES,
-    crypto_box_NONCEBYTES,
-    crypto_box_PUBLICKEYBYTES,
-    crypto_box_SECRETKEYBYTES,
-    crypto_box_SEEDBYTES,
-    crypto_box_beforenm,
-    crypto_box_easy,
-    crypto_box_easy_afternm,
-    crypto_box_keypair,
-    crypto_box_open_easy,
-    crypto_box_open_easy_afternm,
-    crypto_box_SEALBYTES,
-    crypto_box_seal,
-    crypto_box_seal_open,
-    crypto_box_seed_keypair,
-    crypto_scalarmult_base,
-    crypto_sign_ed25519_pk_to_curve25519,
-    crypto_sign_ed25519_sk_to_curve25519,
-    sodium_increment,
+use libsodium_rs::{
+    crypto_box as cbox,
+    crypto_scalarmult::curve25519,
+    crypto_sign as sign,
+    utils,
 };
 use static_assertions::const_assert;
 use std::fmt;
-
-use crate::{as_uchar_ptr, as_uchar_ptr_mut};
 
 use crate::{
     errors::{ArgumentError, CryptoError},
     signature, Error, Result,
 };
 
-const_assert!(PrivateKey::BYTES == crypto_box_SECRETKEYBYTES as usize);
-const_assert!(PublicKey::BYTES == crypto_box_PUBLICKEYBYTES as usize);
-const_assert!(Nonce::BYTES == crypto_box_NONCEBYTES as usize);
-const_assert!(KeyPair::SEED_BYTES == crypto_box_SEEDBYTES as usize);
-const_assert!(CryptoBox::SYMMETRIC_KEY_BYTES == crypto_box_BEFORENMBYTES as usize);
-const_assert!(CryptoBox::MAC_BYTES == crypto_box_MACBYTES as usize);
-const_assert!(CryptoBox::SEAL_BYTES == crypto_box_SEALBYTES as usize);
+const_assert!(PrivateKey::BYTES == cbox::SECRETKEYBYTES);
+const_assert!(PublicKey::BYTES == cbox::PUBLICKEYBYTES);
+const_assert!(Nonce::BYTES == cbox::NONCEBYTES);
+const_assert!(KeyPair::SEED_BYTES == 32);
+const_assert!(CryptoBox::SYMMETRIC_KEY_BYTES == cbox::BEFORENMBYTES);
+const_assert!(CryptoBox::MAC_BYTES == cbox::MACBYTES);
+const_assert!(CryptoBox::SEAL_BYTES == cbox::SEALBYTES);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PrivateKey([u8; Self::BYTES]);
 
 impl PrivateKey {
@@ -74,6 +56,11 @@ impl PrivateKey {
 
     pub fn clear(&mut self) {
         crate::memzero(&mut self.0);
+    }
+
+    /// This key as a libsodium-rs key.
+    fn raw(&self) -> cbox::SecretKey {
+        cbox::SecretKey::from(self.0)
     }
 }
 
@@ -94,20 +81,9 @@ impl TryFrom<&[u8]> for PrivateKey {
 impl TryFrom<&signature::PrivateKey> for PrivateKey {
     type Error = Error;
     fn try_from(sk: &signature::PrivateKey) -> Result<Self> {
-        let mut bytes = [0u8; Self::BYTES];
-        let rc = unsafe {
-            crypto_sign_ed25519_sk_to_curve25519(
-                as_uchar_ptr_mut!(bytes),
-                as_uchar_ptr!(sk.as_bytes()),
-            )
-        };
-
-        if rc != 0 {
-            return Err(CryptoError::new(format!(
-                "converts Ed25519 key to x25519 key failed."
-            )));
-        }
-        Ok(Self(bytes))
+        sign::ed25519_sk_to_curve25519(&sk.raw())
+            .map(Self)
+            .map_err(|_| CryptoError::new("converts Ed25519 key to x25519 key failed.").into())
     }
 }
 
@@ -123,9 +99,16 @@ impl AsRef<[u8]> for PrivateKey {
     }
 }
 
+// Private keys never print: as_bytes() gives one on purpose.
 impl fmt::Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
+        f.write_str("<redacted>")
+    }
+}
+
+impl fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CryptoBox::PrivateKey(<redacted>)")
     }
 }
 
@@ -146,6 +129,11 @@ impl PublicKey {
     pub fn clear(&mut self) {
         crate::memzero(&mut self.0);
     }
+
+    /// This key as a libsodium-rs key.
+    fn raw(&self) -> cbox::PublicKey {
+        cbox::PublicKey::from(self.0)
+    }
 }
 
 impl TryFrom<&[u8]> for PublicKey {
@@ -165,20 +153,9 @@ impl TryFrom<&[u8]> for PublicKey {
 impl TryFrom<&signature::PublicKey> for PublicKey {
     type Error = Error;
     fn try_from(pk: &signature::PublicKey) -> Result<Self> {
-        let mut bytes = [0u8; Self::BYTES];
-        let rc = unsafe {
-            crypto_sign_ed25519_pk_to_curve25519(
-                as_uchar_ptr_mut!(bytes),
-                as_uchar_ptr!(pk.as_bytes()),
-            )
-        };
-
-        if rc != 0 {
-            return Err(CryptoError::new(format!(
-                "converts Ed25519 key to x25519 key failed."
-            )));
-        }
-        Ok(Self(bytes))
+        sign::ed25519_pk_to_curve25519(&pk.raw())
+            .map(Self)
+            .map_err(|_| CryptoError::new("converts Ed25519 key to x25519 key failed.").into())
     }
 }
 
@@ -216,7 +193,8 @@ impl Nonce {
     }
 
     pub fn increment(&mut self) -> &Self {
-        unsafe { sodium_increment(as_uchar_ptr_mut!(self.0), Self::BYTES) }
+        // sodium_increment: little-endian, despite the wrapper's name.
+        utils::increment_le(&mut self.0);
         self
     }
 
@@ -230,6 +208,11 @@ impl Nonce {
 
     pub fn clear(&mut self) {
         crate::memzero(&mut self.0)
+    }
+
+    /// This nonce as a libsodium-rs nonce.
+    fn raw(&self) -> cbox::Nonce {
+        cbox::Nonce::from_bytes_exact(self.0)
     }
 }
 
@@ -274,32 +257,15 @@ impl KeyPair {
 
     pub fn new() -> Self {
         crate::ensure_init();
-        let mut pk = [0u8; PublicKey::BYTES];
-        let mut sk = [0u8; PrivateKey::BYTES];
-
-        unsafe {
-            crypto_box_keypair(as_uchar_ptr_mut!(pk), as_uchar_ptr_mut!(sk));
-        }
-
-        Self(PrivateKey(sk), PublicKey(pk))
+        let (pk, sk) = cbox::KeyPair::generate().into_tuple();
+        Self(PrivateKey(sk.into()), PublicKey(pk.into()))
     }
 
     pub fn random() -> Self {
-        let seed = crate::random_array::<{ Self::SEED_BYTES }>();
-
-        let mut sk = [0u8; PrivateKey::BYTES];
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            // Always success
-            crypto_box_seed_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk),
-                as_uchar_ptr!(seed),
-            );
-        }
-
-        Self(PrivateKey(sk), PublicKey(pk))
+        let mut seed = crate::random_array::<{ Self::SEED_BYTES }>();
+        let keypair = Self::try_from_seed(&seed).expect("X25519 key generation never fails");
+        crate::memzero(&mut seed);
+        keypair
     }
 
     pub fn generate() -> Self {
@@ -315,17 +281,10 @@ impl KeyPair {
             )));
         }
 
-        let mut pk = [0u8; PublicKey::BYTES];
-        let mut sk = [0u8; PrivateKey::BYTES];
-        unsafe {
-            crypto_box_seed_keypair(
-                as_uchar_ptr_mut!(pk),
-                as_uchar_ptr_mut!(sk),
-                as_uchar_ptr!(seed),
-            );
-        }
-
-        Ok(Self(PrivateKey(sk), PublicKey(pk)))
+        let (pk, sk) = cbox::KeyPair::from_seed(seed)
+            .map_err(|e| CryptoError::new(format!("X25519 key generation failed: {e}")))?
+            .into_tuple();
+        Ok(Self(PrivateKey(sk.into()), PublicKey(pk.into())))
     }
 
     pub const fn private_key(&self) -> &PrivateKey {
@@ -361,38 +320,23 @@ impl TryFrom<&[u8]> for KeyPair {
             )));
         }
 
-        let mut pk = [0u8; PublicKey::BYTES];
-        unsafe {
-            crypto_scalarmult_base(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk));
-        }
-
-        Ok(Self(PrivateKey::try_from(sk).unwrap(), PublicKey(pk)))
+        Ok(Self::from(&PrivateKey::try_from(sk)?))
     }
 }
 
 impl From<&PrivateKey> for KeyPair {
     fn from(sk: &PrivateKey) -> Self {
-        let mut pk = [0u8; PublicKey::BYTES];
-
-        unsafe {
-            crypto_scalarmult_base(as_uchar_ptr_mut!(pk), as_uchar_ptr!(sk.as_bytes()));
-        }
-
+        let pk = curve25519::scalarmult_base(sk.as_bytes())
+            .expect("X25519 public key derivation never fails");
         KeyPair(sk.clone(), PublicKey(pk))
     }
 }
 
 impl From<&signature::KeyPair> for KeyPair {
     fn from(kp: &signature::KeyPair) -> Self {
-        let mut x25519 = [0u8; PrivateKey::BYTES];
-
-        unsafe {
-            crypto_sign_ed25519_sk_to_curve25519(
-                as_uchar_ptr_mut!(x25519),
-                as_uchar_ptr!(kp.private_key().as_bytes()),
-            );
-        }
-        Self::try_from(x25519.as_slice()).unwrap()
+        let sk = PrivateKey::try_from(kp.private_key())
+            .expect("Ed25519 to X25519 key conversion never fails");
+        Self::from(&sk)
     }
 }
 
@@ -414,8 +358,14 @@ impl AsRef<PublicKey> for KeyPair {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CryptoBox([u8; Self::SYMMETRIC_KEY_BYTES]);
+
+impl fmt::Debug for CryptoBox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CryptoBox(<redacted>)")
+    }
+}
 
 impl CryptoBox {
     pub const SYMMETRIC_KEY_BYTES: usize = 32;
@@ -443,20 +393,10 @@ impl CryptoBox {
             )));
         }
 
-        let rc = unsafe {
-            crypto_box_easy_afternm(
-                as_uchar_ptr_mut!(cipher[..expected_len]),
-                as_uchar_ptr!(plain),
-                plain.len() as libc::c_ulonglong,
-                as_uchar_ptr!(nonce.as_bytes()),
-                as_uchar_ptr!(self.0),
-            )
-        };
-
-        match rc == 0 {
-            true => Ok(expected_len),
-            false => return Err(CryptoError::new(format!("Data encryption failed"))),
-        }
+        let sealed = cbox::seal_afternm(plain, &nonce.raw(), &self.raw())
+            .map_err(|_| CryptoError::new("Data encryption failed"))?;
+        cipher[..expected_len].copy_from_slice(&sealed);
+        Ok(expected_len)
     }
 
     pub fn decrypt(&self, cipher: &[u8], plain: &mut [u8], nonce: &Nonce) -> Result<usize> {
@@ -475,20 +415,10 @@ impl CryptoBox {
             )));
         }
 
-        let rc = unsafe {
-            crypto_box_open_easy_afternm(
-                as_uchar_ptr_mut!(plain[..expected_len]),
-                as_uchar_ptr!(cipher),
-                cipher.len() as libc::c_ulonglong,
-                as_uchar_ptr!(nonce.as_bytes()),
-                as_uchar_ptr!(self.0),
-            )
-        };
-
-        match rc == 0 {
-            true => Ok(expected_len),
-            false => return Err(CryptoError::new(format!("Data decryption failed"))),
-        }
+        let opened = cbox::open_afternm(cipher, &nonce.raw(), &self.raw())
+            .map_err(|_| CryptoError::new("Data decryption failed"))?;
+        plain[..expected_len].copy_from_slice(&opened);
+        Ok(expected_len)
     }
 
     /// Encrypts with an explicit nonce and returns raw ciphertext (no nonce prefix).
@@ -503,27 +433,33 @@ impl CryptoBox {
         self.decrypt(cipher, &mut plain, nonce).map(|_| plain)
     }
     
-    /// Encrypts `message` anonymously for `receiver`, as a sealed box: only the receiver can open
-    /// it, and it does not tell who sent it.
-    pub fn encrypt_sealed(message: &[u8], receiver: &PublicKey) -> Result<Vec<u8>> {
-        crate::ensure_init();
-        let mut cipher = vec![0u8; message.len() + Self::SEAL_BYTES];
-        let rc = unsafe {
-            crypto_box_seal(
-                as_uchar_ptr_mut!(cipher),
-                as_uchar_ptr!(message),
-                message.len() as libc::c_ulonglong,
-                as_uchar_ptr!(receiver.0),
-            )
-        };
-        if rc != 0 {
-            return Err(CryptoError::new("Sealed-box encryption failed"));
+    /// Encrypts `message` anonymously for `receiver`, as a sealed box, into `cipher`: only the
+    /// receiver can open it, and it does not tell who sent it.
+    pub fn encrypt_sealed(message: &[u8], cipher: &mut [u8], receiver: &PublicKey) -> Result<usize> {
+        let expected_len = message.len() + Self::SEAL_BYTES;
+        if cipher.len() < expected_len {
+            return Err(ArgumentError::new("The output buffer is insufficient."));
         }
-        Ok(cipher)
+        crate::ensure_init();
+        let sealed = cbox::seal_box(message, &receiver.raw())
+            .map_err(|_| CryptoError::new("Sealed-box encryption failed"))?;
+        cipher[..expected_len].copy_from_slice(&sealed);
+        Ok(expected_len)
     }
 
-    /// Opens a sealed box with the receiver's public and private key.
-    pub fn decrypt_sealed(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
+    /// Encrypts `message` anonymously for `receiver`, as a sealed box.
+    pub fn encrypt_sealed_into(message: &[u8], receiver: &PublicKey) -> Result<Vec<u8>> {
+        let mut cipher = vec![0u8; message.len() + Self::SEAL_BYTES];
+        Self::encrypt_sealed(message, &mut cipher, receiver).map(|_| cipher)
+    }
+
+    /// Opens a sealed box with the receiver's public and private key, into `plain`.
+    pub fn decrypt_sealed(
+        cipher: &[u8],
+        plain: &mut [u8],
+        pk: &PublicKey,
+        sk: &PrivateKey,
+    ) -> Result<usize> {
         if cipher.len() < Self::SEAL_BYTES {
             return Err(CryptoError::new(format!(
                 "Sealed box length {} is smaller than the required overhead {}",
@@ -531,41 +467,35 @@ impl CryptoBox {
                 Self::SEAL_BYTES
             )));
         }
-        let mut plain = vec![0u8; cipher.len() - Self::SEAL_BYTES];
-        let rc = unsafe {
-            crypto_box_seal_open(
-                as_uchar_ptr_mut!(plain),
-                as_uchar_ptr!(cipher),
-                cipher.len() as libc::c_ulonglong,
-                as_uchar_ptr!(pk.0),
-                as_uchar_ptr!(sk.0),
-            )
-        };
-        if rc != 0 {
-            return Err(CryptoError::new("Sealed-box decryption failed"));
+        let expected_len = cipher.len() - Self::SEAL_BYTES;
+        if plain.len() < expected_len {
+            return Err(ArgumentError::new("The output buffer is insufficient."));
         }
-        Ok(plain)
+        let opened = cbox::open_sealed_box(cipher, &pk.raw(), &sk.raw())
+            .map_err(|_| CryptoError::new("Sealed-box decryption failed"))?;
+        plain[..expected_len].copy_from_slice(&opened);
+        Ok(expected_len)
+    }
+
+    /// Opens a sealed box with the receiver's public and private key.
+    pub fn decrypt_sealed_into(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
+        let mut plain = vec![0u8; cipher.len().saturating_sub(Self::SEAL_BYTES)];
+        Self::decrypt_sealed(cipher, &mut plain, pk, sk).map(|_| plain)
+    }
+
+    /// The shared key as a libsodium-rs key.
+    fn raw(&self) -> cbox::PrecomputedKey {
+        cbox::PrecomputedKey::from(self.0)
     }
 }
 
 impl TryFrom<(&PublicKey, &PrivateKey)> for CryptoBox {
     type Error = Error;
     fn try_from(kp: (&PublicKey, &PrivateKey)) -> Result<Self> {
-        let mut key = [0u8; Self::SYMMETRIC_KEY_BYTES];
-        let rc = unsafe {
-            crypto_box_beforenm(
-                as_uchar_ptr_mut!(key),
-                as_uchar_ptr!(kp.0.as_bytes()),
-                as_uchar_ptr!(kp.1.as_bytes()),
-            )
-        };
-        if rc != 0 {
-            return Err(CryptoError::new(format!(
-                "Compute symmetric key failed, wrong public key or private key"
-            )));
-        }
-
-        Ok(CryptoBox(key))
+        let key = cbox::beforenm(&kp.0.raw(), &kp.1.raw()).map_err(|_| {
+            CryptoError::new("Compute symmetric key failed, wrong public key or private key")
+        })?;
+        Ok(CryptoBox(key.into()))
     }
 }
 
@@ -588,20 +518,10 @@ pub fn encrypt(plain: &[u8], cipher: &mut [u8], nonce: &Nonce,
         )));
     }
 
-    let rc = unsafe {
-        crypto_box_easy(
-            as_uchar_ptr_mut!(cipher[..expected_len]),
-            as_uchar_ptr!(plain),
-            plain.len() as libc::c_ulonglong,
-            as_uchar_ptr!(nonce.as_bytes()),
-            as_uchar_ptr!(pk.as_bytes()),
-            as_uchar_ptr!(sk.as_bytes()),
-        )
-    };
-    match rc == 0 {
-        true => Ok(expected_len),
-        false => return Err(CryptoError::new(format!("Data encryption failed"))),
-    }
+    let sealed = cbox::seal(plain, &nonce.raw(), &pk.raw(), &sk.raw())
+        .map_err(|_| CryptoError::new("Data encryption failed"))?;
+    cipher[..expected_len].copy_from_slice(&sealed);
+    Ok(expected_len)
 }
 
 pub fn decrypt(cipher: &[u8], plain: &mut [u8], nonce: &Nonce,
@@ -622,21 +542,10 @@ pub fn decrypt(cipher: &[u8], plain: &mut [u8], nonce: &Nonce,
         )));
     }
 
-    let rc = unsafe {
-        crypto_box_open_easy(
-            as_uchar_ptr_mut!(plain[..expected_len]),
-            as_uchar_ptr!(cipher),
-            cipher.len() as libc::c_ulonglong,
-            as_uchar_ptr!(nonce.as_bytes()),
-            as_uchar_ptr!(pk.as_bytes()),
-            as_uchar_ptr!(sk.as_bytes()),
-        )
-    };
-
-    match rc == 0 {
-        true => Ok(expected_len),
-        false => return Err(CryptoError::new(format!("Data decryption failed"))),
-    }
+    let opened = cbox::open(cipher, &nonce.raw(), &pk.raw(), &sk.raw())
+        .map_err(|_| CryptoError::new("Data decryption failed"))?;
+    plain[..expected_len].copy_from_slice(&opened);
+    Ok(expected_len)
 }
 
 /// Encrypts with an explicit nonce and returns raw ciphertext (no nonce prefix).

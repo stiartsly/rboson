@@ -44,7 +44,7 @@ fn create_node() -> (Arc<Node>, std::path::PathBuf) {
     fs::create_dir_all(&path).unwrap();
     let private_key = boson::signature::KeyPair::random()
         .private_key()
-        .to_string();
+        .to_hexstr();
     let config_path = path.join("node.yaml");
     let yaml = format!(
         "ipv4: true\nport: 39001\nprivateKey: \"{private_key}\"\ndataDir: {}\ndatabaseUri: jdbc:sqlite:node.db\nlogLevel: \"error\"\n",

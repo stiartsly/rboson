@@ -1,24 +1,20 @@
-use clap::Parser;
+use clap::Args;
 use std::process::exit;
 use boson::activeproxy::{
     Client as APClient,
     Options as APOptions,
 };
 
-const DEFAULT_CONFIG: &str = "apps/launcher/config.yaml";
+const DEFAULT_CONFIG: &str = "tools/cli/proxy.yaml";
 
-#[derive(Parser, Debug)]
-#[command(name = "launcher")]
-#[command(version = "1.0")]
-#[command(about = "Boson launcher service", long_about = None)]
-struct Options {
+#[derive(Args, Debug)]
+pub(crate) struct Options {
+    /// The active proxy configuration file
     #[arg(short = 'c', long = "config", value_name = "FILE")]
     config: Option<String>,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let options = Options::parse();
+pub(crate) async fn start(options: Options) {
     let config = options
         .config
         .as_deref()

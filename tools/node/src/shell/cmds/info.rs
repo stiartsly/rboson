@@ -2,7 +2,8 @@ use boson::dht::Node;
 use clap::Command;
 
 pub(crate) fn command() -> Command {
-    Command::new("info")
+    Command::new("id")
+        .alias("info")
         .about("Show information and status of the current DHT node")
         .visible_alias("status")
 }

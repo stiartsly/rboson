@@ -1,4 +1,4 @@
-use clap::{ArgMatches, Command, Parser};
+use clap::{ArgMatches, Args, Command};
 use std::{
     env,
     sync::{
@@ -92,15 +92,14 @@ impl ConnectionStatusListener for DefaultConnectionStatusListener {
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(about = "Boson Shell", long_about = None)]
-struct Options {
+#[derive(Args, Debug)]
+pub(crate) struct Options {
     /// The node configuration file
     #[arg(
         short,
         long,
         value_name = "FILE",
-        default_value = "apps/shell/node.yaml"
+        default_value = "tools/node/shell/node.yaml"
     )]
     config: Option<String>,
 
@@ -114,14 +113,74 @@ fn build_cli() -> Command {
         .no_binary_name(true)
         .subcommand_required(false)
         .arg_required_else_help(false)
-        .subcommand(cmds::announce_peer::command())
-        .subcommand(cmds::store_value::command())
-        .subcommand(cmds::find_node::command())
-        .subcommand(cmds::find_peer::command())
-        .subcommand(cmds::find_value::command())
         .subcommand(cmds::info::command())
-        .subcommand(cmds::log::command())
+        .subcommand(pending("bootstrap", "Join the DHT through a node already on it."))
+        .subcommand(
+            group("find", "Look up a node, a value or a peer.")
+                .subcommand(cmds::find_node::command())
+                .subcommand(cmds::find_value::command())
+                .subcommand(cmds::find_peer::command()),
+        )
+        .subcommand(group("store", "Store a value on the DHT.").subcommand(cmds::store_value::command()))
+        .subcommand(
+            group("announce", "Announce a service peer on the DHT.")
+                .subcommand(cmds::announce_peer::command()),
+        )
+        .subcommand(
+            group("subscribe", "Watch a value or peer records for changes.")
+                .subcommand(pending("value", "Watch a value for newer versions."))
+                .subcommand(pending("peer", "Watch the peer records under an id."))
+                .subcommand(pending("list", "List what is watched.")),
+        )
+        .subcommand(pending("unsubscribe", "Stop watching a value or peer records."))
         .subcommand(cmds::rt::command())
+        .subcommand(
+            group("storage", "Show the values and peers stored on this node.")
+                .subcommand(pending("values", "List the values stored on this node."))
+                .subcommand(pending("value", "Show a value stored on this node."))
+                .subcommand(pending("peers", "List the peers stored on this node."))
+                .subcommand(pending("peer", "Show the peers stored for one service.")),
+        )
+        .subcommand(pending("cache", "Show a routing table saved in a data directory."))
+        .subcommand(pending("keygen", "Generate a key pair."))
+        .subcommand(pending("stop", "Stop the node. The shell stays open; 'exit' leaves it."))
+        .subcommand(cmds::log::command())
+}
+
+/// A command group of the shell, such as `find`.
+fn group(name: &'static str, about: &'static str) -> Command {
+    Command::new(name).about(about).subcommand_required(true)
+}
+
+/// A command of the Java boson-node shell that has no Rust implementation yet.
+fn pending(name: &'static str, about: &'static str) -> Command {
+    Command::new(name)
+        .about(about)
+        .arg(clap::Arg::new("args").num_args(0..).trailing_var_arg(true).allow_hyphen_values(true).hide(true))
+}
+
+/// The command names of earlier versions of this shell, as their current form.
+fn renamed(args: Vec<String>) -> Vec<String> {
+    let replacement: &[&str] = match args.first().map(String::as_str) {
+        Some("findnode") => &["find", "node"],
+        Some("findvalue") => &["find", "value"],
+        Some("findpeer") => &["find", "peer"],
+        Some("announcepeer") => &["announce", "peer"],
+        Some("announcevalue") => &["store", "value"],
+        _ => return args,
+    };
+    replacement.iter().map(|s| s.to_string()).chain(args.into_iter().skip(1)).collect()
+}
+
+/// The subcommand names of a parsed command line, such as `storage values`.
+fn command_path(matches: &ArgMatches) -> String {
+    let mut names = Vec::new();
+    let mut current = matches;
+    while let Some((name, sub)) = current.subcommand() {
+        names.push(name);
+        current = sub;
+    }
+    names.join(" ")
 }
 
 fn use_ui_log_output(shell_ui: &ui::ShellUi) {
@@ -138,37 +197,37 @@ async fn execute_command(
     readiness: &ConnectionReadiness,
 ) {
     match matches.subcommand() {
-        Some(("announcepeer", m)) => {
-            cmds::announce_peer::run(m, node, node_private_key).await;
-        }
-        Some(("announcevalue", m)) => {
-            cmds::store_value::run(m, node).await;
-        }
-        Some(("findnode", m)) => {
-            cmds::find_node::run(m, node).await;
-        }
-        Some(("findpeer", m)) => {
-            cmds::find_peer::run(m, node).await;
-        }
-        Some(("findvalue", m)) => {
-            cmds::find_value::run(m, node).await;
-        }
-        Some(("info", _)) => {
+        Some(("announce", m)) => match m.subcommand() {
+            Some(("peer", m)) => cmds::announce_peer::run(m, node, node_private_key).await,
+            _ => {}
+        },
+        Some(("store", m)) => match m.subcommand() {
+            Some(("value", m)) => cmds::store_value::run(m, node).await,
+            _ => {}
+        },
+        Some(("find", m)) => match m.subcommand() {
+            Some(("node", m)) => cmds::find_node::run(m, node).await,
+            Some(("peer", m)) => cmds::find_peer::run(m, node).await,
+            Some(("value", m)) => cmds::find_value::run(m, node).await,
+            _ => {}
+        },
+        Some(("id", _)) => {
             cmds::info::run(node, readiness.is_connected());
         }
         Some(("log", m)) => {
             cmds::log::run(m);
         }
-        Some(("routingtable", m)) | Some(("rt", m)) => {
+        Some(("routing", m)) => {
             cmds::rt::run(m, node);
         }
-        _ => {}
+        Some(_) => {
+            cmds::print_result(format!("{}: not implemented yet", command_path(&matches)));
+        }
+        None => {}
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let opts = Options::parse();
+pub(crate) async fn run(opts: Options) {
 
     let shell_ui = ui::ShellUi::new();
     shell_ui.draw();
@@ -183,7 +242,7 @@ async fn main() {
         .as_deref()
         .map(str::to_owned)
         .or_else(|| env::var("NODE_CONFIG").ok())
-        .unwrap_or_else(|| "apps/shell/node.yaml".to_string());
+        .unwrap_or_else(|| "tools/node/shell/node.yaml".to_string());
 
     let node_options = match NodeOptions::load(&config) {
         Ok(options) => options,
@@ -274,7 +333,7 @@ async fn main() {
             continue;
         }
 
-        let args: Vec<String> = input.split_whitespace().map(str::to_string).collect();
+        let args = renamed(input.split_whitespace().map(str::to_string).collect());
         match cli.clone().try_get_matches_from(args) {
             Ok(matches) => {
                 execute_command(
@@ -308,5 +367,29 @@ fn print_help(cli: &mut Command, command_name: Option<&str>, shell_ui: &ui::Shel
     match result {
         Ok(()) => shell_ui.result(String::from_utf8_lossy(&output).into_owned()),
         Err(e) => shell_ui.result(format!("Unable to render help: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(line: &str) -> String {
+        let args = renamed(line.split_whitespace().map(str::to_string).collect());
+        command_path(&build_cli().try_get_matches_from(args).unwrap())
+    }
+
+    #[test]
+    fn command_tree_is_valid() {
+        build_cli().debug_assert();
+    }
+
+    #[test]
+    fn earlier_command_names_still_work() {
+        assert_eq!(parse("findnode FyHfVWtscJWUeejGQaJXyUnjUcKFGSVVYmozqBuJSmjo"), "find node");
+        assert_eq!(parse("announcevalue hello"), "store value");
+        assert_eq!(parse("rt"), "routing");
+        assert_eq!(parse("info"), "id");
+        assert_eq!(parse("storage values"), "storage values");
     }
 }

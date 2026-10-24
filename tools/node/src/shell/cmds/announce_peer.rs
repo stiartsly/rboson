@@ -8,7 +8,7 @@ use boson::{
 pub(crate) const DEFAULT_ENDPOINT: &str = "www.example.com";
 
 pub(crate) fn command() -> Command {
-    Command::new("announcepeer")
+    Command::new("peer")
         .visible_alias("announce_peer")
         .about("Announce a peer to the Boson network")
         .arg(arg!([ENDPOINT] "Endpoint value for the announced peer").default_value(DEFAULT_ENDPOINT))

@@ -2,7 +2,7 @@ use clap::{arg, ArgMatches, Command};
 use boson::{dht::Node, ImmutableBuilder};
 
 pub(crate) fn command() -> Command {
-    Command::new("announcevalue")
+    Command::new("value")
         .about("Announce an immutable value to the Boson network")
         .arg(arg!(<VALUE> "Value data (string) to announce"))
 }

@@ -1,15 +1,11 @@
 use boson::director::{self, Client, Device, NodeStatus, Profile, Service, UserRegistration};
 use boson::{signature, Id, Result};
-use clap::{Parser, Subcommand};
+use clap::Args;
 use std::{env, time::UNIX_EPOCH};
 
-#[derive(Parser, Debug)]
-#[command(name = "identity")]
-#[command(
-    about = "Boson Director and Identity management tool",
-    long_about = None
-)]
-struct Cli {
+/// How to reach the Director of the super node.
+#[derive(Args, Debug)]
+pub(crate) struct ConnectionOptions {
     /// Director node URL (default: $BOSON_DIRECTOR_URL)
     #[arg(
         long = "director-url",
@@ -22,134 +18,106 @@ struct Cli {
     /// Accept invalid TLS certificates from the Director endpoint
     #[arg(long, global = true)]
     insecure: bool,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
 }
 
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Display information about a user and list their authorized devices
-    #[command(name = "user")]
-    User {
-        /// User ID (defaults to $BOSON_USER_ID)
-        #[arg(value_name = "USERID")]
-        user_id: Option<String>,
+#[derive(Args, Debug)]
+pub(crate) struct UserShowArgs {
+    /// User ID (defaults to $BOSON_USER_ID)
+    #[arg(value_name = "USERID")]
+    user_id: Option<String>,
 
-        /// User private key to authenticate with Director (defaults to $BOSON_USER_PRIVATE_KEY)
-        #[arg(short = 'u', long = "user-key", value_name = "PRIVATE_KEY")]
-        user_key: Option<String>,
+    /// User private key to authenticate with Director (defaults to $BOSON_USER_PRIVATE_KEY)
+    #[arg(short = 'u', long = "user-key", value_name = "PRIVATE_KEY")]
+    user_key: Option<String>,
 
-        /// List all authorized devices for this user
-        #[arg(short = 'l', long = "devices", default_value_t = false)]
-        devices: bool,
-    },
-
-    /// Register a new user with the Director node
-    #[command(name = "reguser")]
-    RegUser {
-        /// User private key (defaults to $BOSON_USER_PRIVATE_KEY or generates random if omitted)
-        #[arg(value_name = "PRIVATE_KEY")]
-        user_key: String,
-
-        /// User display name (random-generated with 'user_' prefix if omitted)
-        #[arg(long, value_name = "STRING")]
-        name: Option<String>,
-
-        /// User email (random-generated with 'user_' prefix if omitted)
-        #[arg(long, value_name = "STRING")]
-        email: Option<String>,
-
-        /// User biography (random-generated with 'Boson user' prefix if omitted)
-        #[arg(long, value_name = "STRING")]
-        bio: Option<String>,
-
-        /// Passphrase for user registration
-        #[arg(long, value_name = "STRING")]
-        passphrase: Option<String>,
-    },
-
-    /// Register a new device under an authorized user
-    #[command(name = "regdev")]
-    RegDev {
-        /// Device private key (generates random if omitted)
-        #[arg(value_name = "DEVICE_PRIVATE_KEY")]
-        device_key: String,
-
-        /// User private key authorizing this device (defaults to $BOSON_USER_PRIVATE_KEY)
-        #[arg(short = 'u', long = "user-key", value_name = "PRIVATE_KEY")]
-        user_key: Option<String>,
-
-        /// Device name (random-generated with 'device_' prefix if omitted)
-        #[arg(long = "device-name", value_name = "STRING")]
-        device_name: Option<String>,
-
-        /// Application name (defaults to BosonApp if omitted)
-        #[arg(long, value_name = "STRING")]
-        app: Option<String>,
-
-        /// Passphrase for device registration
-        #[arg(long, value_name = "STRING")]
-        passphrase: Option<String>,
-    },
+    /// List all authorized devices for this user
+    #[arg(short = 'l', long = "devices", default_value_t = false)]
+    devices: bool,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    if let Err(error) = run().await {
-        eprintln!("identity: {error}");
-        std::process::exit(1);
-    }
+#[derive(Args, Debug)]
+pub(crate) struct UserRegisterArgs {
+    /// User private key (defaults to $BOSON_USER_PRIVATE_KEY or generates random if omitted)
+    #[arg(value_name = "PRIVATE_KEY")]
+    user_key: String,
+
+    /// User display name (random-generated with 'user_' prefix if omitted)
+    #[arg(long, value_name = "STRING")]
+    name: Option<String>,
+
+    /// User email (random-generated with 'user_' prefix if omitted)
+    #[arg(long, value_name = "STRING")]
+    email: Option<String>,
+
+    /// User biography (random-generated with 'Boson user' prefix if omitted)
+    #[arg(long, value_name = "STRING")]
+    bio: Option<String>,
+
+    /// Passphrase for user registration
+    #[arg(long, value_name = "STRING")]
+    passphrase: Option<String>,
 }
 
-async fn run() -> Result<()> {
-    let cli = Cli::parse();
+#[derive(Args, Debug)]
+pub(crate) struct DeviceAddArgs {
+    /// Device private key (generates random if omitted)
+    #[arg(value_name = "DEVICE_PRIVATE_KEY")]
+    device_key: String,
 
-    match &cli.command {
-        Some(Commands::User {
-            user_id,
-            user_key,
-            devices,
-        }) => user_command(&cli, user_id.as_deref(), user_key.as_deref(), *devices).await,
-        Some(Commands::RegUser {
-            user_key,
-            name,
-            email,
-            bio,
-            passphrase,
-        }) => {
-            reguser_command(
-                &cli,
-                user_key.as_str(),
-                name.as_deref(),
-                email.as_deref(),
-                bio.as_deref(),
-                passphrase.as_deref(),
-            )
-            .await
-        }
-        Some(Commands::RegDev {
-            device_key,
-            user_key,
-            device_name,
-            app,
-            passphrase,
-        }) => {
-            regdev_command(
-                &cli,
-                device_key.as_str(),
-                user_key.as_deref(),
-                device_name.as_deref(),
-                app.as_deref(),
-                passphrase.as_deref(),
-            )
-            .await
-        }
-        _ => director_command(&cli, None).await,
-    }
+    /// User private key authorizing this device (defaults to $BOSON_USER_PRIVATE_KEY)
+    #[arg(short = 'u', long = "user-key", value_name = "PRIVATE_KEY")]
+    user_key: Option<String>,
+
+    /// Device name (random-generated with 'device_' prefix if omitted)
+    #[arg(long = "device-name", value_name = "STRING")]
+    device_name: Option<String>,
+
+    /// Application name (defaults to BosonApp if omitted)
+    #[arg(long, value_name = "STRING")]
+    app: Option<String>,
+
+    /// Passphrase for device registration
+    #[arg(long, value_name = "STRING")]
+    passphrase: Option<String>,
 }
 
-fn resolve_director_url(cli: &Cli, input_url: Option<&str>) -> Result<String> {
+/// `boson-cli user show`
+pub(crate) async fn user_show(cli: &ConnectionOptions, args: &UserShowArgs) -> Result<()> {
+    user_command(cli, args.user_id.as_deref(), args.user_key.as_deref(), args.devices).await
+}
+
+/// `boson-cli user register`
+pub(crate) async fn user_register(cli: &ConnectionOptions, args: &UserRegisterArgs) -> Result<()> {
+    reguser_command(
+        cli,
+        args.user_key.as_str(),
+        args.name.as_deref(),
+        args.email.as_deref(),
+        args.bio.as_deref(),
+        args.passphrase.as_deref(),
+    )
+    .await
+}
+
+/// `boson-cli device add`
+pub(crate) async fn device_add(cli: &ConnectionOptions, args: &DeviceAddArgs) -> Result<()> {
+    regdev_command(
+        cli,
+        args.device_key.as_str(),
+        args.user_key.as_deref(),
+        args.device_name.as_deref(),
+        args.app.as_deref(),
+        args.passphrase.as_deref(),
+    )
+    .await
+}
+
+/// `boson-cli node status`
+pub(crate) async fn node_status(cli: &ConnectionOptions) -> Result<()> {
+    director_command(cli, None).await
+}
+
+fn resolve_director_url(cli: &ConnectionOptions, input_url: Option<&str>) -> Result<String> {
     let url = input_url
         .map(str::to_owned)
         .or_else(|| cli.director_url.clone())
@@ -162,7 +130,7 @@ fn resolve_director_url(cli: &Cli, input_url: Option<&str>) -> Result<String> {
     Ok(url)
 }
 
-async fn director_command(cli: &Cli, url: Option<&str>) -> Result<()> {
+async fn director_command(cli: &ConnectionOptions, url: Option<&str>) -> Result<()> {
     let director_url = resolve_director_url(cli, url)?;
     let dir_opts = director::Options::new(&director_url)?.with_insecure(cli.insecure);
     let client = Client::new(dir_opts)?;
@@ -172,7 +140,7 @@ async fn director_command(cli: &Cli, url: Option<&str>) -> Result<()> {
 }
 
 async fn user_command(
-    cli: &Cli,
+    cli: &ConnectionOptions,
     user_id_arg: Option<&str>,
     user_key_arg: Option<&str>,
     devices: bool,
@@ -228,7 +196,7 @@ async fn user_command(
 }
 
 async fn reguser_command(
-    cli: &Cli,
+    cli: &ConnectionOptions,
     user_key_arg: &str,
     name_arg: Option<&str>,
     email_arg: Option<&str>,
@@ -299,7 +267,7 @@ async fn reguser_command(
 }
 
 async fn regdev_command(
-    cli: &Cli,
+    cli: &ConnectionOptions,
     device_key_arg: &str,
     user_key_arg: Option<&str>,
     device_name_arg: Option<&str>,

@@ -31,6 +31,9 @@ use libsodium_sys::{
     crypto_box_keypair,
     crypto_box_open_easy,
     crypto_box_open_easy_afternm,
+    crypto_box_SEALBYTES,
+    crypto_box_seal,
+    crypto_box_seal_open,
     crypto_box_seed_keypair,
     crypto_scalarmult_base,
     crypto_sign_ed25519_pk_to_curve25519,
@@ -53,6 +56,7 @@ const_assert!(Nonce::BYTES == crypto_box_NONCEBYTES as usize);
 const_assert!(KeyPair::SEED_BYTES == crypto_box_SEEDBYTES as usize);
 const_assert!(CryptoBox::SYMMETRIC_KEY_BYTES == crypto_box_BEFORENMBYTES as usize);
 const_assert!(CryptoBox::MAC_BYTES == crypto_box_MACBYTES as usize);
+const_assert!(CryptoBox::SEAL_BYTES == crypto_box_SEALBYTES as usize);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivateKey([u8; Self::BYTES]);
@@ -69,7 +73,7 @@ impl PrivateKey {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0);
+        crate::memzero(&mut self.0);
     }
 }
 
@@ -140,7 +144,7 @@ impl PublicKey {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0);
+        crate::memzero(&mut self.0);
     }
 }
 
@@ -225,7 +229,7 @@ impl Nonce {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0)
+        crate::memzero(&mut self.0)
     }
 }
 
@@ -269,6 +273,7 @@ impl KeyPair {
     pub const SEED_BYTES: usize = 32;
 
     pub fn new() -> Self {
+        crate::ensure_init();
         let mut pk = [0u8; PublicKey::BYTES];
         let mut sk = [0u8; PrivateKey::BYTES];
 
@@ -415,6 +420,8 @@ pub struct CryptoBox([u8; Self::SYMMETRIC_KEY_BYTES]);
 impl CryptoBox {
     pub const SYMMETRIC_KEY_BYTES: usize = 32;
     pub const MAC_BYTES: usize = 16;
+    /// The bytes a sealed box adds to the message.
+    pub const SEAL_BYTES: usize = 48;
 
     pub const fn size(&self) -> usize {
         Self::SYMMETRIC_KEY_BYTES
@@ -425,7 +432,7 @@ impl CryptoBox {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0)
+        crate::memzero(&mut self.0)
     }
 
     pub fn encrypt(&self, plain: &[u8], cipher: &mut [u8], nonce: &Nonce) -> Result<usize> {
@@ -494,6 +501,50 @@ impl CryptoBox {
     pub fn decrypt_into(&self, cipher: &[u8], nonce: &Nonce) -> Result<Vec<u8>> {
         let mut plain = vec![0u8; cipher.len().saturating_sub(Self::MAC_BYTES)];
         self.decrypt(cipher, &mut plain, nonce).map(|_| plain)
+    }
+    
+    /// Encrypts `message` anonymously for `receiver`, as a sealed box: only the receiver can open
+    /// it, and it does not tell who sent it.
+    pub fn encrypt_sealed(message: &[u8], receiver: &PublicKey) -> Result<Vec<u8>> {
+        crate::ensure_init();
+        let mut cipher = vec![0u8; message.len() + Self::SEAL_BYTES];
+        let rc = unsafe {
+            crypto_box_seal(
+                as_uchar_ptr_mut!(cipher),
+                as_uchar_ptr!(message),
+                message.len() as libc::c_ulonglong,
+                as_uchar_ptr!(receiver.0),
+            )
+        };
+        if rc != 0 {
+            return Err(CryptoError::new("Sealed-box encryption failed"));
+        }
+        Ok(cipher)
+    }
+
+    /// Opens a sealed box with the receiver's public and private key.
+    pub fn decrypt_sealed(cipher: &[u8], pk: &PublicKey, sk: &PrivateKey) -> Result<Vec<u8>> {
+        if cipher.len() < Self::SEAL_BYTES {
+            return Err(CryptoError::new(format!(
+                "Sealed box length {} is smaller than the required overhead {}",
+                cipher.len(),
+                Self::SEAL_BYTES
+            )));
+        }
+        let mut plain = vec![0u8; cipher.len() - Self::SEAL_BYTES];
+        let rc = unsafe {
+            crypto_box_seal_open(
+                as_uchar_ptr_mut!(plain),
+                as_uchar_ptr!(cipher),
+                cipher.len() as libc::c_ulonglong,
+                as_uchar_ptr!(pk.0),
+                as_uchar_ptr!(sk.0),
+            )
+        };
+        if rc != 0 {
+            return Err(CryptoError::new("Sealed-box decryption failed"));
+        }
+        Ok(plain)
     }
 }
 

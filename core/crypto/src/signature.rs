@@ -18,6 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Ed25519 signatures.
+//!
+//! One-shot signing signs a whole message at once. It is what Boson signs on the wire, and what the
+//! Java SDK does: [`PrivateKey::sign_into`] and [`PublicKey::verify`], or the functions [`sign`],
+//! [`sign_into`] and [`verify`].
+//!
+//! Streaming signing, [`Signature`], signs or verifies a message given in parts. It uses libsodium's
+//! multi-part API, which is Ed25519ph: it signs a SHA-512 hash of the message. Its signatures do not
+//! verify with the one-shot functions or with the Java SDK, nor the other way round.
+
 use std::{
     str::FromStr,
     fmt, mem,
@@ -61,7 +71,7 @@ impl PrivateKey {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0);
+        crate::memzero(&mut self.0);
     }
 
     /// Returns the 32-byte Ed25519 seed embedded in this private key.
@@ -245,7 +255,7 @@ impl PublicKey {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0);
+        crate::memzero(&mut self.0);
     }
 
     pub fn to_base58(&self) -> String {
@@ -356,6 +366,7 @@ impl KeyPair {
     pub const SEED_BYTES: usize = 32;
 
     pub fn new() -> Self {
+        crate::ensure_init();
         let mut sk = [0u8; PrivateKey::BYTES];
         let mut pk = [0u8; PublicKey::BYTES];
 
@@ -368,6 +379,7 @@ impl KeyPair {
     }
 
     pub fn random() -> Self {
+        crate::ensure_init();
         let mut seed = [0u8; KeyPair::SEED_BYTES];
         unsafe {
             randombytes_buf(seed.as_mut_ptr() as *mut libc::c_void, KeyPair::SEED_BYTES);
@@ -509,6 +521,8 @@ impl AsRef<PublicKey> for KeyPair {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SignState([u8; std::mem::size_of::<crypto_sign_state>()]);
 
+/// A streaming Ed25519ph signer and verifier, for a message given in parts. Its signatures are not
+/// interchangeable with one-shot signatures; see the module documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     state: SignState,
@@ -518,9 +532,11 @@ impl Signature {
     pub const BYTES: usize = 64;
 
     pub fn new() -> Self {
-        Self {
+        let mut signature = Self {
             state: SignState([0u8; std::mem::size_of::<crypto_sign_state>()]),
-        }
+        };
+        signature.reset();
+        signature
     }
 
     pub fn reset(&mut self) -> &mut Self {
@@ -597,14 +613,17 @@ impl Drop for Signature {
     }
 }
 
+/// Signs `data` in one shot, into `sig`.
 pub fn sign(data: &[u8], sig: &mut [u8], sk: &PrivateKey) -> Result<usize> {
     sk.sign(data, sig)
 }
 
+/// Signs `data` in one shot.
 pub fn sign_into(data: &[u8], sk: &PrivateKey) -> Result<Vec<u8>> {
     sk.sign_into(data)
 }
 
+/// Verifies a one-shot signature of `data`.
 pub fn verify(data: &[u8], signature: &[u8], pk: &PublicKey) -> Result<bool> {
     pk.verify(data, signature)
 }

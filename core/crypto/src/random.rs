@@ -21,6 +21,7 @@
 use libsodium_sys::randombytes_buf;
 
 pub fn random_array_secure<const N: usize>(array: &mut [u8; N]) {
+    crate::ensure_init();
     unsafe {
         randombytes_buf(
             array.as_mut_ptr() as *mut libc::c_void,
@@ -39,6 +40,7 @@ pub fn random_bytes_secure(buffer: &mut [u8]) {
     if buffer.is_empty() {
         return;
     }
+    crate::ensure_init();
     unsafe {
         randombytes_buf(
             buffer.as_mut_ptr() as *mut libc::c_void,

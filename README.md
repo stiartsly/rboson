@@ -141,12 +141,20 @@ The administration tool of a super node. None of its commands has a Rust impleme
 
 `clients/messaging/examples/chat` is an interactive terminal chat over the messaging client: friend
 requests, channels and invite tickets, text messages, and every client event as it happens. Run two
-instances, for example as Alice and Bob, against a messaging service:
+instances, for example as Alice and Bob, against a messaging service. Their configurations take the
+service and the keys from environment variables:
 
 ```bash
-cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/alice.yaml
-cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/bob.yaml
+export MESSAGING_SERVICE_PEER_ID=SERVICE_PEER_ID
+export MESSAGING_SERVICE_ENDPOINT=mqtts://HOST:PORT
+
+ALICE_USER_PRIVATE_KEY=... ALICE_DEVICE_PRIVATE_KEY=... \
+  cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/alice.yaml
+BOB_USER_PRIVATE_KEY=... BOB_DEVICE_PRIVATE_KEY=... \
+  cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/bob.yaml
 ```
+
+`boson-cli util keygen --user` and `--device` generate the keys.
 
 Inside the chat, `help` lists the commands; `exit` leaves it.
 

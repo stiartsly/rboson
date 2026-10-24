@@ -235,7 +235,7 @@ mod tests {
 
         let id = Id::from(&sig_pk);
         assert_eq!(id.to_signature_key(), sig_pk);
-        assert_eq!(id.to_encryption_key(), enc_pk);
+        assert_eq!(id.to_encryption_key().unwrap(), enc_pk);
     }
 
     #[test]

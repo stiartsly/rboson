@@ -23,7 +23,7 @@ use std::sync::Mutex;
 use crate::{
     cryptobox::{self as crypto_box, CryptoBox, Nonce, PrivateKey},
     errors::CryptoError,
-    signature, Id, Result,
+    Id, Result,
 };
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ impl CryptoContext {
 
     /// Fails when `id` is not a usable public key, as an id from the network may not be.
     pub fn from_private_key(id: Id, sk: &PrivateKey) -> Result<Self> {
-        let pk = crypto_box::PublicKey::try_from(&signature::PublicKey::try_from(id.as_bytes())?)?;
+        let pk = id.to_encryption_key()?;
         Self::from_keys(id, &pk, sk)
     }
 

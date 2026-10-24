@@ -192,12 +192,15 @@ impl Id {
         self.to_abbr_base58()
     }
 
+    /// The Ed25519 public key with this id's bytes.
     pub fn to_signature_key(&self) -> signature::PublicKey {
-        signature::PublicKey::try_from(self.as_bytes()).unwrap()
+        signature::PublicKey::try_from(self.as_bytes()).expect("an id has the size of a public key")
     }
 
-    pub fn to_encryption_key(&self) -> cryptobox::PublicKey {
-        cryptobox::PublicKey::try_from(&self.to_signature_key()).unwrap()
+    /// The X25519 public key converted from this id's Ed25519 key. Fails when the id is not a valid
+    /// Ed25519 point, as any 32 bytes from the network may not be.
+    pub fn to_encryption_key(&self) -> Result<cryptobox::PublicKey> {
+        cryptobox::PublicKey::try_from(&self.to_signature_key())
     }
 
     pub fn distance(&self, other: &Id) -> Id {

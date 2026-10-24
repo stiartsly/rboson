@@ -66,7 +66,7 @@ impl CryptoIdentity {
 
 impl CryptoIdentity {
     fn crypto_box_for(&self, id: &Id) -> Result<CryptoBox> {
-        CryptoBox::try_from((&id.to_encryption_key(), self.encryption_key.private_key()))
+        CryptoBox::try_from((&id.to_encryption_key()?, self.encryption_key.private_key()))
     }
 }
 
@@ -264,7 +264,7 @@ impl Identity for CryptoIdentity {
 
     fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
         CryptoBox::try_from((
-            &id.to_encryption_key(),
+            &id.to_encryption_key()?,
             self.encryption_key.private_key(),
         ))
         .map(|v| CryptoContext::new(id.clone(), v))

@@ -25,7 +25,7 @@ const ACK_MASK: u8 = 0x80;
 const TYPE_MASK: u8 = 0x7F;
 
 fn randv(min: u8, max: u8) -> u8 {
-    (unsafe { libsodium_sys::randombytes_uniform((max - min + 1) as u32) }) as u8
+    boson_api::random::secure_uniform((max - min + 1) as u32) as u8
 }
 
 /*

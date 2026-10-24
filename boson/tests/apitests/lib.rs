@@ -18,7 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// The API tests call libsodium directly; the workspace denies unsafe code elsewhere.
+// Some API tests change environment variables, which is unsafe; the workspace denies unsafe code
+// elsewhere.
 #![allow(unsafe_code)]
 
 #[cfg(test)]
@@ -72,17 +73,11 @@ mod messaging {
 }
 // helper function
 fn randomize_bytes<const N: usize>(array: &mut [u8; N]) {
-    unsafe {
-        libsodium_sys::randombytes_buf(array.as_mut_ptr() as *mut libc::c_void, N);
-    }
+    boson::crypto::random::random_array_secure(array);
 }
 
 fn create_random_bytes(len: usize) -> Vec<u8> {
-    let mut bytes = vec![0u8; len];
-    unsafe {
-        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, len);
-    }
-    bytes
+    boson::crypto::random::secure_bytes(len)
 }
 
 fn remove_working_path(input: &str) {

@@ -18,7 +18,6 @@ categories.workspace = true
 boson-crypto.workspace = true
 boson-api.workspace = true
 futures.workspace = true
-libsodium-sys-stable.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true

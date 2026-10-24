@@ -890,22 +890,18 @@ fn find_terminator(buf: &[u8], start: usize) -> Option<usize> {
 fn padding_size(size: usize) -> usize {
     let bound = (size + 255) & !255;
     let range = (bound - size + 1) as u32;
-    (unsafe { libsodium_sys::randombytes_uniform(range) }) as usize
+    boson_api::random::secure_uniform(range) as usize
 }
 
 fn random_padding(size: usize) -> Vec<u8> {
     let len = padding_size(size);
     let mut padding = vec![0u8; len];
-    if len > 0 {
-        unsafe {
-            libsodium_sys::randombytes_buf(padding.as_mut_ptr() as *mut _, len);
-        }
-    }
+    boson_api::random::random_bytes_secure(&mut padding);
     padding
 }
 
 fn random_ack_byte(succeeded: bool) -> u8 {
-    let r = (unsafe { libsodium_sys::randombytes_uniform(255) }) as u8;
+    let r = boson_api::random::secure_uniform(255) as u8;
     match succeeded {
         true => r | 0x01,
         false => r & 0xFE,

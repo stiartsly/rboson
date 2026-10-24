@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libsodium_sys::randombytes_uniform;
 use log::info;
 use rbtree::RBTree;
 use std::{fmt, time::SystemTime};
@@ -120,7 +119,7 @@ impl KBucket {
                 .map(|(_, v)| v.clone());
         }
 
-        let pos = unsafe { randombytes_uniform(self.entries.len() as u32) } as usize;
+        let pos = boson_api::random::secure_uniform(self.entries.len() as u32) as usize;
         self.entries.values().nth(pos).cloned()
     }
 

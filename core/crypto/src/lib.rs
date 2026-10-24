@@ -34,6 +34,7 @@ pub mod signature;
 mod unitests {
     mod test_cryptobox;
     mod test_key_derivation;
+    mod test_random;
     mod test_signature;
 }
 

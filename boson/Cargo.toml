@@ -41,8 +41,6 @@ boson-messaging-client = { workspace = true, optional = true }
 
 [dev-dependencies]
 base64.workspace = true
-libc.workspace = true
-libsodium-sys-stable.workspace = true
 log.workspace = true
 rand.workspace = true
 serde.workspace = true

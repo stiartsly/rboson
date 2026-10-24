@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Migrated code: it calls libsodium directly and is not documented yet. Remove these allows as the
-// crate is brought in line with the workspace lints.
+// Migrated code: its SQLite storage uses unsafe code and it is not documented yet. Remove these
+// allows as the crate is brought in line with the workspace lints.
 #![allow(unsafe_code)]
 #![allow(missing_docs)]
 

@@ -45,6 +45,19 @@ pub fn secure_bytes(length: usize) -> Vec<u8> {
     bytes
 }
 
+/// A random number from libsodium, uniformly distributed over the whole `u32` range.
+pub fn secure_u32() -> u32 {
+    crate::ensure_init();
+    random::u32()
+}
+
+/// A random number from libsodium in `0..upper_bound`, uniformly distributed (no modulo bias).
+/// Returns 0 when `upper_bound` is below 2.
+pub fn secure_uniform(upper_bound: u32) -> u32 {
+    crate::ensure_init();
+    random::uniform(upper_bound)
+}
+
 pub fn bytes(length: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; length];
     rand::fill(bytes.as_mut_slice());

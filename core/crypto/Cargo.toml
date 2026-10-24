@@ -2,7 +2,8 @@
 name = "boson-crypto"
 description = "Boson cryptography: signatures, key agreement, crypto box, hashing, key derivation"
 version.workspace = true
-edition.workspace = true
+# Migrated from the single rboson crate (edition 2021); moving to the workspace edition is a separate step.
+edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,6 +15,13 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+bs58.workspace = true
+hex.workspace = true
+libc.workspace = true
+libsodium-sys-stable.workspace = true
+rand.workspace = true
+sha2.workspace = true
+static_assertions.workspace = true
 
 [lints]
 workspace = true

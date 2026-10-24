@@ -1,4 +1,4 @@
-# `core/api/src/crypto/signature.rs`
+# `core/crypto/src/signature.rs`
 
 The `signature` module wraps libsodium Ed25519 signing primitives and provides the identity key material used throughout Boson.
 

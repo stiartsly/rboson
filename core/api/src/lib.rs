@@ -1,8 +1,7 @@
 //! Core Boson protocol primitives.
 
-// Migrated code: it calls libsodium directly and is not documented yet. Remove these allows as the
-// crate is brought in line with the workspace lints.
-#![allow(unsafe_code)]
+// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
+// with the workspace lints.
 #![allow(missing_docs)]
 
 pub mod crypto_identity;
@@ -17,15 +16,10 @@ pub mod value;
 pub mod version;
 
 pub(crate) mod crypto_context;
-pub(crate) mod crypto {
-    pub mod cryptobox;
-    pub mod signature;
-    pub mod key_derivation;
-    pub mod random;
-}
+
+pub use boson_crypto::{cryptobox, key_derivation, random, signature};
 
 pub use crate::{
-    crypto::{cryptobox, key_derivation, random, signature},
     cryptobox::CryptoBox,
     crypto_identity::CryptoIdentity,
     errors::{Error, Result, *},
@@ -42,21 +36,6 @@ pub use crate::{
     crypto_context::CryptoContext,
 };
 
-macro_rules! as_uchar_ptr {
-    ($val:expr) => {
-        $val.as_ptr().cast::<libc::c_uchar>()
-    };
-}
-macro_rules! as_uchar_ptr_mut {
-    ($val:expr) => {
-        $val.as_mut_ptr().cast::<libc::c_uchar>()
-    };
-}
-
-pub(crate) use {
-    as_uchar_ptr,
-    as_uchar_ptr_mut
-};
 
 #[doc(hidden)]
 pub mod utils {
@@ -147,23 +126,7 @@ pub fn local_addr(ipv4: bool) -> Result<IpAddr> {
 }
 
 #[doc(hidden)]
-pub fn random_array<const N: usize>() -> [u8; N] {
-    let mut bytes = [0u8; N];
-    unsafe {
-        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, N);
-    };
-    bytes
-}
-
-#[allow(unused)]
-#[doc(hidden)]
-pub fn random_bytes(len: usize) -> Vec<u8> {
-    let mut bytes = vec![0u8; len];
-    unsafe {
-        libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut libc::c_void, len);
-    };
-    bytes
-}
+pub use boson_crypto::{random_array, random_bytes};
 
 #[allow(unused)]
 #[doc(hidden)]

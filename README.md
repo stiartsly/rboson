@@ -41,11 +41,12 @@ The `boson` facade also keeps the public API of the earlier single `rboson` crat
 
 Work in progress in this layout:
 
-- Cryptography still lives in `boson-api`; `boson-crypto` gets it once it is split out.
 - `Node` is still the concrete DHT node in `boson-dht`. A `Node` abstraction in `boson-api`, like
   the Java `Node` interface, comes later; then the client crates depend on it instead of on a node
   implementation, and the application chooses `boson-dht` or `boson-higgs`.
-- `boson-crypto`, `boson-http`, `boson-higgs` and `boson-ion-store-client` are still empty.
+- `boson-crypto` holds the libsodium-based primitives (signatures, crypto box, key derivation,
+  random); `boson-api` re-exports them at their earlier paths.
+- `boson-http`, `boson-higgs` and `boson-ion-store-client` are still empty.
 
 ## 3. Compiling the project
 

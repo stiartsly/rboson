@@ -411,7 +411,9 @@ impl str::FromStr for Id {
 // Create Id from signature public key.
 impl From<&signature::PublicKey> for Id {
     fn from(pk: &signature::PublicKey) -> Self {
-        Id(pk.0)
+        let mut bytes = [0u8; Id::BYTES];
+        bytes.copy_from_slice(pk.as_bytes());
+        Id(bytes)
     }
 }
 

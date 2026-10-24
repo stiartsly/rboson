@@ -14,6 +14,7 @@ pub(crate) fn cli() -> Command {
         .arg(
             Arg::new("to")
                 .long("to")
+                .required(true)
                 .value_name("USERID")
                 .help("User ID of the recipient"),
         )

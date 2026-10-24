@@ -46,8 +46,6 @@ Work in progress in this layout:
   the Java `Node` interface, comes later; then the client crates depend on it instead of on a node
   implementation, and the application chooses `boson-dht` or `boson-higgs`.
 - `boson-crypto`, `boson-http`, `boson-higgs` and `boson-ion-store-client` are still empty.
-- `refactor/apps/chat` is the chat demo of the earlier layout. It is not part of the workspace and
-  is not built.
 
 ## 3. Compiling the project
 
@@ -137,7 +135,22 @@ cargo run -p boson-cli -- proxy start --config tools/cli/proxy.yaml
 
 The administration tool of a super node. None of its commands has a Rust implementation yet.
 
-## 5. License
+## 5. Examples
+
+### Messaging chat
+
+`clients/messaging/examples/chat` is an interactive terminal chat over the messaging client: friend
+requests, channels and invite tickets, text messages, and every client event as it happens. Run two
+instances, for example as Alice and Bob, against a messaging service:
+
+```bash
+cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/alice.yaml
+cargo run -p boson-messaging-client --example chat -- -c clients/messaging/examples/chat/bob.yaml
+```
+
+Inside the chat, `help` lists the commands; `exit` leaves it.
+
+## 6. License
 
 This project is open source software licensed under the MIT License.
 

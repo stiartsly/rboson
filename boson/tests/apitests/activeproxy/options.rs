@@ -137,8 +137,8 @@ fn test_parse_options() {
     let content = yaml(
         service_peerid,
         Id::from(user_key.public_key()),
-        user_key.private_key(),
-        device_key.private_key(),
+        user_key.private_key().to_hexstr(),
+        device_key.private_key().to_hexstr(),
         "192.0.2.1",
         "127.0.0.2",
     );
@@ -204,8 +204,8 @@ fn test_load_options() {
     let config = ConfigFile::new(&yaml(
         loaded_peerid,
         Id::from(loaded_user_key.public_key()),
-        loaded_user_key.private_key(),
-        loaded_device_key.private_key(),
+        loaded_user_key.private_key().to_hexstr(),
+        loaded_device_key.private_key().to_hexstr(),
         "192.0.2.1",
         "127.0.0.2",
     ));
@@ -238,11 +238,11 @@ fn test_load_and_expand_envioroment_variables() {
         ),
         (
             "ACTIVEPROXY_OPTIONS_TEST_USER_KEY",
-            user_key.private_key().to_string(),
+            user_key.private_key().to_hexstr(),
         ),
         (
             "ACTIVEPROXY_OPTIONS_TEST_DEVICE_KEY",
-            device_key.private_key().to_string(),
+            device_key.private_key().to_hexstr(),
         ),
         (
             "ACTIVEPROXY_OPTIONS_TEST_SERVICE_HOST",

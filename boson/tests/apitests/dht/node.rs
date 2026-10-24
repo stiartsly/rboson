@@ -50,7 +50,7 @@ fn cleanup_path(input: &str) {
 }
 
 fn create_node(port: u16, path: &str) -> Result<Arc<Node>> {
-    let private_key = signature::KeyPair::random().private_key().to_string();
+    let private_key = signature::KeyPair::random().private_key().to_hexstr();
     let config_path = format!("{path}/node.yaml");
     let yaml = format!(
         "ipv4: true\nport: {}\nprivateKey: \"{}\"\ndataDir: {}\ndatabaseUri: {}\nlogLevel: \"debug\"\n",

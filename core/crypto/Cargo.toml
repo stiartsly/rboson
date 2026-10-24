@@ -17,8 +17,7 @@ categories.workspace = true
 [dependencies]
 bs58.workspace = true
 hex.workspace = true
-libc.workspace = true
-libsodium-sys-stable.workspace = true
+libsodium-rs.workspace = true
 rand.workspace = true
 sha2.workspace = true
 static_assertions.workspace = true

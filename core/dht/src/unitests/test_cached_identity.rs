@@ -49,8 +49,8 @@ mod tests {
         let cached = CachedIdentity::new(CryptoIdentity::random());
         let peer_id = CryptoIdentity::random().id().clone();
 
-        let first = cached.context(&peer_id);
-        let second = cached.context(&peer_id);
+        let first = cached.context(&peer_id).unwrap();
+        let second = cached.context(&peer_id).unwrap();
 
         assert_eq!(Arc::ptr_eq(&first, &second), true);
         assert_eq!(first.lock().unwrap().id(), &peer_id);
@@ -62,8 +62,8 @@ mod tests {
         let peer_a = CryptoIdentity::random().id().clone();
         let peer_b = CryptoIdentity::random().id().clone();
 
-        let ctx_a = cached.context(&peer_a);
-        let ctx_b = cached.context(&peer_b);
+        let ctx_a = cached.context(&peer_a).unwrap();
+        let ctx_b = cached.context(&peer_b).unwrap();
 
         assert!(!Arc::ptr_eq(&ctx_a, &ctx_b));
         assert_eq!(ctx_a.lock().unwrap().id(), &peer_a);
@@ -75,9 +75,9 @@ mod tests {
         let cached = CachedIdentity::new(CryptoIdentity::random());
         let peer_id = CryptoIdentity::random().id().clone();
 
-        let first = cached.context(&peer_id);
+        let first = cached.context(&peer_id).unwrap();
         cached.clear_cache();
-        let second = cached.context(&peer_id);
+        let second = cached.context(&peer_id).unwrap();
 
         assert_eq!(Arc::ptr_eq(&first, &second), false);
         assert_eq!(second.lock().unwrap().id(), &peer_id);

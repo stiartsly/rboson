@@ -112,3 +112,12 @@ fn streaming_and_one_shot_signatures_are_not_interchangeable() {
     let one_shot = kp.private_key().sign_into(b"message").unwrap();
     assert!(!Signature::new().update(b"message").verify(&one_shot, kp.public_key()).unwrap());
 }
+
+#[test]
+fn private_keys_are_redacted() {
+    let kp = KeyPair::random();
+    assert_eq!(format!("{}", kp.private_key()), "<redacted>");
+    assert_eq!(format!("{:?}", kp.private_key()), "Signature::PrivateKey(<redacted>)");
+    assert!(format!("{:?}", kp).contains("Signature::PrivateKey(<redacted>)"));
+    assert!(kp.private_key().to_hexstr().starts_with("0x"));
+}

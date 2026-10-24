@@ -58,14 +58,38 @@ fn one_shot_matches_precomputed() {
 #[test]
 fn sealed_box_roundtrip() {
     let bob = KeyPair::random();
-    let cipher = CryptoBox::encrypt_sealed(b"anon", bob.public_key()).unwrap();
+    let cipher = CryptoBox::encrypt_sealed_into(b"anon", bob.public_key()).unwrap();
     assert_eq!(cipher.len(), b"anon".len() + CryptoBox::SEAL_BYTES);
-    let plain = CryptoBox::decrypt_sealed(&cipher, bob.public_key(), bob.private_key()).unwrap();
+    let plain = CryptoBox::decrypt_sealed_into(&cipher, bob.public_key(), bob.private_key()).unwrap();
     assert_eq!(plain, b"anon");
 
     let eve = KeyPair::random();
-    assert!(CryptoBox::decrypt_sealed(&cipher, eve.public_key(), eve.private_key()).is_err());
-    assert!(CryptoBox::decrypt_sealed(&cipher[..10], bob.public_key(), bob.private_key()).is_err());
+    assert!(CryptoBox::decrypt_sealed_into(&cipher, eve.public_key(), eve.private_key()).is_err());
+    assert!(CryptoBox::decrypt_sealed_into(&cipher[..10], bob.public_key(), bob.private_key()).is_err());
+}
+
+#[test]
+fn sealed_box_into_buffers() {
+    let bob = KeyPair::random();
+    let mut cipher = [0u8; 4 + CryptoBox::SEAL_BYTES];
+    assert_eq!(CryptoBox::encrypt_sealed(b"anon", &mut cipher, bob.public_key()).unwrap(), cipher.len());
+    let mut plain = [0u8; 4];
+    assert_eq!(CryptoBox::decrypt_sealed(&cipher, &mut plain, bob.public_key(), bob.private_key()).unwrap(), 4);
+    assert_eq!(&plain, b"anon");
+
+    let mut short = [0u8; 10];
+    assert!(CryptoBox::encrypt_sealed(b"anon", &mut short, bob.public_key()).is_err());
+    assert!(CryptoBox::decrypt_sealed(&cipher, &mut [0u8; 3], bob.public_key(), bob.private_key()).is_err());
+}
+
+#[test]
+fn secrets_are_redacted() {
+    let kp = KeyPair::random();
+    assert_eq!(format!("{}", kp.private_key()), "<redacted>");
+    assert_eq!(format!("{:?}", kp.private_key()), "CryptoBox::PrivateKey(<redacted>)");
+    assert!(format!("{:?}", kp).contains("CryptoBox::PrivateKey(<redacted>)"));
+    let shared = CryptoBox::try_from((kp.public_key(), kp.private_key())).unwrap();
+    assert_eq!(format!("{:?}", shared), "CryptoBox(<redacted>)");
 }
 
 #[test]

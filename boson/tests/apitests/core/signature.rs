@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_keypair_tryfrom_sk2() {
         let kp = signature::KeyPair::random();
-        let kp_str = kp.private_key().to_string();
+        let kp_str = kp.private_key().to_hexstr();
 
         let sk = PrivateKey::try_from(kp_str.as_str());
         assert_eq!(sk.is_ok(), true);

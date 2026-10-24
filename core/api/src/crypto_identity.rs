@@ -163,9 +163,9 @@ impl Identity for CryptoIdentity {
     }
 
     fn decrypt(&self, sender: &Id, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if cipher.len() < Self::OVERHEAD_PADDED_NONCE {
+        if cipher.len() <= Self::OVERHEAD_PADDED_NONCE {
             return Err(ArgumentError::new(format!(
-                "Ciphertext length {} is smaller than the required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD_PADDED_NONCE
             )));
@@ -182,9 +182,9 @@ impl Identity for CryptoIdentity {
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        if cipher.len() < Self::OVERHEAD_PADDED_NONCE {
+        if cipher.len() <= Self::OVERHEAD_PADDED_NONCE {
             return Err(ArgumentError::new(format!(
-                "Ciphertext length {} is smaller than the required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD_PADDED_NONCE
             )));
@@ -215,9 +215,9 @@ impl Identity for CryptoIdentity {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if cipher.len() < Self::OVERHEAD_BASE {
+        if cipher.len() <= Self::OVERHEAD_BASE {
             return Err(ArgumentError::new(format!(
-                "Ciphertext length {} is smaller than the required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD_BASE
             )));
@@ -250,9 +250,9 @@ impl Identity for CryptoIdentity {
         nonce: &[u8],
         cipher: &[u8],
     ) -> Result<Vec<u8>> {
-        if cipher.len() < Self::OVERHEAD_BASE {
+        if cipher.len() <= Self::OVERHEAD_BASE {
             return Err(ArgumentError::new(format!(
-                "Ciphertext length {} is smaller than the required overhead {}",
+                "Ciphertext length {} must be longer than the overhead {}",
                 cipher.len(),
                 Self::OVERHEAD_BASE
             )));

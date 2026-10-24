@@ -33,8 +33,8 @@ mod tests {
             "service:\n  peerId: {service_peerid}\n{service}\
              client:\n  userId: {user_id}\n  userPrivateKey: \"{}\"\n  devicePrivateKey: \"{}\"\n\
              upstream:\n  host: 127.0.0.1\n  port: 8080\n  scheme: http://\n",
-            user_key.private_key(),
-            device_key.private_key(),
+            user_key.private_key().to_hexstr(),
+            device_key.private_key().to_hexstr(),
         ))
         .unwrap()
     }

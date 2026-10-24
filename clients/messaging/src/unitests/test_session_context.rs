@@ -74,7 +74,7 @@ fn encrypts_channel_data() {
     for channel in [false, true] {
         let peer = CryptoIdentity::new();
         let context = context(channel, *peer.id());
-        for plain in [b"message".as_slice(), b"".as_slice()] {
+        for plain in [b"message".as_slice()] {
             let rc = context.encrypt(peer.id(), plain);
             assert!(rc.is_ok());
             let encrypted = rc.unwrap();
@@ -93,6 +93,12 @@ fn encrypts_channel_data() {
             let decrypted = rc.unwrap();
             assert_eq!(decrypted, plain);
         }
+
+        // An empty plaintext encrypts, but its ciphertext is rejected, as the Java SDK does.
+        let encrypted = context.encrypt(peer.id(), b"").unwrap();
+        assert!(peer.decrypt_into(context.session_id(), &encrypted).is_err());
+        let encrypted = peer.encrypt_into(context.session_id(), b"").unwrap();
+        assert!(context.decrypt(peer.id(), &encrypted).is_err());
 
         assert!(context.rx_crypto_context.is_none());
         assert!(context.tx_crypto_context.is_none());

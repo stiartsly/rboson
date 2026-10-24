@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use boson_api::{
     {CryptoContext, CryptoIdentity, Result},
+    errors::CryptoError,
     Id, Identity,
 };
 
@@ -47,13 +48,15 @@ impl CachedIdentity {
         self.cache.invalidate_all();
     }
 
-    pub(crate) fn context(&self, key: &Id) -> Arc<Mutex<CryptoContext>> {
-        self.cache.get_with(key.clone(), || {
-            Arc::new(Mutex::new(CryptoContext::from_private_key(
-                key.clone(),
-                self.identity.encryption_key().private_key(),
-            )))
-        })
+    /// Fails when `key` is not a usable public key, as an id from the network may not be.
+    pub(crate) fn context(&self, key: &Id) -> Result<Arc<Mutex<CryptoContext>>> {
+        self.cache
+            .try_get_with(key.clone(), || {
+                CryptoContext::from_private_key(key.clone(), self.identity.encryption_key().private_key())
+                    .map(|context| Arc::new(Mutex::new(context)))
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| CryptoError::new(e.to_string()).into())
     }
 
     pub(crate) fn identity(&self) -> Arc<CryptoIdentity> {
@@ -79,19 +82,19 @@ impl Identity for CachedIdentity {
     }
 
     fn encrypt(&self, receiver: &Id, data: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        self.context(receiver).lock().unwrap().encrypt(data, cipher)
+        self.context(receiver)?.lock().unwrap().encrypt(data, cipher)
     }
 
     fn encrypt_into(&self, receiver: &Id, plain: &[u8]) -> Result<Vec<u8>> {
-        self.context(receiver).lock().unwrap().encrypt_into(plain)
+        self.context(receiver)?.lock().unwrap().encrypt_into(plain)
     }
 
     fn decrypt(&self, sender: &Id, data: &[u8], plain: &mut [u8]) -> Result<usize> {
-        self.context(sender).lock().unwrap().decrypt(data, plain)
+        self.context(sender)?.lock().unwrap().decrypt(data, plain)
     }
 
     fn decrypt_into(&self, sender: &Id, cipher: &[u8]) -> Result<Vec<u8>> {
-        self.context(sender).lock().unwrap().decrypt_into(cipher)
+        self.context(sender)?.lock().unwrap().decrypt_into(cipher)
     }
 
     fn encrypt_with_nonce(

@@ -1,6 +1,4 @@
-mod argument_error;
 mod before_valid_period;
-mod crypto_error;
 mod db_error;
 mod expired_error;
 mod io_error;
@@ -13,13 +11,10 @@ mod protocol_error;
 mod signature_error;
 mod state_error;
 
-pub type Error = Box<dyn std::error::Error>;
-pub type Result<T> = std::result::Result<T, Error>;
+pub use boson_crypto::errors::{ArgumentError, CryptoError, Error, Result};
 
 pub use {
-    argument_error::ArgumentError,
     before_valid_period::BeforeValidPeriodError,
-    crypto_error::CryptoError,
     db_error::DBError,
     expired_error::ExpiredError,
     io_error::IOError,

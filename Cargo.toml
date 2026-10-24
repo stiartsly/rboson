@@ -6,8 +6,6 @@ members = [
     "clients/*",
     "tools/*",
 ]
-# Old single-crate sources that have no place in the new layout yet.
-exclude = ["refactor"]
 
 [workspace.package]
 version = "0.1.0"

@@ -36,109 +36,106 @@ At a high level, this project provides:
 | `tools/node/` | `boson-node` | Regular node daemon |
 | `interop/` | | Test vectors and integration tests against the Java implementation |
 
-Client crates depend on the `Node` trait only, never on a node implementation: the application
-chooses `boson-dht` or `boson-higgs`.
+The `boson` facade also keeps the public API of the earlier single `rboson` crate (`boson::Id`,
+`boson::dht::Node`, `boson::did`, ...), so code written against it builds unchanged.
+
+Work in progress in this layout:
+
+- Cryptography still lives in `boson-api`; `boson-crypto` gets it once it is split out.
+- `Node` is still the concrete DHT node in `boson-dht`. A `Node` abstraction in `boson-api`, like
+  the Java `Node` interface, comes later; then the client crates depend on it instead of on a node
+  implementation, and the application chooses `boson-dht` or `boson-higgs`.
+- `boson-crypto`, `boson-http`, `boson-higgs` and `boson-ion-store-client` are still empty.
+- `refactor/apps/chat` is the chat demo of the earlier layout. It is not part of the workspace and
+  is not built.
 
 ## 3. Compiling the project
 
-Build the full project:
-
 ```bash
 cargo build
-cargo test
 cargo clippy --all-targets --all-features
 ```
 
-Check the library modules:
+Run the tests:
 
 ```bash
-cargo check --lib
+cargo test                   # unit tests of every crate
+cargo test --all-features    # also the API tests in boson/tests/apitests
 ```
 
-Run tests:
+The API tests use the whole stack through the `boson` facade, so they need all of its features.
+They start DHT nodes on fixed local ports.
+
+`boson-dht` enables its `devp` feature by default: developer mode, which lets the node use private
+(bogon) addresses.
+
+## 4. Tools
+
+The tools ship with the Rust SDK and double as sample code for Rust developers. They have the same
+commands as the Java tools of the Boson Java SDK. Commands without a Rust implementation yet say so
+(`<tool> <command>: not implemented yet`, exit code 2).
+
+| Tool | Implemented | Not implemented yet |
+|---|---|---|
+| `boson-cli` | `user register`, `user show`, `device add`, `node status`, `proxy start`, `util keygen` | the rest of `user`, `device`, `ionstore`, `dht`, `turn`, `node`, `config`, `identity`, `util` |
+| `boson-node` | `run`, `shell` | `setup`, `cache`, `id`, `config` |
+| `boson-director-cli` | | all of `user`, `device`, `plan`, `feature`, `subscription`, `blacklist`, `federation`, `node`, `config`, `identity` |
+
+Every command has `--help`, for example `cargo run -p boson-cli -- user --help`.
+
+### boson-node
+
+Run a DHT node. It keeps its key and database in the data directory, and stops after 10 minutes:
 
 ```bash
-cargo test
+cargo run -p boson-node -- run \
+  -d .sample_node \
+  -p 39088 \
+  -b NODEID@IP:PORT
 ```
 
-Build or check a specific application binary:
+Explore the DHT from an interactive shell:
 
 ```bash
-cargo check --bin shell
-cargo check --bin launcher
-cargo check --bin chat
+cargo run -p boson-node -- shell --config tools/node/shell/node.yaml
 ```
 
-The default feature set includes development/inspection support as configured in `Cargo.toml`.
+Set `privateKey` in `tools/node/shell/node.yaml` first; it ships with a placeholder. Inside the
+shell, `help` lists the commands: `id`, `find node|value|peer`, `store value`,
+`announce peer`, `routing` and `log`; `exit` leaves it. `tools/node/shell/` also holds the
+configurations of three more shell nodes (`announce_peer`, `announce_value`, `query`), each with
+its own port, key and data directory, to run several shells on one machine.
 
-## 4. Main applications
+### boson-cli
 
-### Shell
-
-The shell application provides an interactive DHT and Director-oriented command shell.
+The account commands talk to the Director of a super node, given by `--director-url` or
+`$BOSON_DIRECTOR_URL`:
 
 ```bash
-cargo run --bin shell -- --config apps/shell/node.yaml
+export BOSON_DIRECTOR_URL=https://127.0.0.1:9000
+
+cargo run -p boson-cli -- node status
+cargo run -p boson-cli -- user register USER_PRIVATE_KEY --name Alice
+cargo run -p boson-cli -- user show -u USER_PRIVATE_KEY --devices
+cargo run -p boson-cli -- device add DEVICE_PRIVATE_KEY -u USER_PRIVATE_KEY --device-name laptop
 ```
 
-Useful options include:
+Generate a user identity or a device key, offline:
 
 ```bash
-cargo run --bin shell -- \
-  --config apps/shell/node.yaml \
-  --port 39001 \
-  --datadir .dev_shell_data
+cargo run -p boson-cli -- util keygen --user
+cargo run -p boson-cli -- util keygen --device
 ```
 
-Inside the shell, use `help` to list available commands.
-
-### Launcher
-
-The launcher application starts the Boson node and active proxy service using separate node and active proxy configuration files.
+Expose a local service through the super node's Active Proxy, until Ctrl+C:
 
 ```bash
-cargo run --bin launcher -- \
-  --config apps/launcher/node.yaml \
-  --activeproxy-config apps/launcher/activeproxy.yaml \
-  --director-url https://127.0.0.1:9000
+cargo run -p boson-cli -- proxy start --config tools/cli/proxy.yaml
 ```
 
-The node configuration is used to construct node runtime options, while the active proxy configuration provides service, user, device, and upstream settings.
+### boson-director-cli
 
-### Chat
-
-The chat application starts a DHT node and an interactive messaging shell. It can be run in multiple terminals with different ports, data directories, user keys, and device keys to simulate multiple users.
-
-```bash
-cargo run --bin chat -- \
-  --config apps/chat/alice.yaml \
-  --node-config apps/chat/node.yaml \
-  --port 39011 \
-  --datadir .dev_alice_data/node
-```
-
-Example for a second instance:
-
-```bash
-cargo run --bin chat -- \
-  --config apps/chat/bob.yaml \
-  --node-config apps/chat/node.yaml \
-  --port 39012 \
-  --datadir .dev_bob_data/node
-```
-
-The chat application also supports direct messaging service arguments:
-
-```bash
-cargo run --bin chat -- \
-  --peerid PEERID \
-  --endpoint ENDPOINT \
-  --userid USER_PRIVATE_KEY \
-  --dev-key DEVICE_PRIVATE_KEY \
-  --node-config apps/chat/node.yaml \
-  --port 39011 \
-  --datadir .dev_chat_data/node
-```
+The administration tool of a super node. None of its commands has a Rust implementation yet.
 
 ## 5. License
 

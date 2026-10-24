@@ -18,15 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Ed25519 signatures.
+//! Ed25519 signatures, as the Java SDK makes them: a whole message is signed at once.
 //!
-//! One-shot signing signs a whole message at once. It is what Boson signs on the wire, and what the
-//! Java SDK does: [`PrivateKey::sign_into`] and [`PublicKey::verify`], or the functions [`sign`],
-//! [`sign_into`] and [`verify`].
+//! Sign with [`PrivateKey::sign`] / [`PrivateKey::sign_into`] and verify with [`PublicKey::verify`],
+//! or use [`Signature`], which groups the signature size and the same operations as the Java SDK's
+//! `Signature` does.
 //!
-//! Streaming signing, [`Signature`], signs or verifies a message given in parts. It uses libsodium's
-//! multi-part API, which is Ed25519ph: it signs a SHA-512 hash of the message. Its signatures do not
-//! verify with the one-shot functions or with the Java SDK, nor the other way round.
+//! There is deliberately no streaming signer: libsodium's multi-part API computes Ed25519ph, and
+//! Ed25519ph(m) is not Ed25519(SHA512(m)), so its signatures would not verify with the Java SDK.
 
 use std::{
     str::FromStr,
@@ -468,65 +467,26 @@ impl AsRef<PublicKey> for KeyPair {
     }
 }
 
-/// A streaming Ed25519ph signer and verifier, for a message given in parts. Its signatures are not
-/// interchangeable with one-shot signatures; see the module documentation.
-#[derive(Debug, Clone)]
-pub struct Signature {
-    state: sign::State,
-}
+/// Ed25519 signatures, as the Java SDK's `Signature`: the signature size and one-shot signing and
+/// verifying. It is never instantiated.
+pub struct Signature(());
 
 impl Signature {
     pub const BYTES: usize = 64;
 
-    pub fn new() -> Self {
-        Self {
-            state: sign::State::new().expect("Ed25519ph state initialization never fails"),
-        }
+    /// Signs `message` with `key`, into `signature`.
+    pub fn sign(message: &[u8], signature: &mut [u8], key: &PrivateKey) -> Result<usize> {
+        key.sign(message, signature)
     }
 
-    pub fn reset(&mut self) -> &mut Self {
-        self.state = sign::State::new().expect("Ed25519ph state initialization never fails");
-        self
+    /// Signs `message` with `key`.
+    pub fn sign_into(message: &[u8], key: &PrivateKey) -> Result<Vec<u8>> {
+        key.sign_into(message)
     }
 
-    pub fn update(&mut self, part: &[u8]) -> &mut Self {
-        self.state.update(part).expect("Ed25519ph update never fails");
-        self
-    }
-
-    pub fn sign(&mut self, signature: &mut [u8], sk: &PrivateKey) -> Result<usize> {
-        if signature.len() != Signature::BYTES {
-            return Err(CryptoError::new(format!(
-                "Incorrect signature length {}, should be {}",
-                signature.len(),
-                Signature::BYTES
-            )));
-        }
-
-        let sig = self
-            .state
-            .finalize_create(&sk.raw())
-            .map_err(|e| CryptoError::new(format!("Signing failed: {e}")))?;
-        signature.copy_from_slice(&sig);
-        Ok(Signature::BYTES)
-    }
-
-    pub fn sign_into(&mut self, sk: &PrivateKey) -> Result<Vec<u8>> {
-        let mut sig = vec![0u8; Self::BYTES];
-        self.sign(sig.as_mut(), sk).map(|_| sig)
-    }
-
-    pub fn verify(&mut self, signature: &[u8], pk: &PublicKey) -> Result<bool> {
-        if signature.len() != Signature::BYTES {
-            return Err(CryptoError::new(format!(
-                "Incorrect signature length {}, should be {}",
-                signature.len(),
-                Signature::BYTES
-            )));
-        }
-
-        let signature: &[u8; Signature::BYTES] = signature.try_into().unwrap();
-        Ok(self.state.finalize_verify(signature, &pk.raw()))
+    /// Verifies `signature` of `message` with `key`.
+    pub fn verify(message: &[u8], signature: &[u8], key: &PublicKey) -> Result<bool> {
+        key.verify(message, signature)
     }
 }
 

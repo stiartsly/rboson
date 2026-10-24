@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Ported from Boson.Native, adapted to this crate's API, plus the streaming signer.
+// Ported from Boson.Native, adapted to this crate's API.
 
 use crate::signature::{self, KeyPair, PrivateKey, Signature};
 
@@ -76,41 +76,19 @@ fn derive_is_deterministic_and_context_sensitive() {
 }
 
 #[test]
-fn streaming_signs_and_verifies_in_parts() {
+fn signature_matches_the_key_operations() {
     let kp = KeyPair::random();
-    let mut signer = Signature::new();
-    signer.update(b"boson").update(b" streaming");
-    let sig = signer.sign_into(kp.private_key()).unwrap();
+    let sig = Signature::sign_into(b"message", kp.private_key()).unwrap();
+    assert_eq!(sig.len(), Signature::BYTES);
+    assert_eq!(sig, kp.private_key().sign_into(b"message").unwrap());
 
-    let mut verifier = Signature::new();
-    verifier.update(b"boson").update(b" streaming");
-    assert!(verifier.verify(&sig, kp.public_key()).unwrap());
+    let mut buffer = [0u8; Signature::BYTES];
+    assert_eq!(Signature::sign(b"message", &mut buffer, kp.private_key()).unwrap(), Signature::BYTES);
+    assert_eq!(buffer.as_slice(), sig.as_slice());
 
-    let mut other = Signature::new();
-    other.update(b"boson").update(b" changed");
-    assert!(!other.verify(&sig, kp.public_key()).unwrap());
-}
-
-#[test]
-fn new_streaming_signer_is_initialized() {
-    // Ed25519 is deterministic, so a signer from new() and one reset explicitly must agree.
-    let kp = KeyPair::random();
-    let mut from_new = Signature::new();
-    let mut from_reset = Signature::new();
-    from_reset.reset();
-    let a = from_new.update(b"message").sign_into(kp.private_key()).unwrap();
-    let b = from_reset.update(b"message").sign_into(kp.private_key()).unwrap();
-    assert_eq!(a, b);
-}
-
-#[test]
-fn streaming_and_one_shot_signatures_are_not_interchangeable() {
-    let kp = KeyPair::random();
-    let streamed = Signature::new().update(b"message").sign_into(kp.private_key()).unwrap();
-    assert!(!kp.public_key().verify(b"message", &streamed).unwrap());
-
-    let one_shot = kp.private_key().sign_into(b"message").unwrap();
-    assert!(!Signature::new().update(b"message").verify(&one_shot, kp.public_key()).unwrap());
+    assert!(Signature::verify(b"message", &sig, kp.public_key()).unwrap());
+    assert!(!Signature::verify(b"tampered", &sig, kp.public_key()).unwrap());
+    assert!(Signature::verify(b"message", &sig[..10], kp.public_key()).is_err());
 }
 
 #[test]

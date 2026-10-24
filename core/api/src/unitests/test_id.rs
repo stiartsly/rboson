@@ -149,4 +149,17 @@ mod tests {
         assert_eq!(Id::try_from_base58(&id.to_base58()).unwrap(), id);
         assert_eq!(Id::try_from_bytes_at(&[0u8; 4].iter().chain(id.as_bytes()).copied().collect::<Vec<_>>(), 4).unwrap(), id);
     }
+
+    #[test]
+    fn encryption_key_of_an_invalid_point_is_an_error() {
+        // A small-order point, which libsodium refuses to convert to X25519: an error, not a panic.
+        let id = Id::try_from([0u8; Id::BYTES].as_slice()).unwrap();
+        assert!(id.to_encryption_key().is_err());
+        let _ = id.to_signature_key();
+
+        // An id made from a real key pair always converts; Id::random() is random bytes, not a key,
+        // and about half of all byte strings are not valid points.
+        let id = Id::from(crate::signature::KeyPair::random().public_key());
+        assert!(id.to_encryption_key().is_ok());
+    }
 }

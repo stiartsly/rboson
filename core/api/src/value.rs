@@ -226,7 +226,7 @@ impl Value {
             value.data.as_ref(),
             &mut cipher,
             nonce,
-            &value.recipient.as_ref().unwrap().to_encryption_key(),
+            &value.recipient.as_ref().unwrap().to_encryption_key()?,
             &encryption_sk,
         )?;
         value.data = cipher;
@@ -410,7 +410,7 @@ impl Value {
             &self.data,
             &mut plain,
             nonce,
-            &pk.to_encryption_key(),
+            &pk.to_encryption_key()?,
             recipient.encryption_key().private_key(),
         )?;
         Ok(plain)

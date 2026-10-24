@@ -284,32 +284,25 @@ mod tests {
     }
 
     /*
-    * Signature APIs
-    - new()
-    - reset(),
-    - update(),
-    - sign(sig, sk) -> Result<usize>
-    - sign_into(sk) -> Result<Vec<u8>>
-    - verify(sig, pk) -> Result<()>
+    * Signature APIs (as the Java SDK's Signature)
+    - BYTES
+    - sign(message, sig, sk) -> Result<usize>
+    - sign_into(message, sk) -> Result<Vec<u8>>
+    - verify(message, sig, pk) -> Result<bool>
     */
     #[test]
     fn test_signature() {
         let kp = KeyPair::random();
-        let mut sig = Signature::new();
-        let data1 = create_random_bytes(32);
-        let data2 = create_random_bytes(64);
-        let data3 = create_random_bytes(128);
-        sig.update(data1.as_slice())
-            .update(data2.as_slice())
-            .update(data3.as_slice());
+        let data = create_random_bytes(224);
 
         let mut sig_data = vec![0u8; Signature::BYTES];
-        let rc = sig.sign(sig_data.as_mut_slice(), kp.private_key());
+        let rc = Signature::sign(&data, sig_data.as_mut_slice(), kp.private_key());
         assert_eq!(rc.is_ok(), true);
         assert_eq!(rc.unwrap(), Signature::BYTES);
+        assert_eq!(Signature::sign_into(&data, kp.private_key()).unwrap(), sig_data);
 
-        // let rc = sig.verify(&sig_data, kp.public_key());
-        // TODO: assert_eq!(rc.is_ok(), true);
+        assert_eq!(Signature::verify(&data, &sig_data, kp.public_key()).unwrap(), true);
+        assert_eq!(Signature::verify(&data[1..], &sig_data, kp.public_key()).unwrap(), false);
     }
 
     /**

@@ -15,10 +15,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+boson-crypto.workspace = true
 boson-api.workspace = true
 boson-http.workspace = true
 base64.workspace = true
-blake2b_simd.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_cbor.workspace = true

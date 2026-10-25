@@ -15,6 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+blake2b_simd.workspace = true
 bs58.workspace = true
 hex.workspace = true
 libsodium-rs.workspace = true

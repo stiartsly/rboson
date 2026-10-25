@@ -20,3 +20,5 @@
 
 //! HTTPS transport shared by the Boson client libraries: certificate verification with the
 //! Boson identity binding, CWT bearer authentication, error mapping and server-sent events.
+
+pub mod tls;

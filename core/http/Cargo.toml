@@ -15,6 +15,14 @@ categories.workspace = true
 
 [dependencies]
 boson-api.workspace = true
+base64.workspace = true
+bs58.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+x509-parser.workspace = true
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "x509-parser"] }
 
 [lints]
 workspace = true

@@ -26,7 +26,6 @@ mod client;
 mod device;
 mod errors;
 mod options;
-mod pow;
 
 mod avatar;
 mod node_status;

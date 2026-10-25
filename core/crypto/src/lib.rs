@@ -28,6 +28,7 @@
 pub mod cryptobox;
 pub mod key_backup;
 pub mod key_derivation;
+pub mod pow;
 pub mod random;
 pub mod secret_stream;
 pub mod signature;
@@ -37,6 +38,7 @@ mod unitests {
     mod test_cryptobox;
     mod test_key_backup;
     mod test_key_derivation;
+    mod test_pow;
     mod test_random;
     mod test_secret_stream;
     mod test_signature;

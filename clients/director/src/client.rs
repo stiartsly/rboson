@@ -31,7 +31,10 @@ use boson_api::{
     errors::{MalformedError, NetworkError, Result, StateError},
     signature, Id,
 };
-use super::pow::{self, Solution};
+use boson_crypto::pow::registration::{self, Proof};
+
+// Nonces the proof-of-work solver may try before it gives up, as the Java SDK's DirectorClient.
+const MAX_POW_NONCES: u64 = 1_000_000;
 use super::errors::{
     ConflictError, ForbiddenError, InvalidRequestError,
     NotFoundError, PassphraseRequiredError,
@@ -92,6 +95,12 @@ impl Client {
             .redirect(reqwest::redirect::Policy::none());
         if options.is_insecure() {
             b = b.danger_accept_invalid_certs(true);
+        } else if let Some(node_id) = options.node_id() {
+            // CA-signed certificates are validated as usual either way; with the node id known, a
+            // self-signed certificate proving that identity is accepted too.
+            let tls = boson_http::tls::client_config(node_id)
+                .map_err(|e| NetworkError::new(format!("TLS setup failed: {e}")))?;
+            b = b.tls_backend_preconfigured(tls);
         }
         let client = b.build().map_err(|e|
             NetworkError::new(e.to_string())
@@ -200,14 +209,16 @@ impl Client {
         let challenge_n = challenge.n;
         let challenge_k = challenge.k;
         let challenge_effort = challenge.effort;
+        let solver_node_id = node_id.clone();
         let solution = tokio::task::spawn_blocking(move || {
-            pow::solve(
-                node_id,
+            registration::solve(
+                solver_node_id.as_bytes(),
                 &challenge_key,
                 challenge_n,
                 challenge_k,
                 challenge_effort,
                 &challenge_nonce,
+                MAX_POW_NONCES,
             )
             .map_err(|error| error.to_string())
         })
@@ -492,14 +503,14 @@ impl Client {
         user_key: &signature::KeyPair,
         initial_device_key: Option<&signature::KeyPair>,
         challenge: &Challenge,
-        solution: Solution,
+        solution: Proof,
     ) -> Result<()> {
         let mut body = json!({
             "userId": Id::from(user_key.public_key()),
             "challenge": base64url(&challenge.token),
             "challengeSig": base64url(&challenge.signature),
             "powNonce": base64url(&solution.pow_nonce),
-            "solution": solution.indices,
+            "solution": solution.solution,
             "userSig": base64url(&solution.signature),
         });
         insert_optional_string(&mut body, "userName", registration.name());
@@ -512,8 +523,8 @@ impl Client {
             body["deviceName"] = json!(registration.device_name());
             body["appName"] = json!(registration.app_name());
             body["deviceSig"] = json!(base64url(
-                &pow::sign(
-                    node_id,
+                &registration::sign(
+                    node_id.as_bytes(),
                     device_key,
                     &challenge.nonce,
                     &solution.pow_nonce,

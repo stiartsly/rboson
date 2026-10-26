@@ -1,5 +1,4 @@
 /target
-/Cargo.lock
 
 *.log
 *_data
@@ -10,7 +9,6 @@
 .sample_node
 
 .DS_Store
-.github
 .vscode
 .idea/
 

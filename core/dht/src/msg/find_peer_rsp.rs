@@ -21,17 +21,17 @@
 use crate::msg::lookup_rsp::{Data, LookupResponse};
 use boson_api::{
     errors::{Error, ProtocolError, Result},
-    utils, NodeInfo, PeerInfo,
+    utils::codec,
+    NodeInfo,
+    PeerInfo,
 };
 use serde::{
-    de::{self, SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
+    Deserialize, Serialize,
 };
 use std::fmt;
-use std::result::Result as StdResult;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindPeerResponse", try_from = "SerdeFindPeerResponse")]
+#[serde(into = "FindPeerResponseRaw", try_from = "FindPeerResponseRaw")]
 pub(crate) struct FindPeerResponse {
     data: Data,
     peers: Option<Vec<PeerInfo>>,
@@ -65,77 +65,94 @@ impl LookupResponse for FindPeerResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindPeerResponse {
-    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
+struct FindPeerResponseRaw {
+    #[serde(
+        rename = "n4",
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes4: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "n6",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "tok", default, skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     token: i32,
 
     #[serde(
         rename = "p",
         default,
-        serialize_with = "serialize_peers",
-        deserialize_with = "deserialize_peers",
-        skip_serializing_if = "utils::is_default"
+        with = "peers_codec",
+        skip_serializing_if = "codec::is_default"
     )]
     peers: Vec<PeerInfo>,
 }
 
-fn serialize_peers<S>(peers: &Vec<PeerInfo>, serializer: S) -> StdResult<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    if serializer.is_human_readable() {
-        peers.serialize(serializer)
-    } else {
-        let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
-        serializer.serialize_bytes(&packed)
+mod peers_codec {
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserializer, Serialize, Serializer};
+    use std::fmt;
+    use std::result::Result as StdResult;
+    use boson_api::PeerInfo;
+
+    pub(crate) fn serialize<S>(peers: &Vec<PeerInfo>, se: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if se.is_human_readable() {
+            peers.serialize(se)
+        } else {
+            let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
+            se.serialize_bytes(&packed)
+        }
     }
-}
 
-fn deserialize_peers<'de, D>(deserializer: D) -> StdResult<Vec<PeerInfo>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct PeersVisitor;
+    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Vec<PeerInfo>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PeersVisitor;
 
-    impl<'de> Visitor<'de> for PeersVisitor {
-        type Value = Vec<PeerInfo>;
+        impl<'de> Visitor<'de> for PeersVisitor {
+            type Value = Vec<PeerInfo>;
 
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a CBOR byte string containing peers or a peer sequence")
-        }
-
-        fn visit_bytes<E>(self, packed: &[u8]) -> StdResult<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            serde_cbor::from_slice(packed)
-                .map_err(|e| E::custom(format!("decoding packed peers failed: {e}")))
-        }
-
-        fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut peers = Vec::new();
-            while let Some(peer) = sequence.next_element()? {
-                peers.push(peer);
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a CBOR byte string containing peers or a peer sequence")
             }
-            Ok(peers)
-        }
-    }
 
-    deserializer.deserialize_any(PeersVisitor)
+            fn visit_bytes<E>(self, packed: &[u8]) -> StdResult<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                serde_cbor::from_slice(packed)
+                    .map_err(|e| E::custom(format!("decoding packed peers failed: {e}")))
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut peers = Vec::new();
+                while let Some(peer) = sequence.next_element()? {
+                    peers.push(peer);
+                }
+                Ok(peers)
+            }
+        }
+        de.deserialize_any(PeersVisitor)
+    }
 }
 
-impl Into<SerdeFindPeerResponse> for FindPeerResponse {
-    fn into(self) -> SerdeFindPeerResponse {
-        SerdeFindPeerResponse {
+impl Into<FindPeerResponseRaw> for FindPeerResponse {
+    fn into(self) -> FindPeerResponseRaw {
+        FindPeerResponseRaw {
             nodes4: self.nodes4().map(|v| v.to_vec()),
             nodes6: self.nodes6().map(|v| v.to_vec()),
             token: self.token(),
@@ -144,10 +161,10 @@ impl Into<SerdeFindPeerResponse> for FindPeerResponse {
     }
 }
 
-impl TryFrom<SerdeFindPeerResponse> for FindPeerResponse {
+impl TryFrom<FindPeerResponseRaw> for FindPeerResponse {
     type Error = Error;
 
-    fn try_from(s: SerdeFindPeerResponse) -> Result<Self> {
+    fn try_from(s: FindPeerResponseRaw) -> Result<Self> {
         if s.peers.is_empty() && s.nodes4.is_none() && s.nodes6.is_none() {
             return Err(ProtocolError::new(
                 "either \"n4\", \"n6\" or \"p\" must be present",
@@ -172,3 +189,7 @@ impl fmt::Display for FindPeerResponse {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_peer_rsp.rs"]
+mod test_find_peer_rsp;

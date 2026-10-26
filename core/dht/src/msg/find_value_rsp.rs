@@ -22,13 +22,16 @@ use super::lookup_rsp::{Data, LookupResponse};
 use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
-    utils, Id, NodeInfo, Value,
+    utils::codec,
+    Id,
+    NodeInfo,
+    Value,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindValueResponse", try_from = "SerdeFindValueResponse")]
+#[serde(into = "FindValueResponseRaw", try_from = "FindValueResponseRaw")]
 pub(crate) struct FindValueResponse {
     data: Data,
     value: Option<Value>,
@@ -62,30 +65,39 @@ impl LookupResponse for FindValueResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindValueResponse {
-    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
+struct FindValueResponseRaw {
+    #[serde(
+        rename = "n4",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes4: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "n6",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "tok", default, skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     token: i32,
 
     #[serde(
         rename = "k",
         default,
-        serialize_with = "utils::codec::id_opt::serialize",
-        deserialize_with = "utils::codec::id_opt::deserialize",
-        skip_serializing_if = "Option::is_none"
+        with = "codec::id_opt"
     )]
     pk: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "utils::codec::id_opt::serialize",
-        deserialize_with = "utils::codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     rec: Option<Id>,
@@ -93,40 +105,38 @@ struct SerdeFindValueResponse {
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "seq",
-        default, skip_serializing_if = "utils::is_default"
+        default,
+        skip_serializing_if = "codec::is_default"
     )]
     seq: i32,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     value: Option<Vec<u8>>,
 }
 
-impl Into<SerdeFindValueResponse> for FindValueResponse {
-    fn into(self) -> SerdeFindValueResponse {
-        SerdeFindValueResponse {
+impl Into<FindValueResponseRaw> for FindValueResponse {
+    fn into(self) -> FindValueResponseRaw {
+        FindValueResponseRaw {
             nodes4: self.nodes4().map(|v| v.to_vec()),
             nodes6: self.nodes6().map(|v| v.to_vec()),
             token: self.token(),
@@ -150,9 +160,9 @@ impl Into<SerdeFindValueResponse> for FindValueResponse {
     }
 }
 
-impl TryFrom<SerdeFindValueResponse> for FindValueResponse {
+impl TryFrom<FindValueResponseRaw> for FindValueResponse {
     type Error = Error;
-    fn try_from(s: SerdeFindValueResponse) -> Result<Self> {
+    fn try_from(s: FindValueResponseRaw) -> Result<Self> {
         if s.value.is_none() && s.nodes4.is_none() && s.nodes6.is_none() {
             return Err(ProtocolError::new(
                 "either \"n4\", \"n6\" or \"v\" must be present",
@@ -201,3 +211,7 @@ impl fmt::Display for FindValueResponse {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_value_rsp.rs"]
+mod test_find_value_rsp;

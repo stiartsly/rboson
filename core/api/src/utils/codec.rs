@@ -241,7 +241,7 @@ impl<'de> Visitor<'de> for OptionalBytesVisitor {
     }
 }
 
-pub mod seq {
+pub mod num {
     use super::*;
 
     pub fn serialize<S>(value: &i32, se: S) -> Result<S::Ok, S::Error>
@@ -266,9 +266,10 @@ pub mod seq {
                 .parse()
                 .map_err(D::Error::custom)?
         } else {
-            i32::deserialize(de)?
+            Option::<i32>::deserialize(de)?.unwrap_or(0)
         };
 
+        println!("Deserialized seq: {}", seq);
         if seq < 0 {
             return Err(D::Error::custom("seq must be larger than or equal to 0"));
         }
@@ -301,7 +302,7 @@ pub mod expected_seq {
                 .parse()
                 .map_err(D::Error::custom)?
         } else {
-            i32::deserialize(de)?
+            Option::<i32>::deserialize(de)?.unwrap_or(-1)
         };
 
         if seq < -1 {

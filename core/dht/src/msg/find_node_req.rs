@@ -18,20 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::{
-    msg::lookup_req::{
-        Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK, WANT_TOKEN_MASK,
-    },
+use crate::msg::lookup_req::{
+    Data as LookupData,
+    LookupRequest,
+    WANT4_MASK,
+    WANT6_MASK,
+    WANT_TOKEN_MASK,
 };
 use boson_api::{
-    utils,
+    utils::codec,
     Id,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindNodeRequest", from = "SerdeFindNodeRequest")]
+#[serde(into = "FindNodeRequestRaw", from = "FindNodeRequestRaw")]
 pub(crate) struct FindNodeRequest {
     data: LookupData,
 }
@@ -52,28 +54,24 @@ impl LookupRequest for FindNodeRequest {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindNodeRequest {
-    #[serde(
-        rename = "t",
-        serialize_with = "utils::codec::id::serialize",
-        deserialize_with = "utils::codec::id::deserialize"
-    )]
+struct FindNodeRequestRaw {
+    #[serde(rename = "t", with = "codec::id")]
     target: Id,
     #[serde(rename = "w")]
     want: i32,
 }
 
-impl Into<SerdeFindNodeRequest> for FindNodeRequest {
-    fn into(self) -> SerdeFindNodeRequest {
-        SerdeFindNodeRequest {
+impl Into<FindNodeRequestRaw> for FindNodeRequest {
+    fn into(self) -> FindNodeRequestRaw {
+        FindNodeRequestRaw {
             target: self.target().clone(),
             want: self.want(),
         }
     }
 }
 
-impl From<SerdeFindNodeRequest> for FindNodeRequest {
-    fn from(s: SerdeFindNodeRequest) -> Self {
+impl From<FindNodeRequestRaw> for FindNodeRequest {
+    fn from(s: FindNodeRequestRaw) -> Self {
         FindNodeRequest::new(
             s.target,
             s.want & WANT4_MASK != 0,
@@ -89,3 +87,7 @@ impl fmt::Display for FindNodeRequest {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_node_req.rs"]
+mod test_find_node_req;

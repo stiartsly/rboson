@@ -224,6 +224,7 @@ impl fmt::Display for Body {
     }
 }
 
+// Transaction ids.
 pub(crate) type TxId = u32;
 static NEXT_TXID: AtomicU32 = AtomicU32::new(0);
 
@@ -248,7 +249,7 @@ fn next_txid() -> TxId {
 }
 
 #[derive(Clone, Deserialize)]
-#[serde(try_from = "SerdeCborMessage")]
+#[serde(try_from = "CborMessageRaw")]
 pub(crate) struct Message {
     nodeid: Option<Id>, // The DHT node Id of the message sender.
 
@@ -355,9 +356,17 @@ impl Message {
     }
 }
 
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
+// Wire representations of `Message`.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeCborMessage {
+struct CborMessageRaw {
     #[serde(rename = "y")]
     type_: i32,
     #[serde(rename = "t")]
@@ -379,7 +388,7 @@ struct SerdeCborMessage {
 }
 
 #[derive(Serialize)]
-struct SerdeJsonMessage<'a> {
+struct JsonMessageRaw<'a> {
     #[serde(rename = "y")]
     type_: i32,
     #[serde(rename = "t")]
@@ -401,12 +410,12 @@ impl Serialize for Message {
         S: serde::Serializer,
     {
         if !se.is_human_readable() {
-            let message = SerdeCborMessage::try_from(self).map_err(serde::ser::Error::custom)?;
+            let message = CborMessageRaw::try_from(self).map_err(serde::ser::Error::custom)?;
             return message.serialize(se);
         }
 
         let body = self.body();
-        SerdeJsonMessage {
+        JsonMessageRaw {
             type_: self.composite_type(),
             txid: self.txid,
             ver: self.ver,
@@ -418,7 +427,7 @@ impl Serialize for Message {
     }
 }
 
-impl TryFrom<&Message> for SerdeCborMessage {
+impl TryFrom<&Message> for CborMessageRaw {
     type Error = serde_cbor::Error;
 
     fn try_from(msg: &Message) -> StdResult<Self, Self::Error> {
@@ -454,10 +463,10 @@ impl TryFrom<&Message> for SerdeCborMessage {
     }
 }
 
-impl TryFrom<SerdeCborMessage> for Message {
+impl TryFrom<CborMessageRaw> for Message {
     type Error = Error;
 
-    fn try_from(s: SerdeCborMessage) -> Result<Self> {
+    fn try_from(s: CborMessageRaw) -> Result<Self> {
         let kind: Kind = s.type_.try_into()?;
         let method: Method = s.type_.try_into()?;
 
@@ -501,6 +510,7 @@ impl AsRef<Message> for Message {
     }
 }
 
+// Message constructors.
 #[inline]
 fn request(method: Method, body: Option<Body>) -> Message {
     Message::new(Kind::Request, method, next_txid(), body)
@@ -612,9 +622,6 @@ pub(crate) fn error_msg(method: Method, txid: TxId, code: i32, description: Stri
     Message::new(Kind::Error, method, txid, Some(body))
 }
 
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let json = serde_json::to_value(&self).map_err(|_| fmt::Error)?;
-        write!(f, "{}", json)
-    }
-}
+#[cfg(test)]
+#[path = "unitests/test_msg.rs"]
+mod test_msg;

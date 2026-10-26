@@ -18,16 +18,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use super::lookup_req::{Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK};
+use super::lookup_req::{
+    Data as LookupData,
+    LookupRequest,
+    WANT4_MASK,
+    WANT6_MASK
+};
 use boson_api::{
     errors::{Error, Result},
-    utils, Id,
+    utils::codec, Id,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindValueRequest", try_from = "SerdeFindValueRequest")]
+#[serde(into = "FindValueRequestRaw", try_from = "FindValueRequestRaw")]
 pub(crate) struct FindValueRequest {
     data: LookupData,
     expected_seq: i32,
@@ -54,12 +59,8 @@ impl LookupRequest for FindValueRequest {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindValueRequest {
-    #[serde(
-        rename = "t",
-        serialize_with = "utils::codec::id::serialize",
-        deserialize_with = "utils::codec::id::deserialize"
-    )]
+struct FindValueRequestRaw {
+    #[serde(rename = "t", with = "codec::id")]
     target: Id,
 
     #[serde(rename = "w")]
@@ -68,8 +69,7 @@ struct SerdeFindValueRequest {
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        deserialize_with = "utils::codec::expected_seq::deserialize",
-        skip_serializing_if = "is_default_expected_seq"
+        with = "codec::expected_seq",
     )]
     expected_seq: i32,
 }
@@ -78,13 +78,9 @@ fn default_expected_seq() -> i32 {
     -1
 }
 
-fn is_default_expected_seq(value: &i32) -> bool {
-    *value == -1
-}
-
-impl Into<SerdeFindValueRequest> for FindValueRequest {
-    fn into(self) -> SerdeFindValueRequest {
-        SerdeFindValueRequest {
+impl Into<FindValueRequestRaw> for FindValueRequest {
+    fn into(self) -> FindValueRequestRaw {
+        FindValueRequestRaw {
             target: self.target().clone(),
             want: self.want(),
             expected_seq: self.expected_seq,
@@ -92,9 +88,9 @@ impl Into<SerdeFindValueRequest> for FindValueRequest {
     }
 }
 
-impl TryFrom<SerdeFindValueRequest> for FindValueRequest {
+impl TryFrom<FindValueRequestRaw> for FindValueRequest {
     type Error = Error;
-    fn try_from(s: SerdeFindValueRequest) -> Result<Self> {
+    fn try_from(s: FindValueRequestRaw) -> Result<Self> {
         Ok(FindValueRequest::new(
             s.target,
             s.want & WANT4_MASK != 0,
@@ -110,3 +106,7 @@ impl fmt::Display for FindValueRequest {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_value_req.rs"]
+mod test_find_value_req;

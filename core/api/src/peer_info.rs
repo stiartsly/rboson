@@ -566,8 +566,7 @@ struct PeerInfoRaw {
     #[serde(
         rename = "seq",
         default,
-        with = "codec::seq",
-        skip_serializing_if = "codec::is_default"
+        with = "codec::num",
     )]
     seq: i32,
 
@@ -610,7 +609,6 @@ struct PeerInfoRaw {
         rename = "ex",
         default,
         with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
     )]
     extra: Option<Vec<u8>>,
 }

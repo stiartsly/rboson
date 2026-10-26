@@ -20,15 +20,18 @@
 
 use boson_api::{
     errors::{Error, Result},
-    utils, Id, PeerInfo,
+    utils,
+    utils::codec,
+    Id,
+    PeerInfo,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(
-    into = "SerdeAnnouncePeerRequest",
-    try_from = "SerdeAnnouncePeerRequest"
+    into = "AnnouncePeerRequestRaw",
+    try_from = "AnnouncePeerRequestRaw"
 )]
 pub(crate) struct AnnouncePeerRequest {
     token: i32,
@@ -59,38 +62,32 @@ impl AnnouncePeerRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-struct SerdeAnnouncePeerRequest {
+struct AnnouncePeerRequestRaw {
     #[serde(rename = "tok")]
     token: i32,
 
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        deserialize_with = "utils::codec::expected_seq::deserialize",
-        skip_serializing_if = "is_default_expected_seq"
+        with = "codec::expected_seq"
     )]
     expected_seq: i32,
 
-    #[serde(
-        rename = "k",
-        serialize_with = "utils::codec::id::serialize",
-        deserialize_with = "utils::codec::id::deserialize"
-    )]
+    #[serde(rename = "k", with = "codec::id")]
     id: Id,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "utils::codec::seq::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::num",
+        skip_serializing_if = "codec::is_default"
     )]
     seq: i32,
 
     #[serde(
         rename = "o",
         default,
-        serialize_with = "utils::codec::id_opt::serialize",
-        deserialize_with = "utils::codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     node_id: Option<Id>,
@@ -98,16 +95,14 @@ struct SerdeAnnouncePeerRequest {
     #[serde(
         rename = "os",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "utils::codec::bytes::serialize",
-        deserialize_with = "utils::codec::bytes::deserialize"
+        with = "codec::bytes"
     )]
     sig: Vec<u8>,
 
@@ -120,9 +115,8 @@ struct SerdeAnnouncePeerRequest {
     #[serde(
         rename = "ex",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     extra: Option<Vec<u8>>,
 }
@@ -135,10 +129,10 @@ fn is_default_expected_seq(value: &i32) -> bool {
     *value == -1
 }
 
-impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
-    fn into(self) -> SerdeAnnouncePeerRequest {
+impl Into<AnnouncePeerRequestRaw> for AnnouncePeerRequest {
+    fn into(self) -> AnnouncePeerRequestRaw {
         let peer = self.peer;
-        SerdeAnnouncePeerRequest {
+        AnnouncePeerRequestRaw {
             token: self.token,
             expected_seq: self.expected_seq,
             id: peer.id().clone(),
@@ -161,9 +155,9 @@ impl Into<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
     }
 }
 
-impl TryFrom<SerdeAnnouncePeerRequest> for AnnouncePeerRequest {
+impl TryFrom<AnnouncePeerRequestRaw> for AnnouncePeerRequest {
     type Error = Error;
-    fn try_from(s: SerdeAnnouncePeerRequest) -> Result<Self> {
+    fn try_from(s: AnnouncePeerRequestRaw) -> Result<Self> {
         let peer = PeerInfo::packed(
             s.id,
             s.seq,
@@ -188,3 +182,7 @@ impl fmt::Display for AnnouncePeerRequest {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_announce_peer_req.rs"]
+mod test_announce_peer_req;

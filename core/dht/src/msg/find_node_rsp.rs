@@ -19,12 +19,15 @@
 // SOFTWARE.
 
 use crate::msg::lookup_rsp::{Data as LookupData, LookupResponse};
-use boson_api::{utils, NodeInfo};
+use boson_api::{
+    utils::codec,
+    NodeInfo
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindNodeResponse", try_from = "SerdeFindNodeResponse")]
+#[serde(into = "FindNodeResponseRaw", try_from = "FindNodeResponseRaw")]
 pub(crate) struct FindNodeResponse {
     data: LookupData,
 }
@@ -49,20 +52,32 @@ impl LookupResponse for FindNodeResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindNodeResponse {
-    #[serde(rename = "n4", skip_serializing_if = "utils::is_default")]
+struct FindNodeResponseRaw {
+    #[serde(
+        rename = "n4",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes4: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "n6", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "n6",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     nodes6: Option<Vec<NodeInfo>>,
 
-    #[serde(rename = "tok", default, skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "tok",
+        default,
+        skip_serializing_if = "codec::is_default"
+    )]
     token: i32,
 }
 
-impl Into<SerdeFindNodeResponse> for FindNodeResponse {
-    fn into(self) -> SerdeFindNodeResponse {
-        SerdeFindNodeResponse {
+impl Into<FindNodeResponseRaw> for FindNodeResponse {
+    fn into(self) -> FindNodeResponseRaw {
+        FindNodeResponseRaw {
             nodes4: self.nodes4().map(|v| v.to_vec()),
             nodes6: self.nodes6().map(|v| v.to_vec()),
             token: self.token(),
@@ -70,8 +85,8 @@ impl Into<SerdeFindNodeResponse> for FindNodeResponse {
     }
 }
 
-impl From<SerdeFindNodeResponse> for FindNodeResponse {
-    fn from(s: SerdeFindNodeResponse) -> Self {
+impl From<FindNodeResponseRaw> for FindNodeResponse {
+    fn from(s: FindNodeResponseRaw) -> Self {
         Self::new(s.nodes4, s.nodes6, s.token)
     }
 }
@@ -82,3 +97,7 @@ impl fmt::Display for FindNodeResponse {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_node_rsp.rs"]
+mod test_find_node_rsp;

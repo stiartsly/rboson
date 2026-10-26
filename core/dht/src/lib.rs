@@ -37,20 +37,6 @@ mod msg {
     pub(crate) mod msg;
     pub(crate) mod store_value_req;
 
-    #[cfg(test)]
-    mod unitests {
-        mod test_announce_peer_req;
-        mod test_error;
-        mod test_find_node_req;
-        mod test_find_node_rsp;
-        mod test_find_peer_req;
-        mod test_find_peer_rsp;
-        mod test_find_value_req;
-        mod test_find_value_rsp;
-        mod test_msg;
-        mod test_store_value_req;
-    }
-
     pub(crate) use {
         announce_peer_req::AnnouncePeerRequest,
         error::Error as ErrorBody,

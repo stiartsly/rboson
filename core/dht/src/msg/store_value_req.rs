@@ -21,13 +21,18 @@
 use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
-    utils, Id, Value,
+    utils::codec,
+    Id,
+    Value,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeStoreValueRequest", try_from = "SerdeStoreValueRequest")]
+#[serde(
+    into = "StoreValueRequestRaw",
+    try_from = "StoreValueRequestRaw"
+)]
 pub(crate) struct StoreValueRequest {
     token: i32,
     expected_seq: i32,
@@ -57,31 +62,28 @@ impl StoreValueRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-struct SerdeStoreValueRequest {
+struct StoreValueRequestRaw {
     #[serde(rename = "tok")]
     token: i32,
 
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        deserialize_with = "utils::codec::expected_seq::deserialize",
-        skip_serializing_if = "is_default_expected_seq"
+        with = "codec::expected_seq",
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "utils::codec::seq::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::num",
     )]
     seq: i32,
 
     #[serde(
         rename = "k",
         default,
-        serialize_with = "utils::codec::id_opt::serialize",
-        deserialize_with = "utils::codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     public_key: Option<Id>,
@@ -89,8 +91,7 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "utils::codec::id_opt::serialize",
-        deserialize_with = "utils::codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     recipient: Option<Id>,
@@ -98,26 +99,23 @@ struct SerdeStoreValueRequest {
     #[serde(
         rename = "n",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "utils::codec::bytes_opt::serialize",
-        deserialize_with = "utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes_opt",
+        skip_serializing_if = "codec::is_default"
     )]
     signature: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        serialize_with = "utils::codec::bytes::serialize",
-        deserialize_with = "utils::codec::bytes::deserialize",
-        skip_serializing_if = "utils::is_default"
+        with = "codec::bytes",
+        skip_serializing_if = "codec::is_default"
     )]
     data: Vec<u8>,
 }
@@ -126,14 +124,10 @@ fn default_expected_seq() -> i32 {
     -1
 }
 
-fn is_default_expected_seq(value: &i32) -> bool {
-    *value == -1
-}
-
-impl Into<SerdeStoreValueRequest> for StoreValueRequest {
-    fn into(self) -> SerdeStoreValueRequest {
+impl Into<StoreValueRequestRaw> for StoreValueRequest {
+    fn into(self) -> StoreValueRequestRaw {
         let value = self.value;
-        SerdeStoreValueRequest {
+        StoreValueRequestRaw {
             token: self.token,
             expected_seq: self.expected_seq,
             seq: value.sequence_number(),
@@ -146,10 +140,10 @@ impl Into<SerdeStoreValueRequest> for StoreValueRequest {
     }
 }
 
-impl TryFrom<SerdeStoreValueRequest> for StoreValueRequest {
+impl TryFrom<StoreValueRequestRaw> for StoreValueRequest {
     type Error = Error;
 
-    fn try_from(s: SerdeStoreValueRequest) -> Result<Self> {
+    fn try_from(s: StoreValueRequestRaw) -> Result<Self> {
         if s.data.is_empty() {
             return Err(ProtocolError::new("data field \"v\" cannot be empty"));
         }
@@ -178,3 +172,7 @@ impl fmt::Display for StoreValueRequest {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_store_value_req.rs"]
+mod test_store_value_req;

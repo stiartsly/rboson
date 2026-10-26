@@ -498,8 +498,7 @@ struct SerdeValue {
     #[serde(
         rename = "k",
         default,
-        serialize_with = "codec::id_opt::serialize",
-        deserialize_with = "codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     pk: Option<Id>,
@@ -507,8 +506,7 @@ struct SerdeValue {
     #[serde(
         rename = "rec",
         default,
-        serialize_with = "codec::id_opt::serialize",
-        deserialize_with = "codec::id_opt::deserialize",
+        with = "codec::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     recipient: Option<Id>,
@@ -516,8 +514,7 @@ struct SerdeValue {
     #[serde(
         rename = "n",
         default,
-        serialize_with = "codec::nonce_opt::serialize",
-        deserialize_with = "codec::nonce_opt::deserialize",
+        with = "codec::nonce_opt",
         skip_serializing_if = "Option::is_none"
     )]
     nonce: Option<Nonce>,
@@ -525,24 +522,21 @@ struct SerdeValue {
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "codec::bytes_opt::serialize",
-        deserialize_with = "codec::bytes_opt::deserialize",
+        with = "codec::bytes_opt",
         skip_serializing_if = "codec::is_default"
     )]
     sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize"
+        with = "codec::bytes"
     )]
     data: Vec<u8>,
 
     #[serde(
         rename = "seq",
         default,
-        deserialize_with = "codec::seq::deserialize",
-        skip_serializing_if = "crate::utils::is_default"
+        with = "codec::num",
     )]
     seq: i32,
 }

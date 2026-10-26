@@ -28,10 +28,16 @@ use boson_api::{utils, Id};
 /// Channel creation request sent to the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct NewChannelInfo {
-    #[serde(rename = "sid", serialize_with = "utils::codec::id::serialize")]
+    #[serde(
+        rename = "sid",
+        with = "utils::codec::id"
+    )]
     session_id: Id,
 
-    #[serde(rename = "sk", serialize_with = "utils::codec::bytes::serialize")]
+    #[serde(
+        rename = "sk",
+        with = "utils::codec::bytes"
+    )]
     session_key: Vec<u8>,
 
     #[serde(rename = "p", with = "codec::permission")]
@@ -51,7 +57,10 @@ pub(crate) struct NewChannelInfo {
     )]
     notice: Option<String>,
 
-    #[serde(rename = "a", skip_serializing_if = "utils::is_default")]
+    #[serde(
+        rename = "a",
+        skip_serializing_if = "utils::is_default"
+    )]
     announce: bool,
 }
 

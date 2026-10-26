@@ -18,17 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::msg::lookup_req::{Data as LookupData, LookupRequest, WANT4_MASK, WANT6_MASK};
+use std::fmt;
+use serde::{Deserialize, Serialize};
+
 use boson_api::{
     errors::{Error, Result},
-    utils, Id,
+    utils::codec, Id,
 };
-use serde::de::{Deserializer, Error as DeError};
-use serde::{Deserialize, Serialize};
-use std::{fmt, result::Result as StdResult};
+use crate::msg::lookup_req::{
+    Data as LookupData,
+    LookupRequest,
+    WANT4_MASK,
+    WANT6_MASK
+};
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(into = "SerdeFindPeerRequest", try_from = "SerdeFindPeerRequest")]
+#[serde(into = "FindPeerRequestRaw", try_from = "FindPeerRequestRaw")]
 pub(crate) struct FindPeerRequest {
     data: LookupData,
     expected_seq: i32,
@@ -67,12 +72,8 @@ impl LookupRequest for FindPeerRequest {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SerdeFindPeerRequest {
-    #[serde(
-        rename = "t",
-        serialize_with = "utils::codec::id::serialize",
-        deserialize_with = "utils::codec::id::deserialize"
-    )]
+struct FindPeerRequestRaw {
+    #[serde(rename = "t", with = "codec::id")]
     target: Id,
 
     #[serde(rename = "w")]
@@ -81,41 +82,25 @@ struct SerdeFindPeerRequest {
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        deserialize_with = "utils::codec::expected_seq::deserialize",
-        skip_serializing_if = "is_default_expected_seq"
+        with = "codec::expected_seq",
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "e",
-        deserialize_with = "deserialize_count",
-        skip_serializing_if = "utils::is_default"
+        default = "i32::default",
+        with = "codec::num",
     )]
     expected_count: i32,
-}
-
-fn deserialize_count<'de, D>(de: D) -> StdResult<i32, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let count = i32::deserialize(de)?;
-    if count < 0 {
-        return Err(DeError::custom("count must be larger than or equal to 0"));
-    }
-    Ok(count)
 }
 
 fn default_expected_seq() -> i32 {
     -1
 }
 
-fn is_default_expected_seq(value: &i32) -> bool {
-    *value == -1
-}
-
-impl Into<SerdeFindPeerRequest> for FindPeerRequest {
-    fn into(self) -> SerdeFindPeerRequest {
-        SerdeFindPeerRequest {
+impl Into<FindPeerRequestRaw> for FindPeerRequest {
+    fn into(self) -> FindPeerRequestRaw {
+        FindPeerRequestRaw {
             target: self.target().clone(),
             want: self.want(),
             expected_seq: self.expected_seq,
@@ -124,9 +109,9 @@ impl Into<SerdeFindPeerRequest> for FindPeerRequest {
     }
 }
 
-impl TryFrom<SerdeFindPeerRequest> for FindPeerRequest {
+impl TryFrom<FindPeerRequestRaw> for FindPeerRequest {
     type Error = Error;
-    fn try_from(s: SerdeFindPeerRequest) -> Result<Self> {
+    fn try_from(s: FindPeerRequestRaw) -> Result<Self> {
         Ok(FindPeerRequest::new(
             s.target,
             s.want & WANT4_MASK != 0,
@@ -143,3 +128,7 @@ impl fmt::Display for FindPeerRequest {
         write!(f, "{}", json)
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_find_peer_req.rs"]
+mod test_find_peer_req;

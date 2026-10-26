@@ -50,6 +50,8 @@ Work in progress in this layout:
 
 ## 3. Compiling the project
 
+The project requires Rust 1.88 or newer; `rust-toolchain.toml` pins 1.88.0.
+
 ```bash
 cargo build
 cargo clippy --all-targets --all-features

@@ -326,7 +326,7 @@ pub mod ver {
         }
     }
 
-    pub fn deserialize<'de, D>(de: D) -> Result<i32, D::Error>
+    pub fn deserialize<'de, D>(_de: D) -> Result<i32, D::Error>
     where
         D: Deserializer<'de>,
     {

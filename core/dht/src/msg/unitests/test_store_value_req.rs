@@ -18,18 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::{cryptobox::Nonce, Id, Value};
-use crate::{msg::store_value_req::StoreValueRequest};
+use boson_api::{
+    signature::KeyPair,
+    SignedBuilder,
+    Value,
+};
+use crate::msg::{
+    store_value_req::StoreValueRequest,
+};
 
 fn make_value() -> Value {
-    Value::packed(
-        Some(Id::random()),
-        None,
-        Some(Nonce::random()),
-        Some(vec![9; 64]),
-        vec![1, 2, 3, 4],
-        7,
-    )
+    let data = [1, 2, 3, 4];
+    SignedBuilder::new(&data)
+        .with_keypair(&KeyPair::random())
+        .with_sequence_number(7)
+        .build()
+        .expect("valid signed value")
 }
 
 #[cfg(test)]
@@ -73,3 +77,4 @@ mod tests {
         assert_eq!(decoded.value(), &value);
     }
 }
+

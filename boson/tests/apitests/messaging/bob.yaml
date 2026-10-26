@@ -3,9 +3,17 @@ service:
   endpoint: mqtts://47.101.142.224:9083
 
 client:
-  #userId: 7aTkVTBf1QKH5PxHtZjF6LE4uNUd5penYozZPVngmZwC
-  userPrivateKey: 0x69a742f28a2c6d8715191f3b809b02b7822de4419c25b33e96b605efb73e7b3961b888ce16422322620f169accdecbd86b269f93b148486a10fe0af865aa9a37
-  #deviceId: 3K9JDgqfQzKLTqaXU11fSBRySgr5deRk6g14C8yKozvd
-  devicePrivateKey: 0xb5bf200c01cadcb0c209ead75c82d487517cf8d4a9cc779d6aaee38adc18f063225d35b05c9edad030ac2dd6da91720f5fda3faaae7f8f73a9589380ff91c8ba
+  #userId: 81K81E9rwgDnSwfBMminErD7kMxAJjwFt6etCh6zB5Pu
+  userPrivateKey: 0x2ba41d34732cfbc4b5e5509bbde97595b20f6c3055148370ce318164637cd8be68164c35661e0669252119856dd15b591fe9340432ef137054142240c7cf6280
+  #deviceId: BuGNYn5Lsanr1pJecXQWC1e6XRkmxJJ8TuJ8v5x7An2M
+  devicePrivateKey: 0xb6b04dc43a19854c55951f2c76e129f9698b52889348c55c7950d6a698f04134a1f873b3da36238f1a072cc2dba93ed164128de00f763fef9fe28ae01636454a
 
-dataDir: /tmp/tests_sender
+dataDir: /tmp/.testing_bob
+
+database:
+  uri: jdbc:sqlite:messaging.db
+  poolSize: 1
+
+# Logger configuration.
+# Log level can be one of: trace, debug, info, warn, error
+logLevel: debug

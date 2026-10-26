@@ -1,23 +1,3 @@
-// Copyright (c) 2023 -      bosonnetwork.io
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 use std::time::{Duration, SystemTime};
 use serial_test::serial;
 use tokio::{sync::mpsc, time};
@@ -240,6 +220,8 @@ async fn clear_friend_requests(first: &Client, second: &Client) {
 
 async fn clear_contacts(first: &Client, second: &Client) {
     let (first_clear, second_clear) = tokio::join!(first.clear_contacts(), second.clear_contacts());
+    println!("first_clear: {:?}", first_clear.as_ref().err());
+    println!("second_clear: {:?}", second_clear.as_ref().err());
     assert!(first_clear.is_ok());
     assert!(second_clear.is_ok());
 }
@@ -622,6 +604,12 @@ mod lifecycle {
 mod friend_requests {
     use super::*;
 
+    async fn remove_friend_contact_if_present(client: &Client, friend_id: &Id) {
+        if client.get_contact(friend_id).await.unwrap().is_some() {
+            client.remove_contact(friend_id).await.unwrap();
+        }
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_friend_request() {
@@ -684,7 +672,11 @@ mod friend_requests {
         let recipient_id = *recipient.user_id();
 
         start_clients(&sender, &recipient).await;
-        reset_clients(&sender, &recipient).await;
+        clear_friend_requests(&sender, &recipient).await;
+        tokio::join!(
+            remove_friend_contact_if_present(&sender, &recipient_id),
+            remove_friend_contact_if_present(&recipient, &sender_id),
+        );
 
         // There is nothing to accept yet.
         assert!(recipient.accept_friend_request(sender_id).await.is_err());
@@ -756,7 +748,11 @@ mod friend_requests {
             .is_none());
         assert!(sender.get_contact(&recipient_id).await.unwrap().is_some());
 
-        reset_clients(&sender, &recipient).await;
+        clear_friend_requests(&sender, &recipient).await;
+        tokio::join!(
+            remove_friend_contact_if_present(&sender, &recipient_id),
+            remove_friend_contact_if_present(&recipient, &sender_id),
+        );
         stop_clients(&sender, &recipient).await;
     }
 

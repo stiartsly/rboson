@@ -607,7 +607,7 @@ pub(crate) async fn deploy(
 
     if let Err(error) = client.start().await {
         client.stop().await;
-        return Err(error);
+        return Err(error.into());
     }
     Ok(client)
 }

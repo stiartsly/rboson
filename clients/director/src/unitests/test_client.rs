@@ -27,8 +27,18 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
+// Keep the loopback mock server out of any proxy configured in the environment.
+fn bypass_proxy() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        std::env::set_var("NO_PROXY", "localhost,127.0.0.1,::1");
+        std::env::set_var("no_proxy", "localhost,127.0.0.1,::1");
+    });
+}
+
 #[tokio::test]
 async fn test_register_user() {
+    bypass_proxy();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
@@ -111,7 +121,8 @@ async fn test_register_user() {
 }
 
 #[tokio::test]
-async fn test_register_device_path() {
+async fn test_register_device() {
+    bypass_proxy();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
@@ -152,7 +163,7 @@ async fn test_register_device_path() {
 }
 
 #[tokio::test]
-async fn test_url_prefix_deduplication() {
+async fn test_url_prefix_dedup() {
     let user_key = KeyPair::random();
     let client1 = Client::new(
         director::Options::new("https://director.example.com")
@@ -209,7 +220,8 @@ async fn test_client_close_state() {
 }
 
 #[tokio::test]
-async fn test_get_avatar_none() {
+async fn test_get_avatar() {
+    bypass_proxy();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();
@@ -245,7 +257,8 @@ async fn test_get_avatar_none() {
 }
 
 #[tokio::test]
-async fn test_json_error_message_parsing() {
+async fn test_parse_error_message() {
+    bypass_proxy();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let user_key = KeyPair::random();

@@ -122,6 +122,12 @@ impl ProxyConnection {
         self.opened.get()
     }
 
+    // Skips the handshake so benchmarks can drive a connection straight into the relay phase.
+    #[cfg(test)]
+    pub(crate) fn force_idle(&self) {
+        *self.state.borrow_mut() = State::Idling;
+    }
+
     fn allow(self: &Rc<Self>, addr: SocketAddr) -> bool {
         self.handler.allow(addr)
     }
@@ -633,10 +639,10 @@ impl ProxyConnection {
     async fn handle_disconnect(self: &Rc<Self>, _pkt: packet::Disconnect) -> Result<()> {
         debug!("Connection {} got DISCONNECT from server", self.cid());
 
-        // Disconnected from the client side before connecting to the upstream:
-        // assume the upstream is already gone and account
-        // for that leg of the handshake before sending our own DISCONNECT.
-        if *self.state.borrow() == State::Connecting && self.upstream_tx.borrow().is_none() {
+        // The server closed first: we have not sent our own DISCONNECT yet. Count the server's
+        // DISCONNECT and send ours, so the server acknowledges it and the handshake can complete.
+        // (When the upstream side closed first, close_upstream() already sent it.)
+        if matches!(*self.state.borrow(), State::Connecting | State::Relaying) {
             self.confirm_disconnect();
             let _ = self.send_disconnect().await;
         }

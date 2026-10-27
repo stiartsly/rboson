@@ -31,6 +31,10 @@ mod session;
 mod state;
 mod verticle;
 
+#[cfg(test)]
+#[path = "unitests/bench_relay.rs"]
+mod bench_relay;
+
 pub(crate) use boson_api::utils::{
     handler::LocalBoxHandler,
     timer_client::{LocalBoxTimerClient, LocalBoxTimerCmd},

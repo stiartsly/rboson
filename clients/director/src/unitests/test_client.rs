@@ -128,6 +128,9 @@ async fn test_register_device() {
     let user_key = KeyPair::random();
     let device_key = KeyPair::random();
     let node_id = Id::random();
+    let expected_device_id = Id::from(device_key.public_key());
+    let user_pk = user_key.public_key().clone();
+    let device_pk = device_key.public_key().clone();
     let server = tokio::spawn(async move {
         let (mut stream, request) = accept_request(&listener).await;
         assert!(request.starts_with("GET /api/v1/client/id HTTP/1.1"));
@@ -145,6 +148,28 @@ async fn test_register_device() {
             request.lines().next().unwrap_or_default()
         );
         assert!(request.lines().any(|line| line == "authorization: Bearer device-test-token"));
+
+        let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["deviceId"], expected_device_id.to_base58());
+        assert_eq!(body["deviceName"], "Laptop");
+        assert_eq!(body["appName"], "BosonApp");
+
+        let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(body["nonce"].as_str().expect("nonce must be a base64 string"))
+            .unwrap();
+        assert_eq!(nonce.len(), 32);
+        let device_sig = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(body["deviceSig"].as_str().expect("deviceSig must be a base64 string"))
+            .unwrap();
+        assert!(device_pk.verify(&nonce, &device_sig).unwrap());
+
+        let user_sig = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(body["userSig"].as_str().expect("userSig must be a base64 string"))
+            .unwrap();
+        let mut authorization = expected_device_id.as_bytes().to_vec();
+        authorization.extend_from_slice(&nonce);
+        assert!(user_pk.verify(&authorization, &user_sig).unwrap());
+
         respond(&mut stream, &json!({})).await;
     });
 

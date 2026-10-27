@@ -20,17 +20,15 @@
 
 use futures::future::LocalBoxFuture;
 use log::{debug, error, info, warn};
+use futures::future::join_all;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
     rc::{Rc, Weak},
     time::{Duration, SystemTime},
 };
-use tokio::{
-    net::{TcpSocket, TcpStream},
-    task, time,
-};
+use tokio::{net::TcpStream, task, time};
 
 use super::{
     connection::ProxyConnection, connection_handler::ConnectionHandler,
@@ -51,6 +49,7 @@ const RE_ANNOUNCE_INTERVAL: u128 = 60 * 60 * 1000; // 60 minutes
 const MAX_IDLE_TIME: u128 = 5 * 60 * 1000; // 5 minutes
 const RECONNECT_BASE_DELAY: u64 = 5 * 1000; // 5 seconds
 const MAX_RECONNECT_FAILURES: i32 = 12; // caps retry delay at 1 minute
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait ConnectionStatusListener {
     fn connected(&self) {}
@@ -79,24 +78,25 @@ pub(crate) struct ProxySession {
     peer_context: Rc<RefCell<CryptoContext>>,
     session_context: Rc<RefCell<Option<CryptoContext>>>,
 
-    connected: RefCell<bool>,
-    next_connection_id: RefCell<i32>,
-    pending_connects: RefCell<i32>,
-    max_connections: RefCell<i32>,
-    name_access: RefCell<bool>,
-    connect_failures: RefCell<i32>,
-    reconnect_scheduled: RefCell<bool>,
+    // Plain-value state lives in `Cell`s: no runtime borrow tracking and no panics on re-entry.
+    connected: Cell<bool>,
+    next_connection_id: Cell<i32>,
+    pending_connects: Cell<i32>,
+    max_connections: Cell<i32>,
+    name_access: Cell<bool>,
+    connect_failures: Cell<i32>,
+    reconnect_scheduled: Cell<bool>,
 
     peer_info: RefCell<Option<PeerInfo>>,
 
     connection_map: RefCell<HashMap<i32, Rc<ProxyConnection>>>,
     connections: RefCell<ConnectionRegistry<ProxyConnection>>,
 
-    running: RefCell<bool>,
-    dangling_timestamp: RefCell<SystemTime>,
-    idle_timestamp: RefCell<SystemTime>,
-    last_announce_timestamp: RefCell<SystemTime>,
-    last_idle_check_timestamp: RefCell<SystemTime>,
+    running: Cell<bool>,
+    dangling_timestamp: Cell<SystemTime>,
+    idle_timestamp: Cell<SystemTime>,
+    last_announce_timestamp: Cell<SystemTime>,
+    last_idle_check_timestamp: Cell<SystemTime>,
 
     connection_status_listener: RefCell<Option<Rc<dyn ConnectionStatusListener>>>,
 
@@ -147,22 +147,22 @@ impl ProxySession {
             client_session_keypair: RefCell::new(None),
             peer_context: Rc::new(RefCell::new(peer_context)),
             session_context: Rc::new(RefCell::new(None)),
-            connected: RefCell::new(false),
-            next_connection_id: RefCell::new(0),
-            max_connections: RefCell::new(1),
-            name_access: RefCell::new(false),
-            connect_failures: RefCell::new(0),
-            reconnect_scheduled: RefCell::new(false),
-            pending_connects: RefCell::new(0),
+            connected: Cell::new(false),
+            next_connection_id: Cell::new(0),
+            max_connections: Cell::new(1),
+            name_access: Cell::new(false),
+            connect_failures: Cell::new(0),
+            reconnect_scheduled: Cell::new(false),
+            pending_connects: Cell::new(0),
             connection_map: RefCell::new(HashMap::new()),
             connections: RefCell::new(ConnectionRegistry::new()),
-            running: RefCell::new(false),
+            running: Cell::new(false),
             timer_client,
 
-            dangling_timestamp: RefCell::new(SystemTime::UNIX_EPOCH),
-            idle_timestamp: RefCell::new(SystemTime::UNIX_EPOCH),
-            last_announce_timestamp: RefCell::new(SystemTime::UNIX_EPOCH),
-            last_idle_check_timestamp: RefCell::new(SystemTime::UNIX_EPOCH),
+            dangling_timestamp: Cell::new(SystemTime::UNIX_EPOCH),
+            idle_timestamp: Cell::new(SystemTime::UNIX_EPOCH),
+            last_announce_timestamp: Cell::new(SystemTime::UNIX_EPOCH),
+            last_idle_check_timestamp: Cell::new(SystemTime::UNIX_EPOCH),
             connection_status_listener: RefCell::new(None),
         }))
     }
@@ -181,12 +181,13 @@ impl ProxySession {
         *self.connection_status_listener.borrow_mut() = listener;
     }
 
-    pub(crate) async fn start0(self: &Rc<Self>) -> Result<()> {
-        *self.last_idle_check_timestamp.borrow_mut() = SystemTime::now();
+    // Arms the periodic maintenance timer; the service connection is made later by `start`.
+    pub(crate) fn init(self: &Rc<Self>) -> Result<()> {
+        self.last_idle_check_timestamp.set(SystemTime::now());
 
-        *self.running.borrow_mut() = true;
-        if let Err(e) = self.setup_periodic_tasks().await {
-            *self.running.borrow_mut() = false;
+        self.running.set(true);
+        if let Err(e) = self.setup_periodic_tasks() {
+            self.running.set(false);
             return Err(e);
         }
 
@@ -206,7 +207,7 @@ impl ProxySession {
         Ok(())
     }
 
-    async fn setup_periodic_tasks(self: &Rc<Self>) -> Result<()> {
+    fn setup_periodic_tasks(self: &Rc<Self>) -> Result<()> {
         let session = self.clone();
         let _ = self.timer_client.add_timer(
             PERIODIC_CHECK_INTERVAL,
@@ -222,25 +223,19 @@ impl ProxySession {
     }
 
     pub(crate) async fn stop(self: &Rc<Self>) {
-        if !*self.running.borrow() {
+        if !self.running.get() {
             return;
         }
 
         debug!("Proxy session {} is stopping ...", self.peer_id());
-        *self.running.borrow_mut() = false;
+        self.running.set(false);
 
-        let conn_ids = self.connections.borrow().connections();
-        for id in conn_ids {
-            let conn = { self.connection_map.borrow().get(&id).cloned() };
-            if let Some(conn) = conn {
-                let _ = conn.close().await;
-            }
-        }
-        self.connection_map.borrow_mut().clear();
+        // Detach everything first, then close all connections concurrently.
+        let conns: Vec<_> = self.connection_map.borrow_mut().drain().map(|(_, c)| c).collect();
         self.connections.borrow_mut().clear();
+        join_all(conns.iter().map(|conn| conn.close())).await;
 
-        if *self.connected.borrow() {
-            *self.connected.borrow_mut() = false;
+        if self.connected.replace(false) {
             if let Some(listener) = self.connection_status_listener.borrow().as_ref() {
                 listener.disconnected();
             }
@@ -257,10 +252,10 @@ impl ProxySession {
 
     fn try_close_idle_connections(self: &Rc<Self>) {
         let now = SystemTime::now();
-        if elapsed_ms!(*self.last_idle_check_timestamp.borrow()) < IDLE_CHECK_INTERVAL {
+        if elapsed_ms!(self.last_idle_check_timestamp.get()) < IDLE_CHECK_INTERVAL {
             return;
         }
-        *self.last_idle_check_timestamp.borrow_mut() = now;
+        self.last_idle_check_timestamp.set(now);
 
         let (size, in_flight) = {
             let registry = self.connections.borrow();
@@ -271,7 +266,7 @@ impl ProxySession {
             self.peer_id()
         );
 
-        let idle_timestamp = *self.idle_timestamp.borrow();
+        let idle_timestamp = self.idle_timestamp.get();
         if in_flight != 0
             || idle_timestamp == SystemTime::UNIX_EPOCH
             || size <= 1
@@ -313,12 +308,12 @@ impl ProxySession {
         let Some(handler) = self.cfg.announce_peer_handler.clone() else {
             return;
         };
-        if elapsed_ms!(*self.last_announce_timestamp.borrow()) < RE_ANNOUNCE_INTERVAL {
+        if elapsed_ms!(self.last_announce_timestamp.get()) < RE_ANNOUNCE_INTERVAL {
             return;
         }
 
         info!("Session {} announcing peer info {peer} ...", self.peer_id());
-        *self.last_announce_timestamp.borrow_mut() = SystemTime::now();
+        self.last_announce_timestamp.set(SystemTime::now());
 
         let session = self.clone();
         task::spawn_local(async move {
@@ -330,29 +325,31 @@ impl ProxySession {
                         session.peer_id()
                     );
                     // retry after 1 minute
-                    *session.last_announce_timestamp.borrow_mut() = SystemTime::now()
-                        - Duration::from_millis((RE_ANNOUNCE_INTERVAL - 60_000) as u64);
+                    session.last_announce_timestamp.set(
+                        SystemTime::now()
+                            - Duration::from_millis((RE_ANNOUNCE_INTERVAL - 60_000) as u64),
+                    );
                 }
             }
         });
     }
 
     fn reset(&self) {
-        *self.connected.borrow_mut() = false;
-        *self.dangling_timestamp.borrow_mut() = SystemTime::UNIX_EPOCH;
+        self.connected.set(false);
+        self.dangling_timestamp.set(SystemTime::UNIX_EPOCH);
     }
 
     fn needs_new_connection(&self) -> bool {
-        if !*self.running.borrow() {
+        if !self.running.get() {
             return false;
         }
 
         let registry = self.connections.borrow();
-        let pending = *self.pending_connects.borrow() as usize;
+        let pending = self.pending_connects.get() as usize;
 
         // Count in-flight dials against the ceiling so concurrent busy/close handlers cannot
         // over-provision past max_connections while a CONNECT is still pending.
-        if registry.size() + pending >= *self.max_connections.borrow() as usize {
+        if registry.size() + pending >= self.max_connections.get() as usize {
             return false;
         }
 
@@ -363,13 +360,12 @@ impl ProxySession {
     }
 
     fn schedule_reconnect(self: &Rc<Self>) {
-        if !*self.running.borrow() || *self.reconnect_scheduled.borrow() {
+        if !self.running.get() || self.reconnect_scheduled.get() {
             return;
         }
 
-        let failures = (*self.connect_failures.borrow()).max(1);
-        let delay = reconnect_delay(failures);
-        *self.reconnect_scheduled.borrow_mut() = true;
+        let delay = reconnect_delay(self.connect_failures.get());
+        self.reconnect_scheduled.set(true);
         warn!(
             "Proxy session {} will retry connection for device {} in {} seconds",
             self.peer_id(),
@@ -380,7 +376,7 @@ impl ProxySession {
         let session = self.clone();
         task::spawn_local(async move {
             time::sleep(delay).await;
-            *session.reconnect_scheduled.borrow_mut() = false;
+            session.reconnect_scheduled.set(false);
             if session.needs_new_connection() && session.connect().await.is_err() {
                 session.schedule_reconnect();
             }
@@ -393,8 +389,16 @@ impl ProxySession {
         }
     }
 
+    // Fire-and-forget dial that never blocks the caller (callbacks from connections, timers).
+    fn spawn_connect(self: &Rc<Self>) {
+        let session = self.clone();
+        task::spawn_local(async move {
+            session.connect_or_schedule().await;
+        });
+    }
+
     async fn connect(self: &Rc<Self>) -> Result<()> {
-        *self.pending_connects.borrow_mut() += 1;
+        self.pending_connects.set(self.pending_connects.get() + 1);
 
         let addr = self.service_addr;
         debug!(
@@ -402,15 +406,14 @@ impl ProxySession {
             self.peer_id()
         );
 
-        let socket = TcpSocket::new_v4()?;
-        let result = socket.connect(addr).await;
-        *self.pending_connects.borrow_mut() -= 1;
+        let result = connect_tcp(addr).await;
+        self.pending_connects.set(self.pending_connects.get() - 1);
 
         let stream = match result {
             Ok(stream) => stream,
             Err(e) => {
-                *self.connect_failures.borrow_mut() += 1;
-                let failures = *self.connect_failures.borrow();
+                let failures = self.connect_failures.get() + 1;
+                self.connect_failures.set(failures);
                 warn!(
                     "Create new proxy connection to service {}@{addr} failed({failures}): {e}",
                     self.peer_id()
@@ -419,8 +422,8 @@ impl ProxySession {
             }
         };
 
-        let cid = *self.next_connection_id.borrow();
-        *self.next_connection_id.borrow_mut() = cid + 1;
+        let cid = self.next_connection_id.get();
+        self.next_connection_id.set(cid + 1);
         info!(
             "Created new proxy connection {cid} to service {}@{addr}",
             self.peer_id()
@@ -451,8 +454,7 @@ impl ProxySession {
 
     pub(crate) async fn connect_upstream(&self) -> Result<TcpStream> {
         debug!("Connecting to the upstream {} ...", self.upstream_addr);
-        let socket = TcpSocket::new_v4()?;
-        socket.connect(self.upstream_addr).await.map_err(Into::into)
+        connect_tcp(self.upstream_addr).await.map_err(Into::into)
     }
 
     pub(crate) fn on_challenge(
@@ -470,7 +472,7 @@ impl ProxySession {
 
         let device_id = self.device_identity.id().clone();
         let connection = connection.clone();
-        let connected = *self.connected.borrow();
+        let connected = self.connected.get();
         if !connected {
             let kp = cryptobox::KeyPair::random();
             let pk = kp.to_public_key();
@@ -515,15 +517,15 @@ impl ProxySession {
             return Err(ArgumentError::new("Session not initialized"));
         };
 
-        *self.max_connections.borrow_mut() = max_connections;
-        *self.name_access.borrow_mut() = name_access;
+        self.max_connections.set(max_connections);
+        self.name_access.set(name_access);
         //*self.endpoint.borrow_mut() = endpoint.to_string();
         //*self.named_endpoint.borrow_mut() = named_endpoint.map(|s| s.to_string());
 
         let crypto_box = cryptobox::CryptoBox::try_from((server_session_pk, kp.private_key()))?;
         *self.session_context.borrow_mut() =
             Some(CryptoContext::new(self.peer_id().clone(), crypto_box));
-        *self.connected.borrow_mut() = true;
+        self.connected.set(true);
 
         let endpoint = public_endpoint(endpoint, self.service_addr);
         let advertised = named_endpoint.unwrap_or(&endpoint);
@@ -572,8 +574,8 @@ impl ProxySession {
     }
 
     pub(crate) fn on_connection_opened(&self, _connection: &Rc<ProxyConnection>) {
-        *self.connect_failures.borrow_mut() = 0;
-        *self.dangling_timestamp.borrow_mut() = SystemTime::UNIX_EPOCH;
+        self.connect_failures.set(0);
+        self.dangling_timestamp.set(SystemTime::UNIX_EPOCH);
     }
 
     pub(crate) fn on_connection_closed(self: &Rc<Self>, connection: &Rc<ProxyConnection>) {
@@ -584,12 +586,12 @@ impl ProxySession {
 
         if self.connections.borrow().is_empty() {
             warn!("Proxy session {} is dangling ...", self.peer_id());
-            *self.dangling_timestamp.borrow_mut() = SystemTime::now();
+            self.dangling_timestamp.set(SystemTime::now());
 
             let session = self.clone();
             task::spawn_local(async move {
                 time::sleep(Duration::from_millis(STOP_DELAY)).await;
-                let dangling = *session.dangling_timestamp.borrow();
+                let dangling = session.dangling_timestamp.get();
                 if dangling != SystemTime::UNIX_EPOCH && elapsed_ms!(dangling) >= STOP_DELAY as u128
                 {
                     info!(
@@ -606,12 +608,9 @@ impl ProxySession {
 
         if self.needs_new_connection() {
             if was_opened {
-                let session = self.clone();
-                task::spawn_local(async move {
-                    session.connect_or_schedule().await;
-                });
+                self.spawn_connect();
             } else {
-                *self.connect_failures.borrow_mut() += 1;
+                self.connect_failures.set(self.connect_failures.get() + 1);
                 warn!(
                     "Proxy session {} connection was rejected before authentication; \
                      verify that device {} is admitted to the ActiveProxy service",
@@ -627,20 +626,17 @@ impl ProxySession {
         let id = connection.cid();
         let mut registry = self.connections.borrow_mut();
         if registry.mark_idle(id) && registry.in_flight() == 0 {
-            *self.idle_timestamp.borrow_mut() = SystemTime::now();
+            self.idle_timestamp.set(SystemTime::now());
         }
     }
 
     pub(crate) fn on_connection_busy(self: &Rc<Self>, connection: &Rc<ProxyConnection>) {
         let id = connection.cid();
         self.connections.borrow_mut().mark_busy(id);
-        *self.idle_timestamp.borrow_mut() = SystemTime::UNIX_EPOCH;
+        self.idle_timestamp.set(SystemTime::UNIX_EPOCH);
 
         if self.needs_new_connection() {
-            let session = self.clone();
-            task::spawn_local(async move {
-                session.connect_or_schedule().await;
-            });
+            self.spawn_connect();
         }
     }
 
@@ -650,7 +646,7 @@ impl ProxySession {
 
     // Closes the session: releases the crypto material. Must be called only after `stop()`.
     pub(crate) fn close(&self) {
-        assert!(!*self.running.borrow(), "Proxy session is still running");
+        assert!(!self.running.get(), "Proxy session is still running");
 
         *self.connection_status_listener.borrow_mut() = None;
         *self.session_context.borrow_mut() = None;
@@ -658,6 +654,15 @@ impl ProxySession {
 
         debug!("Proxy session {} closed", self.peer_id());
     }
+}
+
+// Dials with a bounded timeout and disables Nagle so small relayed frames are not delayed.
+async fn connect_tcp(addr: SocketAddr) -> std::io::Result<TcpStream> {
+    let stream = time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out"))??;
+    let _ = stream.set_nodelay(true);
+    Ok(stream)
 }
 
 fn reconnect_delay(failures: i32) -> Duration {

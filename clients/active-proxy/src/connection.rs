@@ -727,13 +727,15 @@ impl ProxyConnection {
 
         info!("Connection {} is closing...", self.cid());
 
-        if let Some(mut writer) = self.upstream_tx.borrow_mut().take() {
+        let writer = self.upstream_tx.borrow_mut().take();
+        if let Some(mut writer) = writer {
             let _ = writer.shutdown().await;
             info!("Connection {} upstream socket closed", self.cid());
         }
         *self.upstream_rx.borrow_mut() = None;
 
-        if let Some(mut writer) = self.relay_tx.borrow_mut().take() {
+        let writer = self.relay_tx.borrow_mut().take();
+        if let Some(mut writer) = writer {
             let _ = writer.shutdown().await;
             info!("Connection {} proxy socket closed", self.cid());
         }

@@ -44,7 +44,8 @@ use super::errors::{
 };
 use super::{
     base64url,
-    sign_nonce, Avatar, Device, NodeStatus, Options,
+    sign_device_authorization, sign_nonce,
+    Avatar, Device, NodeStatus, Options,
     Plan, Profile, ProfileUpdate, Subscription,
     UserPlan, UserRegistration,
 };
@@ -268,15 +269,24 @@ impl Client {
         }
 
         let nonce = boson_api::random_array::<AUTH_NONCE_BYTES>();
-        let signature = sign_nonce(key.private_key(), &nonce).map_err(|e|
+        let device_id = Id::from(key.public_key());
+        let device_sig = sign_nonce(key.private_key(), &nonce).map_err(|e|
             MalformedError::new(e.to_string())
         )?;
+        let Some(user_key) = self.options.user_key() else {
+            return Err(StateError::new(
+                "Registering a device needs the user's private key",
+            ));
+        };
+        let user_sig = sign_device_authorization(user_key.private_key(), &device_id, &nonce)
+            .map_err(|e| MalformedError::new(e.to_string()))?;
         let mut body = json!({
-            "deviceId": Id::from(key.public_key()),
+            "deviceId": device_id,
             "deviceName": name,
             "appName": app,
-            "nonce": nonce,
-            "deviceSig": signature,
+            "nonce": base64url(&nonce),
+            "deviceSig": device_sig,
+            "userSig": user_sig,
         });
         if let Some(passphrase) = passphrase {
             if passphrase.is_empty() {

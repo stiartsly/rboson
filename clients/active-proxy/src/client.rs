@@ -36,6 +36,13 @@ use super::{
     verticle::{self, VerticleClient},
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum State {
+    Stopped,
+    Starting,
+    Running,
+}
+
 pub struct ActiveProxyClient {
     options: Options,
     service_peerid: Id,
@@ -45,7 +52,7 @@ pub struct ActiveProxyClient {
     upstream_addr: SocketAddr,
 
     verticle: Cell<Option<VerticleClient>>,
-    running: Cell<bool>,
+    state: Cell<State>,
 }
 
 impl ActiveProxyClient {
@@ -59,6 +66,30 @@ impl ActiveProxyClient {
             }
         }
 
+        Self::validate(&options)?;
+
+        let upstream_endpoint = format!(
+            "{}{}:{}",
+            options.upstream_scheme(),
+            options.upstream_host(),
+            options.upstream_port()
+        );
+        let upstream_sockaddr = resolve_upstream(&upstream_endpoint)?;
+
+        let endpoint = format!("{}:{}", options.service_host(), options.service_port());
+
+        Ok(Arc::new(Self {
+            service_peerid: options.service_peerid().clone(),
+            service_endpoint: endpoint,
+            upstream_endpoint,
+            upstream_addr: upstream_sockaddr,
+            verticle: Cell::new(None),
+            state: Cell::new(State::Stopped),
+            options,
+        }))
+    }
+
+    fn validate(options: &Options) -> Result<()> {
         if options.service_host().trim().is_empty() {
             return Err(ArgumentError::new("ActiveProxy service host is empty"));
         }
@@ -71,39 +102,7 @@ impl ActiveProxyClient {
         if options.upstream_port() == 0 {
             return Err(ArgumentError::new("ActiveProxy upstream port is not set"));
         }
-
-        let upstream_endpoint = format!(
-            "{}{}:{}",
-            options.upstream_scheme(),
-            options.upstream_host(),
-            options.upstream_port()
-        );
-        let rest = upstream_endpoint
-            .strip_prefix("http://")
-            .unwrap_or(&upstream_endpoint);
-        let upstream_sockaddr = rest
-            .to_socket_addrs()
-            .map_err(|e| {
-                error!("Failed to resolve address '{rest}', network error: {e}");
-                ArgumentError::new(format!("Bad upstream address: {rest}"))
-            })?
-            .next()
-            .ok_or_else(|| {
-                error!("No valid address found for '{rest}', network error!!!");
-                NetworkError::new(format!("No valid address found for '{rest}'!"))
-            })?;
-
-        let endpoint = format!("{}:{}", options.service_host(), options.service_port());
-
-        Ok(Arc::new(Self {
-            service_peerid: options.service_peerid().clone(),
-            service_endpoint: endpoint,
-            upstream_endpoint,
-            upstream_addr: upstream_sockaddr,
-            verticle: Cell::new(None),
-            running: Cell::new(false),
-            options,
-        }))
+        Ok(())
     }
 
     pub fn options(&self) -> &Options {
@@ -135,17 +134,33 @@ impl ActiveProxyClient {
     }
 
     pub async fn start(&self) -> Result<()> {
-        if self.running.get() {
+        if self.state.get() != State::Stopped {
             return Err(ArgumentError::new(
                 "ActiveProxy instance is already running",
             ));
         }
+        // Claim the slot before the first await so concurrent callers cannot double-start.
+        self.state.set(State::Starting);
 
+        match self.deploy_verticle().await {
+            Ok(client) => {
+                self.verticle.set(Some(client));
+                self.state.set(State::Running);
+                Ok(())
+            }
+            Err(e) => {
+                self.state.set(State::Stopped);
+                Err(e)
+            }
+        }
+    }
+
+    async fn deploy_verticle(&self) -> Result<VerticleClient> {
         let options = verticle::VerticleOptions::new(
             self.service_peerid().clone(),
             self.service_endpoint.clone(),
-            self.upstream_socketaddr().clone(),
-            self.upstream_endpoint().to_string(),
+            self.upstream_addr,
+            self.upstream_endpoint.clone(),
             self.options.user_id().clone(),
             self.options.device_private_key().clone(),
             self.options.is_name_access_enabled(),
@@ -153,7 +168,7 @@ impl ActiveProxyClient {
             self.options.announce_peer_handler(),
         );
 
-        let mut client = verticle::deploy(options).map_err(|e| {
+        let mut client = verticle::deploy(options).await.map_err(|e| {
             ArgumentError::new(format!("Failed to deploy ActiveProxy verticle: {e}"))
         })?;
 
@@ -163,29 +178,37 @@ impl ActiveProxyClient {
             }
             return Err(e);
         }
-
-        self.running.set(true);
-        self.verticle.set(Some(client));
-        Ok(())
-    }
-
-    fn is_running(&self) -> bool {
-        self.running.get()
+        Ok(client)
     }
 
     pub async fn stop(&self) {
         debug!("ActiveProxy instance is stopping ....");
-        if !self.is_running() {
+        if self.state.get() != State::Running {
             return;
         }
 
-        if let Some(mut v) = self.verticle.replace(None) {
+        self.state.set(State::Stopped);
+        if let Some(mut v) = self.verticle.take() {
             if let Err(e) = v.stop().await {
                 error!("Failed to stop ActiveProxy verticle cleanly: {e}");
             }
         }
-        self.running.set(false);
 
         info!("ActiveProxy instance stopped.");
     }
+}
+
+fn resolve_upstream(endpoint: &str) -> Result<SocketAddr> {
+    let rest = endpoint.strip_prefix("http://").unwrap_or(endpoint);
+    Ok(rest
+        .to_socket_addrs()
+        .map_err(|e| {
+            error!("Failed to resolve address '{rest}', network error: {e}");
+            ArgumentError::new(format!("Bad upstream address: {rest}"))
+        })?
+        .next()
+        .ok_or_else(|| {
+            error!("No valid address found for '{rest}', network error!!!");
+            NetworkError::new(format!("No valid address found for '{rest}'!"))
+        })?)
 }

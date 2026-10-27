@@ -68,3 +68,15 @@ pub(crate) fn sign_nonce(
 ) -> Result<String, boson_api::Error> {
     Ok(base64url(&key.sign_into(nonce)?))
 }
+
+/// Signs the message that authorizes adding a device: the device id, then the nonce.
+pub(crate) fn sign_device_authorization(
+    key: &boson_api::signature::PrivateKey,
+    device_id: &boson_api::Id,
+    nonce: &[u8],
+) -> Result<String, boson_api::Error> {
+    let mut message = Vec::with_capacity(boson_api::Id::BYTES + nonce.len());
+    message.extend_from_slice(device_id.as_bytes());
+    message.extend_from_slice(nonce);
+    Ok(base64url(&key.sign_into(&message)?))
+}

@@ -97,8 +97,13 @@ impl Logger {
 
     /// Builds the plain log line, or `None` when the record is not from this crate.
     fn format(record: &Record) -> Option<String> {
-        let mut parts = record.target().split("::");
-        if parts.next() != Some(CRATE_NAME) {
+        // Workspace crates are named `boson` or `boson_*` (e.g. `boson_active_proxy_client`).
+        let crate_name = record.target().split("::").next().unwrap_or_default();
+        let is_boson = crate_name == CRATE_NAME
+            || crate_name
+                .strip_prefix(CRATE_NAME)
+                .is_some_and(|rest| rest.starts_with('_'));
+        if !is_boson {
             return None;
         }
 

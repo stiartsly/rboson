@@ -18,12 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use log::info;
+use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use log::debug;
 use std::{
+    future::Future,
     net::SocketAddr,
+    pin::Pin,
     rc::Rc,
     result::Result as StdResult,
-    sync::mpsc as std_mpsc,
     thread::JoinHandle,
 };
 use tokio::{
@@ -31,6 +33,9 @@ use tokio::{
     sync::{mpsc, oneshot},
     task,
 };
+
+/// Futures driven by [`Verticle::run_loop`]: the work spawned by received events.
+type Pending = FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>;
 
 use super::{
     options::AnnouncePeerHandler,
@@ -67,7 +72,7 @@ impl VerticleClient {
     }
 
     pub(crate) async fn start(&self) -> Result<()> {
-        info!("Starting ActiveProxy verticle");
+        debug!("Starting ActiveProxy verticle");
 
         let (tx, rx) = oneshot::channel();
         self.event_tx
@@ -77,13 +82,14 @@ impl VerticleClient {
             .map_err(|_| StateError::new("ActiveProxy verticle startup channel closed"))?
             .map_err(StateError::new)?;
 
-        info!("ActiveProxy verticle started");
+        debug!("ActiveProxy verticle started");
         Ok(())
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {
-        info!("Stopping ActiveProxy verticle");
+        debug!("Stopping ActiveProxy verticle");
 
+        // The ack arrives only after the session is torn down, so the join below is immediate.
         let (tx, rx) = oneshot::channel();
         if self.event_tx.send(Event::Stop { complete: tx }).is_ok() {
             let _ = rx.await;
@@ -92,7 +98,7 @@ impl VerticleClient {
             let _ = handle.join();
         }
 
-        info!("ActiveProxy verticle stopped");
+        debug!("ActiveProxy verticle stopped");
         Ok(())
     }
 }
@@ -140,6 +146,7 @@ pub(crate) struct Verticle {
     timer_manager: TimerManager,
     event_rx: mpsc::UnboundedReceiver<Event>,
     tmr_rx: mpsc::UnboundedReceiver<TimerCmd>,
+    stop_ack: Option<oneshot::Sender<StdResult<(), String>>>,
     quit: bool,
 }
 
@@ -153,25 +160,27 @@ impl Verticle {
             timer_manager: TimerManager::new(),
             event_rx,
             tmr_rx,
+            stop_ack: None,
             quit: false,
         })
     }
 
-    fn handle_event(&mut self, event: Event) {
+    fn handle_events(&mut self, event: Event, pending: &mut Pending) {
         match event {
             Event::Start { complete } => {
-                task::spawn_local({
-                    let session = self.session.clone();
+                let session = self.session.clone();
+                pending.push(
                     async move {
                         let result = session.start().await;
                         let _ = complete.send(result.map_err(|e| e.to_string()));
                     }
-                });
+                    .boxed_local(),
+                );
             }
             Event::Stop { complete } => {
                 self.quit = true;
                 self.timer_manager.stop_all();
-                let _ = complete.send(Ok(()));
+                self.stop_ack = Some(complete);
             }
         }
     }
@@ -195,11 +204,22 @@ impl Verticle {
     }
 
     async fn run_loop(&mut self) {
+        let mut pendings = Pending::new();
         loop {
+            // Stop only once every event already in flight has settled.
+            if self.quit && pendings.is_empty() {
+                break;
+            }
+
             tokio::select! {
-                Some(event) = self.event_rx.recv() => {
-                    self.handle_event(event);
+                event = self.event_rx.recv(), if !self.quit => {
+                    match event {
+                        Some(event) => self.handle_events(event, &mut pendings),
+                        // Every sender is gone: drain in-flight work, then shut down.
+                        None => self.quit = true,
+                    }
                 }
+                Some(()) = pendings.next(), if !pendings.is_empty() => {}
                 Some(cmd) = self.tmr_rx.recv() => {
                     self.handle_command(cmd);
                 }
@@ -207,47 +227,55 @@ impl Verticle {
                     self.timer_manager.fire_expired(timer_id).await;
                 }
             }
-
-            if self.quit {
-                break;
-            }
         }
 
         self.session.stop().await;
         self.session.close();
-        info!("ActiveProxy verticle stopped");
+        if let Some(ack) = self.stop_ack.take() {
+            let _ = ack.send(Ok(()));
+        }
     }
 }
 
-pub(crate) fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
+// Runs the verticle on its own single-threaded runtime so its non-`Send` state stays on one
+// thread and the caller's executor is never blocked by session I/O.
+pub(crate) async fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
-    let (reply_tx, reply_rx) = std_mpsc::sync_channel::<StdResult<(), String>>(1);
+    let (ready_tx, ready_rx) = oneshot::channel::<StdResult<(), String>>();
 
     let handle = std::thread::spawn(move || {
-        let rt = runtime::Builder::new_current_thread()
+        let rt = match runtime::Builder::new_current_thread()
             .enable_time()
             .enable_io()
             .build()
-            .expect("ActiveProxy runtime verticle should be built");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to build ActiveProxy runtime: {e}")));
+                return;
+            }
+        };
 
         let local = task::LocalSet::new();
         rt.block_on(local.run_until(async move {
-            match Verticle::new(options, event_rx) {
+            match Verticle::new(options, event_rx).and_then(|v| v.session.init().map(|_| v)) {
                 Ok(mut v) => {
-                    let _ = v.session.start0().await;
-                    let _ = reply_tx.send(Ok(()));
+                    let _ = ready_tx.send(Ok(()));
                     v.run_loop().await;
                 }
                 Err(e) => {
-                    let _ = reply_tx.send(Err(e.to_string()));
+                    let _ = ready_tx.send(Err(e.to_string()));
                 }
             }
         }));
     });
 
-    match reply_rx.recv() {
+    match ready_rx.await {
         Ok(Ok(())) => Ok(VerticleClient::new(event_tx, handle)),
-        Ok(Err(msg)) => Err(StateError::new(msg)),
+        Ok(Err(msg)) => {
+            let _ = handle.join();
+            Err(StateError::new(msg))
+        }
         Err(_) => Err(StateError::new(
             "ActiveProxy verticle startup channel closed",
         )),

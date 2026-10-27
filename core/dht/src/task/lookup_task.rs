@@ -78,7 +78,7 @@ pub(crate) trait LookupTask: Task {
     }
 
     fn add(&mut self, mut entries: Vec<impl Into<CandidateNode>>) {
-        let ni = self.dht().ni();
+        let ni = self.dht().ni().clone();
         let mut todo: Vec<CandidateNode> = Vec::new();
         while let Some(entry) = entries.pop() {
             let candidate: CandidateNode = entry.into();

@@ -294,7 +294,7 @@ impl Verticle {
     }
 
     fn ni(&self) -> NodeInfo {
-        self.dht.ni()
+        self.dht.ni().clone()
     }
 
     /// Dispatches one Node command without awaiting the DHT operation itself.

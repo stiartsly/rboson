@@ -18,26 +18,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::{
-    errors::Result, BoxHandler, BoxTimerClient as TimerClient, BoxTimerCmd as TimerCmd,
-    BoxTimerManager as TimerManager,
-};
-use std::{sync::Mutex, thread::JoinHandle};
+
+use std::{sync::Mutex, thread};
 use tokio::{
     runtime,
     sync::mpsc::{self, UnboundedSender},
     task,
+};
+use boson_api::{
+    errors::Result,
+    BoxHandler,
+    BoxTimerClient as TimerClient,
+    BoxTimerCmd as TimerCmd,
+    BoxTimerManager as TimerManager,
 };
 
 pub(crate) type TimerId = u64;
 
 pub(crate) struct VerticleClient {
     timerc: TimerClient,
-    handle: Mutex<Option<JoinHandle<()>>>,
+    handle: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl VerticleClient {
-    pub(crate) fn new(sender: UnboundedSender<TimerCmd>, handle: JoinHandle<()>) -> Self {
+    pub(crate) fn new(
+        sender: UnboundedSender<TimerCmd>,
+        handle: thread::JoinHandle<()>
+    ) -> Self {
         Self {
             timerc: TimerClient::new(sender),
             handle: Mutex::new(Some(handle)),
@@ -79,12 +86,7 @@ impl Verticle {
 
     fn handle_commands(&mut self, cmd: TimerCmd) -> bool {
         match cmd {
-            TimerCmd::Add {
-                timer_id,
-                delay,
-                interval,
-                cb,
-            } => {
+            TimerCmd::Add {timer_id, delay, interval, cb }=> {
                 self.timerman.add_timer(timer_id, delay, interval, cb);
             }
             TimerCmd::Cancel { timer_id } => {
@@ -124,20 +126,22 @@ impl Verticle {
 #[derive(Default)]
 pub(crate) struct VerticleOptions {}
 
+fn run(receiver: mpsc::UnboundedReceiver<TimerCmd>) {
+    let rt = runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()
+        .expect("dht verticle runtime should build");
+
+    let local = task::LocalSet::new();
+    rt.block_on(local.run_until(async move {
+        let mut vert = Verticle::new(receiver);
+        vert.run_loop().await;
+    }));
+}
+
 pub(crate) fn deploy(_option: VerticleOptions) -> Result<VerticleClient> {
     let (sender, receiver) = mpsc::unbounded_channel::<TimerCmd>();
-    let handle = std::thread::spawn(move || {
-        let rt = runtime::Builder::new_current_thread()
-            .enable_time()
-            .enable_io()
-            .build()
-            .expect("dht verticle runtime should build");
-
-        let local = task::LocalSet::new();
-        rt.block_on(local.run_until(async move {
-            let mut vert = Verticle::new(receiver);
-            vert.run_loop().await;
-        }));
-    });
+    let handle = thread::spawn(move || run(receiver));
     Ok(VerticleClient::new(sender, handle))
 }

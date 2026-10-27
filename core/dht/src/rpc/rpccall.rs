@@ -221,7 +221,7 @@ impl RpcCall {
         self.timer_id = Some(timer_id);
     }
 
-    fn cancel_timeout_timer(&mut self) {
+    pub(crate) fn cancel_timeout_timer(&mut self) {
         let Some(timer_client) = self.timer_client.take() else {
             return;
         };

@@ -1,4 +1,4 @@
 # Keep in sync with workspace.package.rust-version in Cargo.toml.
 [toolchain]
-channel = "1.88.0"
+channel = "1.92.0"
 components = ["clippy", "rustfmt"]

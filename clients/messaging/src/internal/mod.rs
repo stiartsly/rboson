@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-mod codec;
-
+pub(crate) mod codec;
 pub(crate) mod photon_channel;
 pub(crate) mod handshake;
 pub(crate) mod notification;
@@ -30,20 +29,16 @@ pub(crate) mod contact_mutation;
 pub(crate) mod contact_sync;
 pub(crate) mod contact_opaque;
 pub(crate) mod topic;
-pub(crate) mod channel_member;
 pub(crate) mod channel_info;
 pub(crate) mod channel_members_role;
 pub(crate) mod channel_session_rotation;
 pub(crate) mod new_channel_info;
-
 pub(crate) mod sessoin_context;
-
 pub(crate) mod connection_listener;
 
 mod channel {
     pub(crate) use super::{
         channel_info::ChannelInfo,
-        channel_member::ChannelMember,
         channel_members_role::ChannelMembersRole,
     };
 }
@@ -65,7 +60,6 @@ pub(crate) use {
     contact_mutation::{ContactMutation, MutationData},
     contact_sync::{ContactSync, SyncType},
     contact_opaque::OpaqueContact,
-    channel_member::ChannelMember,
     channel_info::ChannelInfo,
     channel_session_rotation::ChannelSessionKeyRotation,
     connection_listener::ClientConnectionListener,

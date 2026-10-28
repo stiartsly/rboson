@@ -38,8 +38,7 @@ pub(crate) struct PhotonChannel {
     pub(crate) members: Vec<PhotonChannelMember>,
 }
 
-/// Alias kept for call sites that distinguish wire members from public ones.
-pub(crate) use super::ChannelMember as PhotonChannelMember;
+pub(crate) type PhotonChannelMember = crate::ChannelMember;
 
 impl From<&PhotonChannelMember> for ChannelMember {
     fn from(member: &PhotonChannelMember) -> Self {

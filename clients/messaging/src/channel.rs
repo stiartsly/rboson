@@ -22,9 +22,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use boson_api::Id;
 use boson_api::{Result, errors::ArgumentError};
-use crate::contact::ContactOps;
-use crate::channel_member::ChannelMember;
-
+use crate::{
+    contact::ContactOps,
+    channel_member::ChannelMember
+};
 
 /// Controls who may invite new members to a channel.
 #[derive(Serialize, Deserialize)]

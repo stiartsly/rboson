@@ -19,8 +19,6 @@
 // SOFTWARE.
 
 use crate::internal::handshake::*;
-
-use super::*;
 use serde_cbor::Value;
 
 #[test]

@@ -256,15 +256,6 @@ fn complete_builder(peer_id: Id, user_key: &KeyPair, device_key: &KeyPair) -> Op
     builder
 }
 
-fn options_with_database(data_dir: &Path, uri: &str) -> Options {
-    let user_key = KeyPair::random();
-    let device_key = KeyPair::random();
-    let mut builder = complete_builder(Id::random(), &user_key, &device_key);
-    builder.with_data_dir(data_dir);
-    builder.with_database(uri, 2).unwrap();
-    builder.build().unwrap()
-}
-
 fn assert_identity(
     options: &Options,
     peer_id: &Id,

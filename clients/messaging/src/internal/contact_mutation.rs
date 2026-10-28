@@ -39,13 +39,6 @@ pub(crate) enum Op {
 }
 
 #[cfg(test)]
-impl Op {
-    pub(crate) const fn value(self) -> i32 {
-        self as i32
-    }
-}
-
-#[cfg(test)]
 impl TryFrom<i32> for Op {
     type Error = Error;
 

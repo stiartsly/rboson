@@ -20,7 +20,6 @@
 
 use boson_api::{
     errors::{Error, Result},
-    utils,
     utils::codec,
     Id,
     PeerInfo,
@@ -68,7 +67,6 @@ struct AnnouncePeerRequestRaw {
 
     #[serde(
         rename = "cas",
-        default = "default_expected_seq",
         with = "codec::expected_seq"
     )]
     expected_seq: i32,
@@ -119,14 +117,6 @@ struct AnnouncePeerRequestRaw {
         skip_serializing_if = "codec::is_default"
     )]
     extra: Option<Vec<u8>>,
-}
-
-fn default_expected_seq() -> i32 {
-    -1
-}
-
-fn is_default_expected_seq(value: &i32) -> bool {
-    *value == -1
 }
 
 impl Into<AnnouncePeerRequestRaw> for AnnouncePeerRequest {

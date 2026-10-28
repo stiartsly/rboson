@@ -19,11 +19,10 @@
 // SOFTWARE.
 
 use std::{str::FromStr, sync::Arc};
-
 use clap::{arg, Arg, ArgMatches, Command};
 
 use boson::{
-    messaging::{Client, ContactOps, ContactType, InviteTicket, MessagingClient, Permission},
+    messaging::{Client, ContactOps, ContactType, InviteTicket, Permission},
     Id,
 };
 

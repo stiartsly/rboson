@@ -21,13 +21,13 @@
 use boson_api::{Id};
 use crate::channel::Role;
 use serde::{Serialize, Deserialize};
+pub(crate) use crate::internal::codec;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChannelMember {
-    #[serde(rename = "id")]
     id: Id,
-    #[serde(rename = "r")]
+    #[serde(rename = "r", with = "codec::role")]
     role: Role,
     #[serde(rename = "j")]
     joined: u64,

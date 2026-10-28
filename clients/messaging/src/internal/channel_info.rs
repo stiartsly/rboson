@@ -26,7 +26,7 @@ use crate::{
     channel::Permission,
     internal::codec
 };
-use super::ChannelMember;
+use crate::ChannelMember;
 
 /// Channel metadata and membership as sent by the service.
 #[derive(Serialize, Deserialize)]

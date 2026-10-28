@@ -22,13 +22,13 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::EncodingError;
-use crate::SessionInfo;
+use crate::{ChannelMember, SessionInfo};
 use boson_api::{
     errors::{Error, Result},
     Id,
 };
 
-use super::channel::{ChannelInfo, ChannelMember, ChannelMembersRole};
+use super::channel::{ChannelInfo, ChannelMembersRole};
 use super::contact::ContactSync;
 
 /// Notification event tag used on the wire.

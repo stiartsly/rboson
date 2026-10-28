@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{fmt, time::SystemTime};
+use std::fmt;
 use serde::{Deserialize, Serialize};
 use boson_api::Id;
 use boson_api::{Result, errors::ArgumentError};

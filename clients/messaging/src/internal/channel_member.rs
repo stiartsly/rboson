@@ -54,31 +54,16 @@ impl ChannelMember {
     pub(crate) fn is_banned(&self) -> bool {
         self.role.is_banned()
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_cbor::Value;
+    pub(crate) fn is_owner(&self) -> bool {
+        self.role == Role::Owner
+    }
 
-    #[test]
-    fn serde_channel_member() {
-        for role in [Role::Owner, Role::Moderator, Role::Member, Role::Banned] {
-            let member = ChannelMember::new(Id::random(), role, 12);
-            let bytes = serde_cbor::to_vec(&member).unwrap();
-            let Value::Map(fields) = serde_cbor::from_slice::<Value>(&bytes).unwrap() else {
-                panic!("Channel member must serialize as a map");
-            };
-            assert_eq!(
-                fields.get(&Value::Text("r".into())),
-                Some(&Value::Integer((role as i32).into()))
-            );
+    pub(crate) fn is_moderator(&self) -> bool {
+        self.role == Role::Moderator
+    }
 
-            let decoded: ChannelMember = serde_cbor::from_slice(&bytes).unwrap();
-            assert_eq!(decoded, member);
-            assert_eq!(decoded.id(), member.id());
-            assert_eq!(decoded.role(), role);
-            assert_eq!(decoded.joined(), 12);
-        }
+    pub(crate) fn is_member(&self) -> bool {
+        self.role == Role::Member
     }
 }

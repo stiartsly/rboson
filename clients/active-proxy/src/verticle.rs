@@ -34,7 +34,6 @@ use tokio::{
     task,
 };
 
-/// Futures driven by [`Verticle::run_loop`]: the work spawned by received events.
 type Pending = FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>;
 
 use super::{

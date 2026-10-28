@@ -80,11 +80,3 @@ pub use message::{
 
 pub(crate) use internal::ClientConnectionListener;
 
-#[cfg(test)]
-mod unitests {
-    mod test_message;
-    mod test_contact;
-   // mod test_mqtt;
-   // mod test_session;
-   // mod test_verticle;
-}

@@ -47,16 +47,10 @@ use std::{
     future::Future,
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex, MutexGuard},
     sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
-use boson_api::{Id, logger, signature};
-use boson_api::errors::{
-    Result,
-    StateError,
-    ArgumentError,
-};
 use crate::{
     channel::{Channel, Permission, Role},
     channel_listener::ChannelListener,
@@ -68,20 +62,17 @@ use crate::{
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
     message::{
-        content_type,
-        CONTENT_DISPOSITION_HEADER,
-        ContentDisposition,
-        Message,
-        MessageBuilder,
+        content_type, ContentDisposition, Message, MessageBuilder, CONTENT_DISPOSITION_HEADER,
     },
     message_listener::MessageListener,
     options::Options,
     session_info::SessionInfo,
     session_listener::SessionListener,
-    MessagingClient,
     verticle::{self, VerticleClient, VerticleOptions},
-    ClientConnectionListener
+    ClientConnectionListener, MessagingClient,
 };
+use boson_api::errors::{ArgumentError, Result, StateError};
+use boson_api::{logger, signature, Id};
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -191,7 +182,7 @@ impl Client {
             return Ok(());
         }
 
-        let verticle = match verticle::deploy(self.verticle_options()) {
+        let verticle = match verticle::deploy(self.verticle_options()).await {
             Ok(verticle) => verticle,
             Err(error) => {
                 self.reset_state();
@@ -262,7 +253,9 @@ impl Client {
 
     /// Drops several conversations in one round trip.
     pub async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
-        self.verticle_client()?.remove_conversations(ids.to_vec()).await
+        self.verticle_client()?
+            .remove_conversations(ids.to_vec())
+            .await
     }
 }
 
@@ -303,7 +296,9 @@ impl Client {
 
     /// Removes several messages by id in one round trip.
     pub async fn remove_messages_by_ids(&self, message_ids: &[i64]) -> Result<()> {
-        self.verticle_client()?.remove_messages_by_ids(message_ids.to_vec()).await
+        self.verticle_client()?
+            .remove_messages_by_ids(message_ids.to_vec())
+            .await
     }
 
     /// Clears the whole history of a conversation.
@@ -318,7 +313,10 @@ impl Client {
     /// The builder captures the verticle sender as it is created, so a builder
     /// obtained while the client is stopped can never be sent later.
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
-        let sender = self.verticle_slot().as_ref().map(|verticle| verticle.sender());
+        let sender = self
+            .verticle_slot()
+            .as_ref()
+            .map(|verticle| verticle.sender());
         Box::new(ComposedMessageBuilder::new(
             recipient,
             sender,
@@ -363,25 +361,23 @@ impl Client {
         if &user_id == self.user_id() {
             return Err(ArgumentError::new("Cannot send friend request to yourself"));
         }
-        self.verticle_client()?.friend_request(user_id, hello.map(Into::into)).await
+        self.verticle_client()?
+            .friend_request(user_id, hello.map(Into::into))
+            .await
     }
 
     /// Accepts a pending friend request.
-    pub async fn accept_friend_request(
-        &self,
-        user_id: Id,
-    ) -> Result<()> {
+    pub async fn accept_friend_request(&self, user_id: Id) -> Result<()> {
         if &user_id == self.user_id() {
-            return Err(ArgumentError::new("Cannot accept friend request from yourself"));
+            return Err(ArgumentError::new(
+                "Cannot accept friend request from yourself",
+            ));
         }
         self.verticle_client()?.friend_accept(user_id).await
     }
 
     /// Looks up a single pending friend request.
-    pub async fn get_friend_request(
-        &self,
-        user_id: Id,
-    ) -> Result<Option<FriendRequest>> {
+    pub async fn get_friend_request(&self, user_id: Id) -> Result<Option<FriendRequest>> {
         self.verticle_client()?.get_friend_request(user_id).await
     }
 
@@ -391,22 +387,18 @@ impl Client {
     }
 
     /// Dismisses a pending friend request without accepting it.
-    pub async fn remove_friend_request(
-        &self,
-        user_id: Id
-    ) -> Result<()> {
+    pub async fn remove_friend_request(&self, user_id: Id) -> Result<()> {
         self.verticle_client()?.remove_friend_request(user_id).await
     }
 
     /// Dismisses several pending friend requests in one round trip.
-    pub async fn remove_friend_requests(
-        &self,
-        user_ids: &[Id]
-    ) -> Result<()> {
+    pub async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
         if user_ids.is_empty() {
             return Ok(());
         }
-        self.verticle_client()?.remove_friend_requests(user_ids.to_vec()).await
+        self.verticle_client()?
+            .remove_friend_requests(user_ids.to_vec())
+            .await
     }
 
     /// Dismisses every pending friend request.
@@ -422,18 +414,13 @@ impl Client {
         remark: Option<impl Into<String>>,
     ) -> Result<()> {
         let key = session_key.into().private_key().as_ref().to_vec();
-        self.verticle_client()?.add_friend(
-            user_id,
-            key,
-            remark.map(Into::into)
-        ).await
+        self.verticle_client()?
+            .add_friend(user_id, key, remark.map(Into::into))
+            .await
     }
 
     /// Blocks a user, which also stops them from messaging you.
-    pub async fn block_user(
-        &self,
-        user_id: Id,
-    ) -> Result<Contact> {
+    pub async fn block_user(&self, user_id: Id) -> Result<Contact> {
         self.verticle_client()?.block_user(user_id).await
     }
 }
@@ -445,23 +432,17 @@ impl Client {
 impl Client {
     /// Looks up a single contact.
     pub async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
-        self.verticle_client()?
-            .get_contact(*id)
-            .await
+        self.verticle_client()?.get_contact(*id).await
     }
 
     /// Lists every known contact.
     pub async fn get_contacts(&self) -> Result<Vec<Contact>> {
-        self.verticle_client()?
-            .get_contacts()
-            .await
+        self.verticle_client()?.get_contacts().await
     }
 
     /// Overwrites a contact's locally stored metadata.
     pub async fn update_contact(&self, contact: Contact) -> Result<()> {
-        self.verticle_client()?
-            .update_contact(contact)
-            .await
+        self.verticle_client()?.update_contact(contact).await
     }
 
     /// Removes a single contact; sugar for a one-element [`Client::remove_contacts`].
@@ -507,26 +488,17 @@ impl Client {
     }
 
     /// Removes a channel (owner only).
-    pub async fn remove_channel(
-        &self,
-        channel_id: &Id
-    ) -> Result<()> {
+    pub async fn remove_channel(&self, channel_id: &Id) -> Result<()> {
         self.verticle_client()?.remove_channel(*channel_id).await
     }
 
     /// Joins a channel using an invite ticket.
-    pub async fn join_channel(
-        &self,
-        ticket: InviteTicket
-    ) -> Result<Box<dyn Channel>> {
+    pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
         self.verticle_client()?.join_channel(ticket).await
     }
 
     /// Leaves a channel.
-    pub async fn leave_channel(
-        &self,
-        channel_id: &Id
-    ) -> Result<()> {
+    pub async fn leave_channel(&self, channel_id: &Id) -> Result<()> {
         self.verticle_client()?.leave_channel(*channel_id).await
     }
 
@@ -536,35 +508,27 @@ impl Client {
         channel_id: &Id,
         invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        self.verticle_client()?.create_invite_ticket(*channel_id, invitee).await
+        self.verticle_client()?
+            .create_invite_ticket(*channel_id, invitee)
+            .await
     }
 
     /// Transfers channel ownership to another user.
-    pub async fn transfer_channel_ownership(
-        &self,
-        channel_id: &Id,
-        new_owner: Id,
-    ) -> Result<()> {
+    pub async fn transfer_channel_ownership(&self, channel_id: &Id, new_owner: Id) -> Result<()> {
         self.verticle_client()?
             .transfer_channel_ownership(*channel_id, new_owner)
             .await
     }
 
     /// Rotates the channel session key.
-    pub async fn rotate_channel_session_key(
-        &self,
-        channel_id: &Id
-    ) -> Result<()> {
+    pub async fn rotate_channel_session_key(&self, channel_id: &Id) -> Result<()> {
         self.verticle_client()?
             .rotate_channel_session_key(*channel_id)
             .await
     }
 
     /// Updates channel metadata.
-    pub async fn update_channel_info(
-        &self,
-        channel: &dyn Channel
-    ) -> Result<()> {
+    pub async fn update_channel_info(&self, channel: &dyn Channel) -> Result<()> {
         self.verticle_client()?
             .update_channel_info(channel.edit_channel().build())
             .await
@@ -586,33 +550,21 @@ impl Client {
     }
 
     /// Bans a set of channel members.
-    pub async fn ban_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id]
-    ) -> Result<()> {
+    pub async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.verticle_client()?
             .ban_channel_members(*channel_id, members.to_vec())
             .await
     }
 
     /// Unbans a set of channel members.
-    pub async fn unban_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id]
-    ) -> Result<()> {
+    pub async fn unban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.verticle_client()?
             .unban_channel_members(*channel_id, members.to_vec())
             .await
     }
 
     /// Removes a set of channel members.
-    pub async fn remove_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id]
-    ) -> Result<()> {
+    pub async fn remove_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.verticle_client()?
             .remove_channel_members(*channel_id, members.to_vec())
             .await
@@ -726,10 +678,7 @@ impl MessagingClient for Client {
         self.message(recipient)
     }
 
-    async fn get_conversation(
-        &self,
-        id: &Id
-    ) -> Result<Option<Conversation>> {
+    async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
         self.get_conversation(id).await
     }
 
@@ -752,7 +701,8 @@ impl MessagingClient for Client {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.get_messages(conversation_id, until, limit, offset).await
+        self.get_messages(conversation_id, until, limit, offset)
+            .await
     }
 
     async fn get_messages_in_range(
@@ -761,7 +711,8 @@ impl MessagingClient for Client {
         begin: i64,
         end: i64,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.get_messages_in_range(conversation_id, begin, end).await
+        self.get_messages_in_range(conversation_id, begin, end)
+            .await
     }
 
     async fn remove_message(&self, message_id: i64) -> Result<()> {
@@ -792,9 +743,7 @@ impl MessagingClient for Client {
         self.accept_friend_request(*userid).await
     }
 
-    async fn get_friend_request(&self,
-        user_id: &Id,
-    ) -> Result<Option<FriendRequest>> {
+    async fn get_friend_request(&self, user_id: &Id) -> Result<Option<FriendRequest>> {
         self.get_friend_request(*user_id).await
     }
 
@@ -823,14 +772,17 @@ impl MessagingClient for Client {
         self.add_friend(*userid, session_key, remark).await
     }
 
-    async fn block_user(
-        &self,
-        userid: &Id
-    ) -> Result<Contact> {
+    async fn block_user(&self, userid: &Id) -> Result<Contact> {
         self.block_user(*userid).await
     }
 
-    async fn create_channel(&self, perms: Permission, name: String, notice: Option<String>, announce: bool) -> Result<Box<dyn Channel>> {
+    async fn create_channel(
+        &self,
+        perms: Permission,
+        name: String,
+        notice: Option<String>,
+        announce: bool,
+    ) -> Result<Box<dyn Channel>> {
         self.create_channel(perms, name, notice, announce).await
     }
 
@@ -854,11 +806,7 @@ impl MessagingClient for Client {
         self.create_invite_ticket(channel_id, invitee).await
     }
 
-    async fn transfer_channel_ownership(
-        &self,
-        channel_id: &Id,
-        new_owner: Id,
-    ) -> Result<()> {
+    async fn transfer_channel_ownership(&self, channel_id: &Id, new_owner: Id) -> Result<()> {
         self.transfer_channel_ownership(channel_id, new_owner).await
     }
 
@@ -876,26 +824,19 @@ impl MessagingClient for Client {
         members: &[Id],
         role: Role,
     ) -> Result<()> {
-        self.set_channel_members_role(channel_id, members, role).await
+        self.set_channel_members_role(channel_id, members, role)
+            .await
     }
 
     async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.ban_channel_members(channel_id, members).await
     }
 
-    async fn unban_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id],
-    ) -> Result<()> {
+    async fn unban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.unban_channel_members(channel_id, members).await
     }
 
-    async fn remove_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id],
-    ) -> Result<()> {
+    async fn remove_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         self.remove_channel_members(channel_id, members).await
     }
 
@@ -997,11 +938,14 @@ impl MessageBuilder for ComposedMessageBuilder {
         self: Box<Self>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
         Box::pin(async move {
-            let recipient = self.recipient
+            let recipient = self
+                .recipient
                 .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
-            let body = self.body
+            let body = self
+                .body
                 .ok_or_else(|| ArgumentError::new("Message content is required"))?;
-            let sender = self.verticle_tx
+            let sender = self
+                .verticle_tx
                 .ok_or_else(|| StateError::new("Messaging client is not running"))?;
 
             let text = self.text;
@@ -1014,13 +958,12 @@ impl MessageBuilder for ComposedMessageBuilder {
 
             let (complete, response) = tokio::sync::oneshot::channel();
             sender
-                .send(verticle::Event::ContentMessage {
-                    recipient,
-                    headers,
-                    body,
-                    text,
-                    complete,
-                })
+                .send(verticle::Event::ContentMessage(
+                    verticle::WithParams {
+                        data: (recipient, headers, body, text),
+                        complete: complete,
+                    },
+                ))
                 .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
 
             let message = response
@@ -1051,7 +994,10 @@ fn merge_headers(
         .collect();
 
     if let Some(declared_type) = declared_type {
-        merged.insert(content_type::HEADER_NAME.into(), serde_json::Value::String(declared_type));
+        merged.insert(
+            content_type::HEADER_NAME.into(),
+            serde_json::Value::String(declared_type),
+        );
     } else if !text {
         merged.insert(
             content_type::HEADER_NAME.into(),

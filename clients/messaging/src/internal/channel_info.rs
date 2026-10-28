@@ -21,14 +21,16 @@
 use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
-use crate::channel::Permission;
-use crate::internal::codec;
 use boson_api::{utils, Id};
-
+use crate::{
+    channel::Permission,
+    internal::codec
+};
 use super::ChannelMember;
 
 /// Channel metadata and membership as sent by the service.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ChannelInfo {
     #[serde(rename = "id")]
     channel_id: Id,
@@ -40,26 +42,27 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "sk",
         default,
-        serialize_with = "boson_api::utils::codec::bytes_opt::serialize",
-        deserialize_with = "boson_api::utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "is_bytes_none_or_empty"
+        with = "utils::bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     session_key: Option<Vec<u8>>,
 
-    #[serde(rename = "p", with = "codec::permission")]
+    #[serde(
+        rename = "p",
+        with = "codec::permission"
+    )]
     permission: Permission,
 
     #[serde(
         rename = "n",
-        default,
-        skip_serializing_if = "Option::is_none"
+        default
     )]
     name: Option<String>,
 
     #[serde(
         rename = "nt",
         default,
-        skip_serializing_if = "is_none_or_empty"
+        skip_serializing_if = "utils::is_default"
     )]
     notice: Option<String>,
 
@@ -158,14 +161,6 @@ impl ChannelInfo {
     pub(crate) fn members(&self) -> &[ChannelMember] {
         &self.members
     }
-}
-
-fn is_bytes_none_or_empty(value: &Option<Vec<u8>>) -> bool {
-    value.as_ref().map_or(true, Vec::is_empty)
-}
-
-fn is_none_or_empty(value: &Option<String>) -> bool {
-    value.as_deref().map_or(true, str::is_empty)
 }
 
 #[cfg(test)]

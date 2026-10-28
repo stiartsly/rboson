@@ -20,7 +20,14 @@
 
 use std::sync::Arc;
 use super::{ContextKind, SessionContext};
-use boson_api::{cryptobox::Nonce, errors::ArgumentError, CryptoIdentity, Id, Identity, Signature};
+use boson_api::{
+    cryptobox::Nonce,
+    errors::ArgumentError,
+    CryptoIdentity,
+    Id,
+    Identity,
+    Signature
+};
 
 fn context(for_channel: bool, contact_id: Id) -> SessionContext {
     let user = Arc::new(CryptoIdentity::new());

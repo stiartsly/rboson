@@ -253,3 +253,7 @@ impl ContactOps for Contact {
         ContactEditor { contact: self.clone() }
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_contact.rs"]
+mod test_contact;

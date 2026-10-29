@@ -39,10 +39,10 @@ use tokio::sync;
 
 use crate::{
     channel::{Channel, Permission, Role},
-    contact::{Contact, ContactOps, ContactType},
+    contact::{Contact, ContactType},
     content_disposition::{ContentDisposition, HEADER_NAME as CONTENT_DISPOSITION_HEADER},
     content_type,
-    conversation::{Conversation, ConversationOps},
+    conversation::Conversation,
     errors::{AuthenticationError, EncodingError, ProtocolError},
     invite_ticket::InviteTicket,
     message::{Message, MessageBuilder, MessageType},
@@ -58,8 +58,7 @@ use boson_api::{signature, CryptoIdentity, Id, Identity};
 use super::internal::{
     ChannelInfo, ChannelSessionKeyRotation, ContactData, ContactMutation, ContactSync,
     ContentFormat, Handshake, HandshakeType, MessageContent, MutationData, NewChannelInfo,
-    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonChannel,
-    PhotonChannelMember, PhotonMessage, SyncType, Topic,
+    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage, SyncType, Topic,
 };
 use super::mqtt::{
     self, decode_cbor, decode_cbor_bytes, to_cbor, to_cbor_bytes, ClientHandle, Inbound,
@@ -117,7 +116,7 @@ struct ChannelContactInfo {
 struct DecodedContact {
     contact: Contact,
     session: Option<CryptoIdentity>,
-    channel: Option<PhotonChannel>,
+    channel: Option<Channel>,
 }
 
 /// The contact book a sync is applied to.
@@ -127,7 +126,7 @@ struct DecodedContact {
 struct ContactState {
     contacts: HashMap<Id, Contact>,
     sessions: HashMap<Id, CryptoIdentity>,
-    channels: HashMap<Id, PhotonChannel>,
+    channels: HashMap<Id, Channel>,
     revision: i32,
 }
 
@@ -157,7 +156,7 @@ pub(crate) struct RpcServer {
 
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, Contact>>,
-    channels: RefCell<HashMap<Id, PhotonChannel>>,
+    channels: RefCell<HashMap<Id, Channel>>,
     conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
@@ -234,7 +233,7 @@ fn member_id_array(members: &[Id]) -> Value {
 /// both build their document through this function.
 fn insert_channel_fields(
     document: &mut BTreeMap<Value, Value>,
-    channel: &PhotonChannel,
+    channel: &Channel,
     session_key: Vec<u8>,
 ) {
     document.insert(
@@ -279,7 +278,7 @@ enum MemberUpdate {
 
 impl MemberUpdate {
     /// Applies the update to `channel` and returns the members that changed.
-    fn apply(self, channel: &mut PhotonChannel, touched: &[Id]) -> Vec<ChannelMember> {
+    fn apply(self, channel: &mut Channel, touched: &[Id]) -> Vec<ChannelMember> {
         match self {
             MemberUpdate::Role(role) => Self::reassign(channel, touched, role),
             MemberUpdate::Ban => Self::reassign(channel, touched, Role::Banned),
@@ -299,13 +298,13 @@ impl MemberUpdate {
         }
     }
 
-    fn reassign(channel: &mut PhotonChannel, touched: &[Id], role: Role) -> Vec<ChannelMember> {
+    fn reassign(channel: &mut Channel, touched: &[Id], role: Role) -> Vec<ChannelMember> {
         channel
             .members
             .iter_mut()
             .filter(|member| touched.contains(member.id()))
             .map(|member| {
-                *member = PhotonChannelMember::new(*member.id(), role, member.joined());
+                *member = ChannelMember::new(*member.id(), role, member.joined());
                 ChannelMember::from(&*member)
             })
             .collect()
@@ -435,6 +434,7 @@ impl RpcServer {
         };
         self.pending_rpc
             .respond(RPCResponse::parse(&payload)?, sender)
+            .map_err(|e| e.into())
     }
 }
 
@@ -625,7 +625,7 @@ impl RpcServer {
                     .filter(|channel| channel.session_id == session_id)
                     .map(|channel| channel.members.clone())
                     .unwrap_or_default();
-                Some(PhotonChannel {
+                Some(Channel {
                     contact: contact.clone(),
                     owner: info.owner,
                     session_id,
@@ -925,7 +925,7 @@ impl RpcServer {
         if message.message_type == CONTENT_MESSAGE {
             return self.handle_content_message(topic, message, from);
         }
-        Err(EncodingError::new("Unsupported user message type"))
+        Err(EncodingError::new("Unsupported user message type").into())
     }
 
     /// Handles a reply to a control RPC.
@@ -944,7 +944,7 @@ impl RpcServer {
             .copied()
             .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
         if from == *peer_id {
-            return self.handle_rpc_response(message.payload, &from);
+            return self.handle_rpc_response(message.payload, &from).map_err(|e| e.into());
         }
 
         let Value::Bytes(payload) = message.payload else {
@@ -956,7 +956,7 @@ impl RpcServer {
             .map_err(|error| {
                 AuthenticationError::new(format!("Decrypting channel RPC failed: {error}"))
             })?;
-        self.handle_rpc_response(Value::Bytes(payload), &from)
+        self.handle_rpc_response(Value::Bytes(payload), &from).map_err(|e| e.into())
     }
 
     /// Handles a service notification.
@@ -978,7 +978,8 @@ impl RpcServer {
             .copied()
             .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
         if from == *peer_id && message.recipient == *self.user_id() {
-            return self.handle_notification(message.payload, &from);
+            return self.handle_notification(message.payload, &from)
+                .map_err(|e| e.into());
         }
 
         let Value::Bytes(payload) = message.payload else {
@@ -1531,7 +1532,7 @@ impl RpcServer {
         if result != Value::Null {
             return Err(EncodingError::new(
                 "Session revoke response contains an unexpected result",
-            ));
+            ).into());
         }
         Ok(())
     }
@@ -1612,7 +1613,7 @@ impl RpcServer {
             .await?;
 
         if Self::timestamp(timestamp) < request.created_at() {
-            return Err(StateError::new("Friend request changed while accepting"));
+            return Err(StateError::new("Friend request changed while accepting").into());
         }
 
         self.friend_sessions
@@ -1709,7 +1710,7 @@ impl RpcServer {
         name: String,
         notice: Option<String>,
         announce: bool,
-    ) -> Result<Box<dyn Channel>> {
+    ) -> Result<Box<Channel>> {
         // let _requests = self.requests.lock().await;
 
         let session = CryptoIdentity::new();
@@ -1760,7 +1761,7 @@ impl RpcServer {
     }
 
     /// Joins a channel from an invite ticket.
-    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
         let _request = self.requests.lock().await;
         if !ticket.is_genuine()
             || ticket.is_expired()
@@ -1776,7 +1777,7 @@ impl RpcServer {
             .get(ticket.channel_id())
             .is_some_and(|channel| channel.has_member(self.user_id()))
         {
-            return Err(StateError::new("Already joined the channel"));
+            return Err(StateError::new("Already joined the channel").into());
         }
         let key = if ticket.is_named_ticket() {
             self.user_identity
@@ -1834,7 +1835,7 @@ impl RpcServer {
         {
             return Err(EncodingError::new(
                 "Joined channel does not match invitation or membership",
-            ));
+            ).into());
         }
         self.store_channel(channel.clone(), returned_session)
             .await?;
@@ -1883,12 +1884,12 @@ impl RpcServer {
         if !allowed {
             return Err(StateError::new(
                 "Insufficient permission to invite channel members",
-            ));
+            ).into());
         }
         if invitee.is_some_and(|id| channel.has_member(&id)) {
             return Err(ArgumentError::new(
                 "The invitee is already a channel member",
-            ));
+            ).into());
         }
         let session = self
             .friend_sessions
@@ -1916,10 +1917,10 @@ impl RpcServer {
             invitee,
             expiration,
             key,
-        )
+        ).map_err(|e| e.into())
     }
 
-    fn channel_snapshot(&self, id: &Id) -> Result<PhotonChannel> {
+    fn channel_snapshot(&self, id: &Id) -> Result<Channel> {
         Ok(self
             .channels
             .borrow()
@@ -1928,12 +1929,12 @@ impl RpcServer {
             .ok_or_else(|| StateError::new(format!("Channel {id} does not exist")))?)
     }
 
-    fn decode_channel_info(&self, value: Value) -> Result<(PhotonChannel, CryptoIdentity)> {
+    fn decode_channel_info(&self, value: Value) -> Result<(Channel, CryptoIdentity)> {
         let info: ChannelInfo = decode_cbor(value, "channel info")?;
         self.channel_from_info(&info)
     }
 
-    fn channel_from_info(&self, info: &ChannelInfo) -> Result<(PhotonChannel, CryptoIdentity)> {
+    fn channel_from_info(&self, info: &ChannelInfo) -> Result<(Channel, CryptoIdentity)> {
         let timestamp = |time: SystemTime| -> Result<i64> {
             let millis = time
                 .duration_since(UNIX_EPOCH)
@@ -1971,7 +1972,7 @@ impl RpcServer {
         let mut data = ContactData::new(*info.channel_id(), ContactType::Channel as u8, created_at);
         data.name = info.name().map(ToString::to_string);
         data.updated_at = updated_at;
-        let channel = PhotonChannel {
+        let channel = Channel {
             contact: Contact::try_from(data)?,
             owner: *info.owner_id(),
             session_id: *info.session_id(),
@@ -1998,7 +1999,7 @@ impl RpcServer {
 
     async fn store_channel(
         &self,
-        mut channel: PhotonChannel,
+        mut channel: Channel,
         session: CryptoIdentity,
     ) -> Result<()> {
         let key = self.user_identity.encrypt_into(
@@ -2147,7 +2148,7 @@ impl RpcServer {
     }
 
     /// Pushes changed channel metadata, sending only the fields that differ.
-    pub(crate) async fn update_channel_info(&self, channel: &dyn Channel) -> Result<()> {
+    pub(crate) async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
         let _request = self.requests.lock().await;
         let mut current = self.channel_snapshot(channel.id())?;
         if current.owner != *self.user_id() {
@@ -2188,7 +2189,7 @@ impl RpcServer {
             );
         }
         if changes.is_empty() {
-            return Err(ArgumentError::new("Channel information has not changed"));
+            return Err(ArgumentError::new("Channel information has not changed").into());
         }
 
         self.rpc_call(
@@ -2332,7 +2333,7 @@ impl RpcServer {
         Ok(())
     }
 
-    fn ensure_channel_moderator(channel: &PhotonChannel, user_id: &Id) -> Result<()> {
+    fn ensure_channel_moderator(channel: &Channel, user_id: &Id) -> Result<()> {
         if !channel
             .member(user_id)
             .is_some_and(|member| member.is_owner() || member.is_moderator())
@@ -2427,7 +2428,7 @@ impl RpcServer {
             let channel = self.channel_snapshot(contact.id())?;
             let key = key.ok_or_else(|| StateError::new("Channel session key is missing"))?;
             let Value::Map(mut document) = to_cbor(&data, "channel contact")? else {
-                return Err(EncodingError::new("Channel contact is not a map"));
+                return Err(EncodingError::new("Channel contact is not a map").into());
             };
             insert_channel_fields(&mut document, &channel, key);
             let document = to_cbor_bytes(&Value::Map(document), "channel contact")?;

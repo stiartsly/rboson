@@ -22,12 +22,23 @@ use boson::{
     core::logger,
     errors::Result,
     Id,
-    messaging::{
-        Channel, ChannelListener, Client, ConnectionListener, Contact, ContactOps, ContactListener,
-        FriendRequestListener, Message, MessageListener, Options as MessagingOptions,
-        OptionsBuilder as MessagingOptionsBuilder, SessionInfo, SessionListener,
-    },
 };
+use boson::messaging::{
+    channel::Channel,
+    ChannelListener,
+    Client,
+    ConnectionListener,
+    Contact,
+    ContactListener,
+    FriendRequestListener,
+    Message,
+    MessageListener,
+    Options as MessagingOptions,
+    OptionsBuilder as MessagingOptionsBuilder,
+    SessionInfo,
+    SessionListener,
+};
+
 use clap::Parser;
 use reedline::{ExternalPrinter, Reedline, Signal};
 use std::{
@@ -320,22 +331,21 @@ impl PhotonChannelListener {
 }
 
 impl ChannelListener for PhotonChannelListener {
-    fn on_channel_created(&self, channel: &dyn Channel) {
-        self.output
-            .println(format!("Channel created: {}", channel.id()));
+    fn on_channel_created(&self, channel: &Channel) {
+        self.output.println(format!("Channel created: {}", channel.id()));
     }
 
-    fn on_channel_deleted(&self, channel: &dyn Channel) {
+    fn on_channel_deleted(&self, channel: &Channel) {
         self.output
             .println(format!("Channel deleted: {}", channel.id()));
     }
 
-    fn on_joined_channel(&self, channel: &dyn Channel) {
+    fn on_joined_channel(&self, channel: &Channel) {
         self.output
             .println(format!("Joined channel: {}", channel.id()));
     }
 
-    fn on_left_channel(&self, channel: &dyn Channel) {
+    fn on_left_channel(&self, channel: &Channel) {
         self.output
             .println(format!("Left channel: {}", channel.id()));
     }

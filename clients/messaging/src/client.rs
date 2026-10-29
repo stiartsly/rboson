@@ -52,7 +52,7 @@ use std::{
 };
 
 use crate::{
-    channel::{Channel, Permission, Role},
+    channel::{Permission, Role, Channel},
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,
     contact::Contact,
@@ -476,7 +476,7 @@ impl Client {
         name: impl Into<String>,
         notice: Option<impl Into<String>>,
         announce: bool,
-    ) -> Result<Box<dyn Channel>> {
+    ) -> Result<Box<Channel>> {
         let name = name.into().trim().to_string();
         if name.is_empty() {
             return Err(ArgumentError::new("Channel name is required"));
@@ -493,7 +493,7 @@ impl Client {
     }
 
     /// Joins a channel using an invite ticket.
-    pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+    pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
         self.verticle_client()?.join_channel(ticket).await
     }
 
@@ -528,7 +528,7 @@ impl Client {
     }
 
     /// Updates channel metadata.
-    pub async fn update_channel_info(&self, channel: &dyn Channel) -> Result<()> {
+    pub async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
         self.verticle_client()?
             .update_channel_info(channel.edit_channel().build())
             .await
@@ -782,7 +782,7 @@ impl MessagingClient for Client {
         name: String,
         notice: Option<String>,
         announce: bool,
-    ) -> Result<Box<dyn Channel>> {
+    ) -> Result<Box<Channel>> {
         self.create_channel(perms, name, notice, announce).await
     }
 
@@ -790,7 +790,7 @@ impl MessagingClient for Client {
         self.remove_channel(channel_id).await
     }
 
-    async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+    async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
         self.join_channel(ticket).await
     }
 
@@ -814,7 +814,7 @@ impl MessagingClient for Client {
         self.rotate_channel_session_key(channel_id).await
     }
 
-    async fn update_channel_info(&self, channel: &dyn Channel) -> Result<()> {
+    async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
         self.update_channel_info(channel).await
     }
 

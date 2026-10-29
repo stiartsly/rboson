@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 pub(crate) mod codec;
-pub(crate) mod photon_channel;
 pub(crate) mod handshake;
 pub(crate) mod notification;
 pub(crate) mod photon_message;
@@ -51,7 +50,6 @@ pub(crate) mod contact {
 }
 
 pub(crate) use {
-    photon_channel::{PhotonChannel, PhotonChannelMember},
     photon_message::PhotonMessage,
     message_content::{ContentFormat, MessageContent},
     handshake::{Handshake, HandshakeType},

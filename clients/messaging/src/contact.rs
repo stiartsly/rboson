@@ -18,17 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use serde::{Deserialize, Serialize};
 use boson_api::{
     Id,
     errors::{Result, Error, ArgumentError}
 };
-use serde::{Deserialize, Serialize};
 use crate::{
     errors::EncodingError,
-    contact_editor::{ContactEditor, ContactEditorOps},
-    internal::{
-        contact::ContactData
-    },
+    contact_editor::ContactEditor,
+    ops::ContactOps,
+    internal::contact::ContactData
 };
 
 /// The type of a contact.
@@ -56,70 +55,35 @@ impl TryFrom<i32> for ContactType {
     }
 }
 
-/// A contact entry in the local contact list.
-///
-/// This trait mirrors the Java `Contact` interface and is implemented by both
-/// individual contacts (friends) and channel contacts.
-pub trait ContactOps: Send + Sync {
-    /// The unique boson `Id` of this contact.
-    fn id(&self) -> &Id;
-
-    /// The type of this contact.
-    fn contact_type(&self) -> ContactType;
-
-    /// Display name, either the user-set remark or the contact's published name.
-    fn name(&self) -> Option<&str>;
-
-    /// User-defined remark (alias) for this contact.
-    fn remark(&self) -> Option<&str>;
-
-    /// User-defined tags attached to this contact.
-    fn tags(&self) -> Option<&str>;
-
-    /// Whether this contact has been muted.
-    fn is_muted(&self) -> bool;
-
-    /// Whether this contact has been blocked.
-    fn is_blocked(&self) -> bool;
-
-    /// Timestamp when this contact was first created locally, in milliseconds.
-    fn created_at(&self) -> i64;
-
-    /// Timestamp of the last update to this contact's record, in milliseconds.
-    fn updated_at(&self) -> i64;
-
-    /// Monotonically increasing revision counter for sync purposes.
-    fn revision(&self) -> i32;
-
-    /// Returns `true` if `other` refers to the same contact as `self`.
-    fn is(&self, other: &dyn ContactOps) -> bool {
-        self.id() == other.id()
-    }
-
-    /// Creates an editor that builds a new contact without mutating this one.
-    fn edit(&self) -> ContactEditor;
-}
-
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 #[serde(into = "ContactData", try_from = "ContactData")]
 pub struct Contact {
-    id: Id,
-    contact_type: ContactType,
-    name: Option<String>,
-    remark: Option<String>,
-    tags: Option<String>,
-    muted: bool,
-    blocked: bool,
-    created_at: i64,
-    updated_at: i64,
-    revision: i32,
+    pub(crate) id          : Id,
+    pub(crate) contact_type: ContactType,
+    pub(crate) name        : Option<String>,
+    pub(crate) remark      : Option<String>,
+    pub(crate) tags        : Option<String>,
+    pub(crate) muted       : bool,
+    pub(crate) blocked     : bool,
+    pub(crate) created_at  : i64,
+    pub(crate) updated_at  : i64,
+    pub(crate) revision    : i32,
 }
 
 impl Contact {
     pub(crate) fn new(id: Id, contact_type: ContactType, created_at: i64) -> Self {
         Self {
-            id, contact_type, name: None, remark: None, tags: None,
-            muted: false, blocked: false, created_at, updated_at: created_at, revision: 0,
+            id,
+            contact_type,
+            created_at,
+            updated_at: created_at,
+
+            name: None,
+            remark: None,
+            tags: None,
+            muted: false,
+            blocked: false,
+            revision: 0,
         }
     }
 
@@ -177,80 +141,95 @@ impl TryFrom<ContactData> for Contact {
     }
 }
 
-impl ContactEditorOps for ContactEditor {
-    fn remark(mut self: Box<Self>, remark: Option<String>) -> Self {
-        self.contact.remark = remark;
-        *self
+impl Contact {
+    pub fn id(&self) -> &Id {
+        &self.id
     }
 
-    fn tags(mut self: Box<Self>, tags: Option<String>) -> Self {
-        self.contact.tags = tags;
-        *self
+    pub fn contact_type(&self) -> ContactType {
+        self.contact_type
     }
 
-    fn muted(mut self: Box<Self>, muted: bool) -> Self {
-        self.contact.muted = muted;
-        *self
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
-    fn blocked(mut self: Box<Self>, blocked: bool) -> Self {
-        self.contact.blocked = blocked;
-        *self
+    pub fn remark(&self) -> Option<&str> {
+        self.remark.as_deref()
     }
 
-    fn build(mut self: Box<Self>) -> Contact {
-        self.contact.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        self.contact.revision += 1;
-        self.contact
+    pub fn tags(&self) -> Option<&str> {
+        self.tags.as_deref()
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.muted
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.blocked
+    }
+
+    pub fn created_at(&self) -> i64 {
+        self.created_at
+    }
+
+    pub fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
+
+    pub fn revision(&self) -> i32 {
+        self.revision
+    }
+
+    pub fn edit(&self) -> ContactEditor {
+        ContactEditor { contact: self.clone() }
     }
 }
 
 impl ContactOps for Contact {
     fn id(&self) -> &Id {
-        &self.id
+        self.id()
     }
 
     fn contact_type(&self) -> ContactType {
-        self.contact_type
+        self.contact_type()
     }
 
     fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+        self.name()
     }
 
     fn remark(&self) -> Option<&str> {
-        self.remark.as_deref()
+        self.remark()
     }
 
     fn tags(&self) -> Option<&str> {
-        self.tags.as_deref()
+        self.tags()
     }
 
     fn is_muted(&self) -> bool {
-        self.muted
+        self.is_muted()
     }
 
     fn is_blocked(&self) -> bool {
-        self.blocked
+        self.is_blocked()
     }
 
     fn created_at(&self) -> i64 {
-        self.created_at
+        self.created_at()
     }
 
     fn updated_at(&self) -> i64 {
-        self.updated_at
+        self.updated_at()
     }
 
     fn revision(&self) -> i32 {
-        self.revision
+        self.revision()
     }
 
     fn edit(&self) -> ContactEditor {
-        ContactEditor { contact: self.clone() }
+        self.edit()
     }
 }
 

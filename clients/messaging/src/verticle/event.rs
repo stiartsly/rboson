@@ -21,8 +21,7 @@ use std::result::Result as StdResult;
 use tokio::sync::oneshot;
 
 use crate::{
-    channel::Channel,
-    channel::{Permission, Role},
+    channel::{Channel, Permission, Role},
     contact::Contact,
     conversation::Conversation,
     friend_request::FriendRequest,
@@ -77,14 +76,14 @@ pub(crate) enum Event {
     ),
     RegisterFriendSession(WithParams<(Id, Vec<u8>, Option<String>), ()>),
     BlockUser(WithParams<Id, Contact>),
-    CreateChannel(WithParams<(Permission, String, Option<String>, bool), Box<dyn Channel>>),
+    CreateChannel(WithParams<(Permission, String, Option<String>, bool), Box<Channel>>),
     RemoveChannel(WithParams<Id, ()>),
-    JoinChannel(WithParams<InviteTicket, Box<dyn Channel>>),
+    JoinChannel(WithParams<InviteTicket, Box<Channel>>),
     LeaveChannel(WithParams<Id, ()>),
     CreateInviteTicket(WithParams<(Id, Option<Id>), InviteTicket>),
     TransferChannelOwnership(WithParams<(Id, Id), ()>),
     RotateChannelSessionKey(WithParams<Id, ()>),
-    UpdateChannelInfo(WithParams<Box<dyn Channel>, ()>),
+    UpdateChannelInfo(WithParams<Box<Channel>, ()>),
     SetChannelMemberRole(WithParams<(Id, Vec<Id>, Role), ()>),
     BanChannelMembers(WithParams<(Id, Vec<Id>), ()>),
     UnbanChannelMembers(WithParams<(Id, Vec<Id>), ()>),

@@ -23,37 +23,16 @@ use std::{
     sync::Arc,
     time::SystemTime
 };
-use boson_api::{
-    Id,
-    errors::{ArgumentError, Result}
-};
+use boson_api::Id;
+use boson_api::errors::{ArgumentError, Result};
 use crate::{
-    contact::{Contact, ContactOps, ContactType},
+    contact::{Contact, ContactType},
     invite_ticket::InviteTicket,
     message::Message,
+    ops::ConversationOps,
 };
 
-/// A conversation between the local user and another party (person or channel).
-///
-/// The conversation ID equals the other party's boson `Id`.
-pub trait ConversationOps: Send + Sync {
-    /// The unique identifier of this conversation (same as the participant's `Id`).
-    fn id(&self) -> &Id;
-
-    /// The contact representing the other participant.
-    fn contact(&self) -> &Contact;
-
-    /// Whether this is a channel (group) conversation.
-    fn is_channel(&self) -> bool;
-
-    /// Short text preview of the most recent activity.
-    fn preview(&self) -> Result<Option<&str>>;
-
-    /// When this conversation was last updated.
-    fn updated_at(&self) -> Option<SystemTime>;
-}
-
-    #[derive(Clone)]
+#[derive(Clone)]
 pub struct Conversation {
     contact: Contact,
     last_message: Option<Arc<dyn Message>>,
@@ -134,24 +113,46 @@ impl Hash for Conversation {
     }
 }
 
-impl ConversationOps for Conversation {
-    fn id(&self) -> &Id {
+impl Conversation {
+    pub fn id(&self) -> &Id {
         self.contact.id()
     }
 
-    fn contact(&self) -> &Contact {
+    pub fn contact(&self) -> &Contact {
         &self.contact
     }
 
-    fn is_channel(&self) -> bool {
+    pub fn is_channel(&self) -> bool {
         self.contact.contact_type() == ContactType::Channel
     }
 
-    fn preview(&self) -> Result<Option<&str>> {
+    pub fn preview(&self) -> Result<Option<&str>> {
         Ok(self.preview.as_deref())
     }
 
-    fn updated_at(&self) -> Option<SystemTime> {
+    pub fn updated_at(&self) -> Option<SystemTime> {
         self.last_message.as_ref().and_then(|message| message.received_at().or(message.sent_at()))
+    }
+}
+
+impl ConversationOps for Conversation {
+    fn id(&self) -> &Id {
+        self.id()
+    }
+
+    fn contact(&self) -> &Contact {
+        self.contact()
+    }
+
+    fn is_channel(&self) -> bool {
+        self.is_channel()
+    }
+
+    fn preview(&self) -> Result<Option<&str>> {
+        self.preview()
+    }
+
+    fn updated_at(&self) -> Option<SystemTime> {
+        self.updated_at()
     }
 }

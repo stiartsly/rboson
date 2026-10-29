@@ -281,7 +281,7 @@ pub(super) fn handle(
             complete,
         }) => {
             respond(pending, complete, async move {
-                rpc.update_channel_info(channel.as_ref()).await
+                rpc.update_channel_info(&channel).await
             });
         }
 

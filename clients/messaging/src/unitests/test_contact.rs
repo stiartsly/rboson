@@ -22,8 +22,7 @@
 use boson_api::Id;
 use crate::{
     internal::contact::ContactData,
-    contact::{Contact, ContactOps},
-    contact_editor::ContactEditorOps,
+    contact::Contact,
 };
 use serde_cbor::Value;
 

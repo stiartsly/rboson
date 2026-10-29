@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
 use crate::{
-    contact::{Contact, ContactOps, ContactType},
+    contact::{Contact, ContactType},
     errors::{AuthenticationError, EncodingError},
 };
 use boson_api::{CryptoIdentity, Id, Identity, Result};

@@ -18,30 +18,62 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::contact::{
-    Contact,
-};
+use crate::contact::Contact;
+use crate::ops::ContactEditorOps;
 
-/// Builder for an immutable contact update.
-pub trait ContactEditorOps: Send {
-    /// Set the user-defined remark (alias).
-    fn remark(self: Box<Self>, remark: Option<String>) -> Self;
-
-    /// Set the user-defined tags.
-    fn tags(self: Box<Self>, tags: Option<String>) -> Self;
-
-    /// Toggle the muted state.
-    fn muted(self: Box<Self>, muted: bool) -> Self;
-
-    /// Toggle the blocked state.
-    fn blocked(self: Box<Self>, blocked: bool) -> Self;
-
-    /// Build the updated immutable contact.
-    fn build(self: Box<Self>) -> Contact;
-}
-
-
-/// Builder for updating a [`Contact`].
 pub struct ContactEditor {
     pub(crate) contact: Contact,
+}
+
+impl ContactEditor {
+    pub fn remark(mut self: Box<Self>, remark: Option<String>) -> Self {
+        self.contact.remark = remark;
+        *self
+    }
+
+    pub fn tags(mut self: Box<Self>, tags: Option<String>) -> Self {
+        self.contact.tags = tags;
+        *self
+    }
+
+    pub fn muted(mut self: Box<Self>, muted: bool) -> Self {
+        self.contact.muted = muted;
+        *self
+    }
+
+    pub fn blocked(mut self: Box<Self>, blocked: bool) -> Self {
+        self.contact.blocked = blocked;
+        *self
+    }
+
+    pub fn build(mut self: Box<Self>) -> Contact {
+        self.contact.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        self.contact.revision += 1;
+        self.contact
+    }
+}
+
+impl ContactEditorOps for ContactEditor {
+    fn remark(self: Box<Self>, remark: Option<String>) -> Self {
+        self.remark(remark)
+    }
+
+    fn tags(self: Box<Self>, tags: Option<String>) -> Self {
+        self.tags(tags)
+    }
+
+    fn muted(self: Box<Self>, muted: bool) -> Self {
+        self.muted(muted)
+    }
+
+    fn blocked(self: Box<Self>, blocked: bool) -> Self {
+        self.blocked(blocked)
+    }
+
+    fn build(self: Box<Self>) -> Contact {
+        self.build()
+    }
 }

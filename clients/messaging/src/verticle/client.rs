@@ -33,8 +33,7 @@ use boson_api::{
 };
 
 use crate::{
-    channel::Channel,
-    channel::{Permission, Role},
+    channel::{Permission, Role, Channel},
     contact::Contact,
     conversation::Conversation,
     friend_request::FriendRequest,
@@ -76,8 +75,8 @@ impl VerticleClient {
 
         match rx.await {
             Ok(Ok(v)) => Ok(v),
-            Ok(Err(msg)) => Err(StateError::new(msg)),
-            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED)),
+            Ok(Err(msg)) => Err(StateError::new(msg).into()),
+            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED).into()),
         }
     }
 
@@ -322,7 +321,7 @@ impl VerticleClient {
         name: String,
         notice: Option<String>,
         announcement: bool,
-    ) -> Result<Box<dyn Channel>> {
+    ) -> Result<Box<Channel>> {
         self.call(|complete| {
             Event::CreateChannel(WithParams {
                 data: (permission, name, notice, announcement),
@@ -342,7 +341,7 @@ impl VerticleClient {
         .await
     }
 
-    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<dyn Channel>> {
+    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
         self.call(|complete| {
             Event::JoinChannel(WithParams {
                 data: (ticket),
@@ -400,7 +399,7 @@ impl VerticleClient {
         .await
     }
 
-    pub(crate) async fn update_channel_info(&self, channel: Box<dyn Channel>) -> Result<()> {
+    pub(crate) async fn update_channel_info(&self, channel: Box<Channel>) -> Result<()> {
         self.call(|complete| {
             Event::UpdateChannelInfo(WithParams {
                 data: (channel),

@@ -24,6 +24,7 @@
 
 pub(crate) mod internal;
 pub(crate) mod rpc;
+pub mod ops;
 
 pub(crate) mod mqtt;
 pub(crate) mod rpc_server;
@@ -64,11 +65,11 @@ pub use {
     message_listener::MessageListener,
     session_listener::SessionListener,
     channel_listener::ChannelListener,
-    channel::{Channel, ChannelEditor, Permission, Role},
+    channel::{Permission, Role},
     channel_member::ChannelMember,
-    contact::{Contact, ContactOps, ContactType},
+    contact::{Contact, ContactType},
     contact_editor::ContactEditor,
-    conversation::ConversationOps,
+    ops::{ChannelEditorOps, ChannelOps, ContactEditorOps, ContactOps, ConversationOps},
     invite_ticket::InviteTicket,
     session_info::SessionInfo,
 };

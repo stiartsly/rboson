@@ -4,11 +4,11 @@ use tokio::{sync::mpsc, time};
 use boson::{signature::KeyPair, Id};
 use boson::messaging::{
     Client,
+    channel::Channel,
     Options, OptionsBuilder,
-    Channel,
+    ChannelOps,
     ChannelListener,
-    ContactOps, ContactType,
-    ConversationOps,
+    ContactType,
     InviteTicket,
     Message,
     MessageListener,
@@ -16,7 +16,6 @@ use boson::messaging::{
     MessagingClient,
     Permission,
     Role,
-    contact_editor::ContactEditorOps,
 };
 
 const BOB_YAML: &str = "tests/apitests/messaging/bob.yaml";
@@ -66,7 +65,7 @@ struct ChannelRotationCapture {
 }
 
 impl ChannelListener for ChannelRotationCapture {
-    fn on_channel_session_key_rotated(&self, channel: &dyn Channel) {
+    fn on_channel_session_key_rotated(&self, channel: &Channel) {
         self.rotated
             .send(*channel.id())
             .expect("Channel rotation test receiver should remain open");
@@ -329,7 +328,7 @@ async fn create_channel(
     name: &str,
     notice: Option<&str>,
     announce: bool,
-) -> Box<dyn Channel> {
+) -> Box<Channel> {
     client
         .create_channel(permission, name, notice, announce)
         .await
@@ -340,7 +339,7 @@ async fn create_channel_with_member(
     bob: &Client,
     alice: &Client,
     name: &str,
-) -> (Id, Box<dyn Channel>) {
+) -> (Id, Box<Channel>) {
     let channel = create_channel(bob, Permission::OwnerInvite, name, None, false).await;
     let channel_id = *channel.id();
     assert!(channel.has_member(bob.user_id()));
@@ -1236,7 +1235,7 @@ mod channels {
             .announced(false)
             .permission(Permission::Public)
             .build();
-        assert!(bob.update_channel_info(updated.as_ref()).await.is_ok());
+        assert!(bob.update_channel_info(&updated).await.is_ok());
 
         let updated_contact = bob.get_contact(&channel_id).await.unwrap().unwrap();
         assert_eq!(
@@ -1246,7 +1245,7 @@ mod channels {
         assert!(updated_contact.updated_at() >= contact.updated_at());
 
         let error = bob
-            .update_channel_info(updated.as_ref())
+            .update_channel_info(&updated)
             .await
             .err()
             .unwrap()
@@ -1329,7 +1328,7 @@ mod channels {
 
         let attempt = joined.edit_channel().name("not allowed".to_string()).build();
         let error = alice
-            .update_channel_info(attempt.as_ref())
+            .update_channel_info(&attempt)
             .await
             .err()
             .unwrap()

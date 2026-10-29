@@ -343,7 +343,10 @@ impl Client {
         if device_id == self.device_id() {
             return Err(ArgumentError::new("Cannot revoke the current session"));
         }
-        self.verticle_client()?.revoke_session(*device_id).await
+        self.verticle_client()?
+            .revoke_session(*device_id)
+            .await
+            .map_err(|e| e.into())
     }
 }
 
@@ -364,6 +367,7 @@ impl Client {
         self.verticle_client()?
             .friend_request(user_id, hello.map(Into::into))
             .await
+            .map_err(|e| e.into())
     }
 
     /// Accepts a pending friend request.
@@ -373,7 +377,7 @@ impl Client {
                 "Cannot accept friend request from yourself",
             ));
         }
-        self.verticle_client()?.friend_accept(user_id).await
+        self.verticle_client()?.friend_accept(user_id).await.map_err(|e| e.into())
     }
 
     /// Looks up a single pending friend request.
@@ -455,7 +459,10 @@ impl Client {
         if ids.is_empty() {
             return Err(ArgumentError::new("No contact IDs specified"));
         }
-        self.verticle_client()?.remove_contacts(ids.to_vec()).await
+        self.verticle_client()?
+            .remove_contacts(ids.to_vec())
+            .await
+            .map_err(|e| e.into())
     }
 
     /// Removes every contact.
@@ -485,6 +492,7 @@ impl Client {
         self.verticle_client()?
             .create_channel(permission, name, notice.map(Into::into), announce)
             .await
+            .map_err(|e| e.into())
     }
 
     /// Removes a channel (owner only).
@@ -956,20 +964,17 @@ impl MessageBuilder for ComposedMessageBuilder {
                 text,
             );
 
-            let (complete, response) = tokio::sync::oneshot::channel();
+            let (promise, future) = verticle::Promise::pair();
             sender
                 .send(verticle::Event::ContentMessage(
                     verticle::WithParams {
                         data: (recipient, headers, body, text),
-                        complete: complete,
+                        promise
                     },
                 ))
                 .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
 
-            let message = response
-                .await
-                .map_err(|_| StateError::new("Messaging verticle response channel closed"))?
-                .map_err(StateError::new)?;
+            let message = future.await.map_err(StateError::new)?;
             self.message_listener.on_sent(message.as_ref());
             Ok(message)
         })

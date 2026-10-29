@@ -17,8 +17,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-use std::result::Result as StdResult;
-use tokio::sync::oneshot;
 
 use crate::{
     channel::{Channel, Permission, Role},
@@ -30,16 +28,14 @@ use crate::{
     session_info::SessionInfo,
 };
 use boson_api::Id;
-
-pub(crate) type CmdResult<T> = StdResult<T, String>;
-type Completion<T> = oneshot::Sender<CmdResult<T>>;
+use super::promise::Promise;
 
 pub(crate) struct NoParams<T> {
-    pub(crate) complete: Completion<T>,
+    pub(crate) promise: Promise<T>,
 }
 pub(crate) struct WithParams<D, T> {
     pub(crate) data: D,
-    pub(crate) complete: Completion<T>,
+    pub(crate) promise: Promise<T>,
 }
 
 pub(crate) enum Event {

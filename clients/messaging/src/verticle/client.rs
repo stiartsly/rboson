@@ -23,7 +23,7 @@ use std::{
 };
 
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::mpsc,
     task,
 };
 
@@ -41,7 +41,8 @@ use crate::{
     message::Message,
 };
 
-use super::event::{CmdResult, Event, NoParams, WithParams};
+use super::event::{Event, NoParams, WithParams};
+use super::promise::Promise;
 
 const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
 const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
@@ -66,31 +67,27 @@ impl VerticleClient {
 
     async fn call<T>(
         &self,
-        make_event: impl FnOnce(oneshot::Sender<CmdResult<T>>) -> Event,
+        make_event: impl FnOnce(Promise<T>) -> Event,
     ) -> Result<T> {
-        let (tx, rx) = oneshot::channel();
+        let (promise, future) = Promise::pair();
         self.event_tx
-            .send(make_event(tx))
+            .send(make_event(promise))
             .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
 
-        match rx.await {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(msg)) => Err(StateError::new(msg).into()),
-            Err(_) => Err(StateError::new(CHANNEL_RSP_CLOSED).into()),
-        }
+        future.await.map_err(|msg| StateError::new(msg).into())
     }
 
     pub(crate) async fn start(&self) -> Result<()> {
-        self.call(|complete| {
-            Event::Start(NoParams {complete})
+        self.call(|promise| {
+            Event::Start(NoParams {promise})
         })
         .await
     }
 
     pub(crate) async fn stop(&self) -> Result<()> {
         let result = self
-            .call(|complete| {
-                Event::Stop(NoParams {complete})
+            .call(|promise| {
+                Event::Stop(NoParams {promise})
             })
             .await;
 
@@ -112,37 +109,37 @@ impl VerticleClient {
     }
 
     pub(crate) async fn get_conversation(&self, id: Id) -> Result<Option<Conversation>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::GetConversation(WithParams {
                 data: id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_conversations(&self) -> Result<Vec<Conversation>> {
-        self.call(|complete| {
-            Event::GetConversations(NoParams { complete})
+        self.call(|promise| {
+            Event::GetConversations(NoParams { promise})
         })
         .await
     }
 
     pub(crate) async fn remove_conversation(&self, id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveConversation(WithParams {
                 data: id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_conversations(&self, ids: Vec<Id>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveConversations(WithParams {
                 data: (ids),
-                complete,
+                promise,
             })
         })
         .await
@@ -155,10 +152,10 @@ impl VerticleClient {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::GetMessages(WithParams {
                 data: (conversation_id, until, limit, offset),
-                complete: complete,
+                promise,
             })
         })
         .await
@@ -170,122 +167,122 @@ impl VerticleClient {
         begin: i64,
         end: i64,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::GetMessagesInRange(WithParams {
                 data: (conversation_id, begin, end),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_message(&self, message_id: i64) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveMessage(WithParams {
                 data: (message_id),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_messages_by_ids(&self, message_ids: Vec<i64>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveMessagesByIds(WithParams {
                 data: (message_ids),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_messages_in_conversation(&self, conversation_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveMessagesInConversation(WithParams {
                 data: conversation_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_sessions(&self) -> Result<Vec<crate::session_info::SessionInfo>> {
-        self.call(|complete| {
-            Event::GetSessions(NoParams { complete})
+        self.call(|promise| {
+            Event::GetSessions(NoParams { promise})
         })
         .await
     }
 
     pub(crate) async fn revoke_session(&self, device_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RevokeSession(WithParams {
                 data: device_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::FriendRequest(WithParams {
                 data: (user_id, hello),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn friend_accept(&self, user_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::FriendAccept(WithParams {
                 data: user_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_friend_request(&self, user_id: Id) -> Result<Option<FriendRequest>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::GetFriendRequest(WithParams {
                 data: user_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
-        self.call(|complete| {
-            Event::GetFriendRequests(NoParams { complete})
+        self.call(|promise| {
+            Event::GetFriendRequests(NoParams { promise})
         })
         .await
     }
 
     pub(crate) async fn remove_friend_request(&self, user_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveFriendRequest(WithParams {
                 data: user_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_friend_requests(&self, user_ids: Vec<Id>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveFriendRequests(WithParams {
                 data: (user_ids),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
-        self.call(|complete| {
-            Event::ClearFriendRequests(NoParams { complete})
+        self.call(|promise| {
+            Event::ClearFriendRequests(NoParams { promise})
         })
         .await
     }
@@ -296,20 +293,20 @@ impl VerticleClient {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RegisterFriendSession(WithParams {
                 data: (user_id, session_key, remark),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn block_user(&self, user_id: Id) -> Result<Contact> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::BlockUser(WithParams {
                 data: user_id,
-                complete,
+                promise,
             })
         })
         .await
@@ -322,40 +319,40 @@ impl VerticleClient {
         notice: Option<String>,
         announcement: bool,
     ) -> Result<Box<Channel>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::CreateChannel(WithParams {
                 data: (permission, name, notice, announcement),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_channel(&self, channel_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveChannel(WithParams {
                 data: channel_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::JoinChannel(WithParams {
                 data: (ticket),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn leave_channel(&self, channel_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::LeaveChannel(WithParams {
                 data: channel_id,
-                complete,
+                promise,
             })
         })
         .await
@@ -366,10 +363,10 @@ impl VerticleClient {
         channel_id: Id,
         invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::CreateInviteTicket(WithParams {
                 data: (channel_id, invitee),
-                complete,
+                promise,
             })
         })
         .await
@@ -380,30 +377,30 @@ impl VerticleClient {
         channel_id: Id,
         new_owner: Id,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::TransferChannelOwnership(WithParams {
                 data: (channel_id, new_owner),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn rotate_channel_session_key(&self, channel_id: Id) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RotateChannelSessionKey(WithParams {
                 data: channel_id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn update_channel_info(&self, channel: Box<Channel>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::UpdateChannelInfo(WithParams {
                 data: (channel),
-                complete,
+                promise,
             })
         })
         .await
@@ -415,10 +412,10 @@ impl VerticleClient {
         member_ids: Vec<Id>,
         role: Role,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::SetChannelMemberRole(WithParams {
                 data: (channel_id, member_ids, role),
-                complete,
+                promise,
             })
         })
         .await
@@ -429,10 +426,10 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::BanChannelMembers(WithParams {
                 data: (channel_id, member_ids),
-                complete,
+                promise,
             })
         })
         .await
@@ -443,10 +440,10 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::UnbanChannelMembers(WithParams {
                 data: (channel_id, member_ids),
-                complete,
+                promise,
             })
         })
         .await
@@ -457,55 +454,55 @@ impl VerticleClient {
         channel_id: Id,
         members: Vec<Id>,
     ) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveChannelMembers(WithParams {
                 data: (channel_id, members),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<Contact>> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::GetContact(WithParams {
                 data: id,
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
-        self.call(|complete| {
-            Event::GetContacts(NoParams { complete })
+        self.call(|promise| {
+            Event::GetContacts(NoParams { promise })
         })
         .await
     }
 
     pub(crate) async fn update_contact(&self, contact: Contact) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::UpdateContact(WithParams {
                 data: (contact),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn remove_contacts(&self, ids: Vec<Id>) -> Result<()> {
-        self.call(|complete| {
+        self.call(|promise| {
             Event::RemoveContacts(WithParams {
                 data: (ids),
-                complete,
+                promise,
             })
         })
         .await
     }
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
-        self.call(|complete| {
-            Event::ClearContacts(NoParams { complete })
+        self.call(|promise| {
+            Event::ClearContacts(NoParams { promise })
         })
         .await
     }

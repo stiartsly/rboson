@@ -23,6 +23,7 @@ mod commands;
 mod event;
 mod runtime;
 mod transport;
+mod promise;
 
 use std::{
     result::Result as StdResult,
@@ -50,6 +51,7 @@ use crate::{
 
 pub(crate) use client::VerticleClient;
 pub(crate) use event::{Event, WithParams};
+pub(crate) use promise::Promise;
 
 /// Everything needed to construct the messaging engine on its thread.
 pub(crate) struct VerticleOptions {

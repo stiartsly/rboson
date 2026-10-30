@@ -18,37 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! # Messaging client
-//!
-//! [`Client`] is the public entry point of the messaging stack.
-//!
-//! It owns nothing but configuration and liveness flags: every request is
-//! forwarded to a dedicated verticle thread, which is the only place that
-//! touches session state. That keeps the public API `&self` + `async` while
-//! the state machine stays single-threaded and lock-free.
-//!
-//! ```text
-//!   Client ──Event────▶ verticle thread ──▶ SessionAgent ──▶ MQTT
-//!          ◀─oneshot──
-//! ```
-//!
-//! Three flags describe how far the connection has progressed:
-//!
-//! | flag        | means                                            |
-//! |-------------|--------------------------------------------------|
-//! | `running`   | the verticle thread is deployed                  |
-//! | `connected` | the transport finished the MQTT handshake        |
-//! | `ready`     | topics are subscribed, application traffic flows |
-//!
-//! Requests only require `connected`; a full teardown clears all three.
-
 use std::{
     collections::HashMap,
     future::Future,
+    cell::Cell,
     path::Path,
     pin::Pin,
     sync::atomic::{AtomicBool, Ordering},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
 };
 
 use crate::{
@@ -91,7 +68,8 @@ pub struct Client {
     contact_listener: Arc<dyn ContactListener>,
     session_listener: Arc<dyn SessionListener>,
     friend_request_listener: Arc<dyn FriendRequestListener>,
-    verticle: Mutex<Option<Arc<VerticleClient>>>,
+
+    verticle: Cell<Option<VerticleClient>>,
     lifecycle: tokio::sync::Mutex<()>,
 }
 
@@ -121,7 +99,7 @@ impl Client {
             contact_listener,
             session_listener,
             friend_request_listener,
-            verticle: Mutex::new(None),
+            verticle: Cell::new(None),
             lifecycle: tokio::sync::Mutex::new(()),
         }
     }
@@ -182,7 +160,7 @@ impl Client {
             return Ok(());
         }
 
-        let verticle = match verticle::deploy(self.verticle_options()).await {
+        let mut verticle = match verticle::deploy(self.verticle_options()).await {
             Ok(verticle) => verticle,
             Err(error) => {
                 self.reset_state();
@@ -200,7 +178,7 @@ impl Client {
             return Err(error);
         }
 
-        *self.verticle_slot() = Some(Arc::new(verticle));
+        self.verticle.set(Some(verticle));
         self.running.store(true, Ordering::Release);
         Ok(())
     }
@@ -208,7 +186,7 @@ impl Client {
     pub async fn stop(&self) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
         let result = match self.take_verticle() {
-            Some(verticle) => verticle.stop().await,
+            Some(mut verticle) => verticle.stop().await,
             _ => Ok(()),
         };
         self.reset_state();
@@ -313,10 +291,7 @@ impl Client {
     /// The builder captures the verticle sender as it is created, so a builder
     /// obtained while the client is stopped can never be sent later.
     pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
-        let sender = self
-            .verticle_slot()
-            .as_ref()
-            .map(|verticle| verticle.sender());
+        let sender = self.verticle_ref().map(|verticle| verticle.sender());
         Box::new(ComposedMessageBuilder::new(
             recipient,
             sender,
@@ -584,41 +559,31 @@ impl Client {
 // ---------------------------------------------------------------------------
 
 impl Client {
-    /// Returns the deployed verticle, or explains why there is none.
-    fn verticle_client(&self) -> Result<Arc<VerticleClient>> {
+    fn verticle_client(&self) -> Result<&VerticleClient> {
         if !self.is_connected() {
             return Err(StateError::new("Messaging client is not connected"));
         }
-        match self.verticle_slot().clone() {
-            Some(verticle) => Ok(verticle),
-            _ => Err(StateError::new("Messaging verticle is not deployed")),
-        }
+        self.verticle_ref()
+            .ok_or_else(|| StateError::new("Messaging verticle is not deployed").into())
     }
 
-    /// Removes the verticle handle so teardown happens exactly once.
-    fn take_verticle(&self) -> Option<Arc<VerticleClient>> {
-        self.verticle_slot().take()
+    #[allow(unsafe_code)]
+    fn verticle_ref(&self) -> Option<&VerticleClient> {
+        // SAFETY: `Client` is `!Sync` because of `Cell`, and the slot is only
+        // replaced by `start`/`stop`, which are serialized by `lifecycle`.
+        unsafe { (*self.verticle.as_ptr()).as_ref() }
     }
 
-    /// Locks the verticle slot.
-    ///
-    /// The slot only ever holds an `Option<Arc<_>>`, which stays perfectly
-    /// usable after a panic elsewhere, so poisoning is ignored rather than
-    /// turned into a second panic.
-    fn verticle_slot(&self) -> MutexGuard<'_, Option<Arc<VerticleClient>>> {
-        self.verticle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn take_verticle(&self) -> Option<VerticleClient> {
+        self.verticle.take()
     }
 
-    /// Clears every liveness flag; used by both the success and failure paths.
     fn reset_state(&self) {
         self.running.store(false, Ordering::Release);
         self.connected.store(false, Ordering::Release);
         self.ready.store(false, Ordering::Release);
     }
 
-    /// Builds the option set consumed by the verticle thread.
     fn verticle_options(&self) -> VerticleOptions {
         let connection_listener = Arc::new(ClientConnectionListener::new(
             self.connection_listener.clone(),

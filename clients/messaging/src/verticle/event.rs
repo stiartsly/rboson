@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use boson_api::Id;
 use crate::{
     channel::{Channel, Permission, Role},
     contact::Contact,
@@ -27,7 +28,6 @@ use crate::{
     message::Message,
     session_info::SessionInfo,
 };
-use boson_api::Id;
 use super::promise::Promise;
 
 pub(crate) struct NoParams<T> {

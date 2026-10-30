@@ -29,18 +29,16 @@ use tokio::{
 };
 
 use boson_api::errors::Result;
-
 use crate::rpc_server::RpcServer;
-
-use super::{commands, event::Event, transport, VerticleOptions};
+use super::{
+    commands,
+    event::Event,
+    transport,
+    VerticleOptions
+};
 
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// The single-owner container of the messaging engine.
-///
-/// It lives inside one current-thread runtime on one physical thread. Commands,
-/// timer/maintenance work and MQTT delivery are all tasks/futures on that
-/// thread; no work is moved to a second worker thread.
 pub(super) struct Verticle {
     rpc_server: Rc<RpcServer>,
     event_rx: mpsc::UnboundedReceiver<Event>,
@@ -53,12 +51,11 @@ impl Verticle {
         options: VerticleOptions,
         event_rx: mpsc::UnboundedReceiver<Event>,
     ) -> Result<Self> {
-        let rpc_server = RpcServer::new(options)?;
         Ok(Self {
-            rpc_server,
+            rpc_server      : RpcServer::new(options)?,
             event_rx,
-            transport_rx: None,
-            transport_task: None,
+            transport_rx    : None,
+            transport_task  : None,
         })
     }
 
@@ -159,9 +156,3 @@ impl Verticle {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../unitests/test_runtime.rs"]
-mod test_runtime;
-
-

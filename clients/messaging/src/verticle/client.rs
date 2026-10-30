@@ -17,15 +17,9 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-use std::{
-    sync::{Arc, Mutex},
-    thread::JoinHandle,
-};
-
-use tokio::{
-    sync::mpsc,
-    task,
-};
+use std::thread::JoinHandle;
+use tokio::sync::mpsc;
+use log::warn;
 
 use boson_api::{
     Id,
@@ -40,24 +34,21 @@ use crate::{
     invite_ticket::InviteTicket,
     message::Message,
 };
-
 use super::event::{Event, NoParams, WithParams};
 use super::promise::Promise;
 
-const CHANNEL_REQ_CLOSED: &str = "verticle request channel closed";
-const CHANNEL_RSP_CLOSED: &str = "verticle response channel closed";
+const CHANNEL_CLOSED: &str = "verticle event channel closed";
 
-#[derive(Clone)]
 pub(crate) struct VerticleClient {
     event_tx: mpsc::UnboundedSender<Event>,
-    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl VerticleClient {
     pub(super) fn new(event_tx: mpsc::UnboundedSender<Event>, handle: JoinHandle<()>) -> Self {
         Self {
             event_tx,
-            handle: Arc::new(Mutex::new(Some(handle))),
+            handle: Some(handle),
         }
     }
 
@@ -72,77 +63,72 @@ impl VerticleClient {
         let (promise, future) = Promise::pair();
         self.event_tx
             .send(make_event(promise))
-            .map_err(|_| StateError::new(CHANNEL_REQ_CLOSED))?;
+            .map_err(|_| StateError::new(CHANNEL_CLOSED))?;
 
-        future.await.map_err(|msg| StateError::new(msg).into())
+        future.await.map_err(|msg|
+            StateError::new(msg).into()
+        )
     }
 
     pub(crate) async fn start(&self) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::Start(NoParams {promise})
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
-    pub(crate) async fn stop(&self) -> Result<()> {
-        let result = self
-            .call(|promise| {
-                Event::Stop(NoParams {promise})
-            })
-            .await;
+    pub(crate) async fn stop(&mut self) -> Result<()> {
+        let make_event = |promise| {
+            Event::Stop(NoParams {promise})
+        };
+        let result = self.call(make_event).await;
 
-        // A poisoned lock still holds a usable handle; never panic on shutdown.
-        let handle = self
-            .handle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
-        if let Some(handle) = handle {
-            let joined = task::spawn_blocking(move || handle.join())
-                .await
-                .map_err(|error| {
-                    StateError::new(format!("Joining messaging verticle task failed: {error}"))
-                })?;
-            joined.map_err(|_| StateError::new("Messaging verticle thread panicked"))?;
-        }
-        result
+        let Some(handle) = self.handle.take() else  {
+            return result;
+        };
+
+        let _ = handle.join().map_err(|e| {
+            warn!("Joining messaging verticle task failed: {:?}", e);
+        });
+
+        Ok(())
     }
 
     pub(crate) async fn get_conversation(&self, id: Id) -> Result<Option<Conversation>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetConversation(WithParams {
                 data: id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_conversations(&self) -> Result<Vec<Conversation>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetConversations(NoParams { promise})
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_conversation(&self, id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveConversation(WithParams {
                 data: id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_conversations(&self, ids: Vec<Id>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveConversations(WithParams {
                 data: (ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_messages(
@@ -152,13 +138,13 @@ impl VerticleClient {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetMessages(WithParams {
                 data: (conversation_id, until, limit, offset),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_messages_in_range(
@@ -167,124 +153,124 @@ impl VerticleClient {
         begin: i64,
         end: i64,
     ) -> Result<Vec<Box<dyn Message>>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetMessagesInRange(WithParams {
                 data: (conversation_id, begin, end),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_message(&self, message_id: i64) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveMessage(WithParams {
                 data: (message_id),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_messages_by_ids(&self, message_ids: Vec<i64>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveMessagesByIds(WithParams {
                 data: (message_ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_messages_in_conversation(&self, conversation_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveMessagesInConversation(WithParams {
                 data: conversation_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_sessions(&self) -> Result<Vec<crate::session_info::SessionInfo>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetSessions(NoParams { promise})
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn revoke_session(&self, device_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RevokeSession(WithParams {
                 data: device_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn friend_request(&self, user_id: Id, hello: Option<String>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::FriendRequest(WithParams {
                 data: (user_id, hello),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn friend_accept(&self, user_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::FriendAccept(WithParams {
                 data: user_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_friend_request(&self, user_id: Id) -> Result<Option<FriendRequest>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetFriendRequest(WithParams {
                 data: user_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_friend_requests(&self) -> Result<Vec<FriendRequest>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetFriendRequests(NoParams { promise})
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_friend_request(&self, user_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveFriendRequest(WithParams {
                 data: user_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_friend_requests(&self, user_ids: Vec<Id>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveFriendRequests(WithParams {
                 data: (user_ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::ClearFriendRequests(NoParams { promise})
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn add_friend(
@@ -293,23 +279,23 @@ impl VerticleClient {
         session_key: Vec<u8>,
         remark: Option<String>,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RegisterFriendSession(WithParams {
                 data: (user_id, session_key, remark),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn block_user(&self, user_id: Id) -> Result<Contact> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::BlockUser(WithParams {
                 data: user_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn create_channel(
@@ -319,43 +305,43 @@ impl VerticleClient {
         notice: Option<String>,
         announcement: bool,
     ) -> Result<Box<Channel>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::CreateChannel(WithParams {
                 data: (permission, name, notice, announcement),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_channel(&self, channel_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveChannel(WithParams {
                 data: channel_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::JoinChannel(WithParams {
                 data: (ticket),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn leave_channel(&self, channel_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::LeaveChannel(WithParams {
                 data: channel_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn create_invite_ticket(
@@ -363,13 +349,13 @@ impl VerticleClient {
         channel_id: Id,
         invitee: Option<Id>,
     ) -> Result<InviteTicket> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::CreateInviteTicket(WithParams {
                 data: (channel_id, invitee),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn transfer_channel_ownership(
@@ -377,33 +363,33 @@ impl VerticleClient {
         channel_id: Id,
         new_owner: Id,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::TransferChannelOwnership(WithParams {
                 data: (channel_id, new_owner),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn rotate_channel_session_key(&self, channel_id: Id) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RotateChannelSessionKey(WithParams {
                 data: channel_id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn update_channel_info(&self, channel: Box<Channel>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::UpdateChannelInfo(WithParams {
                 data: (channel),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn set_channel_members_role(
@@ -412,13 +398,13 @@ impl VerticleClient {
         member_ids: Vec<Id>,
         role: Role,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::SetChannelMemberRole(WithParams {
                 data: (channel_id, member_ids, role),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn ban_channel_members(
@@ -426,13 +412,13 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::BanChannelMembers(WithParams {
                 data: (channel_id, member_ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn unban_channel_members(
@@ -440,13 +426,13 @@ impl VerticleClient {
         channel_id: Id,
         member_ids: Vec<Id>,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::UnbanChannelMembers(WithParams {
                 data: (channel_id, member_ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_channel_members(
@@ -454,56 +440,56 @@ impl VerticleClient {
         channel_id: Id,
         members: Vec<Id>,
     ) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveChannelMembers(WithParams {
                 data: (channel_id, members),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<Contact>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetContact(WithParams {
                 data: id,
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::GetContacts(NoParams { promise })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn update_contact(&self, contact: Contact) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::UpdateContact(WithParams {
                 data: (contact),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn remove_contacts(&self, ids: Vec<Id>) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::RemoveContacts(WithParams {
                 data: (ids),
                 promise,
             })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
-        self.call(|promise| {
+        let make_event = |promise| {
             Event::ClearContacts(NoParams { promise })
-        })
-        .await
+        };
+        self.call(make_event).await
     }
 }

@@ -20,7 +20,7 @@
 
 // Some API tests change environment variables, which is unsafe; the workspace denies unsafe code
 // elsewhere.
-#![allow(unsafe_code)]
+#![allow(unsafe_code, missing_docs)]
 
 #[cfg(test)]
 mod core {

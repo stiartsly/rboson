@@ -137,6 +137,13 @@ pub fn local_addr(ipv4: bool) -> Result<IpAddr> {
     };
 
     for iface in if_addrs {
+        let name = iface.name.to_ascii_lowercase();
+        if ["utun", "tun", "tap", "ppp", "ipsec", "wg"]
+            .iter()
+            .any(|p| name.starts_with(p))
+        {
+            continue;
+        }
         let ip = iface.ip();
         if !ip.is_loopback() && ((ipv4 && ip.is_ipv4()) || (!ipv4 && ip.is_ipv6())) {
             return Ok(ip);

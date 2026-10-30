@@ -6,7 +6,6 @@ use boson::messaging::{
     Client,
     channel::Channel,
     Options, OptionsBuilder,
-    ChannelOps,
     ChannelListener,
     ContactType,
     InviteTicket,

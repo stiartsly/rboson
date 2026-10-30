@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::SystemTime;
 
-use crate::date;
+use crate::date::{date, to_millis};
 use boson_api::{signature, Id, utils::codec};
 
 use crate::{DIDUrl, VerificationMethod};
@@ -150,7 +150,7 @@ impl fmt::Display for Proof {
             f,
             "Proof{{type={}, created={}, verificationMethod={}, proofPurpose={}, proofValue={}}}",
             self.proof_type,
-            date::to_millis(self.created),
+            to_millis(self.created),
             self.verification_method,
             self.proof_purpose,
             hex::encode(&self.proof_value)

@@ -28,7 +28,9 @@ use std::time::SystemTime;
 
 use boson_api::{
     errors::{ArgumentError, Result, SignatureError},
-    utils::codec, CryptoIdentity, Id,
+    utils,
+    CryptoIdentity,
+    Id,
 };
 
 use crate::{
@@ -36,7 +38,9 @@ use crate::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{DIDDocumentBuilder, VerifiableCredential as VC},
-    DIDUrl, VerificationMethod as VM, VerificationMethodType,
+    DIDUrl,
+    VerificationMethod as VM,
+    VerificationMethodType,
 };
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
@@ -44,49 +48,48 @@ pub struct DIDDocument {
     #[serde(
         rename = "@context",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     contexts: Option<Vec<String>>,
 
     #[serde(
         rename = "id",
-        serialize_with = "codec::id::serialize",
-        deserialize_with = "codec::id::deserialize"
+        with = "utils::id",
     )]
     id: Id,
 
     #[serde(
         rename = "verificationMethod",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     verification_methods: Option<Vec<VM>>,
 
     #[serde(
         rename = "authentication",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     authentications: Option<Vec<VM>>,
 
     #[serde(
         rename = "assertion",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     assertions: Option<Vec<VM>>,
 
     #[serde(
         rename = "verifiableCredential",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     credentials: Option<Vec<VC>>,
 
     #[serde(
         rename = "service",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     services: Option<Vec<Service>>,
 

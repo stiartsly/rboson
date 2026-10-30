@@ -35,9 +35,9 @@ use boson_api::errors::{
     ExpiredError,
     SignatureError,
     Result};
-use boson_api::{signature, utils::codec, CryptoIdentity, Id};
+use boson_api::{signature, utils::{self, codec}, CryptoIdentity, Id};
 use crate::{
-    date,
+    date::date_opt,
     w3c::VerifiableCredential as VC,
     CredentialBuilder
 };
@@ -48,15 +48,15 @@ pub struct Credential {
     id: String,
 
     #[serde(rename = "t",
-        default, skip_serializing_if = "codec::is_default")]
+        default, skip_serializing_if = "utils::is_default")]
     types: Option<Vec<String>>,
 
     #[serde(rename = "n",
-        default, skip_serializing_if = "codec::is_default")]
+        default, skip_serializing_if = "utils::is_default")]
     name: Option<String>,
 
     #[serde(rename = "d",
-        default, skip_serializing_if = "codec::is_default")]
+        default, skip_serializing_if = "utils::is_default")]
     description: Option<String>,
 
     #[serde(rename = "i")]
@@ -66,8 +66,8 @@ pub struct Credential {
         rename = "v",
         default,
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        serialize_with = "date_opt::serialize",
+        deserialize_with = "date_opt::deserialize"
     )]
     valid_from: Option<SystemTime>,
 
@@ -75,8 +75,8 @@ pub struct Credential {
         rename = "e",
         default,
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        serialize_with = "date_opt::serialize",
+        deserialize_with = "date_opt::deserialize"
     )]
     valid_until: Option<SystemTime>,
 
@@ -87,8 +87,8 @@ pub struct Credential {
         rename = "sat",
         default,
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        serialize_with = "date_opt::serialize",
+        deserialize_with = "date_opt::deserialize"
     )]
     signed_at: Option<SystemTime>,
 
@@ -302,43 +302,43 @@ impl fmt::Display for Credential {
 struct CredentialData {
     #[serde(rename = "id")]
     id: String,
-    #[serde(rename = "t", default)]
+    #[serde(
+        rename = "t",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     types: Option<Vec<String>>,
-    #[serde(rename = "n", default)]
+
+    #[serde(
+        rename = "n",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     name: Option<String>,
-    #[serde(rename = "d", default)]
+
+    #[serde(
+        rename = "d",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     description: Option<String>,
+
     #[serde(rename = "i")]
     issuer: Id,
-    #[serde(
-        rename = "v",
-        default,
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
-    )]
+
+    #[serde(rename = "v", default, with = "date_opt")]
     valid_from: Option<SystemTime>,
-    #[serde(
-        rename = "e",
-        default,
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
-    )]
+
+    #[serde(rename = "e", default, with = "date_opt")]
     valid_until: Option<SystemTime>,
+
     #[serde(rename = "s")]
     subject: SubjectDataOwned,
-    #[serde(
-        rename = "sat",
-        default,
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
-    )]
+
+    #[serde(rename = "sat", default, with = "date_opt")]
     signed_at: Option<SystemTime>,
-    #[serde(
-        rename = "sig",
-        default,
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize"
-    )]
+
+    #[serde(rename = "sig", default, with = "utils::bytes")]
     signature: Vec<u8>,
 }
 

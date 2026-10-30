@@ -25,66 +25,73 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::de::Error as DeError;
-use serde::{Deserialize, Deserializer, Serializer};
+pub(crate) mod date {
+    use super::{format_rfc3339, from_millis, parse_rfc3339, to_millis};
+    use serde::de::Error as DeError;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::SystemTime;
 
-/// Serializes a `SystemTime` using the protocol date representation.
-pub(crate) fn serialize<S>(value: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    if serializer.is_human_readable() {
-        serializer.serialize_str(&format_rfc3339(*value))
-    } else {
-        serializer.serialize_i64(to_millis(*value))
+    pub(crate) fn serialize<S>(value: &SystemTime, se: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if se.is_human_readable() {
+            se.serialize_str(&format_rfc3339(*value))
+        } else {
+            se.serialize_i64(to_millis(*value))
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D>(de: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if de.is_human_readable() {
+            let value = String::deserialize(de)?;
+            parse_rfc3339(&value).map_err(D::Error::custom)
+        } else {
+            let millis = i64::deserialize(de)?;
+            from_millis(millis).map_err(D::Error::custom)
+        }
     }
 }
 
-/// Deserializes a `SystemTime` using the protocol date representation.
-pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    if deserializer.is_human_readable() {
-        let value = String::deserialize(deserializer)?;
-        parse_rfc3339(&value).map_err(D::Error::custom)
-    } else {
-        let millis = i64::deserialize(deserializer)?;
-        from_millis(millis).map_err(D::Error::custom)
-    }
-}
+pub(crate) mod date_opt {
+    use super::{from_millis, parse_rfc3339};
+    use serde::de::Error as DeError;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::SystemTime;
 
-/// Optional variant of [`serialize`].
-pub(crate) fn serialize_opt<S>(
-    value: &Option<SystemTime>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match value {
-        Some(value) => serialize(value, serializer),
-        None => serializer.serialize_none(),
+    pub(crate) fn serialize<S>(
+        value: &Option<SystemTime>,
+        se: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(value) => super::date::serialize(value, se),
+            None => se.serialize_none(),
+        }
     }
-}
 
-/// Optional variant of [`deserialize`].
-pub(crate) fn deserialize_opt<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    if deserializer.is_human_readable() {
-        let value = Option::<String>::deserialize(deserializer)?;
-        value
-            .map(|value| parse_rfc3339(&value))
-            .transpose()
-            .map_err(D::Error::custom)
-    } else {
-        let value = Option::<i64>::deserialize(deserializer)?;
-        value
-            .map(from_millis)
-            .transpose()
-            .map_err(D::Error::custom)
+    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Option<SystemTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if de.is_human_readable() {
+            let value = Option::<String>::deserialize(de)?;
+            value
+                .map(|value| parse_rfc3339(&value))
+                .transpose()
+                .map_err(D::Error::custom)
+        } else {
+            let value = Option::<i64>::deserialize(de)?;
+            value
+                .map(from_millis)
+                .transpose()
+                .map_err(D::Error::custom)
+        }
     }
 }
 
@@ -95,7 +102,7 @@ pub(crate) fn to_millis(value: SystemTime) -> i64 {
     }
 }
 
-fn from_millis(millis: i64) -> Result<SystemTime, String> {
+pub(crate) fn from_millis(millis: i64) -> Result<SystemTime, String> {
     if millis >= 0 {
         UNIX_EPOCH
             .checked_add(Duration::from_millis(millis as u64))

@@ -36,9 +36,9 @@ use boson_api::errors::{
     Result,
     Error,
 };
-use boson_api::{utils::codec, CryptoIdentity, Id};
+use boson_api::{utils, CryptoIdentity, Id};
 use crate::{
-    date,
+    date::date_opt,
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::VerifiableCredentialBuilder as VCBuilder,
@@ -53,7 +53,7 @@ pub struct VerifiableCredential {
     #[serde(
         rename = "@context",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     contexts: Option<Vec<String>>,
 
@@ -63,46 +63,41 @@ pub struct VerifiableCredential {
     #[serde(
         rename = "type",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     types: Option<Vec<String>>,
 
     #[serde(
         rename = "name",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     name: Option<String>,
 
     #[serde(
         rename = "description",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     description: Option<String>,
 
     #[serde(
         rename = "issuer",
-        serialize_with = "codec::id::serialize",
-        deserialize_with = "codec::id::deserialize"
+        with = "utils::id"
     )]
     issuer: Id,
 
     #[serde(
         rename = "validFrom",
         default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        with = "date_opt",
     )]
     valid_from: Option<SystemTime>,
 
     #[serde(
         rename = "validUntil",
         default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        with = "date_opt",
     )]
     valid_until: Option<SystemTime>,
 
@@ -493,8 +488,7 @@ impl PartialEq for VerifiableCredential {
 pub struct CredentialSubject {
     #[serde(
         rename = "id",
-        serialize_with = "codec::id::serialize",
-        deserialize_with = "codec::id::deserialize"
+        with = "utils::id",
     )]
     id: Id,
 

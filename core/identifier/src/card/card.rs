@@ -27,7 +27,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use crate::date;
+use crate::date::date_opt;
 use boson_api::{
     errors::{ArgumentError, SignatureError},
     Result,
@@ -35,7 +35,7 @@ use boson_api::{
     signature,
     CryptoIdentity,
     Id,
-    utils::codec,
+    utils,
 };
 
 use crate::{w3c::DIDDocument, CardBuilder, Credential};
@@ -44,10 +44,6 @@ const DEFAULT_PROFILE_CREDENTIAL_ID: &str = "profile";
 const DEFAULT_PROFILE_CREDENTIAL_TYPE: &str = "BosonProfile";
 const DEFAULT_HOME_NODE_SERVICE_ID: &str = "homeNode";
 const DEFAULT_HOME_NODE_SERVICE_TYPE: &str = "BosonHomeNode";
-
-fn is_none<T>(value: &&Option<T>) -> bool {
-    value.is_none()
-}
 
 #[derive(Serialize)]
 struct CardSignData<'a> {
@@ -71,8 +67,7 @@ struct CardSignData<'a> {
     #[serde(
         rename = "sat",
         default,
-        serialize_with = "date::serialize_opt",
-        skip_serializing_if = "Option::is_none",
+        with = "date_opt"
     )]
     signed_at: &'a Option<SystemTime>,
 }
@@ -84,30 +79,28 @@ pub struct Card {
 
     #[serde(
         rename = "c",
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     credentials: Option<Vec<Credential>>,
 
     #[serde(
         rename = "s",
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     services: Option<Vec<Service>>,
 
     #[serde(
         rename = "sat",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt",
-        skip_serializing_if = "Option::is_none",
+        default,
+        with = "date_opt",
     )]
     signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes",
+        skip_serializing_if = "utils::is_default"
     )]
     signature: Vec<u8>,
 

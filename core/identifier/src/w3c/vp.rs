@@ -30,7 +30,7 @@ use boson_api::{
     Error,
     Result,
     errors::{ArgumentError, SignatureError},
-    utils::codec,
+    utils,
     CryptoIdentity,
     Id,
 };
@@ -53,28 +53,27 @@ pub struct VerifiablePresentation {
     #[serde(
         rename = "@context",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     contexts: Option<Vec<String>>,
 
     #[serde(
         rename = "id",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     id: Option<String>,
 
     #[serde(
         rename = "type",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     types: Option<Vec<String>>,
 
     #[serde(
         rename = "holder",
-        serialize_with = "codec::id::serialize",
-        deserialize_with = "codec::id::deserialize"
+        with = "utils::id"
     )]
     holder: Id,
 

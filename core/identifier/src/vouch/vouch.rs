@@ -21,10 +21,13 @@
 use std::{fmt, str, time::SystemTime};
 use serde::{Deserialize, Serialize};
 
-use crate::date;
+use crate::date::date_opt;
 use boson_api::{
+    utils,
     errors::{ArgumentError, Error, Result, SignatureError},
-    signature, utils::codec, CryptoIdentity, Id,
+    signature,
+    CryptoIdentity,
+    Id,
 };
 
 use crate::{
@@ -35,34 +38,39 @@ use crate::{
 
 #[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct Vouch {
-    #[serde(rename = "id",
-        default, skip_serializing_if = "codec::is_default")]
+    #[serde(
+        rename = "id",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     id: Option<String>,
 
     #[serde(rename = "t",
-        default, skip_serializing_if = "codec::is_default")]
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
     types: Option<Vec<String>>,
 
     #[serde(rename = "h")]
     holder: Id,
 
-    #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "c",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     credentials: Vec<Credential>,
 
     #[serde(
         rename = "sat",
         default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
+        with = "date_opt"
     )]
     signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
         default,
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize",
+        with = "utils::bytes",
         skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,

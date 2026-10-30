@@ -21,7 +21,7 @@
 use serde::{Deserialize, Serialize};
 use std::{future::Future, time::SystemTime};
 
-use crate::date;
+use crate::date::{date, date_opt};
 use boson_api::errors::ArgumentError;
 use super::{w3c::DIDDocument, Card};
 use boson_api::{Id, Result};
@@ -76,23 +76,13 @@ impl Default for ResolutionOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolutionMetadata {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
-    )]
+    #[serde(default, with = "date_opt")]
     pub created: Option<SystemTime>,
 
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "date::serialize_opt",
-        deserialize_with = "date::deserialize_opt"
-    )]
+    #[serde(default, with = "date_opt")]
     pub updated: Option<SystemTime>,
 
-    #[serde(serialize_with = "date::serialize", deserialize_with = "date::deserialize")]
+    #[serde(with = "date")]
     pub resolved: SystemTime,
 
     pub deactivated: bool,

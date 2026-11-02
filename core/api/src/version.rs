@@ -19,7 +19,9 @@
 // SOFTWARE.
 
 use std::collections::HashMap;
+
 use once_cell::sync::Lazy;
+
 use crate::errors::{ArgumentError, Result};
 
 /// The general node implementation's short name.
@@ -38,9 +40,8 @@ pub fn build(name: &str, version: i32) -> Result<i32> {
     let bytes = name.as_bytes();
     if bytes.len() < 2 {
         return Err(ArgumentError::new(
-            "Invalid name: must be at least 2 characters".to_string(),
-        )
-        .into());
+            "Invalid name: must be at least 2 characters",
+        ));
     }
     Ok((bytes[0] as i32) << 24
         | (bytes[1] as i32) << 16
@@ -48,8 +49,13 @@ pub fn build(name: &str, version: i32) -> Result<i32> {
 }
 
 /// Returns the current implementation's version code.
-pub fn ver() -> i32 {
+pub fn current_version() -> i32 {
     build(NODE_TAG_NAME, NODE_VERSION).expect("current version constants are valid")
+}
+
+#[inline]
+pub fn ver() -> i32 {
+    current_version()
 }
 
 /// Formats a version code as `Name/version`, with non-printable name bytes replaced by dots.

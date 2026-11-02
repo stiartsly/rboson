@@ -18,19 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{fmt, result::Result as StdResult};
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use crate::{
-    cryptobox,
-    cryptobox::Nonce,
+    cryptobox::{self, Nonce},
     errors::{ArgumentError, Error, StateError},
-    signature,
-    signature::{KeyPair, PrivateKey},
+    signature::{self, KeyPair, PrivateKey},
+    utils::codec,
     CryptoIdentity, Id, Identity, Result,
 };
-use crate::utils::codec;
 
 #[derive(Clone)]
 pub struct ImmutableBuilder<'a> {
@@ -105,7 +104,7 @@ pub struct EncryptedBuilder<'a> {
 impl<'a> EncryptedBuilder<'a> {
     pub fn new(data: &'a [u8], recipient: &'a Id) -> Self {
         Self {
-            data: data,
+            data,
             keypair: None,
             nonce: None,
             seq: 0,
@@ -172,9 +171,13 @@ impl Value {
     fn signed(b: &SignedBuilder) -> Result<Value> {
         assert!(!b.data.is_empty());
 
-        let kp = match b.keypair.as_ref() {
+        let owned_kp;
+        let kp: &KeyPair = match b.keypair.as_ref() {
             Some(v) => v,
-            _ => &KeyPair::random(),
+            None => {
+                owned_kp = KeyPair::random();
+                &owned_kp
+            }
         };
         let mut value = Value {
             pk: Some(Id::from(kp.public_key())),
@@ -202,9 +205,13 @@ impl Value {
     fn encrypted(b: &EncryptedBuilder) -> Result<Value> {
         assert!(!b.data.is_empty());
 
-        let kp = match b.keypair.as_ref() {
+        let owned_kp;
+        let kp: &KeyPair = match b.keypair.as_ref() {
             Some(v) => v,
-            _ => &KeyPair::random(),
+            None => {
+                owned_kp = KeyPair::random();
+                &owned_kp
+            }
         };
 
         let mut value = Value {

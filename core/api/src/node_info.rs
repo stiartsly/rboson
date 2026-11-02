@@ -39,7 +39,7 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize)]
-#[serde(into = "SerdeNodeInfo", try_from = "SerdeNodeInfo")]
+#[serde(into = "NodeInfoRaw", try_from = "NodeInfoRaw")]
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
     id: Id,
@@ -50,7 +50,7 @@ pub struct NodeInfo {
 
 impl NodeInfo {
     pub fn new(id: Id, addr: SocketAddr) -> Self {
-        Self::try_new(id, addr).expect("Invalid port: 0")
+        Self::try_new(id, addr).expect("NodeInfo::new requires a non-zero port")
     }
 
     pub fn try_new(id: Id, addr: SocketAddr) -> Result<Self> {
@@ -102,16 +102,13 @@ impl NodeInfo {
             }
         }
 
-        let preferred_family = match addr4.is_some() {
-            true => Network::IPv4,
-            false => Network::IPv6,
+        let default_family = if addr4.is_some() {
+            Network::IPv4
+        } else {
+            Network::IPv6
         };
-        Ok(Self {
-            id,
-            addr4,
-            addr6,
-            default_family: preferred_family,
-        })
+
+        Ok(Self {id, addr4, addr6, default_family})
     }
 
     pub const fn id(&self) -> &Id {
@@ -262,7 +259,8 @@ impl NodeInfo {
 
 impl Hash for NodeInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        0x6030A.hash(state); // 'n'
+        // 0x6E = ASCII 'n'; used as a domain separator to distinguish NodeInfo hashes.
+        0x6Eu8.hash(state);
         self.id.hash(state);
         self.addr4.hash(state);
         self.addr6.hash(state);
@@ -292,7 +290,7 @@ impl fmt::Display for NodeInfo {
     }
 }
 
-struct SerdeNodeInfo {
+struct NodeInfoRaw {
     id: Id,
     addr4: Option<EncodedIpAddr>,
     port4: Option<u16>,
@@ -389,7 +387,7 @@ impl<'de> Deserialize<'de> for EncodedIpAddr {
     }
 }
 
-impl From<NodeInfo> for SerdeNodeInfo {
+impl From<NodeInfo> for NodeInfoRaw {
     fn from(node: NodeInfo) -> Self {
         Self {
             id: node.id,
@@ -401,10 +399,10 @@ impl From<NodeInfo> for SerdeNodeInfo {
     }
 }
 
-impl TryFrom<SerdeNodeInfo> for NodeInfo {
+impl TryFrom<NodeInfoRaw> for NodeInfo {
     type Error = Error;
 
-    fn try_from(s: SerdeNodeInfo) -> StdResult<Self, Self::Error> {
+    fn try_from(s: NodeInfoRaw) -> StdResult<Self, Self::Error> {
         Self::with_addresses(
             s.id,
             s.addr4
@@ -417,7 +415,7 @@ impl TryFrom<SerdeNodeInfo> for NodeInfo {
     }
 }
 
-impl Serialize for SerdeNodeInfo {
+impl Serialize for NodeInfoRaw {
     fn serialize<S>(&self, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
@@ -449,14 +447,14 @@ impl Serialize for SerdeNodeInfo {
     }
 }
 
-impl<'de> Deserialize<'de> for SerdeNodeInfo {
+impl<'de> Deserialize<'de> for NodeInfoRaw {
     fn deserialize<D>(de: D) -> StdResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct ImplVisitor;
         impl<'de> Visitor<'de> for ImplVisitor {
-            type Value = SerdeNodeInfo;
+            type Value = NodeInfoRaw;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a tuple of 3 or 5 elements for NodeInfo")
@@ -493,7 +491,7 @@ impl<'de> Deserialize<'de> for SerdeNodeInfo {
                 if addr4.is_none() && addr6.is_none() {
                     return Err(bad_length());
                 }
-                Ok(SerdeNodeInfo {id, addr4, port4, addr6, port6})
+                Ok(NodeInfoRaw {id, addr4, port4, addr6, port6})
             }
         }
         de.deserialize_tuple(5, ImplVisitor)

@@ -19,21 +19,20 @@
 // SOFTWARE.
 
 use std::{
-    fmt, ops, str,
     cmp::Ordering,
+    fmt, ops, str,
     result::Result as StdResult,
 };
-use bs58;
+
 use serde::{
     de::{self, Deserializer, Visitor},
     ser::Serializer,
-    Deserialize,
-    Serialize,
+    Deserialize, Serialize,
 };
+
 use crate::{
-    cryptobox,
-    signature,
-    errors::{Error, Result, ArgumentError}
+    cryptobox, signature,
+    errors::{ArgumentError, Error, Result},
 };
 
 pub const DID_PREFIX: &str = "did:boson:";
@@ -53,6 +52,7 @@ impl Id {
         Id(crate::random_array::<{ Self::BYTES }>())
     }
 
+    #[inline]
     pub fn generate() -> Self {
         Self::random()
     }
@@ -211,6 +211,10 @@ impl Id {
         Id(bytes)
     }
 
+    /// Returns the number of bytes that make up this ID.
+    ///
+    /// Prefer the associated constant [`Id::BYTES`] directly.
+    #[deprecated(since = "0.1.0", note = "use `Id::BYTES` instead")]
     pub const fn size(&self) -> usize {
         Id::BYTES
     }
@@ -242,16 +246,19 @@ impl Id {
             return Ordering::Equal;
         }
 
-        let _a = a.0[mmi] ^ self.0[mmi];
-        let _b = b.0[mmi] ^ self.0[mmi];
+        let dist_a = a.0[mmi] ^ self.0[mmi];
+        let dist_b = b.0[mmi] ^ self.0[mmi];
 
-        _a.cmp(&_b)
+        dist_a.cmp(&dist_b)
     }
 
     pub fn distance_between(a: &Id, b: &Id) -> Id {
         a.distance(b)
     }
 
+    /// Returns `true` when the first `depth` bits of `a` and `b` are equal.
+    ///
+    /// `depth` must be in `[0, BITS)`. Values outside this range return `false`.
     pub fn bits_equal(a: &Id, b: &Id, depth: i32) -> bool {
         if depth < 0 || depth >= Self::BITS as i32 {
             return false;

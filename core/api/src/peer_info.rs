@@ -19,10 +19,10 @@
 // SOFTWARE.
 
 use std::{
+    collections::HashMap,
     fmt,
     hash::{Hash, Hasher},
     result::Result as StdResult,
-    collections::HashMap,
 };
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
@@ -38,9 +38,9 @@ use crate::{
     CryptoIdentity,
     Id,
     Identity,
-    signature::{self, KeyPair, PrivateKey}
+    signature::{self, KeyPair, PrivateKey},
+    utils::codec
 };
-use crate::utils::codec;
 
 #[derive(Default)]
 pub struct PeerBuilder<'a> {

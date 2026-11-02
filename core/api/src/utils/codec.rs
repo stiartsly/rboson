@@ -22,18 +22,17 @@ use std::{
     fmt,
     result::Result as StdResult,
 };
+
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{
     de::{self, Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use base64::{
-    engine::general_purpose::URL_SAFE_NO_PAD,
-    Engine as _
-};
+
 use crate::{
     cryptobox::Nonce,
-    Id,
     version,
+    Id,
 };
 
 pub mod id {
@@ -269,11 +268,10 @@ pub mod num {
             Option::<i32>::deserialize(de)?.unwrap_or(0)
         };
 
-        println!("Deserialized seq: {}", seq);
         if seq < 0 {
             return Err(D::Error::custom("seq must be larger than or equal to 0"));
         }
-        return Ok(seq);
+        Ok(seq)
     }
 }
 
@@ -308,7 +306,7 @@ pub mod expected_seq {
         if seq < -1 {
             return Err(D::Error::custom("expected seq must be larger than or equal to -1"));
         }
-        return Ok(seq);
+        Ok(seq)
     }
 }
 
@@ -320,17 +318,19 @@ pub mod ver {
         S: Serializer,
     {
         if se.is_human_readable() {
-            se.serialize_str(&format!("{}", version::format_version(*value)))
+            se.serialize_str(&version::format_version(*value).to_string())
         } else {
             value.serialize(se)
         }
     }
 
+    /// Version decoding is not yet implemented; this module is serialization-only.
+    #[allow(unused)]
     pub fn deserialize<'de, D>(_de: D) -> Result<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
-        unimplemented!()
+        unimplemented!("version deserialization is not supported")
     }
 }
 
@@ -354,15 +354,10 @@ impl<T> IsDefault for Vec<T> {
     }
 }
 
-impl IsDefault for Option<String> {
+// Blanket impl for Option<T> where T: IsDefault covers Option<String>, Option<Vec<T>>, etc.
+impl<T: IsDefault> IsDefault for Option<T> {
     fn is_default(&self) -> bool {
-        self.is_none() || self.as_ref().map_or(true, |v| v.is_empty())
-    }
-}
-
-impl<T> IsDefault for Option<Vec<T>> {
-    fn is_default(&self) -> bool {
-        self.is_none() || self.as_ref().map_or(true, |v| v.is_empty())
+        self.as_ref().map_or(true, T::is_default)
     }
 }
 

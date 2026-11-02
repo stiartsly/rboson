@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use log::{Level, LevelFilter, Metadata, Record};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
@@ -28,14 +27,16 @@ use std::{
     },
 };
 
+use log::{Level, LevelFilter, Metadata, Record};
+
 const CRATE_NAME: &str = "boson";
 const TARGET_WIDTH: usize = 8;
 const LEVEL_WIDTH: usize = 4;
 
 const COLOR_RESET: &str = "\x1b[0m";
-const COLOR_ERR: &str   = "\x1b[31m";         // red
-const COLOR_WARN: &str  = "\x1b[33m";      // yellow
-const COLOR_INFO: &str  = "\x1b[32m";
+const COLOR_ERR: &str = "\x1b[31m";    // red
+const COLOR_WARN: &str = "\x1b[33m";   // yellow
+const COLOR_INFO: &str = "\x1b[32m";   // green
 
 static LOGGER: Logger = Logger::new();
 static LOGGER_INIT: Once = Once::new();

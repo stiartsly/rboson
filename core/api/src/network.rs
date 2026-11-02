@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::fmt;
-use std::net::SocketAddr;
+use std::{fmt, net::SocketAddr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -29,10 +28,12 @@ pub enum Network {
 }
 
 impl Network {
+    #[inline]
     pub fn is_ipv4(&self) -> bool {
         self == &Network::IPv4
     }
 
+    #[inline]
     pub fn is_ipv6(&self) -> bool {
         self == &Network::IPv6
     }
@@ -47,9 +48,10 @@ impl Network {
 
 impl From<&SocketAddr> for Network {
     fn from(input: &SocketAddr) -> Self {
-        match input.is_ipv4() {
-            true => Network::IPv4,
-            false => Network::IPv6,
+        if input.is_ipv4() {
+            Network::IPv4
+        } else {
+            Network::IPv6
         }
     }
 }

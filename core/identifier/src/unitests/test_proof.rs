@@ -18,17 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::{
-    as_secs,
-    signature,
-};
-use crate::{
-    {
-        proof::{ProofPurpose, ProofType},
-        Proof, VerificationMethod,
-    },
-};
 use std::time::{Duration, SystemTime};
+
+use boson_api::{as_secs, signature, CryptoIdentity, Identity};
+
+use crate::{
+    proof::{ProofPurpose, ProofType},
+    Proof, VerificationMethod,
+};
 
 #[cfg(test)]
 mod tests {
@@ -63,7 +60,29 @@ mod tests {
 
     #[test]
     fn test_proof_verify() {
-        // TODO
-        assert!(true); // Placeholder for actual verification test
+        let identity = CryptoIdentity::random();
+        let subject = *identity.id();
+        let vm_id = format!("did:boson:{subject}#default");
+        let data = b"hello boson protocol";
+
+        let sig = identity.sign_into(data).unwrap();
+        let valid_proof = Proof::new(
+            ProofType::Ed25519Signature2020,
+            SystemTime::now(),
+            VerificationMethod::reference(&vm_id),
+            ProofPurpose::AssertionMethod,
+            sig,
+        );
+        assert!(valid_proof.verify(&subject, data));
+
+        // Invalid signature should fail verification
+        let invalid_proof = Proof::new(
+            ProofType::Ed25519Signature2020,
+            SystemTime::now(),
+            VerificationMethod::reference(&vm_id),
+            ProofPurpose::AssertionMethod,
+            vec![0u8; signature::Signature::BYTES],
+        );
+        assert!(!invalid_proof.verify(&subject, data));
     }
 }

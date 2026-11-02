@@ -18,14 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::{fmt, time::SystemTime};
+
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::time::SystemTime;
 
-use crate::date::{date, to_millis};
-use boson_api::{signature, Id, utils::codec};
+use boson_api::{signature, utils::codec, Id};
 
-use crate::{DIDUrl, VerificationMethod};
+use crate::{
+    date::{date, to_millis},
+    DIDUrl, VerificationMethod,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProofType {
@@ -102,6 +104,11 @@ impl Proof {
         }
     }
 
+    pub fn proof_type(&self) -> ProofType {
+        self.proof_type
+    }
+
+    /// Alias for [`proof_type`].
     pub fn types(&self) -> ProofType {
         self.proof_type
     }
@@ -140,7 +147,7 @@ impl Proof {
             return false;
         }
 
-        signature::verify(data, &self.proof_value, &subject.to_signature_key()).is_ok()
+        signature::verify(data, &self.proof_value, &subject.to_signature_key()).unwrap_or(false)
     }
 }
 

@@ -20,8 +20,7 @@
 
 //! Shared JSON/CBOR format helpers for W3C DID objects.
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 use boson_api::{errors::ArgumentError, Result};
 

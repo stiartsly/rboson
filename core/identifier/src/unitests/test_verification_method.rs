@@ -18,12 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::{
-    {VerificationMethod, VerificationMethodType},
-};
-use boson_api::{
-    Id,
-};
+use boson_api::Id;
+
+use crate::{VerificationMethod, VerificationMethodType};
 
 #[cfg(test)]
 mod tests {

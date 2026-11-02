@@ -18,23 +18,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use indexmap::IndexMap;
 use std::collections::HashMap;
+
+use indexmap::IndexMap;
 use unicode_normalization::UnicodeNormalization;
 
 use boson_api::{
-    Result,
     errors::ArgumentError,
-    CryptoIdentity,
-    Identity
+    CryptoIdentity, Identity, Result,
 };
 
 use crate::{
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{VerifiableCredential, VerifiablePresentation as VP},
-    BosonIdentityObjectBuilder,
-    VerificationMethod,
+    BosonIdentityObjectBuilder, VerificationMethod,
 };
 
 pub struct VerifiablePresentationBuilder {
@@ -156,14 +154,14 @@ impl BosonIdentityObjectBuilder for VerifiablePresentationBuilder {
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         if self.credentials.is_empty() {
-            Err(ArgumentError::new("VCs can not empty for VP"))?
+            return Err(ArgumentError::new("VCs can not empty for VP"));
         }
 
         let unsigned = VP::unsigned(
             self.contexts.clone(),
             self.id.clone(),
             self.types.clone(),
-            self.holder.id().clone(),
+            *self.holder.id(),
             self.credentials.values().cloned().collect(),
         );
 

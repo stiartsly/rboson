@@ -18,16 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde_json::{Map, Value};
 use std::time::{Duration, SystemTime};
+
+use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{did_constants, DIDUrl};
 use boson_api::{
     as_secs,
     errors::StateError,
-    Id, Result, CryptoIdentity,
+    CryptoIdentity, Id, Result,
 };
+
+use crate::{did_constants, DIDUrl};
 
 pub(crate) trait BosonIdentityObjectBuilder {
     type BosonIdentityObject;
@@ -72,7 +74,7 @@ pub(crate) trait BosonIdentityObjectBuilder {
     /// subject and include a fragment, matching the Java builder base class.
     fn normalize_subject_id(subject: &Id, id: &str) -> Result<DIDUrl> {
         if id.is_empty() {
-            return Err(StateError::new("id must not be empty").into());
+            return Err(StateError::new("id must not be empty"));
         }
         if !id.starts_with(did_constants::DID_SUFFIXED_SCHEME) {
             return Ok(DIDUrl::new(subject, None, None, Some(id)));

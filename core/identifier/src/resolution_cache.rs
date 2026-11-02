@@ -20,8 +20,9 @@
 
 use std::{path::Path, sync::Arc};
 
-use super::{Card, FileSystemResolutionCache, ResolutionResult};
 use boson_api::{Id, Result};
+use super::{Card, FileSystemResolutionCache, ResolutionResult};
+
 pub trait ResolutionCache: Send + Sync {
     fn put(&self, id: &Id, result: &ResolutionResult<Card>) -> Result<()>;
     fn get(&self, id: &Id) -> Result<Option<ResolutionResult<Card>>>;

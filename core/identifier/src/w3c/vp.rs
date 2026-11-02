@@ -19,20 +19,18 @@
 // SOFTWARE.
 
 use std::{
+    collections::HashMap,
     fmt,
     hash::{Hash, Hasher},
     str::FromStr,
-    collections::HashMap,
 };
+
 use serde::{Deserialize, Serialize};
 
 use boson_api::{
-    Error,
-    Result,
     errors::{ArgumentError, SignatureError},
     utils,
-    CryptoIdentity,
-    Id,
+    CryptoIdentity, Error, Id, Result,
 };
 
 use crate::{
@@ -40,15 +38,12 @@ use crate::{
     proof::{Proof, ProofPurpose, ProofType},
     w3c::{
         VerifiableCredential as VC,
-        VerifiablePresentationBuilder as VPBuilder
+        VerifiablePresentationBuilder as VPBuilder,
     },
-    DIDUrl,
-    VerificationMethod,
-    Vouch,
+    DIDUrl, VerificationMethod, Vouch,
 };
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiablePresentation {
     #[serde(
         rename = "@context",
@@ -181,7 +176,7 @@ impl VerifiablePresentation {
             contexts: Some(contexts.iter().map(|s| s.to_string()).collect()),
             id,
             types: Some(types.iter().map(|t| t.to_string()).collect()),
-            holder: vouch.holder().clone(),
+            holder: *vouch.holder(),
             credentials,
             proof: Some(proof),
         }
@@ -240,9 +235,10 @@ impl VerifiablePresentation {
     }
 
     pub fn validate(&self) -> Result<()> {
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("VP signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("VP signature is not valid"))
         }
     }
 
@@ -255,21 +251,20 @@ impl VerifiablePresentation {
     }
 
     pub(crate) fn to_sign_data(&self) -> Vec<u8> {
-        self.to_unsigned_boson_vouch().to_sign_data()
+        let unsigned = self.to_unsigned_boson_vouch();
+        match self.proof.as_ref() {
+            Some(proof) => unsigned.stamp_signed_at(proof.created()).to_sign_data(),
+            None => unsigned.to_sign_data(),
+        }
     }
 
     pub fn to_unsigned_boson_vouch(&self) -> Vouch {
-        let id = if let Some(id) = self.id.as_ref() {
-            Some(
-                id.parse::<DIDUrl>()
-                    .unwrap()
-                    .fragment()
-                    .unwrap()
-                    .to_string(),
-            ) // TODO:
-        } else {
-            None
-        };
+        let id = self.id.as_ref().map(|id| {
+            id.parse::<DIDUrl>()
+                .ok()
+                .and_then(|u| u.fragment().map(|f| f.to_string()))
+                .unwrap_or_else(|| id.clone())
+        });
         let types = if let Some(ref t) = self.types {
             match t.is_empty() {
                 true => None,
@@ -287,7 +282,7 @@ impl VerifiablePresentation {
         Vouch::unsigned(
             id,
             types,
-            self.holder.clone(),
+            self.holder,
             self.credentials
                 .iter()
                 .map(|c| c.to_boson_credential())

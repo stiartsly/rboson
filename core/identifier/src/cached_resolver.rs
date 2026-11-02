@@ -23,8 +23,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::{Card, ResolutionCache, ResolutionOptions, ResolutionResult, Resolver};
 use boson_api::{Id, Result};
+
+use super::{Card, ResolutionCache, ResolutionOptions, ResolutionResult, Resolver};
 
 pub struct CachedResolver<R> {
     inner: R,

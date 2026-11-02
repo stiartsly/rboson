@@ -24,17 +24,24 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use super::{Card, ResolutionCache, ResolutionResult};
 use boson_api::{Id, Result};
+use super::{
+    resolution_errors::ResolutionCacheError,
+    Card,
+    ResolutionCache,
+    ResolutionResult
+};
+
 pub struct FileSystemResolutionCache {
     dir: PathBuf,
     expiration: Duration,
 }
+
 impl FileSystemResolutionCache {
     pub fn new(path: &Path, expiration_secs: u64) -> Result<Self> {
         fs::create_dir_all(path)?;
         if !path.is_dir() {
-            return Err("resolution cache path is not a directory".into());
+            return Err(ResolutionCacheError::new("resolution cache path is not a directory").into());
         }
         Ok(Self {
             dir: path.to_path_buf(),
@@ -45,10 +52,12 @@ impl FileSystemResolutionCache {
             }),
         })
     }
+
     pub(crate) fn file(&self, id: &Id) -> PathBuf {
         self.dir.join(id.to_string())
     }
 }
+
 impl ResolutionCache for FileSystemResolutionCache {
     fn put(&self, id: &Id, result: &ResolutionResult<Card>) -> Result<()> {
         let tmp = self.dir.join(format!("{}.tmp", id));
@@ -56,6 +65,7 @@ impl ResolutionCache for FileSystemResolutionCache {
         fs::rename(tmp, self.file(id))?;
         Ok(())
     }
+
     fn get(&self, id: &Id) -> Result<Option<ResolutionResult<Card>>> {
         let path = self.file(id);
         let meta = match fs::metadata(&path) {
@@ -76,14 +86,14 @@ impl ResolutionCache for FileSystemResolutionCache {
             && result
                 .result
                 .as_ref()
-                .map(|c| !c.is_genuine())
-                .unwrap_or(true)
+                .map_or(true, |c| !c.is_genuine())
         {
             let _ = fs::remove_file(self.file(id));
             return Ok(None);
         }
         Ok(Some(result))
     }
+
     fn evict_expired(&self) -> Result<()> {
         for e in fs::read_dir(&self.dir)? {
             let p = e?.path();
@@ -98,6 +108,7 @@ impl ResolutionCache for FileSystemResolutionCache {
         }
         Ok(())
     }
+
     fn clear(&self) -> Result<()> {
         for e in fs::read_dir(&self.dir)? {
             let p = e?.path();

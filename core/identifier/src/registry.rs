@@ -18,11 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::fmt;
-use std::future::Future;
+use std::{fmt, future::Future};
+
+use boson_api::{CryptoIdentity, Id, Result};
 
 use crate::{w3c::DIDDocument, Card, ResolutionResult, Resolver};
-use boson_api::{CryptoIdentity, Id, Result};
 
 /// A card a registry publisher keeps: its version and the parsed card.
 #[derive(Debug, Clone, PartialEq, Eq)]

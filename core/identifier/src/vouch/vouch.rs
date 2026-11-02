@@ -18,25 +18,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{fmt, str, time::SystemTime};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    str,
+    time::SystemTime,
+};
+
 use serde::{Deserialize, Serialize};
 
-use crate::date::date_opt;
 use boson_api::{
-    utils,
     errors::{ArgumentError, Error, Result, SignatureError},
-    signature,
-    CryptoIdentity,
-    Id,
+    signature, utils,
+    CryptoIdentity, Id,
 };
 
 use crate::{
+    date::date_opt,
     w3c::VerifiablePresentation as VP,
-    Credential,
-    VouchBuilder
+    Credential, VouchBuilder,
 };
 
-#[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct Vouch {
     #[serde(
         rename = "id",
@@ -93,7 +96,7 @@ impl Vouch {
             holder,
             credentials,
             signed_at: None,
-            signature: vec![],
+            signature: Vec::new(),
             vp,
         }
     }
@@ -168,7 +171,7 @@ impl Vouch {
             &self.signature[..],
             &self.holder.to_signature_key(),
         )
-        .is_ok()
+        .unwrap_or(false)
             && self.credentials.iter().all(Credential::is_genuine)
     }
 
@@ -177,9 +180,10 @@ impl Vouch {
             return Err(ArgumentError::new("Vouch signature is empty"));
         }
 
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("Vouch signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("Vouch signature is not valid"))
         }
     }
 
@@ -218,14 +222,25 @@ impl Vouch {
     }
 }
 
-impl PartialEq<Vouch> for Vouch {
-    fn eq(&self, other: &Vouch) -> bool {
+impl PartialEq for Vouch {
+    fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.types == other.types
             && self.holder == other.holder
             && self.credentials == other.credentials
             && self.signed_at == other.signed_at
             && self.signature == other.signature
+    }
+}
+
+impl Hash for Vouch {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.types.hash(state);
+        self.holder.hash(state);
+        self.credentials.hash(state);
+        self.signed_at.hash(state);
+        self.signature.hash(state);
     }
 }
 

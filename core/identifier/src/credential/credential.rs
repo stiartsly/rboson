@@ -20,26 +20,28 @@
 
 use std::{
     collections::HashMap,
-    error::Error,
     fmt,
     hash::Hash,
     str::FromStr,
     time::SystemTime,
 };
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use boson_api::errors::{
-    ArgumentError,
-    BeforeValidPeriodError,
-    ExpiredError,
-    SignatureError,
-    Result};
-use boson_api::{signature, utils::{self, codec}, CryptoIdentity, Id};
+use boson_api::{
+    errors::{
+        ArgumentError, BeforeValidPeriodError, ExpiredError, Result, SignatureError,
+    },
+    signature,
+    utils::{self, codec},
+    CryptoIdentity, Error, Id,
+};
+
 use crate::{
     date::date_opt,
     w3c::VerifiableCredential as VC,
-    CredentialBuilder
+    CredentialBuilder,
 };
 
 #[derive(Debug, Clone, Eq, Hash, Serialize)]
@@ -122,7 +124,7 @@ impl Credential {
             types,
             name,
             description,
-            issuer: issuer.clone().unwrap_or_else(|| subject.clone()),
+            issuer: issuer.unwrap_or(subject),
             valid_from,
             valid_until,
             subject: Subject::new(subject, claims).implicit_for_issuer(
@@ -224,7 +226,7 @@ impl Credential {
             &self.signature,
             &self.issuer().to_signature_key(),
         )
-        .is_ok()
+        .unwrap_or(false)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -236,9 +238,10 @@ impl Credential {
             return Err(ExpiredError::new("Credential has expired"));
         }
 
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("Credential signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("Credential signature is not valid"))
         }
     }
 
@@ -277,7 +280,7 @@ impl Credential {
     }
 }
 
-impl PartialEq<Self> for Credential {
+impl PartialEq for Credential {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.types == other.types
@@ -371,7 +374,7 @@ impl<'de> Deserialize<'de> for Credential {
 }
 
 impl TryFrom<&str> for Credential {
-    type Error = Box<dyn Error>;
+    type Error = Error;
 
     fn try_from(data: &str) -> Result<Self> {
         serde_json::from_str(data).map_err(|e| {
@@ -381,7 +384,7 @@ impl TryFrom<&str> for Credential {
 }
 
 impl TryFrom<&[u8]> for Credential {
-    type Error = Box<dyn Error>;
+    type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(data).map_err(|e| {
@@ -391,7 +394,7 @@ impl TryFrom<&[u8]> for Credential {
 }
 
 impl FromStr for Credential {
-    type Err = Box<dyn std::error::Error>;
+    type Err = Error;
 
     fn from_str(data: &str) -> Result<Self> {
         Self::try_from(data)
@@ -456,10 +459,7 @@ impl Subject {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.claims.iter().find_map(|(k, v)| match k == key {
-            true => serde_json::from_value(v.clone()).ok(),
-            false => None,
-        })
+        self.claims.get(key).and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }
 
@@ -502,7 +502,7 @@ impl std::hash::Hash for Subject {
     }
 }
 
-impl PartialEq<Self> for Subject {
+impl PartialEq for Subject {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id && self.claims == other.claims
     }

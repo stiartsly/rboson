@@ -20,14 +20,10 @@
 
 use std::{sync::Arc, time::SystemTime};
 
+use boson_api::{Id, Result};
+use boson_dht::{LookupOption, Node};
+
 use super::{Card, ResolutionMetadata, ResolutionOptions, ResolutionResult, Resolver};
-use boson_dht::{
-    {LookupOption, Node},
-};
-use boson_api::{
-    Id,
-    Result,
-};
 
 pub struct DHTResolver {
     node: Arc<Node>,
@@ -37,6 +33,7 @@ impl DHTResolver {
     pub fn new(node: Arc<Node>) -> Self {
         Self { node }
     }
+
     pub fn node(&self) -> &Arc<Node> {
         &self.node
     }
@@ -75,6 +72,6 @@ impl Resolver for DHTResolver {
             deactivated: false,
             version: value.sequence_number(),
         };
-        Ok(ResolutionResult::success(card.clone(), Some(metadata)))
+        Ok(ResolutionResult::success(card, Some(metadata)))
     }
 }

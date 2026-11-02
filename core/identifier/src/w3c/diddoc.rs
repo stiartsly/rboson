@@ -18,19 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::{
+    collections::HashMap,
+    fmt,
+    str::FromStr,
+    time::SystemTime,
+};
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
-use std::str::FromStr;
-use std::time::SystemTime;
 
 use boson_api::{
-    errors::{ArgumentError, Result, SignatureError},
+    errors::{ArgumentError, Error, Result, SignatureError},
     utils,
-    CryptoIdentity,
-    Id,
+    CryptoIdentity, Id,
 };
 
 use crate::{
@@ -111,30 +112,12 @@ impl DIDDocument {
         credentials: Vec<VC>,
         services: Vec<Service>,
     ) -> Self {
-        let contexts = match !contexts.is_empty() {
-            true => Some(contexts),
-            false => None,
-        };
-        let verification_methods = match !vms.is_empty() {
-            true => Some(vms),
-            false => None,
-        };
-        let authentications = match !auths.is_empty() {
-            true => Some(auths),
-            false => None,
-        };
-        let assertions = match !assertions.is_empty() {
-            true => Some(assertions),
-            false => None,
-        };
-        let credentials = match !credentials.is_empty() {
-            true => Some(credentials),
-            false => None,
-        };
-        let services = match !services.is_empty() {
-            true => Some(services),
-            false => None,
-        };
+        let contexts = (!contexts.is_empty()).then_some(contexts);
+        let verification_methods = (!vms.is_empty()).then_some(vms);
+        let authentications = (!auths.is_empty()).then_some(auths);
+        let assertions = (!assertions.is_empty()).then_some(assertions);
+        let credentials = (!credentials.is_empty()).then_some(credentials);
+        let services = (!services.is_empty()).then_some(services);
 
         Self {
             contexts,
@@ -183,7 +166,7 @@ impl DIDDocument {
 
         let unsigned = Self::unsigned(
             contexts.iter().map(|s| s.to_string()).collect(),
-            card.id().clone(),
+            *card.id(),
             vec![default_method],
             vec![default_method_ref.clone()],
             vec![default_method_ref.clone()],
@@ -411,9 +394,10 @@ impl DIDDocument {
     }
 
     pub fn validate(&self) -> Result<()> {
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("Document signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("Document signature is not valid"))
         }
     }
 
@@ -504,14 +488,14 @@ impl DIDDocument {
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self).map_err(|error| {
-            ArgumentError::new(format!("Failed to encode DIDDocument: {error}")).into()
+        serde_cbor::to_vec(self).map_err(|e| {
+            ArgumentError::new(format!("Failed to encode DIDDocument: {}", e)).into()
         })
     }
 
     pub fn to_pretty_string(&self) -> Result<String> {
-        serde_json::to_string_pretty(self).map_err(|error| {
-            ArgumentError::new(format!("Failed to encode DIDDocument: {error}")).into()
+        serde_json::to_string_pretty(self).map_err(|e| {
+            ArgumentError::new(format!("Failed to encode DIDDocument: {}", e)).into()
         })
     }
 
@@ -534,19 +518,19 @@ impl PartialEq<Self> for DIDDocument {
 }
 
 impl TryFrom<&str> for DIDDocument {
-    type Error = Box<dyn Error>;
+    type Error = Error;
 
     fn try_from(data: &str) -> Result<Self> {
-        let document: Self = serde_json::from_str(data).map_err(|e| -> boson_api::Error {
-            ArgumentError::new(format!("Failed to parse DIDDocument from string: {}", e)).into()
-        })?;
+        let document: Self = serde_json::from_str(data).map_err(|e|
+            ArgumentError::new(format!("Failed to parse DIDDocument from string: {}", e))
+        )?;
         document.validate_structure()?;
         Ok(document)
     }
 }
 
 impl FromStr for DIDDocument {
-    type Err = Box<dyn Error>;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
         Self::try_from(s)
@@ -554,12 +538,12 @@ impl FromStr for DIDDocument {
 }
 
 impl TryFrom<&[u8]> for DIDDocument {
-    type Error = Box<dyn Error>;
+    type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self> {
-        let document: Self = serde_cbor::from_slice(data).map_err(|e| -> boson_api::Error {
-            ArgumentError::new(format!("Failed to parse DIDDocument from bytes: {}", e)).into()
-        })?;
+        let document: Self = serde_cbor::from_slice(data).map_err(|e|
+            ArgumentError::new(format!("Failed to parse DIDDocument from bytes: {}", e))
+        )?;
         document.validate_structure()?;
         Ok(document)
     }

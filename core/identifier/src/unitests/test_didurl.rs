@@ -18,12 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::{
-    {DIDUrl, DID_METHOD, DID_SCHEME},
-};
-use boson_api::{
-    Id,
-};
+use boson_api::Id;
+
+use crate::{DIDUrl, DID_METHOD, DID_SCHEME};
 
 #[cfg(test)]
 mod tests {

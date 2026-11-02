@@ -26,10 +26,11 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) mod date {
-    use super::{format_rfc3339, from_millis, parse_rfc3339, to_millis};
-    use serde::de::Error as DeError;
-    use serde::{Deserialize, Deserializer, Serializer};
     use std::time::SystemTime;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::{format_rfc3339, from_millis, parse_rfc3339, to_millis};
 
     pub(crate) fn serialize<S>(value: &SystemTime, se: S) -> Result<S::Ok, S::Error>
     where
@@ -48,19 +49,20 @@ pub(crate) mod date {
     {
         if de.is_human_readable() {
             let value = String::deserialize(de)?;
-            parse_rfc3339(&value).map_err(D::Error::custom)
+            parse_rfc3339(&value).map_err(serde::de::Error::custom)
         } else {
             let millis = i64::deserialize(de)?;
-            from_millis(millis).map_err(D::Error::custom)
+            from_millis(millis).map_err(serde::de::Error::custom)
         }
     }
 }
 
 pub(crate) mod date_opt {
-    use super::{from_millis, parse_rfc3339};
-    use serde::de::Error as DeError;
-    use serde::{Deserialize, Deserializer, Serializer};
     use std::time::SystemTime;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::{from_millis, parse_rfc3339};
 
     pub(crate) fn serialize<S>(
         value: &Option<SystemTime>,
@@ -84,13 +86,13 @@ pub(crate) mod date_opt {
             value
                 .map(|value| parse_rfc3339(&value))
                 .transpose()
-                .map_err(D::Error::custom)
+                .map_err(serde::de::Error::custom)
         } else {
             let value = Option::<i64>::deserialize(de)?;
             value
                 .map(from_millis)
                 .transpose()
-                .map_err(D::Error::custom)
+                .map_err(serde::de::Error::custom)
         }
     }
 }

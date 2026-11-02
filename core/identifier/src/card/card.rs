@@ -18,27 +18,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use std::collections::HashMap;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::str::FromStr;
-use std::time::SystemTime;
-
-use crate::date::date_opt;
-use boson_api::{
-    errors::{ArgumentError, SignatureError},
-    Result,
-    Error,
-    signature,
-    CryptoIdentity,
-    Id,
-    utils,
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::{Hash, Hasher},
+    str::FromStr,
+    time::SystemTime,
 };
 
-use crate::{w3c::DIDDocument, CardBuilder, Credential};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+use boson_api::{
+    errors::{ArgumentError, SignatureError},
+    signature, utils,
+    CryptoIdentity, Error, Id, Result,
+};
+
+use crate::{
+    date::date_opt,
+    w3c::DIDDocument,
+    CardBuilder, Credential,
+};
 
 const DEFAULT_PROFILE_CREDENTIAL_ID: &str = "profile";
 const DEFAULT_PROFILE_CREDENTIAL_TYPE: &str = "BosonProfile";
@@ -120,7 +121,7 @@ impl Card {
             credentials: credentials.filter(|values| !values.is_empty()),
             services: services.filter(|values| !values.is_empty()),
             signed_at: None,
-            signature: vec![0u8; 0],
+            signature: Vec::new(),
             doc,
         }
     }
@@ -184,15 +185,12 @@ impl Card {
     }
 
     pub fn profile_credential(&self) -> Option<&Credential> {
-        self.credentials
-            .as_ref()
-            .map(|v| {
-                v.iter().find(|c| {
-                    c.id() == DEFAULT_PROFILE_CREDENTIAL_ID
-                        && c.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
-                })
+        self.credentials.as_ref().and_then(|v| {
+            v.iter().find(|c| {
+                c.id() == DEFAULT_PROFILE_CREDENTIAL_ID
+                    && c.types().contains(&DEFAULT_PROFILE_CREDENTIAL_TYPE)
             })
-            .flatten()
+        })
     }
 
     pub fn services(&self) -> Vec<&Service> {
@@ -235,15 +233,12 @@ impl Card {
     }
 
     pub fn homenode_service(&self) -> Option<&Service> {
-        self.services
-            .as_ref()
-            .map(|v| {
-                v.iter().find(|s| {
-                    s.id() == DEFAULT_HOME_NODE_SERVICE_ID
-                        && s.service_type() == DEFAULT_HOME_NODE_SERVICE_TYPE
-                })
+        self.services.as_ref().and_then(|v| {
+            v.iter().find(|s| {
+                s.id() == DEFAULT_HOME_NODE_SERVICE_ID
+                    && s.service_type() == DEFAULT_HOME_NODE_SERVICE_TYPE
             })
-            .flatten()
+        })
     }
 
     pub fn signed_at(&self) -> Option<SystemTime> {
@@ -272,9 +267,10 @@ impl Card {
             return Err(SignatureError::new("Card signature is empty"));
         }
 
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("Card signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("Card signature is not valid"))
         }
     }
 
@@ -317,7 +313,7 @@ impl Card {
     }
 }
 
-impl PartialEq<Self> for Card {
+impl PartialEq for Card {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.credentials == other.credentials
@@ -443,8 +439,8 @@ impl Service {
     }
 }
 
-impl PartialEq<Self> for Service {
-    fn eq(&self, other: &Service) -> bool {
+impl PartialEq for Service {
+    fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.service_type == other.service_type
             && self.endpoint == other.endpoint

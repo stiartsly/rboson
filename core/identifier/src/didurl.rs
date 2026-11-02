@@ -18,16 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{DID_METHOD, DID_SCHEME};
 use boson_api::{
     errors::{MalformedError, StateError},
     Error, Id, Result,
 };
+
+use crate::{DID_METHOD, DID_SCHEME};
 
 /// A `did:boson:` URL, or a relative reference to one.
 ///
@@ -170,7 +170,7 @@ impl DIDUrl {
     /// Converts this DID URL to a generic [`url::Url`].
     pub fn to_uri(&self) -> Result<url::Url> {
         url::Url::parse(&self.to_string()).map_err(|error| {
-            boson_api::errors::MalformedError::new(format!("Invalid DIDURL: {error}")).into()
+            MalformedError::new(format!("Invalid DIDURL: {error}")).into()
         })
     }
 

@@ -54,8 +54,9 @@ mod tests {
 
         let id1 = Id::from_bytes(zeros);
         let id2 = Id::default();
-        assert_eq!(id2.size(), Id::BYTES);
+
         assert_eq!(id2.as_bytes(), zeros.as_slice());
+        assert_eq!(id2.as_bytes().len(), Id::BYTES);
         assert_eq!(id1, id2);
     }
 
@@ -65,14 +66,15 @@ mod tests {
         randomize_bytes(&mut bytes);
 
         let id = Id::from_bytes(bytes);
-        assert_eq!(id.size(), Id::BYTES);
         assert_eq!(id.as_bytes(), bytes.as_slice());
+        assert_eq!(id.as_bytes().len(), Id::BYTES);
 
         let result = Id::try_from(bytes.as_slice());
         assert_eq!(result.is_ok(), true);
+
         let id2 = result.unwrap();
-        assert_eq!(id2.size(), Id::BYTES);
         assert_eq!(id2.as_bytes(), bytes.as_slice());
+        assert_eq!(id2.as_bytes().len(), Id::BYTES);
         assert_eq!(id, id2);
     }
 
@@ -87,13 +89,13 @@ mod tests {
         let result = Id::try_from(hexstr);
         assert_eq!(result.is_ok(), true);
         let id1 = result.unwrap();
-        assert_eq!(id1.size(), Id::BYTES);
         assert_eq!(id1.to_hexstr(), hexstr);
+        assert_eq!(id1.as_bytes().len(), Id::BYTES);
 
         let result = Id::try_from(hexstr);
         assert_eq!(result.is_ok(), true);
         let id2 = result.unwrap();
-        assert_eq!(id2.size(), Id::BYTES);
+        assert_eq!(id2.as_bytes().len(), Id::BYTES);
         assert_eq!(id2.to_hexstr(), hexstr);
         assert_eq!(id1, id2);
     }
@@ -109,13 +111,13 @@ mod tests {
         assert_eq!(result.is_ok(), true);
 
         let id1 = result.unwrap();
-        assert_eq!(id1.size(), Id::BYTES);
+        assert_eq!(id1.as_bytes().len(), Id::BYTES);
         assert_eq!(id1.to_base58(), base58);
 
         let result = Id::try_from(base58);
         assert_eq!(result.is_ok(), true);
         let id2 = result.unwrap();
-        assert_eq!(id2.size(), Id::BYTES);
+        assert_eq!(id2.as_bytes().len(), Id::BYTES);
         assert_eq!(id2.to_base58(), base58);
         assert_eq!(id1, id2);
     }
@@ -128,7 +130,7 @@ mod tests {
         let id2 = Id::min();
         let id3 = Id::default();
         let id4 = Id::zero();
-        assert_eq!(id1.size(), Id::BYTES);
+        assert_eq!(id1.as_bytes().len(), Id::BYTES);
         assert_eq!(id1.as_bytes(), bytes.as_slice());
         assert_eq!(
             id1.to_hexstr(),
@@ -145,7 +147,7 @@ mod tests {
         bytes.fill(0xFF);
         let id1 = Id::from_bytes(bytes);
         let id2 = Id::max();
-        assert_eq!(id1.size(), Id::BYTES);
+        assert_eq!(id1.as_bytes().len(), Id::BYTES);
         assert_eq!(id1.as_bytes(), bytes.as_slice());
         assert_eq!(
             id1.to_hexstr(),
@@ -171,7 +173,7 @@ mod tests {
         assert_eq!(result.is_ok(), true);
 
         let id = result.unwrap();
-        assert_eq!(id.size(), Id::BYTES);
+        assert_eq!(id.as_bytes().len(), Id::BYTES);
         assert_eq!(id.as_bytes(), bytes.as_slice());
     }
 
@@ -189,14 +191,14 @@ mod tests {
         assert_eq!(result.is_ok(), true);
 
         let id_from = result.unwrap();
-        assert_eq!(id_from.size(), Id::BYTES);
+        assert_eq!(id_from.as_bytes().len(), Id::BYTES);
         assert_eq!(id_from.to_base58(), base58);
 
         let result: Result<Id, _> = base58.try_into();
         assert_eq!(result.is_ok(), true);
 
         let id_into = result.unwrap();
-        assert_eq!(id_into.size(), Id::BYTES);
+        assert_eq!(id_into.as_bytes().len(), Id::BYTES);
         assert_eq!(id_into.to_base58(), base58);
         assert_eq!(id_from, id_into);
     }
@@ -208,14 +210,14 @@ mod tests {
         assert_eq!(result.is_ok(), true);
 
         let id1 = result.unwrap();
-        assert_eq!(id1.size(), Id::BYTES);
+        assert_eq!(id1.as_bytes().len(), Id::BYTES);
         assert_eq!(id1.to_base58(), base58);
 
         let hexstr = "0xf610197a374dfc3801cb00ad1acda6f7a52bb8e0bff10a3e0db2aacdcea41ed8";
         let result = Id::try_from(hexstr);
         assert_eq!(result.is_ok(), true);
         let id2 = result.unwrap();
-        assert_eq!(id2.size(), Id::BYTES);
+        assert_eq!(id2.as_bytes().len(), Id::BYTES);
         assert_eq!(id2.to_hexstr(), hexstr);
         assert_eq!(id1.to_hexstr(), hexstr);
         assert_eq!(id2.to_base58(), base58);

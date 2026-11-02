@@ -18,9 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::{collections::HashMap, time::SystemTime};
+
 use serde_json::{Map, Value};
-use std::collections::HashMap;
-use std::time::SystemTime;
 use unicode_normalization::UnicodeNormalization;
 
 use boson_api::{
@@ -80,7 +80,7 @@ impl VerifiableCredentialBuilder {
 
     pub fn with_id(&mut self, id: &str) -> Result<&mut Self> {
         if id.is_empty() {
-            Err(ArgumentError::new("Credential Id cannot be empty"))?;
+            return Err(ArgumentError::new("Credential Id cannot be empty"));
         }
 
         if id.starts_with(constants::DID_SUFFIXED_SCHEME) {
@@ -89,16 +89,8 @@ impl VerifiableCredentialBuilder {
             })?;
 
             if url.fragment().is_none() {
-                Err(ArgumentError::new("Id must has the fragment part"))?;
+                return Err(ArgumentError::new("Id must has the fragment part"));
             }
-
-            /*
-            if url.id() != self.issuer.id() {
-                Err(ArgumentError::new(format!(
-                    "Invalid credential id: should be the subject id based DIDURL: {}",
-                    url
-                )))?;
-            }*/
         }
 
         self.id = Some(id.nfc().collect::<String>());
@@ -107,7 +99,7 @@ impl VerifiableCredentialBuilder {
 
     pub fn with_type(&mut self, credential_type: &str, context: &str) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty"))?;
+            return Err(ArgumentError::new("Credential type cannot be empty"));
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -129,7 +121,7 @@ impl VerifiableCredentialBuilder {
 
     pub fn with_types(&mut self, credential_type: &str, contexts: Vec<&str>) -> Result<&mut Self> {
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty"))?;
+            return Err(ArgumentError::new("Credential type cannot be empty"));
         }
 
         let t = credential_type.nfc().collect::<String>();
@@ -230,12 +222,12 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
-        if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
-            Err(ArgumentError::new("VC Id cannot be empty"))?;
-        }
         let Some(id) = self.id.as_ref() else {
             return Err(ArgumentError::new("VC Id cannot be empty"));
         };
+        if id.is_empty() {
+            return Err(ArgumentError::new("VC Id cannot be empty"));
+        }
         if self.claims.is_empty() {
             return Err(ArgumentError::new("VC Claims can not be empty"));
         }
@@ -269,10 +261,10 @@ impl BosonIdentityObjectBuilder for VerifiableCredentialBuilder {
             self.types.clone(),
             self.name.clone(),
             self.description.clone(),
-            self.issuer.id().clone(),
+            *self.issuer.id(),
             self.valid_from,
             self.valid_until,
-            self.subject.clone(),
+            self.subject,
             self.claims.clone(),
         );
 

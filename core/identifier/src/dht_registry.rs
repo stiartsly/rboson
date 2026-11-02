@@ -20,12 +20,16 @@
 
 use std::sync::Arc;
 
+use boson_api::{
+    errors::{ArgumentError, StateError},
+    CryptoIdentity, Id, Identity, Result, SignedBuilder,
+};
+use boson_dht::Node;
+
 use super::{
     CachedResolver, Card, DHTResolver, PublishedCard, Registry, RegistryResolver, ResolutionCache,
     ResolutionOptions, ResolutionResult, Resolver,
 };
-use boson_dht::{Node};
-use boson_api::{CryptoIdentity, Id, Identity, Result, SignedBuilder};
 
 pub struct DHTRegistry {
     node: Arc<Node>,
@@ -53,13 +57,13 @@ impl DHTRegistry {
         version: i32,
     ) -> Result<()> {
         if version < 0 {
-            return Err("version must be non-negative".into());
+            return Err(ArgumentError::new("version must be non-negative"));
         }
         if identity.id() != card.id() {
-            return Err("identity id does not match card id".into());
+            return Err(ArgumentError::new("identity id does not match card id"));
         }
         if !card.is_genuine() {
-            return Err("card is not genuine".into());
+            return Err(StateError::new("card is not genuine"));
         }
 
         let data: Vec<u8> = card.into();
@@ -80,10 +84,10 @@ impl Registry for DHTRegistry {
         last_version: i32,
     ) -> Result<i32> {
         if identity.id() != card.id() {
-            return Err("identity id does not match card id".into());
+            return Err(ArgumentError::new("identity id does not match card id"));
         }
         if !card.is_genuine() {
-            return Err("card is not genuine".into());
+            return Err(StateError::new("card is not genuine"));
         }
 
         let kept = self.node.value(*card.id())?;
@@ -98,7 +102,7 @@ impl Registry for DHTRegistry {
             .max(found.map(|value| value.sequence_number()).unwrap_or(-1));
         let version = highest
             .checked_add(1)
-            .ok_or_else(|| boson_api::errors::ArgumentError::new("card version is exhausted"))?;
+            .ok_or_else(|| ArgumentError::new("card version is exhausted"))?;
 
         self.register(identity, card, version).await?;
         self.resolver.invalidate(card.id());

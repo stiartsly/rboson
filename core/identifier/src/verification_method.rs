@@ -18,21 +18,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::de::{MapAccess, Visitor};
-use serde::de::value::MapAccessDeserializer;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
+
+use serde::{
+    de::{value::MapAccessDeserializer, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 use boson_api::{
-    errors::ArgumentError, Result,
+    errors::ArgumentError,
     utils::codec,
-    Id
+    Id, Result,
 };
+
 use super::{did_constants, DIDUrl};
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerificationMethodType {
     Ed25519VerificationKey2020,
 }
@@ -63,7 +67,7 @@ impl VerificationMethod {
         Self::Entity(Entity {
             id: id.into(),
             method_type: Some(method_type),
-            controller: Some(controller.clone()),
+            controller: Some(*controller),
             public_key_multibase: Some(public_key_multibase),
         })
     }

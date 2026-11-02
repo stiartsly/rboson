@@ -18,9 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::collections::HashMap;
+
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Serialize};
-use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
 use boson_api::{errors::ArgumentError, unwrap, CryptoIdentity, Identity, Result};
@@ -80,7 +81,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_context(&mut self, context: &str) -> Result<&mut Self> {
         if context.is_empty() {
-            Err(ArgumentError::new("Context cannot be empty"))?;
+            return Err(ArgumentError::new("Context cannot be empty"));
         }
         let normalized = context.nfc().collect::<String>();
         if !self.contexts.contains(&normalized) {
@@ -140,7 +141,7 @@ impl DIDDocumentBuilder {
 
     pub fn with_credential(&mut self, vc: VC) -> Result<&mut Self> {
         if vc.subject().id() != self.identity.id() {
-            Err(ArgumentError::new("VC subject does not match identity"))?;
+            return Err(ArgumentError::new("VC subject does not match identity"));
         }
         self.credentials.push(vc);
         Ok(self)
@@ -149,9 +150,9 @@ impl DIDDocumentBuilder {
     pub fn with_credentials(&mut self, vcs: Vec<VC>) -> Result<&mut Self> {
         for vc in &vcs {
             if vc.subject().id() != self.identity.id() {
-                Err(ArgumentError::new(
+                return Err(ArgumentError::new(
                     "The subject of one VC does not match identity",
-                ))?;
+                ));
             }
             self.credentials.push(vc.clone());
         }
@@ -169,7 +170,7 @@ impl DIDDocumentBuilder {
         T: Serialize,
     {
         if credential_type.is_empty() {
-            Err(ArgumentError::new("Credential type cannot be empty"))?;
+            return Err(ArgumentError::new("Credential type cannot be empty"));
         }
 
         self.with_credential(
@@ -194,19 +195,19 @@ impl DIDDocumentBuilder {
         let did_url = Self::normalize_subject_id(self.identity.id(), id)?;
 
         if service_type.is_empty() {
-            Err(ArgumentError::new("Service type cannot be empty"))?;
+            return Err(ArgumentError::new("Service type cannot be empty"));
         }
         if endpoint.is_empty() {
-            Err(ArgumentError::new("Service endpoint cannot be empty"))?;
+            return Err(ArgumentError::new("Service endpoint cannot be empty"));
         }
 
         if properties.contains_key("id")
             || properties.contains_key("type")
             || properties.contains_key("serviceEndpoint")
         {
-            Err(ArgumentError::new(
+            return Err(ArgumentError::new(
                 "Service properties cannot contain 'id', 'type' or 'serviceEndpoint'",
-            ))?;
+            ));
         }
 
         let properties = properties
@@ -245,7 +246,7 @@ impl BosonIdentityObjectBuilder for DIDDocumentBuilder {
     fn build(&self) -> Result<Self::BosonIdentityObject> {
         let unsigned = DIDDocument::unsigned(
             self.contexts.clone(),
-            self.identity.id().clone(),
+            *self.identity.id(),
             self.verification_methods.values().cloned().collect(),
             self.authentications.values().cloned().collect(),
             self.assertions.values().cloned().collect(),

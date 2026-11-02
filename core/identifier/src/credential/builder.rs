@@ -18,10 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{
-    collections::HashMap,
-    time::SystemTime
-};
+use std::{collections::HashMap, time::SystemTime};
+
 use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
@@ -29,22 +27,20 @@ use boson_api::{
     errors::{ArgumentError, Result},
     CryptoIdentity, Id, Identity,
 };
-use crate::{
-    BosonIdentityObjectBuilder,
-    Credential
-};
+
+use crate::{BosonIdentityObjectBuilder, Credential};
 
 #[derive(Default)]
 pub struct CredentialBuilder {
-    identity    : CryptoIdentity,
-    id          : Option<String>,
-    types       : Vec<String>,
-    name        : Option<String>,
-    description : Option<String>,
-    valid_from  : Option<SystemTime>,
-    valid_until : Option<SystemTime>,
-    subject     : Option<Id>,
-    claims      : Map<String,Value>,
+    identity: CryptoIdentity,
+    id: Option<String>,
+    types: Vec<String>,
+    name: Option<String>,
+    description: Option<String>,
+    valid_from: Option<SystemTime>,
+    valid_until: Option<SystemTime>,
+    subject: Option<Id>,
+    claims: Map<String, Value>,
 }
 
 impl CredentialBuilder {
@@ -164,7 +160,7 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
-        if self.id.as_ref().map(|v| v.is_empty()).unwrap_or(true) {
+        if self.id.as_ref().map_or(true, |v| v.is_empty()) {
             return Err(ArgumentError::new("Id cannot be empty"));
         }
         if self.claims.is_empty() {
@@ -179,10 +175,11 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
             ));
         }
 
-        let id = self.identity.id().clone();
-        let types = match self.types.is_empty() {
-            true => None,
-            false => Some(self.types.clone()),
+        let id = *self.identity.id();
+        let types = if self.types.is_empty() {
+            None
+        } else {
+            Some(self.types.clone())
         };
         let signed_at = Self::now();
         let unsigned = Credential::unsigned(
@@ -190,7 +187,7 @@ impl BosonIdentityObjectBuilder for CredentialBuilder {
             types,
             self.name.clone(),
             self.description.clone(),
-            Some(id.clone()),
+            Some(id),
             self.valid_from,
             self.valid_until,
             self.subject.unwrap_or(id),

@@ -18,13 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
 use std::{future::Future, time::SystemTime};
 
+use serde::{Deserialize, Serialize};
+
+use boson_api::{errors::ArgumentError, Id, Result};
+
 use crate::date::{date, date_opt};
-use boson_api::errors::ArgumentError;
+
 use super::{w3c::DIDDocument, Card};
-use boson_api::{Id, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
@@ -113,6 +115,7 @@ pub struct ResolutionResult<T> {
     pub result: Option<T>,
     pub metadata: Option<ResolutionMetadata>,
 }
+
 impl<T> ResolutionResult<T> {
     pub fn success(value: T, metadata: Option<ResolutionMetadata>) -> Self {
         Self {
@@ -121,6 +124,7 @@ impl<T> ResolutionResult<T> {
             metadata,
         }
     }
+
     pub fn not_found() -> Self {
         Self {
             status: ResolutionStatus::NotFound,
@@ -128,6 +132,7 @@ impl<T> ResolutionResult<T> {
             metadata: None,
         }
     }
+
     pub fn invalid() -> Self {
         Self {
             status: ResolutionStatus::Invalid,
@@ -135,6 +140,7 @@ impl<T> ResolutionResult<T> {
             metadata: None,
         }
     }
+
     pub fn status(&self) -> ResolutionStatus {
         self.status
     }
@@ -150,6 +156,7 @@ impl<T> ResolutionResult<T> {
     pub fn succeeded(&self) -> bool {
         self.status == ResolutionStatus::Success
     }
+
     pub fn failed(&self) -> bool {
         !self.succeeded()
     }

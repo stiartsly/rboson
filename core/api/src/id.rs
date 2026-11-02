@@ -211,14 +211,6 @@ impl Id {
         Id(bytes)
     }
 
-    /// Returns the number of bytes that make up this ID.
-    ///
-    /// Prefer the associated constant [`Id::BYTES`] directly.
-    #[deprecated(since = "0.1.0", note = "use `Id::BYTES` instead")]
-    pub const fn size(&self) -> usize {
-        Id::BYTES
-    }
-
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_slice()
     }

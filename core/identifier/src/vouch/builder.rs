@@ -18,12 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use indexmap::IndexMap;
 use std::collections::HashMap;
+
+use indexmap::IndexMap;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{BosonIdentityObjectBuilder, Credential, Vouch};
 use boson_api::{errors::ArgumentError, CryptoIdentity, Identity, Result};
+
+use crate::{BosonIdentityObjectBuilder, Credential, Vouch};
 
 pub struct VouchBuilder {
     identity: CryptoIdentity,
@@ -125,15 +127,16 @@ impl BosonIdentityObjectBuilder for VouchBuilder {
             return Err(ArgumentError::new("Credentials cannot be empty"));
         }
 
-        let types = match self.types.is_empty() {
-            true => None,
-            false => Some(self.types.clone()),
+        let types = if self.types.is_empty() {
+            None
+        } else {
+            Some(self.types.clone())
         };
         let signed_at = Self::now();
         let unsigned = Vouch::unsigned(
             self.id.clone(),
             types,
-            self.identity.id().clone(),
+            *self.identity.id(),
             self.credentials.values().cloned().collect(),
             None,
         )

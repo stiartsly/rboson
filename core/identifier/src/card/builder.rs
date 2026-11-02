@@ -19,21 +19,19 @@
 // SOFTWARE.
 
 use std::collections::HashMap;
+
 use indexmap::IndexMap;
 use serde_json::Map;
 use unicode_normalization::UnicodeNormalization;
 
 use boson_api::{
     errors::ArgumentError,
-    CryptoIdentity,
-    Identity,
-    Result
+    CryptoIdentity, Identity, Result,
 };
+
 use crate::{
     card::Service,
-    BosonIdentityObjectBuilder,
-    Card,
-    Credential
+    BosonIdentityObjectBuilder, Card, Credential,
 };
 
 pub struct CardBuilder {
@@ -53,9 +51,9 @@ impl CardBuilder {
 
     pub fn with_credential(&mut self, credential: Credential) -> Result<&mut Self> {
         if credential.subject().id() != self.identity.id() {
-            Err(ArgumentError::new(
+            return Err(ArgumentError::new(
                 "Credential subject does not match identity",
-            ))?;
+            ));
         }
 
         self.credentials
@@ -69,9 +67,9 @@ impl CardBuilder {
         }
         for credential in &credentials {
             if credential.subject().id() != self.identity.id() {
-                Err(ArgumentError::new(
+                return Err(ArgumentError::new(
                     "The subject of one Credential does not match identity",
-                ))?;
+                ));
             }
         }
 
@@ -92,7 +90,7 @@ impl CardBuilder {
         T: serde::Serialize,
     {
         if claims.is_empty() {
-            Err(ArgumentError::new("Claims cannot be empty"))?;
+            return Err(ArgumentError::new("Claims cannot be empty"));
         }
         self.with_credential(
             Credential::builder(self.identity.clone())
@@ -114,17 +112,17 @@ impl CardBuilder {
         T: serde::Serialize,
     {
         if id.is_empty() || service_type.is_empty() || endpoint.is_empty() {
-            Err(ArgumentError::new(
+            return Err(ArgumentError::new(
                 "Service id, type and endpoint cannot be empty",
-            ))?;
+            ));
         }
         if properties
             .keys()
             .any(|key| matches!(*key, "id" | "t" | "e"))
         {
-            Err(ArgumentError::new(
+            return Err(ArgumentError::new(
                 "Service properties must not contain reserved keys: id, t, e",
-            ))?;
+            ));
         }
 
         let mut map = Map::new();
@@ -160,16 +158,18 @@ impl BosonIdentityObjectBuilder for CardBuilder {
     }
 
     fn build(&self) -> Result<Self::BosonIdentityObject> {
-        let creds = match self.credentials.is_empty() {
-            true => None,
-            false => Some(self.credentials.values().cloned().collect()),
+        let creds = if self.credentials.is_empty() {
+            None
+        } else {
+            Some(self.credentials.values().cloned().collect())
         };
-        let services = match self.services.is_empty() {
-            true => None,
-            false => Some(self.services.values().cloned().collect()),
+        let services = if self.services.is_empty() {
+            None
+        } else {
+            Some(self.services.values().cloned().collect())
         };
 
-        let unsigned = Card::unsigned(self.identity.id().clone(), creds, services, None);
+        let unsigned = Card::unsigned(*self.identity.id(), creds, services, None);
 
         let signed_at = Some(Self::now());
         let unsigned = Card::signed(unsigned, signed_at, None);

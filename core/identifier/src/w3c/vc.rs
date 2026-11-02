@@ -25,30 +25,26 @@ use std::{
     str::FromStr,
     time::SystemTime,
 };
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use boson_api::errors::{
-    ArgumentError,
-    BeforeValidPeriodError,
-    ExpiredError,
-    SignatureError,
-    Result,
-    Error,
+use boson_api::{
+    errors::{
+        ArgumentError, BeforeValidPeriodError, ExpiredError, Result, SignatureError,
+    },
+    utils, CryptoIdentity, Error, Id,
 };
-use boson_api::{utils, CryptoIdentity, Id};
+
 use crate::{
     date::date_opt,
     did_constants as constants,
     proof::{Proof, ProofPurpose, ProofType},
     w3c::VerifiableCredentialBuilder as VCBuilder,
-    Credential,
-    VerificationMethod,
-    DIDUrl
+    Credential, DIDUrl, VerificationMethod,
 };
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct VerifiableCredential {
     #[serde(
         rename = "@context",
@@ -133,7 +129,7 @@ impl VerifiableCredential {
             true => None,
             false => Some(types),
         };
-        let subject = CredentialSubject::new(subject.unwrap_or(issuer.clone()), claims);
+        let subject = CredentialSubject::new(subject.unwrap_or(issuer), claims);
         Self {
             contexts,
             id,
@@ -312,9 +308,10 @@ impl VerifiableCredential {
             return Err(ExpiredError::new("VC has expired"));
         }
 
-        match self.is_genuine() {
-            true => Ok(()),
-            false => Err(SignatureError::new("VC signature is not valid")),
+        if self.is_genuine() {
+            Ok(())
+        } else {
+            Err(SignatureError::new("VC signature is not valid"))
         }
     }
 
@@ -330,10 +327,9 @@ impl VerifiableCredential {
         let id = self
             .id
             .parse::<DIDUrl>()
-            .unwrap()
-            .fragment()
-            .unwrap()
-            .to_string();
+            .ok()
+            .and_then(|u| u.fragment().map(|f| f.to_string()))
+            .unwrap_or_else(|| self.id.clone());
         let types = if let Some(ref t) = self.types {
             match t.is_empty() {
                 true => None,
@@ -525,9 +521,6 @@ impl CredentialSubject {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.claims.iter().find_map(|(k, v)| match k == key {
-            true => serde_json::from_value(v.clone()).ok(),
-            false => None,
-        })
+        self.claims.get(key).and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }

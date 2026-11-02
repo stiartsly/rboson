@@ -65,8 +65,10 @@ use super::mqtt::{
     MqttClient, TransportEvent,
 };
 use super::rpc::{
-    call::{Calls, RPCRequest, RPCResponse},
-    method::Method,
+    call::Calls,
+    error::RPCError,
+    request::RPCRequest,
+    response::RPCResponse,
 };
 
 const MESSAGE_VERSION: u8 = 2;
@@ -209,14 +211,6 @@ fn validate_joined_at(joined_ms: u64) -> Result<()> {
         .ok_or_else(|| EncodingError::new("Channel member timestamp is out of range").into())
 }
 
-/// Rejects a member operation that names nobody.
-fn ensure_members(members: &[Id]) -> Result<()> {
-    if members.is_empty() {
-        return Err(ArgumentError::new("No members specified"));
-    }
-    Ok(())
-}
-
 /// Encodes a member list the way the member RPCs expect it.
 fn member_id_array(members: &[Id]) -> Value {
     Value::Array(
@@ -312,6 +306,110 @@ impl MemberUpdate {
 }
 
 // ---------------------------------------------------------------------------
+// Message pipeline
+// ---------------------------------------------------------------------------
+//
+// Every operation that talks to the service is a short pipeline of stages, and
+// each stage has exactly one owner:
+//
+// Outbound (client -> service)
+//   1. collect    the operation builds its typed params from its arguments
+//   2. encode     params -> CBOR bytes          (`to_cbor_bytes`, `RPCRequest::serialize`)
+//   3. protect    body -> encrypted for the recipient, wrapped in a `PhotonMessage`
+//   4. envelope   message -> sealed for the service with the device key
+//                 (3 and 4 are `Outbound::seal`)
+//   5. publish    `MqttClient::publish`
+//   6. await      `Calls::register` + `CallFuture` (RPCs only)
+//   7. finish     decode the reply, then update local state and listeners
+//
+// Inbound (service -> client) is the mirror image
+//   1. open       `MqttClient::interpret` opens the envelope into a `PhotonMessage`
+//   2. classify   `RpcServer::classify` checks version, sender, topic and type
+//   3. unprotect  `unprotect_*` strip the inner encryption layer
+//   4. decode     CBOR bytes -> typed value
+//   5. apply      complete the pending call, or update local state and listeners
+
+/// Outbound stages 3 and 4: protect a body and seal it for the service.
+struct Outbound<'a> {
+    user_identity: &'a CryptoIdentity,
+    device_identity: &'a CryptoIdentity,
+    peer_id: &'a Id,
+}
+
+impl Outbound<'_> {
+    /// Returns the wire message together with its sealed MQTT payload.
+    ///
+    /// `inner` names the peer the body is encrypted for; `None` leaves it as
+    /// is, because the service can already read what only it needs to see.
+    fn seal(
+        &self,
+        recipient: &Id,
+        message_type: u8,
+        timestamp: i64,
+        body: Vec<u8>,
+        inner: Option<&Id>,
+        what: &str,
+    ) -> Result<(PhotonMessage, Vec<u8>)> {
+        let body = match inner {
+            Some(peer) => self
+                .user_identity
+                .encrypt_into(peer, &body)
+                .map_err(|error| {
+                    AuthenticationError::new(format!("Encrypting {what} failed: {error}"))
+                })?,
+            None => body,
+        };
+        let created_at = u64::try_from(timestamp)
+            .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
+        let message = PhotonMessage::new(
+            MESSAGE_VERSION,
+            RpcServer::message_id(self.device_identity.id(), timestamp)?,
+            *recipient,
+            message_type,
+            None,
+            created_at,
+            Value::Bytes(body),
+        );
+        let payload = mqtt::seal_envelope(
+            self.device_identity,
+            self.peer_id,
+            &message,
+            &format!("{what} envelope"),
+        )?;
+        Ok((message, payload))
+    }
+}
+
+/// Inbound stage 3 helper: the bytes of a binary payload.
+fn binary_payload(payload: Value, what: &str) -> Result<Vec<u8>> {
+    match payload {
+        Value::Bytes(bytes) => Ok(bytes),
+        _ => Err(EncodingError::new(format!("{what} payload is not binary")).into()),
+    }
+}
+
+/// Inbound stage 3 helper: removes the layer `sender` encrypted for us.
+fn decrypt_payload(
+    identity: &CryptoIdentity,
+    sender: &Id,
+    ciphertext: &[u8],
+    what: &str,
+) -> Result<Vec<u8>> {
+    identity
+        .decrypt_into(sender, ciphertext)
+        .map_err(|error| AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into())
+}
+
+/// What an inbound message is for, decided by [`RpcServer::classify`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    RpcResponse,
+    Notification,
+    Handshake,
+    Content,
+}
+
+// ---------------------------------------------------------------------------
 // Construction and control RPCs
 // ---------------------------------------------------------------------------
 
@@ -377,11 +475,13 @@ impl RpcServer {
     }
 
     /// Sends a control RPC and waits for its reply.
+    ///
+    /// `build` receives the request ID and returns the request to send. The
+    /// body is encrypted for the recipient unless that is the service itself.
     async fn rpc_call(
         &self,
         recipient: &Id,
-        method: Method,
-        params: Option<Value>,
+        build: impl FnOnce(i64) -> RPCRequest,
     ) -> Result<Value> {
         // if self.stopping.get() || !self.connected.get() {
         //     return Err(StateError::new("Messaging client is not connected"));
@@ -389,51 +489,48 @@ impl RpcServer {
 
         let transport = self.transport.clone();
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
-        let request = RPCRequest::new(timestamp, method, params).serialize()?;
-        let request = if recipient == self.peer_id() {
-            request
-        } else {
-            self.user_identity
-                .encrypt_into(recipient, &request)
-                .map_err(|error| {
-                    AuthenticationError::new(format!("Encrypting channel RPC failed: {error}"))
-                })?
-        };
-        let message = PhotonMessage::new(
-            MESSAGE_VERSION,
-            Self::message_id(self.device_id(), timestamp)?,
-            *recipient,
+        let request = build(timestamp);
+        let method = request.method();
+        let body = request.serialize()?;
+        let inner = (recipient != self.peer_id()).then_some(recipient);
+        let (_, payload) = self.outbound().seal(
+            recipient,
             CONTROL_MESSAGE,
-            None,
-            timestamp as u64,
-            Value::Bytes(request),
-        );
-        let payload = mqtt::seal_envelope(
-            &self.device_identity,
-            self.peer_id(),
-            &message,
-            "RPC envelope",
+            timestamp,
+            body,
+            inner,
+            "channel RPC",
         )?;
 
+        // Register before publishing so a fast reply can never be missed.
         let call = self.pending_rpc.register(timestamp, method, *recipient)?;
         tokio::time::timeout(RPC_TIMEOUT, async move {
             transport.publish(payload, "RPC request").await?;
             call.await
         })
         .await
-        .map_err(|_| StateError::new(format!("RPC '{method:?}' timed out")))?
+        .map_err(|_| {
+            log::warn!("RPC '{method:?}' timed out");
+            RPCError::timeout()
+        })?
+    }
+
+    fn outbound(&self) -> Outbound<'_> {
+        Outbound {
+            user_identity: &self.user_identity,
+            device_identity: &self.device_identity,
+            peer_id: self.peer_id(),
+        }
     }
 
     fn fail_pending_rpc(&self, reason: &str) {
         self.pending_rpc.fail_all(reason);
     }
 
-    fn handle_rpc_response(&self, payload: Value, sender: &Id) -> Result<()> {
-        let Value::Bytes(payload) = payload else {
-            return Err(EncodingError::new("RPC response payload is not binary"));
-        };
+    /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
+    fn handle_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
         self.pending_rpc
-            .respond(RPCResponse::parse(&payload)?, sender)
+            .respond(RPCResponse::parse(payload)?, sender)
             .map_err(|e| e.into())
     }
 }
@@ -447,11 +544,8 @@ impl RpcServer {
     ///
     /// `sender` is the peer that published it, which for channel notifications
     /// doubles as the channel id.
-    fn handle_notification(&self, payload: Value, sender: &Id) -> Result<()> {
-        let Value::Bytes(payload) = payload else {
-            return Err(EncodingError::new("Notification payload is not binary"));
-        };
-        let notification: Notification = decode_cbor_bytes(&payload, "notification")?;
+    fn handle_notification(&self, payload: &[u8], sender: &Id) -> Result<()> {
+        let notification: Notification = decode_cbor_bytes(payload, "notification")?;
         let timestamp = i64::try_from(notification.timestamp())
             .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
 
@@ -707,10 +801,32 @@ impl RpcServer {
         Ok(())
     }
 
+    /// Flags the mutations whose effect a later mutation of the same delta
+    /// fully replaces, so they do not need to be decrypted.
+    ///
+    /// A fresh client replays the whole history of the account; decrypting
+    /// every superseded add/update made connecting scale with that history.
+    fn superseded_mutations(mutations: &[ContactMutation]) -> Vec<bool> {
+        let mut superseded = vec![false; mutations.len()];
+        let mut touched = HashSet::new();
+        let mut cleared = false;
+        for (index, mutation) in mutations.iter().enumerate().rev() {
+            match mutation.data() {
+                Some(MutationData::Add(opaque) | MutationData::Update(opaque)) => {
+                    superseded[index] = cleared || !touched.insert(*opaque.id());
+                }
+                Some(MutationData::Remove(ids)) => touched.extend(ids.iter().copied()),
+                None | Some(MutationData::Clear) => cleared = true,
+            }
+        }
+        superseded
+    }
+
     /// Replays an ordered list of contact mutations.
     fn apply_delta(&self, sync: &ContactSync, state: &mut ContactState) -> Result<()> {
         let original_revision = self.contacts_revision.get();
-        for mutation in sync.mutations() {
+        let superseded = Self::superseded_mutations(sync.mutations());
+        for (index, mutation) in sync.mutations().iter().enumerate() {
             if mutation.revision() < 0 {
                 return Err(EncodingError::new("Contact mutation revision is negative"));
             }
@@ -732,6 +848,10 @@ impl RpcServer {
                         return Err(EncodingError::new(
                             "Contact mutation revision is inconsistent",
                         ));
+                    }
+                    if superseded[index] {
+                        state.revision = next;
+                        continue;
                     }
                     let DecodedContact {
                         contact,
@@ -839,12 +959,9 @@ impl RpcServer {
 
     /// Asks the service for everything that changed since our revision.
     async fn sync_contacts(&self) -> Result<()> {
+        let revision = self.contacts_revision.get();
         let result = self
-            .rpc_call(
-                self.peer_id(),
-                Method::ContactSync,
-                Some(Value::Integer(self.contacts_revision.get().into())),
-            )
+            .rpc_call(self.peer_id(), |id| RPCRequest::contact_sync(id, revision))
             .await?;
         let sync: ContactSync = decode_cbor(result, "contact sync response")?;
         self.apply_contact_sync(&sync)
@@ -862,7 +979,7 @@ impl RpcServer {
         outdated: &str,
     ) -> Result<i32> {
         let result = self
-            .rpc_call(self.peer_id(), Method::ContactMutate, Some(params))
+            .rpc_call(self.peer_id(), |id| RPCRequest::contact_mutate(id, params))
             .await?;
         let revision: i32 = decode_cbor(result, "contact revision")?;
         if revision < minimum || revision < self.contacts_revision.get() {
@@ -896,12 +1013,24 @@ impl RpcServer {
 
     /// Entry point for every inbound application payload.
     ///
-    /// The transport has already opened the envelope, so only the protocol
-    /// version and the message type are left to check. The device inbox only
-    /// ever carries RPC replies, so anything published there is treated as one
-    /// whatever type it claims to be. Everything else is routed by message type.
+    /// The transport has already opened the envelope (stage 1), so this runs
+    /// the remaining stages: classify, then hand over to the route's handler,
+    /// which unprotects, decodes and applies the message.
     async fn dispatch(&self, topic: Topic, message: PhotonMessage) -> Result<()> {
-        let peer_id = self.peer_id();
+        let (route, from) = self.classify(topic, &message)?;
+        match route {
+            Route::RpcResponse => self.handle_device_rpc(message, &from),
+            Route::Notification => self.handle_state_message(message, &from).await,
+            Route::Handshake => self.handle_handshake(topic, message, from).await,
+            Route::Content => self.handle_content_message(topic, message, from),
+        }
+    }
+
+    /// Inbound stage 2: decides what a message is for, or rejects it.
+    ///
+    /// The device inbox only ever carries RPC replies and notifications only
+    /// come through the user inbox; everything else is routed by message type.
+    fn classify(&self, topic: Topic, message: &PhotonMessage) -> Result<(Route, Id)> {
         if message.version != MESSAGE_VERSION {
             return Err(ProtocolError::new(
                 message.version as i32,
@@ -913,19 +1042,25 @@ impl RpcServer {
             .copied()
             .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
 
-        if matches!(topic, Topic::DeviceInbox) {
-            return self.handle_device_rpc(message, peer_id).await;
-        }
-        if message.message_type == STATE_MESSAGE {
-            return self.handle_state_message(topic, message, peer_id).await;
-        }
-        if message.message_type == HANDSHAKE_MESSAGE {
-            return self.handle_handshake(topic, message, from).await;
-        }
-        if message.message_type == CONTENT_MESSAGE {
-            return self.handle_content_message(topic, message, from);
-        }
-        Err(EncodingError::new("Unsupported user message type").into())
+        let route = match (topic, message.message_type) {
+            (Topic::DeviceInbox, CONTROL_MESSAGE)
+                if message.recipient == *self.user_id()
+                    || message.recipient == *self.device_id() =>
+            {
+                Route::RpcResponse
+            }
+            (Topic::DeviceInbox, _) => {
+                return Err(EncodingError::new("Invalid device RPC response"));
+            }
+            (Topic::UserInbox, STATE_MESSAGE) => Route::Notification,
+            (_, STATE_MESSAGE) => {
+                return Err(EncodingError::new("Invalid home-peer notification"));
+            }
+            (_, HANDSHAKE_MESSAGE) => Route::Handshake,
+            (_, CONTENT_MESSAGE) => Route::Content,
+            _ => return Err(EncodingError::new("Unsupported user message type").into()),
+        };
+        Ok((route, from))
     }
 
     /// Handles a reply to a control RPC.
@@ -933,30 +1068,14 @@ impl RpcServer {
     /// Replies from the service are sealed with the device key only. Replies
     /// relayed on behalf of a channel peer carry a second layer that only this
     /// user can open, so they are decrypted twice.
-    async fn handle_device_rpc(&self, message: PhotonMessage, peer_id: &Id) -> Result<()> {
-        if message.message_type != CONTROL_MESSAGE
-            || (message.recipient != *self.user_id() && message.recipient != *self.device_id())
-        {
-            return Err(EncodingError::new("Invalid device RPC response"));
-        }
-        let from = message
-            .from()
-            .copied()
-            .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
-        if from == *peer_id {
-            return self.handle_rpc_response(message.payload, &from).map_err(|e| e.into());
-        }
-
-        let Value::Bytes(payload) = message.payload else {
-            return Err(EncodingError::new("Channel RPC response is not binary"));
+    fn handle_device_rpc(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+        let payload = binary_payload(message.payload, "RPC response")?;
+        let payload = if from == self.peer_id() {
+            payload
+        } else {
+            decrypt_payload(&self.user_identity, from, &payload, "channel RPC")?
         };
-        let payload = self
-            .user_identity
-            .decrypt_into(&from, &payload)
-            .map_err(|error| {
-                AuthenticationError::new(format!("Decrypting channel RPC failed: {error}"))
-            })?;
-        self.handle_rpc_response(Value::Bytes(payload), &from).map_err(|e| e.into())
+        self.handle_rpc_response(&payload, from)
     }
 
     /// Handles a service notification.
@@ -964,53 +1083,34 @@ impl RpcServer {
     /// Notifications about our own account are sealed for this user; channel
     /// notifications are sealed with the channel session key instead, which is
     /// why they need a lookup first.
-    async fn handle_state_message(
-        &self,
-        topic: Topic,
-        message: PhotonMessage,
-        peer_id: &Id,
-    ) -> Result<()> {
-        if !matches!(topic, Topic::UserInbox) {
-            return Err(EncodingError::new("Invalid home-peer notification"));
-        }
-        let from = message
-            .from()
-            .copied()
-            .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
-        if from == *peer_id && message.recipient == *self.user_id() {
-            return self.handle_notification(message.payload, &from)
-                .map_err(|e| e.into());
-        }
-
-        let Value::Bytes(payload) = message.payload else {
-            return Err(EncodingError::new("Channel notification is not binary"));
-        };
+    async fn handle_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+        let home = from == self.peer_id() && message.recipient == *self.user_id();
         // A notification addressed to its own sender is a channel event, and
         // mutating channel state must not interleave with a pending request.
-        let _request = if message.recipient == from {
+        let _request = if !home && message.recipient == *from {
             Some(self.requests.lock().await)
         } else {
             None
         };
-        let plaintext = if message.recipient == *self.user_id() {
-            self.user_identity.decrypt_into(&from, &payload)?
-        } else if message.recipient == from {
+        let recipient = message.recipient;
+        let payload = binary_payload(message.payload, "Notification")?;
+        let payload = if home {
+            payload
+        } else if recipient == *self.user_id() {
+            decrypt_payload(&self.user_identity, from, &payload, "notification")?
+        } else if recipient == *from {
             let session = self
                 .friend_sessions
                 .lock()
                 .unwrap()
-                .get(&from)
+                .get(from)
                 .cloned()
                 .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
-            session.decrypt_into(&from, &payload).map_err(|error| {
-                AuthenticationError::new(format!(
-                    "Decrypting channel notification envelope failed: {error}"
-                ))
-            })?
+            decrypt_payload(&session, from, &payload, "channel notification envelope")?
         } else {
             return Err(EncodingError::new("Invalid channel notification recipient"));
         };
-        self.handle_notification(Value::Bytes(plaintext), &from)
+        self.handle_notification(&payload, from).map_err(|e| e.into())
     }
 
     /// Handles a friend handshake.
@@ -1038,18 +1138,7 @@ impl RpcServer {
             ));
         }
 
-        let encrypted_handshake = match message.payload {
-            Value::Bytes(bytes) => bytes,
-            _ => return Err(EncodingError::new("Handshake payload is not binary")),
-        };
-        let handshake_bytes = self
-            .user_identity
-            .decrypt_into(&friend_id, &encrypted_handshake)
-            .map_err(|error| {
-                AuthenticationError::new(format!("Decrypting handshake failed: {error}"))
-            })?;
-        let mut handshake: Handshake = decode_cbor_bytes(&handshake_bytes, "handshake")?;
-        handshake.from = Some(from);
+        let handshake = self.open_handshake(message.payload, &friend_id, &from)?;
 
         match handshake.body {
             HandshakeType::FriendRequest(hello) => {
@@ -1069,8 +1158,18 @@ impl RpcServer {
             HandshakeType::FriendRequestAccept(session_key) => {
                 self.accept_friend_handshake(friend_id, session_key, handshake.timestamp, is_inbox)
                     .await
+                    .map_err(|e| e.into())
             }
         }
+    }
+
+    /// Inbound stages 3 and 4 for a handshake: unprotect and decode it.
+    fn open_handshake(&self, payload: Value, friend_id: &Id, from: &Id) -> Result<Handshake> {
+        let encrypted = binary_payload(payload, "Handshake")?;
+        let bytes = decrypt_payload(&self.user_identity, friend_id, &encrypted, "handshake")?;
+        let mut handshake: Handshake = decode_cbor_bytes(&bytes, "handshake")?;
+        handshake.from = Some(*from);
+        Ok(handshake)
     }
 
     /// Completes an acceptance we did not initiate: the peer said yes.
@@ -1154,37 +1253,8 @@ impl RpcServer {
                 "Content message has an unexpected recipient",
             ));
         }
-        let encrypted_content = match &message.payload {
-            Value::Bytes(bytes) => bytes.clone(),
-            _ => return Err(EncodingError::new("Content payload is not binary")),
-        };
-        let sessions = self.friend_sessions.lock().unwrap();
-        let session = sessions
-            .get(&contact_id)
-            .ok_or_else(|| StateError::new(format!("No friend session for {contact_id}")))?;
-        let content_bytes = if outbox {
-            self.user_identity
-                .decrypt_into(session.id(), &encrypted_content)
-        } else {
-            session.decrypt_into(&from, &encrypted_content)
-        }
-        .map_err(|error| AuthenticationError::new(format!("Decrypting content failed: {error}")))?;
-        let wire: MessageContent = decode_cbor_bytes(&content_bytes, "message content")?;
-        let body = match (wire.format, wire.body) {
-            (ContentFormat::Text, Value::Text(text)) => text.into_bytes(),
-            (ContentFormat::Binary, Value::Bytes(bytes)) => bytes,
-            _ => return Err(EncodingError::new("Unsupported message content body")),
-        };
-        let mut headers = HashMap::new();
-        for (key, value) in wire.headers {
-            headers.insert(
-                key,
-                serde_json::to_value(value).map_err(|error| {
-                    EncodingError::new(format!("Malformed content header: {error}"))
-                })?,
-            );
-        }
-        drop(sessions);
+        let (content_bytes, headers, body) =
+            self.open_content(&contact_id, outbox, &from, &message.payload)?;
         message.from = Some(from);
         message.received_at = if outbox {
             None
@@ -1215,6 +1285,48 @@ impl RpcServer {
             self.message_listener.on_message(&message);
         }
         Ok(())
+    }
+
+    /// Inbound stages 3 and 4 for a content message.
+    ///
+    /// Returns the plaintext CBOR document together with its headers and body.
+    /// Our own outbox copies are sealed for the session, everything else by
+    /// the sender with the session key.
+    fn open_content(
+        &self,
+        contact_id: &Id,
+        outbox: bool,
+        from: &Id,
+        payload: &Value,
+    ) -> Result<(Vec<u8>, HashMap<String, serde_json::Value>, Vec<u8>)> {
+        let encrypted = binary_payload(payload.clone(), "Content")?;
+        let content_bytes = {
+            let sessions = self.friend_sessions.lock().unwrap();
+            let session = sessions
+                .get(contact_id)
+                .ok_or_else(|| StateError::new(format!("No friend session for {contact_id}")))?;
+            if outbox {
+                decrypt_payload(&self.user_identity, session.id(), &encrypted, "content")?
+            } else {
+                decrypt_payload(session, from, &encrypted, "content")?
+            }
+        };
+        let wire: MessageContent = decode_cbor_bytes(&content_bytes, "message content")?;
+        let body = match (wire.format, wire.body) {
+            (ContentFormat::Text, Value::Text(text)) => text.into_bytes(),
+            (ContentFormat::Binary, Value::Bytes(bytes)) => bytes,
+            _ => return Err(EncodingError::new("Unsupported message content body")),
+        };
+        let mut headers = HashMap::new();
+        for (key, value) in wire.headers {
+            headers.insert(
+                key,
+                serde_json::to_value(value).map_err(|error| {
+                    EncodingError::new(format!("Malformed content header: {error}"))
+                })?,
+            );
+        }
+        Ok((content_bytes, headers, body))
     }
 
     fn timestamp(timestamp: i64) -> SystemTime {
@@ -1378,30 +1490,18 @@ impl RpcServer {
     /// The handshake body is sealed for the friend, then the whole message is
     /// sealed again for the service, so only the service can see that a
     /// handshake exists and only the friend can read it.
-    async fn send_handshake(&self, peer_id: &Id, user_id: Id, body: HandshakeType) -> Result<i64> {
+    async fn send_handshake(&self, user_id: Id, body: HandshakeType) -> Result<i64> {
         self.transport.ensure_open()?;
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
         let handshake = Handshake::new(timestamp, body)?;
         let handshake_bytes = to_cbor_bytes(&handshake, "handshake")?;
-        let encrypted_handshake = self
-            .user_identity
-            .encrypt_into(&user_id, &handshake_bytes)
-            .map_err(|error| EncodingError::new(format!("Encrypting handshake failed: {error}")))?;
-
-        let message = PhotonMessage::new(
-            MESSAGE_VERSION,
-            Self::message_id(self.device_identity.id(), timestamp)?,
-            user_id,
+        let (_, payload) = self.outbound().seal(
+            &user_id,
             HANDSHAKE_MESSAGE,
-            None,
-            timestamp as u64,
-            Value::Bytes(encrypted_handshake),
-        );
-        let payload = mqtt::seal_envelope(
-            &self.device_identity,
-            peer_id,
-            &message,
-            "handshake envelope",
+            timestamp,
+            handshake_bytes,
+            Some(&user_id),
+            "handshake",
         )?;
         self.transport.publish(payload, "handshake message").await?;
         Ok(timestamp)
@@ -1515,7 +1615,7 @@ impl RpcServer {
 
     pub(crate) async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
         let result = self
-            .rpc_call(self.peer_id(), Method::SessionList, None)
+            .rpc_call(self.peer_id(), RPCRequest::list_sessions)
             .await?;
         decode_cbor(result, "session list response")
     }
@@ -1525,9 +1625,8 @@ impl RpcServer {
         if device_id == self.device_id() {
             return Err(ArgumentError::new("Cannot revoke the current session"));
         }
-        let params = to_cbor(device_id, "session ID")?;
         let result = self
-            .rpc_call(self.peer_id(), Method::SessionRevoke, Some(params))
+            .rpc_call(self.peer_id(), |id| RPCRequest::revoke_session(id, device_id))
             .await?;
         if result != Value::Null {
             return Err(EncodingError::new(
@@ -1553,7 +1652,6 @@ impl RpcServer {
         info!("Sending friend request to {user_id}");
         let timestamp = self
             .send_handshake(
-                self.options.peer_id(),
                 *user_id,
                 HandshakeType::FriendRequest(hello.clone()),
             )
@@ -1609,7 +1707,7 @@ impl RpcServer {
         self.store_friend_contact(user_id, &session_identity)
             .await?;
         let timestamp = self
-            .send_handshake(self.options.peer_id(), *user_id, value)
+            .send_handshake(*user_id, value)
             .await?;
 
         if Self::timestamp(timestamp) < request.created_at() {
@@ -1731,7 +1829,7 @@ impl RpcServer {
         let params = to_cbor(&new_channel_info, "channel creation request")?;
 
         let result = self
-            .rpc_call(self.peer_id(), Method::ChannelCreate, Some(params))
+            .rpc_call(self.peer_id(), |id| RPCRequest::create_channel(id, params))
             .await?;
 
         let (channel, returned_session) = self.decode_channel_info(result)?;
@@ -1753,7 +1851,7 @@ impl RpcServer {
         if channel.owner != *self.user_id() {
             return Err(StateError::new("Only the owner can delete the channel"));
         }
-        self.rpc_call(channel_id, Method::ChannelDelete, None)
+        self.rpc_call(channel_id, RPCRequest::delete_channel)
             .await?;
         self.remove_channel_contact(channel_id).await?;
         self.channel_listener.on_channel_deleted(&channel);
@@ -1826,7 +1924,7 @@ impl RpcServer {
             .collect(),
         );
         let result = self
-            .rpc_call(ticket.channel_id(), Method::ChannelJoin, Some(params))
+            .rpc_call(ticket.channel_id(), |id| RPCRequest::join_channel(id, params))
             .await?;
         let (channel, returned_session) = self.decode_channel_info(result)?;
         if channel.contact.id() != ticket.channel_id()
@@ -1850,7 +1948,7 @@ impl RpcServer {
         if channel.owner == *self.user_id() {
             return Err(StateError::new("The owner cannot leave the channel"));
         }
-        self.rpc_call(channel_id, Method::ChannelLeave, None)
+        self.rpc_call(channel_id, RPCRequest::leave_channel)
             .await?;
         self.remove_channel_contact(channel_id).await?;
         self.channel_listener.on_left_channel(&channel);
@@ -1865,7 +1963,7 @@ impl RpcServer {
     ) -> Result<InviteTicket> {
         let _request = self.requests.lock().await;
         self.channel_snapshot(channel_id)?;
-        let info = self.rpc_call(channel_id, Method::ChannelInfo, None).await?;
+        let info = self.rpc_call(channel_id, RPCRequest::get_channel_info).await?;
         let (channel, _) = self.decode_channel_info(info)?;
         if channel.id() != channel_id {
             return Err(EncodingError::new("Channel info has an unexpected ID"));
@@ -2131,7 +2229,7 @@ impl RpcServer {
         let session = CryptoIdentity::from(keypair.clone());
         let rotation = ChannelSessionKeyRotation::new(*session.id(), encrypted_key);
         let params = to_cbor(&rotation, "channel session rotation")?;
-        self.rpc_call(channel_id, Method::ChannelSessionKeyRotate, Some(params))
+        self.rpc_call(channel_id, |id| RPCRequest::rotate_channel_session_key(id, params))
             .await?;
 
         channel.session_id = *session.id();
@@ -2192,11 +2290,9 @@ impl RpcServer {
             return Err(ArgumentError::new("Channel information has not changed").into());
         }
 
-        self.rpc_call(
-            channel.id(),
-            Method::ChannelInfoUpdate,
-            Some(Value::Map(changes)),
-        )
+        self.rpc_call(channel.id(), |id| {
+            RPCRequest::update_channel_info(id, Value::Map(changes))
+        })
         .await?;
         current.permission = channel.permission();
         current
@@ -2225,7 +2321,6 @@ impl RpcServer {
         members: &[Id],
         role: Role,
     ) -> Result<()> {
-        ensure_members(members)?;
         if matches!(role, Role::Owner | Role::Banned) {
             return Err(ArgumentError::new(
                 "Owner and Banned roles cannot be assigned with this operation",
@@ -2244,19 +2339,17 @@ impl RpcServer {
         );
         self.manage_channel_members(
             channel_id,
-            Method::ChannelMembersRoleUpdate,
-            params,
+            |id| RPCRequest::update_channel_members_role(id, params),
             MemberUpdate::Role(role),
         )
         .await
+        .map_err(|e| e.into())
     }
 
     pub(crate) async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
-        ensure_members(members)?;
         self.manage_channel_members(
             channel_id,
-            Method::ChannelMembersBan,
-            member_id_array(members),
+            |id| RPCRequest::ban_channel_members(id, members),
             MemberUpdate::Ban,
         )
         .await
@@ -2267,11 +2360,9 @@ impl RpcServer {
         channel_id: &Id,
         members: &[Id],
     ) -> Result<()> {
-        ensure_members(members)?;
         self.manage_channel_members(
             channel_id,
-            Method::ChannelMembersUnban,
-            member_id_array(members),
+            |id| RPCRequest::unban_channel_members(id, members),
             MemberUpdate::Unban,
         )
         .await
@@ -2282,11 +2373,9 @@ impl RpcServer {
         channel_id: &Id,
         members: &[Id],
     ) -> Result<()> {
-        ensure_members(members)?;
         self.manage_channel_members(
             channel_id,
-            Method::ChannelMembersRemove,
-            member_id_array(members),
+            |id| RPCRequest::remove_channel_members(id, members),
             MemberUpdate::Remove,
         )
         .await
@@ -2299,15 +2388,14 @@ impl RpcServer {
     async fn manage_channel_members(
         &self,
         channel_id: &Id,
-        method: Method,
-        params: Value,
+        build: impl FnOnce(i64) -> RPCRequest,
         update: MemberUpdate,
     ) -> Result<()> {
         let _request = self.requests.lock().await;
         let mut channel = self.channel_snapshot(channel_id)?;
         Self::ensure_channel_moderator(&channel, self.user_id())?;
 
-        let result = self.rpc_call(channel_id, method, Some(params)).await?;
+        let result = self.rpc_call(channel_id, build).await?;
         let touched: Vec<Id> = decode_cbor(result, "updated channel members")?;
         let changed = update.apply(&mut channel, &touched);
         self.channels
@@ -2883,29 +2971,18 @@ impl MessageBuilder for SessionMessageBuilder {
                 },
             };
             let content_bytes = to_cbor_bytes(&content, "message content")?;
-            let encrypted_content = self
-                .user_identity
-                .encrypt_into(friend_identity.id(), &content_bytes)
-                .map_err(|error| {
-                    AuthenticationError::new(format!("Encrypting content failed: {error}"))
-                })?;
-
-            let created_at = u64::try_from(timestamp)
-                .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
-            let mut wire = PhotonMessage::new(
-                MESSAGE_VERSION,
-                RpcServer::message_id(self.device_identity.id(), timestamp)?,
-                recipient,
+            let (mut wire, payload) = Outbound {
+                user_identity: &self.user_identity,
+                device_identity: &self.device_identity,
+                peer_id: &self.peer_id,
+            }
+            .seal(
+                &recipient,
                 CONTENT_MESSAGE,
-                None,
-                created_at,
-                Value::Bytes(encrypted_content),
-            );
-            let payload = mqtt::seal_envelope(
-                &self.device_identity,
-                &self.peer_id,
-                &wire,
-                "message envelope",
+                timestamp,
+                content_bytes.clone(),
+                Some(friend_identity.id()),
+                "content",
             )?;
             mqtt::publish_outbox(&mqtt, payload, "message").await?;
 
@@ -3033,3 +3110,7 @@ impl Message for ConversationMessage {
         self.message.payload_as_content()
     }
 }
+
+#[cfg(test)]
+#[path = "unitests/test_rpc_server.rs"]
+mod test_rpc_server;

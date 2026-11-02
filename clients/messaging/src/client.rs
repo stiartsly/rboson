@@ -527,6 +527,7 @@ impl Client {
         members: &[Id],
         role: Role,
     ) -> Result<()> {
+        ensure_members(members)?;
         self.verticle_client()?
             .set_channel_members_role(*channel_id, members.to_vec(), role)
             .await
@@ -534,6 +535,7 @@ impl Client {
 
     /// Bans a set of channel members.
     pub async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
+        ensure_members(members)?;
         self.verticle_client()?
             .ban_channel_members(*channel_id, members.to_vec())
             .await
@@ -541,6 +543,7 @@ impl Client {
 
     /// Unbans a set of channel members.
     pub async fn unban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
+        ensure_members(members)?;
         self.verticle_client()?
             .unban_channel_members(*channel_id, members.to_vec())
             .await
@@ -548,6 +551,7 @@ impl Client {
 
     /// Removes a set of channel members.
     pub async fn remove_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
+        ensure_members(members)?;
         self.verticle_client()?
             .remove_channel_members(*channel_id, members.to_vec())
             .await
@@ -983,4 +987,11 @@ fn merge_headers(
     }
 
     merged
+}
+
+fn ensure_members(members: &[Id]) -> Result<()> {
+    if members.is_empty() {
+        return Err(ArgumentError::new("No members specified"));
+    }
+    Ok(())
 }

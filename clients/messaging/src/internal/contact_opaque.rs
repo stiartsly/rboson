@@ -44,6 +44,10 @@ impl OpaqueContact {
         Self { id, revision, data }
     }
 
+    pub(crate) fn id(&self) -> &Id {
+        &self.id
+    }
+
     pub(crate) fn revision(&self) -> i32 {
         self.revision
     }

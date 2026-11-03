@@ -78,6 +78,25 @@ pub mod id_opt {
     }
 }
 
+pub mod ids {
+    use super::*;
+
+    pub fn serialize<S>(value: &Vec<Id>, se: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // `Id` serializes as base58 for text formats and as bytes for CBOR.
+        value.serialize(se)
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> Result<Vec<Id>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<Id>::deserialize(de)
+    }
+}
+
 pub mod nonce_opt {
     use super::*;
 
@@ -382,5 +401,33 @@ impl IsDefault for f64 {
 impl IsDefault for bool {
     fn is_default(&self) -> bool {
         !*self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Ids {
+        #[serde(with = "ids")]
+        ids: Vec<Id>,
+    }
+
+    #[test]
+    fn ids_round_trip_in_text_and_cbor() {
+        let value = Ids {
+            ids: vec![Id::random(), Id::random()],
+        };
+
+        let json = serde_json::to_string(&value).unwrap();
+        let decoded: Ids = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, value);
+
+        let cbor = serde_cbor::to_vec(&value).unwrap();
+        let decoded: Ids = serde_cbor::from_slice(&cbor).unwrap();
+        assert_eq!(decoded, value);
     }
 }

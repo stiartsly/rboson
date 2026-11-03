@@ -21,15 +21,13 @@
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
+use boson_api::{CryptoIdentity, Id, Identity, Result, utils};
 use crate::{
     contact::{Contact, ContactType},
-    errors::{AuthenticationError, EncodingError},
+    errors::{AuthenticationError, EncodingError}
 };
-use boson_api::{CryptoIdentity, Id, Identity, Result};
 use super::OpaqueContact;
 
-
-/// Plain contact document stored inside an opaque, encrypted contact envelope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactData {
     #[serde(rename = "id")]
@@ -38,47 +36,41 @@ pub(crate) struct ContactData {
     #[serde(rename = "t")]
     pub(crate) kind: u8,
 
-    #[serde(
-        rename = "sk",
-        default,
-        serialize_with = "boson_api::utils::codec::bytes_opt::serialize",
-        deserialize_with = "boson_api::utils::codec::bytes_opt::deserialize",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "sk", default, with = "utils::bytes_opt")]
     session_key: Option<Vec<u8>>,
 
     #[serde(
         rename = "n",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     pub(crate) name: Option<String>,
 
     #[serde(
         rename = "r",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     pub(crate) remark: Option<String>,
 
     #[serde(
         rename = "ts",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     pub(crate) tags: Option<String>,
 
     #[serde(
         rename = "m",
         default,
-        skip_serializing_if = "boson_api::utils::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     pub(crate) muted: bool,
 
     #[serde(
         rename = "b",
         default,
-        skip_serializing_if = "boson_api::utils::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     pub(crate) blocked: bool,
 

@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use log::{debug, warn};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -25,28 +26,21 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use log::{debug, warn};
-use serde_cbor::Value;
 
-use boson_api::{
-    errors::StateError,
-    Id,
-    Promise, PromiseFuture,
-    Result
+use super::{
+    method::Method,
+    response::{Params as ResponseParams, RPCResponseMessage},
 };
 use crate::errors::{
     AuthenticationError,
     EncodingError
 };
-use super::{
-    method::Method,
-    response::{RPCResponse, Params},
-};
+use boson_api::{errors::StateError, Id, Promise, PromiseFuture, Result};
 
 struct PendingCall {
     method: Method,
     recipient: Id,
-    promise: Promise<Value>,
+    promise: Promise<ResponseParams>,
 }
 
 #[derive(Default)]
@@ -57,11 +51,11 @@ pub(crate) struct Calls {
 pub(crate) struct CallFuture<'a> {
     calls: &'a Calls,
     id: i64,
-    future: PromiseFuture<Value>,
+    future: PromiseFuture<ResponseParams>,
 }
 
 impl Future for CallFuture<'_> {
-    type Output = Result<Value>;
+    type Output = Result<ResponseParams>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.get_mut().future).poll(context)
@@ -100,7 +94,7 @@ impl Calls {
         })
     }
 
-    pub(crate) fn respond(&self, response: RPCResponse, sender: &Id) -> Result<()> {
+    pub(crate) fn respond(&self, response: RPCResponseMessage, sender: &Id) -> Result<()> {
         if self
             .pending
             .borrow()
@@ -125,7 +119,7 @@ impl Calls {
             ))
             .into())
         } else {
-            response.into_result().map(Params::into_value)
+            response.into_result()
         };
         if let Err(error) = &result {
             warn!("{error}");

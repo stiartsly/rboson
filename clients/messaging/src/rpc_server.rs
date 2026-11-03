@@ -57,7 +57,8 @@ use boson_api::{signature, CryptoIdentity, Id, Identity};
 use super::internal::{
     ChannelInfo, ChannelSessionKeyRotation, ContactData, ContactMutation, ContactSync,
     ContentFormat, Handshake, HandshakeType, MessageContent, MutationData, NewChannelInfo,
-    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage, SyncType, Topic,
+    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage, SyncType,
+    Topic,
 };
 use super::mqtt::{
     self, decode_cbor, decode_cbor_bytes, to_cbor, to_cbor_bytes, ClientHandle, Inbound,
@@ -66,9 +67,8 @@ use super::mqtt::{
 use super::rpc::{
     call::Calls,
     error::RPCError,
-    method::Method,
-    request::RPCRequest,
-    response::{Params as ResponseParams, RPCResponse},
+    request::{ChannelInfoUpdate, JoinChannel, RPCRequest},
+    response::{Params as ResponseParams, RPCResponseMessage},
 };
 
 const MESSAGE_VERSION: u8 = 2;
@@ -85,11 +85,6 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 // Field names of the CBOR documents exchanged with the service. They are short
 // because every message carries them, so they get names here instead of being
 // spelled out at each call site.
-const FIELD_VERSION: &str = "v";
-const FIELD_OPERATION: &str = "op";
-const FIELD_DATA: &str = "d";
-const FIELD_ID: &str = "id";
-const FIELD_NAME: &str = "n";
 const FIELD_SESSION_KEY: &str = "sk";
 const FIELD_OWNER: &str = "o";
 const FIELD_PERMISSION: &str = "p";
@@ -383,9 +378,9 @@ fn decrypt_payload(
     ciphertext: &[u8],
     what: &str,
 ) -> Result<Vec<u8>> {
-    identity
-        .decrypt_into(sender, ciphertext)
-        .map_err(|error| AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into())
+    identity.decrypt_into(sender, ciphertext).map_err(|error| {
+        AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into()
+    })
 }
 
 /// What an inbound message is for, decided by [`RpcServer::classify`].
@@ -467,11 +462,7 @@ impl RpcServer {
     /// The request is re-keyed to a fresh ID, which the reply is matched
     /// against. The body is encrypted for the recipient unless that is the
     /// service itself.
-    async fn rpc_call(
-        &self,
-        recipient: &Id,
-        request: RPCRequest,
-    ) -> Result<Value> {
+    async fn rpc_call(&self, recipient: &Id, request: RPCRequest) -> Result<ResponseParams> {
         // if self.stopping.get() || !self.connected.get() {
         //     return Err(StateError::new("Messaging client is not connected"));
         //}
@@ -480,7 +471,10 @@ impl RpcServer {
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
         let method = request.method();
         // The reply is matched to the pending call by this ID.
-        let body = request.with_id(timestamp).serialize()?;
+        let request = request.with_id(timestamp);
+        let body = serde_cbor::to_vec(&request)
+            .map_err(|error| EncodingError::new(format!("Encoding RPC request failed: {error}")))?;
+
         let inner = (recipient != self.peer_id()).then_some(recipient);
         let (_, payload) = self.outbound().seal(
             recipient,
@@ -519,7 +513,7 @@ impl RpcServer {
     /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
     fn handle_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
         self.pending_rpc
-            .respond(RPCResponse::parse(payload)?, sender)
+            .respond(RPCResponseMessage::parse(payload)?, sender)
             .map_err(|e| e.into())
     }
 }
@@ -956,9 +950,7 @@ impl RpcServer {
 
         // 3. Send it to the home peer and 4. decode the delta it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let ResponseParams::ContactSync(document) =
-            RPCResponse::from_value(Method::ContactSync, result)?.into_result()?
-        else {
+        let ResponseParams::ContactSync(document) = result else {
             return Err(EncodingError::new("RPC result is not a contact sync").into());
         };
         let sync: ContactSync = decode_cbor(document, "contact sync response")?;
@@ -974,15 +966,13 @@ impl RpcServer {
     /// it computed so that a concurrent change cannot silently win.
     async fn commit_contact_mutation(
         &self,
-        params: Value,
+        mutation: ContactMutation,
         minimum: i32,
         outdated: &str,
     ) -> Result<i32> {
-        let request = RPCRequest::contact_mutate(0, params);
+        let request = RPCRequest::contact_mutate(0, mutation);
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let ResponseParams::Revision(revision) =
-            RPCResponse::from_value(Method::ContactMutate, result)?.into_result()?
-        else {
+        let ResponseParams::Revision(revision) = result else {
             return Err(EncodingError::new("RPC result is not a contact revision").into());
         };
         if revision < minimum || revision < self.contacts_revision.get() {
@@ -999,8 +989,7 @@ impl RpcServer {
         minimum: i32,
         outdated: &str,
     ) -> Result<i32> {
-        let params = to_cbor(&mutation, "contact mutation")?;
-        self.commit_contact_mutation(params, minimum, outdated)
+        self.commit_contact_mutation(mutation, minimum, outdated)
             .await
     }
 }
@@ -1113,7 +1102,8 @@ impl RpcServer {
         } else {
             return Err(EncodingError::new("Invalid channel notification recipient"));
         };
-        self.handle_notification(&payload, from).map_err(|e| e.into())
+        self.handle_notification(&payload, from)
+            .map_err(|e| e.into())
     }
 
     /// Handles a friend handshake.
@@ -1158,11 +1148,10 @@ impl RpcServer {
                 );
                 Ok(())
             }
-            HandshakeType::FriendRequestAccept(session_key) => {
-                self.accept_friend_handshake(friend_id, session_key, handshake.timestamp, is_inbox)
-                    .await
-                    .map_err(|e| e.into())
-            }
+            HandshakeType::FriendRequestAccept(session_key) => self
+                .accept_friend_handshake(friend_id, session_key, handshake.timestamp, is_inbox)
+                .await
+                .map_err(|e| e.into()),
         }
     }
 
@@ -1625,9 +1614,7 @@ impl RpcServer {
 
         // 3. Send it to the home peer and 4. decode the session list.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let ResponseParams::Sessions(sessions) =
-            RPCResponse::from_value(Method::SessionList, result)?.into_result()?
-        else {
+        let ResponseParams::Sessions(sessions) = result else {
             return Err(EncodingError::new("RPC result is not a session list").into());
         };
 
@@ -1647,7 +1634,7 @@ impl RpcServer {
 
         // 3. Send it to the home peer and 4. check the reply carries no result.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        RPCResponse::from_value(Method::SessionRevoke, result)?;
+        let _ = result;
         Ok(())
     }
 }
@@ -1666,10 +1653,7 @@ impl RpcServer {
 
         info!("Sending friend request to {user_id}");
         let timestamp = self
-            .send_handshake(
-                *user_id,
-                HandshakeType::FriendRequest(hello.clone()),
-            )
+            .send_handshake(*user_id, HandshakeType::FriendRequest(hello.clone()))
             .await?;
 
         let request = FriendRequest::new(
@@ -1721,9 +1705,7 @@ impl RpcServer {
         let session_identity = CryptoIdentity::from(key);
         self.store_friend_contact(user_id, &session_identity)
             .await?;
-        let timestamp = self
-            .send_handshake(*user_id, value)
-            .await?;
+        let timestamp = self.send_handshake(*user_id, value).await?;
 
         if Self::timestamp(timestamp) < request.created_at() {
             return Err(StateError::new("Friend request changed while accepting").into());
@@ -1801,16 +1783,17 @@ impl RpcServer {
         );
         data.remark = remark;
         data.revision = next_revision;
-        data.set_session_key(self.user_identity.encrypt_into(self.user_id(), &session_key)?);
+        data.set_session_key(
+            self.user_identity
+                .encrypt_into(self.user_id(), &session_key)?,
+        );
         let opaque = data.to_opaque(next_revision, &self.user_identity)?;
-        let mutation = to_cbor(&ContactMutation::add(revision, opaque), "contact mutation")?;
+        let mutation = ContactMutation::add(revision, opaque);
         let request = RPCRequest::contact_mutate(0, mutation);
 
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
+        let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
@@ -1867,14 +1850,12 @@ impl RpcServer {
             )?);
         }
         let opaque = data.to_opaque(next_revision, &self.user_identity)?;
-        let mutation = to_cbor(&ContactMutation::update(revision, opaque), "contact mutation")?;
+        let mutation = ContactMutation::update(revision, opaque);
         let request = RPCRequest::contact_mutate(0, mutation);
 
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
+        let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
@@ -1930,9 +1911,7 @@ impl RpcServer {
 
         // 3. Send it to the home peer and 4. decode the channel it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let ResponseParams::Channel(result) =
-            RPCResponse::from_value(Method::ChannelCreate, result)?.into_result()?
-        else {
+        let ResponseParams::Channel(result) = result else {
             return Err(EncodingError::new("RPC result is not channel info").into());
         };
 
@@ -1967,7 +1946,7 @@ impl RpcServer {
 
         // 3. Send it and 4. check the reply carries no result.
         let result = self.rpc_call(channel_id, request).await?;
-        RPCResponse::from_value(Method::ChannelDelete, result)?;
+        let _ = result;
 
         // 5. Drop the channel from the local contacts.
         self.remove_channel_contact(channel_id).await?;
@@ -2013,46 +1992,20 @@ impl RpcServer {
         let key = self.user_identity.encrypt_into(self.user_id(), &key)?;
 
         // 2. Build the request.
-        let params = Value::Map(
-            [
-                (
-                    Value::Text("c".into()),
-                    Value::Bytes(ticket.channel_id().as_bytes().to_vec()),
-                ),
-                (
-                    Value::Text("sid".into()),
-                    Value::Bytes(ticket.session_id().as_bytes().to_vec()),
-                ),
-                (
-                    Value::Text("i".into()),
-                    Value::Bytes(ticket.inviter().as_bytes().to_vec()),
-                ),
-                (
-                    Value::Text("e".into()),
-                    Value::Integer(ticket.expiration_ms().into()),
-                ),
-                (
-                    Value::Text("sig".into()),
-                    Value::Bytes(ticket.signature().to_vec()),
-                ),
-                (Value::Text("sk".into()), Value::Bytes(key)),
-            ]
-            .into_iter()
-            .chain(ticket.invitee().map(|id| {
-                (
-                    Value::Text("ie".into()),
-                    Value::Bytes(id.as_bytes().to_vec()),
-                )
-            }))
-            .collect(),
+        let params = JoinChannel::new(
+            *ticket.channel_id(),
+            *ticket.session_id(),
+            *ticket.inviter(),
+            ticket.expiration_ms(),
+            ticket.signature().to_vec(),
+            key,
+            ticket.invitee().copied(),
         );
         let request = RPCRequest::join_channel(0, params);
 
         // 3. Send it and 4. decode the channel it reports.
         let result = self.rpc_call(ticket.channel_id(), request).await?;
-        let ResponseParams::Channel(result) =
-            RPCResponse::from_value(Method::ChannelJoin, result)?.into_result()?
-        else {
+        let ResponseParams::Channel(result) = result else {
             return Err(EncodingError::new("RPC result is not channel info").into());
         };
         let (channel, returned_session) = self.decode_channel_info(result)?;
@@ -2062,7 +2015,8 @@ impl RpcServer {
         {
             return Err(EncodingError::new(
                 "Joined channel does not match invitation or membership",
-            ).into());
+            )
+            .into());
         }
 
         // 5. Store the channel locally.
@@ -2089,7 +2043,7 @@ impl RpcServer {
 
         // 3. Send it and 4. check the reply carries no result.
         let result = self.rpc_call(channel_id, request).await?;
-        RPCResponse::from_value(Method::ChannelLeave, result)?;
+        let _ = result;
 
         // 5. Drop the channel from the local contacts.
         self.remove_channel_contact(channel_id).await?;
@@ -2109,9 +2063,7 @@ impl RpcServer {
         self.channel_snapshot(channel_id)?;
         let request = RPCRequest::get_channel_info(0);
         let result = self.rpc_call(channel_id, request).await?;
-        let ResponseParams::ChannelInfo(info) =
-            RPCResponse::from_value(Method::ChannelInfo, result)?.into_result()?
-        else {
+        let ResponseParams::ChannelInfo(info) = result else {
             return Err(EncodingError::new("RPC result is not channel info").into());
         };
         let (channel, _) = self.decode_channel_info(info)?;
@@ -2130,14 +2082,12 @@ impl RpcServer {
             Permission::OwnerInvite => member.is_owner(),
         };
         if !allowed {
-            return Err(StateError::new(
-                "Insufficient permission to invite channel members",
-            ).into());
+            return Err(
+                StateError::new("Insufficient permission to invite channel members").into(),
+            );
         }
         if invitee.is_some_and(|id| channel.has_member(&id)) {
-            return Err(ArgumentError::new(
-                "The invitee is already a channel member",
-            ).into());
+            return Err(ArgumentError::new("The invitee is already a channel member").into());
         }
         let session = self
             .friend_sessions
@@ -2165,7 +2115,8 @@ impl RpcServer {
             invitee,
             expiration,
             key,
-        ).map_err(|e| e.into())
+        )
+        .map_err(|e| e.into())
     }
 
     fn channel_snapshot(&self, id: &Id) -> Result<Channel> {
@@ -2245,11 +2196,7 @@ impl RpcServer {
         Ok((channel, session))
     }
 
-    async fn store_channel(
-        &self,
-        mut channel: Channel,
-        session: CryptoIdentity,
-    ) -> Result<()> {
+    async fn store_channel(&self, mut channel: Channel, session: CryptoIdentity) -> Result<()> {
         let key = self.user_identity.encrypt_into(
             self.user_id(),
             session.signature_key().private_key().as_ref(),
@@ -2270,37 +2217,12 @@ impl RpcServer {
         let document = self.user_identity.encrypt_into(self.user_id(), &document)?;
 
         let revision = self.contacts_revision.get();
-        let params = Value::Map(
-            [
-                (
-                    Value::Text(FIELD_VERSION.into()),
-                    Value::Integer(revision.into()),
-                ),
-                (Value::Text(FIELD_OPERATION.into()), Value::Text("a".into())),
-                (
-                    Value::Text(FIELD_DATA.into()),
-                    Value::Map(
-                        [
-                            (
-                                Value::Text(FIELD_ID.into()),
-                                Value::Bytes(channel.id().as_bytes().to_vec()),
-                            ),
-                            (
-                                Value::Text(FIELD_VERSION.into()),
-                                Value::Integer(revision.into()),
-                            ),
-                            (Value::Text(FIELD_DATA.into()), Value::Bytes(document)),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    ),
-                ),
-            ]
-            .into_iter()
-            .collect(),
+        let mutation = ContactMutation::add(
+            revision,
+            OpaqueContact::new(*channel.id(), revision, Value::Bytes(document)),
         );
         let revision = self
-            .commit_contact_mutation(params, revision, "Channel contact revision is outdated")
+            .commit_contact_mutation(mutation, revision, "Channel contact revision is outdated")
             .await?;
         channel.contact.set_revision(revision);
         self.friend_sessions
@@ -2317,22 +2239,8 @@ impl RpcServer {
 
     async fn remove_channel_contact(&self, id: &Id) -> Result<()> {
         let revision = self.contacts_revision.get();
-        let params = Value::Map(
-            [
-                (
-                    Value::Text(FIELD_VERSION.into()),
-                    Value::Integer(revision.into()),
-                ),
-                (Value::Text(FIELD_OPERATION.into()), Value::Text("r".into())),
-                (
-                    Value::Text(FIELD_DATA.into()),
-                    Value::Array(vec![Value::Bytes(id.as_bytes().to_vec())]),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        self.commit_contact_mutation(params, revision, "Channel contact revision is outdated")
+        let mutation = ContactMutation::remove(revision, vec![*id]);
+        self.commit_contact_mutation(mutation, revision, "Channel contact revision is outdated")
             .await?;
         self.channels.borrow_mut().remove(id);
         self.contacts.borrow_mut().remove(id);
@@ -2372,7 +2280,7 @@ impl RpcServer {
 
         // 3. Send it and 4. check the reply carries no result.
         let result = self.rpc_call(channel_id, request).await?;
-        RPCResponse::from_value(Method::ChannelOwnershipTransfer, result)?;
+        let _ = result;
 
         // 5. Apply the change: the new owner takes over, the former owner keeps moderating.
         channel.owner = new_owner;
@@ -2427,12 +2335,11 @@ impl RpcServer {
             .encrypt_into(current_session.id(), keypair.private_key().as_ref())?;
         let session = CryptoIdentity::from(keypair.clone());
         let rotation = ChannelSessionKeyRotation::new(*session.id(), encrypted_key);
-        let params = to_cbor(&rotation, "channel session rotation")?;
-        let request = RPCRequest::rotate_channel_session_key(0, params);
+        let request = RPCRequest::rotate_channel_session_key(0, rotation);
 
         // 3. Send it and 4. check the reply carries no result.
         let result = self.rpc_call(channel_id, request).await?;
-        RPCResponse::from_value(Method::ChannelSessionKeyRotate, result)?;
+        let _ = result;
 
         // 5. Switch the local channel over to the new session key.
         channel.session_id = *session.id();
@@ -2460,45 +2367,27 @@ impl RpcServer {
             ));
         }
 
-        let mut changes = BTreeMap::new();
+        let mut changes = ChannelInfoUpdate::new();
         if current.permission != channel.permission() {
-            changes.insert(
-                Value::Text(FIELD_PERMISSION.into()),
-                Value::Integer((channel.permission() as i32).into()),
-            );
+            changes = changes.permission(channel.permission());
         }
         if current.contact.name() != channel.name() {
-            changes.insert(
-                Value::Text(FIELD_NAME.into()),
-                channel
-                    .name()
-                    .map(|name| Value::Text(name.to_string()))
-                    .unwrap_or(Value::Null),
-            );
+            changes = changes.name(channel.name().map(ToString::to_string));
         }
         if current.notice.as_deref() != channel.notice() {
-            changes.insert(
-                Value::Text(FIELD_NOTICE.into()),
-                channel
-                    .notice()
-                    .map(|notice| Value::Text(notice.to_string()))
-                    .unwrap_or(Value::Null),
-            );
+            changes = changes.notice(channel.notice().map(ToString::to_string));
         }
         if current.announced != channel.is_announced() {
-            changes.insert(
-                Value::Text(FIELD_ANNOUNCED.into()),
-                Value::Bool(channel.is_announced()),
-            );
+            changes = changes.announced(channel.is_announced());
         }
         if changes.is_empty() {
             return Err(ArgumentError::new("Channel information has not changed").into());
         }
 
         // Build the request, send it and check the reply carries no result.
-        let request = RPCRequest::update_channel_info(0, Value::Map(changes));
+        let request = RPCRequest::update_channel_info(0, changes);
         let result = self.rpc_call(channel.id(), request).await?;
-        RPCResponse::from_value(Method::ChannelInfoUpdate, result)?;
+        let _ = result;
 
         // Apply the confirmed change to the local channel.
         current.permission = channel.permission();
@@ -2534,14 +2423,11 @@ impl RpcServer {
         Self::ensure_channel_moderator(&channel, self.user_id())?;
 
         // 2. Build the request.
-        let request =
-            RPCRequest::update_channel_members_role(0, members.to_vec(), role);
+        let request = RPCRequest::update_channel_members_role(0, members.to_vec(), role);
 
         // 3. Send it and 4. decode the members the service confirmed.
         let result = self.rpc_call(channel_id, request).await?;
-        let touched =
-            RPCResponse::from_value(Method::ChannelMembersRoleUpdate, result)?
-                .into_members()?;
+        let touched = result.into_members()?;
 
         // 5. Apply the confirmed change to the local channel.
         let changed = MemberUpdate::Role(role).apply(&mut channel, &touched);
@@ -2558,11 +2444,7 @@ impl RpcServer {
     }
 
     /// Bans channel members.
-    pub(crate) async fn ban_channel_members(
-        &self,
-        channel_id: &Id,
-        members: &[Id],
-    ) -> Result<()> {
+    pub(crate) async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
         let _request = self.requests.lock().await;
 
         // 1. Validate: the channel exists and the user may moderate it.
@@ -2574,8 +2456,7 @@ impl RpcServer {
 
         // 3. Send it and 4. decode the members the service confirmed.
         let result = self.rpc_call(channel_id, request).await?;
-        let touched = RPCResponse::from_value(Method::ChannelMembersBan, result)?
-            .into_members()?;
+        let touched = result.into_members()?;
 
         // 5. Apply the confirmed change to the local channel.
         let changed = MemberUpdate::Ban.apply(&mut channel, &touched);
@@ -2608,8 +2489,7 @@ impl RpcServer {
 
         // 3. Send it and 4. decode the members the service confirmed.
         let result = self.rpc_call(channel_id, request).await?;
-        let touched = RPCResponse::from_value(Method::ChannelMembersUnban, result)?
-            .into_members()?;
+        let touched = result.into_members()?;
 
         // 5. Apply the confirmed change to the local channel.
         let changed = MemberUpdate::Unban.apply(&mut channel, &touched);
@@ -2642,8 +2522,7 @@ impl RpcServer {
 
         // 3. Send it and 4. decode the members the service confirmed.
         let result = self.rpc_call(channel_id, request).await?;
-        let touched = RPCResponse::from_value(Method::ChannelMembersRemove, result)?
-            .into_members()?;
+        let touched = result.into_members()?;
 
         // 5. Apply the confirmed change to the local channel.
         let changed = MemberUpdate::Remove.apply(&mut channel, &touched);
@@ -2771,14 +2650,12 @@ impl RpcServer {
             data.to_opaque(next_revision, &self.user_identity)?
         };
         // 2. Build the request.
-        let mutation = to_cbor(&ContactMutation::update(revision, opaque), "contact mutation")?;
+        let mutation = ContactMutation::update(revision, opaque);
         let request = RPCRequest::contact_mutate(0, mutation);
 
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
+        let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
@@ -2805,49 +2682,8 @@ impl RpcServer {
         Ok(())
     }
 
-    /// Removes a single contact.
-    pub(crate) async fn remove_contact(&self, id: &Id) -> Result<()> {
-        let _request = self.requests.lock().await;
-
-        // 1. Validate: the contact exists.
-        if !self.contacts.borrow().contains_key(id) {
-            return Err(StateError::new("Contact not found"));
-        }
-        let revision = self.contacts_revision.get();
-
-        // 2. Build the request.
-        let mutation = to_cbor(&ContactMutation::remove(revision, vec![*id]), "contact mutation")?;
-        let request = RPCRequest::contact_mutate(0, mutation);
-
-        // 3. Send it to the home peer and 4. decode the revision it reports.
-        let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
-            ResponseParams::Revision(confirmed) => confirmed,
-            _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
-        };
-        if confirmed < revision || confirmed < self.contacts_revision.get() {
-            return Err(StateError::new("Contact removal revision is outdated"));
-        }
-        self.contacts_revision.set(confirmed);
-
-        // 5. Apply the confirmed change to the local state.
-        self.friend_sessions.lock().unwrap().remove(id);
-        self.blocked_contacts.lock().unwrap().remove(id);
-        self.contacts.borrow_mut().remove(id);
-        self.channels.borrow_mut().remove(id);
-
-        // 6. Notify the application.
-        self.contact_listener.on_contacts_removed(&[*id]);
-        Ok(())
-    }
-
-    /// Removes several contacts in one mutation.
     pub(crate) async fn remove_contacts(&self, ids: &[Id]) -> Result<()> {
-        if ids.is_empty() {
-            return Err(ArgumentError::new("No contact IDs specified"));
-        }
+        assert!(!ids.is_empty(), "No contact IDs specified");
 
         let _request = self.requests.lock().await;
 
@@ -2855,19 +2691,17 @@ impl RpcServer {
         let revision = self.contacts_revision.get();
 
         // 2. Build the request.
-        let mutation = to_cbor(&ContactMutation::remove(revision, ids.to_vec()), "contact mutation")?;
+        let mutation = ContactMutation::remove(revision, ids.to_vec());
         let request = RPCRequest::contact_mutate(0, mutation);
 
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
+        let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < revision || confirmed < self.contacts_revision.get() {
-            return Err(StateError::new("Contact removal revision is outdated"));
+            return Err(StateError::new("Contact removal revision is outdated").into());
         }
         self.contacts_revision.set(confirmed);
 
@@ -2891,14 +2725,12 @@ impl RpcServer {
         let revision = self.contacts_revision.get();
 
         // 2. Build the request.
-        let mutation = to_cbor(&ContactMutation::clear(revision), "contact mutation")?;
+        let mutation = ContactMutation::clear(revision);
         let request = RPCRequest::contact_mutate(0, mutation);
 
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
-        let confirmed = match RPCResponse::from_value(Method::ContactMutate, result)?
-            .into_result()?
-        {
+        let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };

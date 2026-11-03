@@ -18,18 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
 use boson_api::{Id, Result};
-use crate::errors::EncodingError;
-use super::{
-    error::RPCError,
-    method::Method,
-    params::id_list
-};
 
-#[derive(Debug, PartialEq)]
+use crate::errors::EncodingError;
+
+use super::{error::RPCError, method::Method};
+
+/// A decoded successful result, paired with the method that produced it.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(untagged)]
 pub(crate) enum Params {
     /// Operations that return nothing.
     Empty,
@@ -62,7 +62,7 @@ impl Params {
     }
 
     /// Interprets the `r` field of a reply according to `method`.
-    pub(crate) fn decode(method: Method, value: Value) -> Result<Self> {
+    fn decode(method: Method, value: Value) -> Result<Self> {
         let malformed = || EncodingError::new(format!("Malformed result for {method:?}"));
         match (method, value) {
             (
@@ -102,58 +102,26 @@ impl Params {
         }
     }
 
-    /// The plain CBOR value a pending call is completed with.
-    pub(crate) fn into_value(self) -> Value {
-        match self {
-            Self::Empty => Value::Null,
-            Self::Sessions(document)
-            | Self::ContactSync(document)
-            | Self::Channel(document)
-            | Self::ChannelInfo(document) => document,
-            Self::Revision(revision) => Value::Integer(revision.into()),
-            Self::Members(ids) => Value::Array(
-                ids.iter()
-                    .map(|id| Value::Bytes(id.as_bytes().to_vec()))
-                    .collect(),
-            ),
-        }
-    }
-
-    /// `None` is the wire form of an empty reply; `Some` carries a body.
+    /// Returns `None` for the wire form of an empty reply.
     fn into_option(self) -> Option<Self> {
         match self {
             Self::Empty => None,
             result => Some(result),
         }
     }
-}
 
-impl Serialize for Params {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    /// The touched members of a member-management result.
+    pub(crate) fn into_members(self) -> Result<Vec<Id>> {
         match self {
-            Self::Empty => serializer.serialize_unit(),
-            Self::Revision(revision) => revision.serialize(serializer),
-            Self::Members(ids) => id_list::serialize(ids, serializer),
-            Self::Sessions(document)
-            | Self::ContactSync(document)
-            | Self::Channel(document)
-            | Self::ChannelInfo(document) => document.serialize(serializer),
+            Self::Members(ids) => Ok(ids),
+            _ => Err(EncodingError::new("RPC result is not a member list").into()),
         }
     }
 }
 
-/// Wire shape of a reply, before its result is interpreted by method.
-#[derive(Deserialize, Serialize)]
-struct Envelope {
-    id: i64,
-    #[serde(rename = "m")]
-    method: Method,
-    #[serde(rename = "r", default)]
-    result: Option<Value>,
-    #[serde(rename = "e", default)]
-    error: Option<RPCError>,
-}
-
+/// A response sent to another peer or to the service.
+///
+/// Outbound replies only need to be serialized.
 #[derive(Debug, Serialize)]
 pub(crate) struct RPCResponse {
     pub(crate) id: i64,
@@ -203,19 +171,11 @@ impl RPCResponse {
     }
 
     pub(crate) fn contact_mutate(id: i64, revision: i32) -> Self {
-        Self::success(
-            id,
-            Method::ContactMutate,
-            Params::Revision(revision),
-        )
+        Self::success(id, Method::ContactMutate, Params::Revision(revision))
     }
 
     pub(crate) fn contact_sync(id: i64, document: Value) -> Self {
-        Self::success(
-            id,
-            Method::ContactSync,
-            Params::ContactSync(document),
-        )
+        Self::success(id, Method::ContactSync, Params::ContactSync(document))
     }
 
     pub(crate) fn create_channel(id: i64, channel: Value) -> Self {
@@ -259,33 +219,15 @@ impl RPCResponse {
     }
 
     pub(crate) fn ban_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(
-            id,
-            Method::ChannelMembersBan,
-            Params::Members(members),
-        )
+        Self::success(id, Method::ChannelMembersBan, Params::Members(members))
     }
 
     pub(crate) fn unban_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(
-            id,
-            Method::ChannelMembersUnban,
-            Params::Members(members),
-        )
+        Self::success(id, Method::ChannelMembersUnban, Params::Members(members))
     }
 
     pub(crate) fn remove_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(
-            id,
-            Method::ChannelMembersRemove,
-            Params::Members(members),
-        )
-    }
-
-    /// Builds a response from the already extracted result of a call.
-    pub(crate) fn from_value(method: Method, value: Value) -> Result<Self> {
-        let result = Params::decode(method, value)?;
-        Ok(Self::new(0, method, result.into_option()))
+        Self::success(id, Method::ChannelMembersRemove, Params::Members(members))
     }
 
     pub(crate) fn error_with(
@@ -298,55 +240,46 @@ impl RPCResponse {
         Self::error(id, method, RPCError::new(code, message, data))
     }
 
-    pub(crate) fn succeeded(&self) -> bool {
-        self.error.is_none()
-    }
-
-    pub(crate) fn failed(&self) -> bool {
-        self.error.is_some()
-    }
-
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        let envelope: Envelope = serde_cbor::from_slice(bytes)
-            .map_err(|error| EncodingError::new(format!("Malformed RPC response: {error}")))?;
-        if envelope.id < 0 {
-            return Err(EncodingError::new("Invalid RPC response ID").into());
-        }
-        if let Some(error) = envelope.error {
-            return Ok(Self::error(envelope.id, envelope.method, error));
-        }
-        let result = match envelope.result {
-            Some(value) => Params::decode(envelope.method, value)?.into_option(),
-            None if Params::accepts_empty(envelope.method) => None,
-            None => {
-                return Err(
-                    EncodingError::new(format!("Missing result for {:?}", envelope.method)).into(),
-                )
-            }
-        };
-        Ok(Self::new(envelope.id, envelope.method, result))
-    }
-
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+    pub(crate) fn serialize1(&self) -> Result<Vec<u8>> {
         serde_cbor::to_vec(self).map_err(|error| {
             EncodingError::new(format!("Encoding RPC response failed: {error}")).into()
         })
     }
+}
 
-    /// Yields the result, or the service's `RPCError` as a typed error.
-    pub(crate) fn into_result(self) -> Result<Params> {
-        match (self.error, self.result) {
-            (Some(error), _) => Err(error.into()),
-            (None, Some(result)) => Ok(result),
-            (None, None) => Ok(Params::Empty),
+/// A response received for a request sent earlier.
+///
+/// Inbound replies only need to be deserialized.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RPCResponseMessage {
+    pub(crate) id: i64,
+    #[serde(rename = "m")]
+    pub(crate) method: Method,
+    #[serde(rename = "r", default)]
+    result: Option<Value>,
+    #[serde(rename = "e", default)]
+    error: Option<RPCError>,
+}
+
+impl RPCResponseMessage {
+    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
+        let response: Self = serde_cbor::from_slice(bytes)
+            .map_err(|error| EncodingError::new(format!("Malformed RPC response: {error}")))?;
+        if response.id < 0 {
+            return Err(EncodingError::new("Invalid RPC response ID").into());
         }
+        Ok(response)
     }
 
-    /// The touched members of a member-management response.
-    pub(crate) fn into_members(self) -> Result<Vec<Id>> {
-        match self.into_result()? {
-            Params::Members(ids) => Ok(ids),
-            _ => Err(EncodingError::new("RPC result is not a member list").into()),
+    /// Yields the decoded result, or the service's `RPCError` as a typed error.
+    pub(crate) fn into_result(self) -> Result<Params> {
+        if let Some(error) = self.error {
+            return Err(error.into());
+        }
+        match self.result {
+            Some(value) => Params::decode(self.method, value),
+            None if Params::accepts_empty(self.method) => Ok(Params::Empty),
+            None => Err(EncodingError::new(format!("Missing result for {:?}", self.method)).into()),
         }
     }
 }

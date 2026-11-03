@@ -18,36 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
-use boson_api::Id;
+use boson_api::{utils, Id};
 
 use crate::{channel::Role, internal::codec};
 
-/// An `Id` that goes on the wire as a byte string, as the service expects.
-pub(super) struct IdBytes<'a>(pub(super) &'a Id);
-
-impl Serialize for IdBytes<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(self.0.as_bytes())
-    }
-}
-
-pub(super) mod id_list {
-    use super::*;
-
-    pub(in crate::rpc) fn serialize<S: Serializer>(
-        ids: &[Id],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(ids.iter().map(IdBytes))
-    }
-}
-
-/// Parameters of `ChannelMembersRoleUpdate`.
 #[derive(Debug, Serialize)]
 pub(crate) struct ChannelMembersRole {
-    #[serde(rename = "ids", serialize_with = "id_list::serialize")]
+    #[serde(rename = "ids", serialize_with = "utils::ids::serialize")]
     members: Vec<Id>,
 
     #[serde(rename = "r", with = "codec::role")]
@@ -57,5 +36,31 @@ pub(crate) struct ChannelMembersRole {
 impl ChannelMembersRole {
     pub(crate) fn new(members: Vec<Id>, role: Role) -> Self {
         Self { members, role }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_cbor::Value;
+
+    use super::*;
+
+    #[test]
+    fn channel_members_role_serializes_ids_for_text_and_cbor() {
+        let id = Id::random();
+        let value = ChannelMembersRole::new(vec![id], Role::Member);
+
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(json["ids"][0], id.to_base58());
+        assert_eq!(json["r"], 2);
+
+        let cbor = serde_cbor::to_vec(&value).unwrap();
+        let Value::Map(map) = serde_cbor::from_slice(&cbor).unwrap() else {
+            panic!("channel members role must be a map");
+        };
+        assert_eq!(
+            map.get(&Value::Text("ids".into())),
+            Some(&Value::Array(vec![Value::Bytes(id.as_bytes().to_vec())]))
+        );
     }
 }

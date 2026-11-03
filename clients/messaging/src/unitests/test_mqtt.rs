@@ -488,7 +488,8 @@ mod protocol_tests {
         data.name = Some("friend".into());
         data.blocked = blocked;
         data.updated_at = 100 + i64::from(revision);
-        data.to_opaque(revision, &session.user_identity).unwrap()
+        data.revision = revision;
+        data.encode_into(&session.user_identity).unwrap()
     }
 
     #[test]

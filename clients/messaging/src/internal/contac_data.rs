@@ -101,6 +101,18 @@ impl ContactData {
         }
     }
 
+    pub(crate) fn set_blocked(&mut self, value: bool) {
+        self.blocked = value;
+    }
+
+    pub(crate) fn set_updated(&mut self, updated_at: i64) {
+        self.updated_at = updated_at;
+    }
+
+    pub(crate) fn set_revision(&mut self, revision: i32) {
+        self.revision = revision;
+    }
+
     pub(crate) fn set_session_key(&mut self, session_key: Vec<u8>) {
         self.session_key = Some(session_key);
     }
@@ -136,40 +148,54 @@ impl ContactData {
     }
 
     /// Encrypts this document into an opaque contact envelope.
-    pub(crate) fn to_opaque(
-        &self,
-        revision: i32,
-        identity: &CryptoIdentity,
-    ) -> Result<OpaqueContact> {
-        // Validate both the contact fields and the encrypted session key.
-        self.contact(revision)?;
+    ///
+    /// Mirrors [`OpaqueContact::decode_into`] in reverse: validate, encode,
+    /// then encrypt.
+    pub(crate) fn encode_into(&self, identity: &CryptoIdentity) -> Result<OpaqueContact> {
+        // 1. Validate: the document assembles into a contact, and its session
+        //    key, if any, is well-formed.
+        self.contact(self.revision)?;
         self.session(identity)?;
 
-        let bytes = serde_cbor::to_vec(self)
+        // 2. Encode: the document to CBOR bytes.
+        let encoded = serde_cbor::to_vec(self)
             .map_err(|error| EncodingError::new(format!("Encoding contact failed: {error}")))?;
+
+        // 3. Encrypt: the bytes for ourselves, so only we can read them back.
         let encrypted = identity
-            .encrypt_into(identity.id(), &bytes)
+            .encrypt_into(identity.id(), &encoded)
             .map_err(|error| {
                 AuthenticationError::new(format!("Encrypting contact failed: {error}"))
             })?;
-        Ok(OpaqueContact::new(self.id, revision, Value::Bytes(encrypted)))
+
+        Ok(OpaqueContact::new(
+            self.id,
+            self.revision,
+            Value::Bytes(encrypted),
+        ))
     }
 }
 
-impl From<Contact> for ContactData {
-    fn from(contact: Contact) -> Self {
+impl From<&Contact> for ContactData {
+    fn from(contact: &Contact) -> Self {
         Self {
-            id: *contact.id(),
-            kind: contact.contact_type() as u8,
+            id:     contact.id().clone(),
+            kind:   contact.contact_type() as u8,
             session_key: None,
-            name: contact.name().map(ToString::to_string),
-            remark: contact.remark().map(ToString::to_string),
-            tags: contact.tags().map(ToString::to_string),
-            muted: contact.is_muted(),
+            name:   contact.name().map(|v|v.into()),
+            remark: contact.remark().map(|v|v.into()),
+            tags:   contact.tags().map(|v|v.into()),
+            muted:  contact.is_muted(),
             blocked: contact.is_blocked(),
             created_at: contact.created_at(),
             updated_at: contact.updated_at(),
             revision: contact.revision(),
         }
+    }
+}
+
+impl From<Contact> for ContactData {
+    fn from(contact: Contact) -> Self {
+        Self::from(&contact)
     }
 }

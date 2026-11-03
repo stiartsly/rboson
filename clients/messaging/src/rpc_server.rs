@@ -683,7 +683,7 @@ impl RpcServer {
     /// Decodes a contact, keeping the session key and channel metadata that the
     /// opaque document carries for the contact kinds that have them.
     fn decode_contact(&self, opaque: &OpaqueContact) -> Result<DecodedContact> {
-        let (data, plaintext) = opaque.decode(&self.user_identity)?;
+        let (data, plaintext) = opaque.decode_into(&self.user_identity)?;
         let contact = data.contact(opaque.revision())?;
         let session = data.session(&self.user_identity)?;
         let channel = match contact.contact_type() {
@@ -1470,8 +1470,8 @@ impl RpcServer {
             self.user_id(),
             session.signature_key().private_key().as_ref(),
         )?);
-        let mutation =
-            ContactMutation::add(revision, data.to_opaque(revision, &self.user_identity)?);
+        data.revision = revision;
+        let mutation = ContactMutation::add(revision, data.encode_into(&self.user_identity)?);
         self.apply_contact_mutation(mutation, revision, "Friend contact revision is outdated")
             .await?;
         Ok(())
@@ -1607,34 +1607,25 @@ impl RpcServer {
 
     /// Lists the sessions of every device of the user.
     pub(crate) async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
-        // 1. Validate: nothing to check, the call takes no arguments.
-
-        // 2. Build the request.
         let request = RPCRequest::list_sessions(0);
 
-        // 3. Send it to the home peer and 4. decode the session list.
         let result = self.rpc_call(self.peer_id(), request).await?;
         let ResponseParams::Sessions(sessions) = result else {
             return Err(EncodingError::new("RPC result is not a session list").into());
         };
 
-        // 5. Convert the raw list into session records.
-        decode_cbor(sessions, "session list response")
+        let sessions: Vec<SessionInfo> = serde_cbor::value::from_value(sessions)
+            .map_err(|e| EncodingError::new(format!("Failed to decode sessions: {e}")))?;
+
+        Ok(sessions)
     }
 
     /// Revokes another device's session.
     pub(crate) async fn revoke_session(&self, device_id: &Id) -> Result<()> {
-        // 1. Validate: the current session cannot be revoked.
-        if device_id == self.device_id() {
-            return Err(ArgumentError::new("Cannot revoke the current session"));
-        }
+        assert!(device_id != self.device_id());
 
-        // 2. Build the request.
         let request = RPCRequest::revoke_session(0, *device_id);
-
-        // 3. Send it to the home peer and 4. check the reply carries no result.
-        let result = self.rpc_call(self.peer_id(), request).await?;
-        let _ = result;
+        let _ = self.rpc_call(self.peer_id(), request).await?;
         Ok(())
     }
 }
@@ -1787,7 +1778,7 @@ impl RpcServer {
             self.user_identity
                 .encrypt_into(self.user_id(), &session_key)?,
         );
-        let opaque = data.to_opaque(next_revision, &self.user_identity)?;
+        let opaque = data.encode_into(&self.user_identity)?;
         let mutation = ContactMutation::add(revision, opaque);
         let request = RPCRequest::contact_mutate(0, mutation);
 
@@ -1820,28 +1811,25 @@ impl RpcServer {
         let _requests = self.requests.lock().await;
 
         // 1. Validate: the user is a known, not yet blocked, non-channel contact.
-        let origin = self
-            .contacts
-            .borrow()
-            .get(user_id)
-            .cloned()
-            .ok_or_else(|| StateError::new("Contact not found"))?;
-        if origin.contact_type() == ContactType::Channel {
+        let contact = self.contact_snapshot(user_id)?;
+        if contact.contact_type() == ContactType::Channel {
             return Err(ArgumentError::new("A channel cannot be blocked as a user").into());
         }
-        if origin.is_blocked() {
+        if contact.is_blocked() {
             return Err(StateError::new("The user is already blocked"));
         }
+
         let revision = self.contacts_revision.get();
         let next_revision = revision
             .checked_add(1)
             .ok_or_else(|| StateError::new("Contact revision is exhausted"))?;
 
         // 2. Build the request.
-        let mut data = ContactData::from(origin.clone());
-        data.blocked = true;
-        data.updated_at = Self::current_timestamp()?.max(origin.updated_at());
-        data.revision = next_revision;
+        let mut data = ContactData::from(&contact);
+        data.set_blocked(true);
+        data.set_updated(Self::current_timestamp()?.max(contact.updated_at()));
+        data.set_revision(next_revision);
+
         let session = self.friend_sessions.lock().unwrap().get(user_id).cloned();
         if let Some(session) = session {
             data.set_session_key(self.user_identity.encrypt_into(
@@ -1849,7 +1837,7 @@ impl RpcServer {
                 session.signature_key().private_key().as_ref(),
             )?);
         }
-        let opaque = data.to_opaque(next_revision, &self.user_identity)?;
+        let opaque = data.encode_into(&self.user_identity)?;
         let mutation = ContactMutation::update(revision, opaque);
         let request = RPCRequest::contact_mutate(0, mutation);
 
@@ -2120,12 +2108,21 @@ impl RpcServer {
     }
 
     fn channel_snapshot(&self, id: &Id) -> Result<Channel> {
-        Ok(self
-            .channels
-            .borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| StateError::new(format!("Channel {id} does not exist")))?)
+        let channel = self.channels.borrow().get(id).cloned();
+        if let Some(channel) = &channel {
+            Ok(channel.clone())
+        } else {
+            Err(StateError::new(format!("Channel {id} does not exist")).into())
+        }
+    }
+
+    fn contact_snapshot(&self, id: &Id) -> Result<Contact> {
+        let contact = self.contacts.borrow().get(id).cloned();
+        if let Some(contact) = &contact {
+            Ok(contact.clone())
+        } else {
+            Err(StateError::new(format!("Contact {id} does not exist")).into())
+        }
     }
 
     fn decode_channel_info(&self, value: Value) -> Result<(Channel, CryptoIdentity)> {
@@ -2610,7 +2607,7 @@ impl RpcServer {
         let next_revision = revision
             .checked_add(1)
             .ok_or_else(|| StateError::new("Contact revision is exhausted"))?;
-        let mut data = ContactData::from(origin.clone());
+        let mut data = ContactData::from(&origin);
         data.remark = contact.remark().map(ToString::to_string);
         data.tags = contact.tags().map(ToString::to_string);
         data.muted = contact.is_muted();
@@ -2647,7 +2644,7 @@ impl RpcServer {
             let document = self.user_identity.encrypt_into(self.user_id(), &document)?;
             OpaqueContact::new(*contact.id(), next_revision, Value::Bytes(document))
         } else {
-            data.to_opaque(next_revision, &self.user_identity)?
+            data.encode_into(&self.user_identity)?
         };
         // 2. Build the request.
         let mutation = ContactMutation::update(revision, opaque);

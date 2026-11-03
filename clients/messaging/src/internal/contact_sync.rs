@@ -21,9 +21,10 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use boson_api::{
-    errors::{ArgumentError, Error, Result},
-    utils,
+use boson_api::errors::{
+    ArgumentError,
+    Error,
+    Result,
 };
 use super::{ContactMutation, OpaqueContact};
 

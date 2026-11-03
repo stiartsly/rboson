@@ -139,7 +139,11 @@ impl RPCError {
     }
 
     pub(crate) fn revoke_current_session() -> Self {
-        Self::new(code::REVOKE_CURRENT_SESSION, "Cannot revoke the current session", None)
+        Self::new(
+            code::REVOKE_CURRENT_SESSION,
+            "Cannot revoke the current session",
+            None,
+        )
     }
 
     pub(crate) fn already_joined_channel() -> Self {
@@ -147,11 +151,19 @@ impl RPCError {
     }
 
     pub(crate) fn forbidden_non_channel_member() -> Self {
-        Self::new(code::FORBIDDEN_NON_CHANNEL_MEMBER, "Non-channel member is forbidden", None)
+        Self::new(
+            code::FORBIDDEN_NON_CHANNEL_MEMBER,
+            "Non-channel member is forbidden",
+            None,
+        )
     }
 
     pub(crate) fn forbidden_banned_channel_member() -> Self {
-        Self::new(code::FORBIDDEN_BANNED_CHANNEL_MEMBER, "Banned channel member is forbidden", None)
+        Self::new(
+            code::FORBIDDEN_BANNED_CHANNEL_MEMBER,
+            "Banned channel member is forbidden",
+            None,
+        )
     }
 }
 

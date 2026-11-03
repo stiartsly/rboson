@@ -528,6 +528,8 @@ impl Client {
         role: Role,
     ) -> Result<()> {
         ensure_members(members)?;
+        ensure_role(role)?;
+
         self.verticle_client()?
             .set_channel_members_role(*channel_id, members.to_vec(), role)
             .await
@@ -992,6 +994,15 @@ fn merge_headers(
 fn ensure_members(members: &[Id]) -> Result<()> {
     if members.is_empty() {
         return Err(ArgumentError::new("No members specified"));
+    }
+    Ok(())
+}
+
+fn ensure_role(role: Role) -> Result<()> {
+    if role == Role::Owner || role == Role::Banned {
+        return Err(ArgumentError::new(
+            "Owner and Banned roles cannot be assigned with this operation",
+        ));
     }
     Ok(())
 }

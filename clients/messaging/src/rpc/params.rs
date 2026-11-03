@@ -18,147 +18,44 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Serializer};
+
 use boson_api::Id;
-use crate::{
-    channel,
-    invite_ticket::InviteTicket,
-};
 
-#[derive(Serialize, Deserialize)]
-pub(crate) struct UserProfile {
-    #[serde(rename = "n")]
-    name: Option<String>,
-}
+use crate::{channel::Role, internal::codec};
 
-#[allow(unused)]
-impl UserProfile {
-    pub(crate) fn new(name: Option<String>) -> Self {
-        Self { name }
-    }
+/// An `Id` that goes on the wire as a byte string, as the service expects.
+pub(super) struct IdBytes<'a>(pub(super) &'a Id);
 
-    pub(crate) fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+impl Serialize for IdBytes<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0.as_bytes())
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ContactRemove {
-    #[serde(rename = "s", skip_serializing_if = "crate::is_none_or_empty")]
-    sequence_id: Option<String>,
+pub(super) mod id_list {
+    use super::*;
 
-    #[serde(rename = "c", skip_serializing_if = "Vec::is_empty")]
-    contacts: Vec<Id>,
-}
-
-#[allow(unused)]
-impl ContactRemove {
-    pub(crate) fn new(sequence_id: Option<String>, contacts: Option<Vec<Id>>) -> Self {
-        Self {
-            sequence_id,
-            contacts: contacts.unwrap_or_default()
-        }
-    }
-
-    pub(crate) fn sequence_id(&self) -> Option<&str> {
-        self.sequence_id.as_deref()
-    }
-
-    pub(crate) fn contacts(&self) -> &[Id] {
-        &self.contacts
+    pub(in crate::rpc) fn serialize<S: Serializer>(
+        ids: &[Id],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(ids.iter().map(IdBytes))
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct ChannelCreate {
-    #[serde(rename = "sid", with="crate::serde_id_as_bytes")]
-    session_id: Id,
-
-    #[serde(rename = "p")]
-    permission: channel::Permission,
-
-    #[serde(rename = "n", skip_serializing_if = "crate::is_none_or_empty")]
-    name: Option<String>,
-
-    #[serde(rename = "nt", skip_serializing_if = "crate::is_none_or_empty")]
-    notice: Option<String>,
-}
-
-#[allow(unused)]
-impl ChannelCreate {
-    pub(crate) fn new(
-            session_id: Id,
-            permission: channel::Permission,
-            name: Option<String>,
-            notice: Option<String>
-        ) -> Self {
-        Self {
-            session_id,
-            permission,
-            name,
-            notice,
-        }
-    }
-
-    pub(crate) fn session_id(&self) -> &Id {
-        &self.session_id
-    }
-
-    pub(crate) fn permission(&self) -> channel::Permission {
-        self.permission
-    }
-
-    pub(crate) fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
-    pub(crate) fn notice(&self) -> Option<&str> {
-        self.notice.as_deref()
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ChannelMemberRole {
-    #[serde(rename = "id")]
+/// Parameters of `ChannelMembersRoleUpdate`.
+#[derive(Debug, Serialize)]
+pub(crate) struct ChannelMembersRole {
+    #[serde(rename = "ids", serialize_with = "id_list::serialize")]
     members: Vec<Id>,
 
-    #[serde(rename = "r")]
-    role: channel::Role,
+    #[serde(rename = "r", with = "codec::role")]
+    role: Role,
 }
 
-#[allow(unused)]
-impl ChannelMemberRole {
-    pub(crate) fn new(members: Vec<Id>, role: channel::Role) -> Self {
+impl ChannelMembersRole {
+    pub(crate) fn new(members: Vec<Id>, role: Role) -> Self {
         Self { members, role }
     }
-
-    pub(crate) fn members(&self) -> &[Id] {
-        &self.members
-    }
-
-    pub(crate) fn role(&self) -> channel::Role {
-        self.role
-    }
-}
-
-#[allow(unused)]
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum Parameters {
-    UserProfile(UserProfile),
-    RemoveContact(ContactRemove),
-    #[serde(with="crate::serde_id_as_bytes")]
-    RevokeDevice(Id),
-    CreateChannel(ChannelCreate),
-    JoinChannel(InviteTicket),
-    ChannelMemberRole(ChannelMemberRole),
-    #[serde(with="crate::serde_id_as_bytes")]
-    SetChannelOwner(Id),
-    SetChannelPermission(channel::Permission),
-    SetChannelName(String),
-    SetChannelNotice(String),
-    SetChannelMemberRole(ChannelMemberRole),
-    BanChannelMembers(Vec<Id>),
-    UnbanChannelMembers(Vec<Id>),
-    RemoveChannelMembers(Vec<Id>),
 }

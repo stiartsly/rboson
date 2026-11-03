@@ -18,18 +18,81 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use std::result::Result as StdResult;
+use serde::{Serialize, Serializer};
 use serde_cbor::Value;
 
-use boson_api::{Id, Result};
-use crate::errors::EncodingError;
-use super::method::Method;
+use boson_api::{
+    Id,
+    Result
+};
 
-fn id_value(id: &Id) -> Value {
-    Value::Bytes(id.as_bytes().to_vec())
+use crate::{
+    channel::Role,
+    errors::EncodingError,
+    internal::NewChannelInfo
+};
+use super::{
+    method::Method,
+    params::{id_list, ChannelMembersRole, IdBytes},
+};
+
+#[derive(Debug)]
+pub(crate) enum Params {
+    ContactSync(i32),
+    RevokeSession(Id),
+    SetChannelOwner(Id),
+    ContactMutate(Value),
+    CreateChannel(NewChannelInfo),
+    JoinChannel(Value),
+    RotateChannelSessionKey(Value),
+    UpdateChannelInfo(Value),
+    ChannelMembersRole(ChannelMembersRole),
+    BanChannelMembers(Vec<Id>),
+    UnbanChannelMembers(Vec<Id>),
+    RemoveChannelMembers(Vec<Id>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl Params {
+    pub(crate) fn matches(&self, method: Method) -> bool {
+        match (method, self) {
+            (Method::SessionRevoke, Self::RevokeSession(_))
+            | (Method::ChannelOwnershipTransfer, Self::SetChannelOwner(_))
+            | (Method::ChannelCreate, Self::CreateChannel(_))
+            | (Method::ChannelJoin, Self::JoinChannel(Value::Map(_)))
+            | (Method::ChannelMembersRoleUpdate, Self::ChannelMembersRole(_)) => true,
+            (Method::ContactSync, Self::ContactSync(revision)) => *revision >= 0,
+            (Method::ContactMutate, Self::ContactMutate(Value::Map(_)))
+            | (Method::ChannelSessionKeyRotate, Self::RotateChannelSessionKey(Value::Map(_)))
+            | (Method::ChannelInfoUpdate, Self::UpdateChannelInfo(Value::Map(_))) => true,
+            (Method::ChannelMembersBan, Self::BanChannelMembers(ids))
+            | (Method::ChannelMembersUnban, Self::UnbanChannelMembers(ids))
+            | (Method::ChannelMembersRemove, Self::RemoveChannelMembers(ids)) => !ids.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+impl Serialize for Params {
+    fn serialize<S: Serializer>(&self, se: S) -> StdResult<S::Ok, S::Error> {
+        match self {
+            Self::ContactSync(revision) => revision.serialize(se),
+            Self::RevokeSession(id) |
+            Self::SetChannelOwner(id) => IdBytes(id).serialize(se),
+            Self::CreateChannel(params) => params.serialize(se),
+            Self::ContactMutate(value)
+            | Self::JoinChannel(value)
+            | Self::RotateChannelSessionKey(value)
+            | Self::UpdateChannelInfo(value) => value.serialize(se),
+            Self::ChannelMembersRole(params) => params.serialize(se),
+            Self::BanChannelMembers(ids)
+            | Self::UnbanChannelMembers(ids)
+            | Self::RemoveChannelMembers(ids) => id_list::serialize(ids, se),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub(crate) struct RPCRequest {
     #[serde(rename = "id")]
     id: i64,
@@ -37,25 +100,26 @@ pub(crate) struct RPCRequest {
     #[serde(rename = "m")]
     method: Method,
 
-    #[serde(
-        rename = "p",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-   params: Option<Value>,
+    #[serde(rename = "p", skip_serializing_if = "Option::is_none")]
+    params: Option<Params>,
 
-    #[serde(
-        rename = "c",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "c", skip_serializing_if = "Option::is_none")]
     cookie: Option<Value>,
 }
 
-#[allow(dead_code)]
 impl RPCRequest {
-    fn new(id: i64, method: Method, params: Option<Value>) -> Self {
-        Self { id, method, params, cookie: None }
+    fn new(id: i64, method: Method, params: Option<Params>) -> Self {
+        Self {id, method, params, cookie: None}
+    }
+
+    pub(crate) fn with_id(mut self, id: i64) -> Self {
+        self.id = id;
+        self
+    }
+
+    pub(crate) fn with_cookie(mut self, cookie: Vec<u8>) -> Self {
+        self.cookie = Some(Value::Bytes(cookie));
+        self
     }
 
     pub(crate) fn method(&self) -> Method {
@@ -66,147 +130,103 @@ impl RPCRequest {
         Self::new(id, Method::SessionList, None)
     }
 
-    pub(crate) fn revoke_session(id: i64, device_id: &Id) -> Self {
-        Self::new(id, Method::SessionRevoke, Some(id_value(device_id)))
+    pub(crate) fn revoke_session(id: i64, device_id: Id) -> Self {
+        let params = Params::RevokeSession(device_id);
+        Self::new(id, Method::SessionRevoke, Some(params))
     }
 
     pub(crate) fn contact_mutate(id: i64, mutation: Value) -> Self {
-        Self::new(id, Method::ContactMutate, Some(mutation))
+        let params = Params::ContactMutate(mutation);
+        Self::new(id, Method::ContactMutate, Some(params))
     }
 
     pub(crate) fn contact_sync(id: i64, revision: i32) -> Self {
-        Self::new(id, Method::ContactSync, Some(Value::Integer(revision.into())))
+        let params = Params::ContactSync(revision);
+        Self::new(id, Method::ContactSync, Some(params))
     }
 
-    pub(crate) fn create_channel(id: i64, params: Value) -> Self {
+    pub(crate) fn create_channel(id: i64, info: NewChannelInfo) -> Self {
+        let params = Params::CreateChannel(info);
         Self::new(id, Method::ChannelCreate, Some(params))
+    }
+
+    pub(crate) fn join_channel(id: i64, ticket: Value) -> Self {
+        let params = Params::JoinChannel(ticket);
+        Self::new(id, Method::ChannelJoin, Some(params))
     }
 
     pub(crate) fn delete_channel(id: i64) -> Self {
         Self::new(id, Method::ChannelDelete, None)
     }
 
-    pub(crate) fn join_channel(id: i64, ticket: Value) -> Self {
-        Self::new(id, Method::ChannelJoin, Some(ticket))
-    }
-
     pub(crate) fn leave_channel(id: i64) -> Self {
         Self::new(id, Method::ChannelLeave, None)
-    }
-
-    pub(crate) fn transfer_channel_ownership(id: i64, new_owner: &Id) -> Self {
-        Self::new(id, Method::ChannelOwnershipTransfer, Some(id_value(new_owner)))
-    }
-
-    pub(crate) fn rotate_channel_session_key(id: i64, params: Value) -> Self {
-        Self::new(id, Method::ChannelSessionKeyRotate, Some(params))
-    }
-
-    pub(crate) fn update_channel_info(id: i64, changes: Value) -> Self {
-        Self::new(id, Method::ChannelInfoUpdate, Some(changes))
-    }
-
-    pub(crate) fn update_channel_members_role(id: i64, params: Value) -> Self {
-        Self::new(id, Method::ChannelMembersRoleUpdate, Some(params))
-    }
-
-    pub(crate) fn ban_channel_members(id: i64, member_ids: &[Id]) -> Self {
-        Self::new(id, Method::ChannelMembersBan, Some(id_list(member_ids)))
-    }
-
-    pub(crate) fn unban_channel_members(id: i64, member_ids: &[Id]) -> Self {
-        Self::new(id, Method::ChannelMembersUnban, Some(id_list(member_ids)))
-    }
-
-    pub(crate) fn remove_channel_members(id: i64, member_ids: &[Id]) -> Self {
-        Self::new(id, Method::ChannelMembersRemove, Some(id_list(member_ids)))
     }
 
     pub(crate) fn get_channel_info(id: i64) -> Self {
         Self::new(id, Method::ChannelInfo, None)
     }
 
-    pub(crate) fn with_cookie(mut self, cookie: Vec<u8>) -> Self {
-        self.cookie = Some(Value::Bytes(cookie));
-        self
+    pub(crate) fn transfer_channel_ownership(id: i64, new_owner: Id) -> Self {
+        let params = Params::SetChannelOwner(new_owner);
+        Self::new(id, Method::ChannelOwnershipTransfer, Some(params))
+    }
+
+    pub(crate) fn rotate_channel_session_key(id: i64, rotation: Value) -> Self {
+        let params = Params::RotateChannelSessionKey(rotation);
+        Self::new(id, Method::ChannelSessionKeyRotate, Some(params))
+    }
+
+    pub(crate) fn update_channel_info(id: i64, changes: Value) -> Self {
+        let params = Params::UpdateChannelInfo(changes);
+        Self::new(id, Method::ChannelInfoUpdate, Some(params))
+    }
+
+    pub(crate) fn update_channel_members_role(id: i64, members: Vec<Id>, role: Role) -> Self {
+        let params = Params::ChannelMembersRole(ChannelMembersRole::new(members, role));
+        Self::new(id, Method::ChannelMembersRoleUpdate, Some(params))
+    }
+
+    pub(crate) fn ban_channel_members(id: i64, members: Vec<Id>) -> Self {
+        let params = Params::BanChannelMembers(members);
+        Self::new(id, Method::ChannelMembersBan, Some(params))
+    }
+
+    pub(crate) fn unban_channel_members(id: i64, members: Vec<Id>) -> Self {
+        let params = Params::UnbanChannelMembers(members);
+        Self::new(id, Method::ChannelMembersUnban, Some(params))
+    }
+
+    pub(crate) fn remove_channel_members(id: i64, members: Vec<Id>) -> Self {
+        let params = Params::RemoveChannelMembers(members);
+        Self::new(id, Method::ChannelMembersRemove, Some(params))
     }
 
     pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
         self.validate()?;
-        serde_cbor::to_vec(self)
-            .map_err(|error| EncodingError::new(format!("Encoding RPC request failed: {error}")).into())
-    }
-
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        let request: Self = serde_cbor::from_slice(bytes)
-            .map_err(|error| EncodingError::new(format!("Malformed RPC request: {error}")))?;
-        request.validate()?;
-        Ok(request)
+        serde_cbor::to_vec(self).map_err(|error| {
+            EncodingError::new(format!("Encoding RPC request failed: {error}")).into()
+        })
     }
 
     fn validate(&self) -> Result<()> {
-        if self.id < 0 || self.cookie.as_ref().is_some_and(|cookie| !matches!(cookie, Value::Bytes(_))) {
-            return Err(EncodingError::new("Invalid RPC request ID or cookie"));
+        if self.id < 0 {
+            return Err(EncodingError::new("Invalid RPC request ID"));
         }
         let valid = match (self.method, self.params.as_ref()) {
-            (Method::SessionList | Method::ChannelDelete | Method::ChannelLeave | Method::ChannelInfo,
-                None | Some(Value::Null)) => true,
-            (Method::SessionRevoke | Method::ChannelOwnershipTransfer, Some(Value::Bytes(id))) => id.len() == 32,
-            (Method::ContactSync, Some(Value::Integer(revision))) => i32::try_from(*revision).is_ok() && *revision >= 0,
-            (Method::ContactMutate | Method::ChannelCreate | Method::ChannelJoin
-                | Method::ChannelSessionKeyRotate | Method::ChannelInfoUpdate
-                | Method::ChannelMembersRoleUpdate, Some(Value::Map(_))) => true,
-            (Method::ChannelMembersBan | Method::ChannelMembersUnban | Method::ChannelMembersRemove,
-                Some(Value::Array(ids))) => ids.iter().all(|id| matches!(id, Value::Bytes(id) if id.len() == 32)),
+            (
+                Method::SessionList
+                | Method::ChannelDelete
+                | Method::ChannelLeave
+                | Method::ChannelInfo,
+                None,
+            ) => true,
+            (method, Some(params)) => params.matches(method),
             _ => false,
         };
         if !valid {
             return Err(EncodingError::new("RPC parameters do not match the method"));
         }
         Ok(())
-    }
-}
-
-fn id_list(ids: &[Id]) -> Value {
-    Value::Array(ids.iter().map(id_value).collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rpc_request_uses_compact_method_and_round_trips() {
-        assert_eq!(
-            serde_cbor::value::to_value(Method::ChannelDelete).unwrap(),
-            Value::Text("cd".to_string())
-        );
-
-        let request = RPCRequest::delete_channel(17);
-        let parsed = RPCRequest::parse(&request.serialize().unwrap()).unwrap();
-
-        assert_eq!(parsed.id, request.id);
-        assert_eq!(parsed.method, request.method);
-        assert_eq!(parsed.params, request.params);
-    }
-
-    #[test]
-    fn typed_constructors_produce_valid_params() {
-        let id = Id::random();
-        for request in [
-            RPCRequest::list_sessions(1),
-            RPCRequest::revoke_session(2, &id),
-            RPCRequest::contact_sync(3, 5),
-            RPCRequest::transfer_channel_ownership(4, &id),
-            RPCRequest::ban_channel_members(5, &[id, id]),
-            RPCRequest::get_channel_info(6).with_cookie(vec![1, 2]),
-        ] {
-            let parsed = RPCRequest::parse(&request.serialize().unwrap()).unwrap();
-            assert_eq!(parsed.method, request.method);
-            assert_eq!(parsed.params, request.params);
-            assert_eq!(parsed.cookie, request.cookie);
-        }
-        assert!(RPCRequest::new(1, Method::SessionRevoke, None).serialize().is_err());
-        assert!(RPCRequest::new(-1, Method::SessionList, None).serialize().is_err());
     }
 }

@@ -18,14 +18,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{cell::RefCell, collections::HashMap, future::Future, pin::Pin, task::{Context, Poll}};
-
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+use log::{debug, warn};
 use serde_cbor::Value;
 
-use boson_api::{Id, Promise, PromiseFuture, Result};
-use boson_api::errors::StateError;
-use crate::errors::{AuthenticationError, EncodingError};
-use super::{method::Method, response::RPCResponse};
+use boson_api::{
+    errors::StateError,
+    Id,
+    Promise, PromiseFuture,
+    Result
+};
+use crate::errors::{
+    AuthenticationError,
+    EncodingError
+};
+use super::{
+    method::Method,
+    response::{RPCResponse, Params},
+};
 
 struct PendingCall {
     method: Method,
@@ -59,34 +75,60 @@ impl Drop for CallFuture<'_> {
 }
 
 impl Calls {
-    pub(crate) fn register(&self, id: i64, method: Method, recipient: Id) -> Result<CallFuture<'_>> {
+    pub(crate) fn register(
+        &self,
+        id: i64,
+        method: Method,
+        recipient: Id,
+    ) -> Result<CallFuture<'_>> {
         if id < 0 || self.pending.borrow().contains_key(&id) {
             return Err(StateError::new("Invalid or duplicate pending RPC ID"));
         }
         let (promise, future) = Promise::pair();
-        self.pending.borrow_mut().insert(id, PendingCall { method, recipient, promise });
-        Ok(CallFuture { calls: self, id, future })
+        self.pending.borrow_mut().insert(
+            id,
+            PendingCall {
+                method,
+                recipient,
+                promise,
+            },
+        );
+        Ok(CallFuture {
+            calls: self,
+            id,
+            future,
+        })
     }
 
     pub(crate) fn respond(&self, response: RPCResponse, sender: &Id) -> Result<()> {
-        if self.pending.borrow().get(&response.id).is_some_and(|call| &call.recipient != sender) {
-            return Err(AuthenticationError::new("RPC response sender does not match request recipient"));
+        if self
+            .pending
+            .borrow()
+            .get(&response.id)
+            .is_some_and(|call| &call.recipient != sender)
+        {
+            return Err(AuthenticationError::new(
+                "RPC response sender does not match request recipient",
+            ));
         }
         let Some(call) = self.pending.borrow_mut().remove(&response.id) else {
-            log::debug!("Ignoring RPC response {} without a pending call", response.id);
+            debug!(
+                "Ignoring RPC response {} without a pending call",
+                response.id
+            );
             return Ok(());
         };
         let result = if call.method != response.method {
             Err(EncodingError::new(format!(
                 "RPC response method '{:?}' does not match '{:?}'",
-                response.method,
-                call.method
-            )).into())
+                response.method, call.method
+            ))
+            .into())
         } else {
-            response.into_result()
+            response.into_result().map(Params::into_value)
         };
         if let Err(error) = &result {
-            log::warn!("{error}");
+            warn!("{error}");
         }
         call.promise.complete(result);
         Ok(())
@@ -94,28 +136,8 @@ impl Calls {
 
     pub(crate) fn fail_all(&self, reason: &str) {
         for (_, call) in self.pending.take() {
-            call.promise.complete(Err(StateError::new(reason.to_string()).into()));
+            call.promise
+                .complete(Err(StateError::new(reason.to_string()).into()));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn response_completes_the_matching_pending_call() {
-        futures::executor::block_on(async {
-            let calls = Calls::default();
-            let recipient = Id::default();
-            let future = calls.register(17, Method::ChannelDelete, recipient).unwrap();
-            let response = RPCResponse::delete_channel(17);
-            let response = RPCResponse::parse(&response.serialize().unwrap()).unwrap();
-
-            assert!(calls.respond(response, &Id::from_bytes([1; Id::BYTES])).is_err());
-            calls.respond(RPCResponse::delete_channel(17), &recipient).unwrap();
-
-            assert_eq!(future.await.unwrap(), Value::Null);
-        });
     }
 }

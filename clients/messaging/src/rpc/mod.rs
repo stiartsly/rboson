@@ -21,5 +21,6 @@
 pub(crate) mod call;
 pub(crate) mod error;
 pub(crate) mod method;
+pub(crate) mod params;
 pub(crate) mod request;
 pub(crate) mod response;

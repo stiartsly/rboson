@@ -19,67 +19,71 @@
 // SOFTWARE.
 
 use serde::{Deserialize, Serialize};
+use boson_api::{
+    errors::ArgumentError,
+    Error,
+    Result
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
 pub(crate) enum Method {
-    #[serde(rename = "sl")] SessionList = 1,
-    #[serde(rename = "sr")] SessionRevoke,
-    #[serde(rename = "cm")] ContactMutate,
-    #[serde(rename = "cs")] ContactSync,
-    #[serde(rename = "cc")] ChannelCreate,
-    #[serde(rename = "cd")] ChannelDelete,
-    #[serde(rename = "cot")] ChannelOwnershipTransfer,
-    #[serde(rename = "csr")] ChannelSessionKeyRotate,
-    #[serde(rename = "ciu")] ChannelInfoUpdate,
-    #[serde(rename = "cru")] ChannelMembersRoleUpdate,
-    #[serde(rename = "cmb")] ChannelMembersBan,
-    #[serde(rename = "cmu")] ChannelMembersUnban,
-    #[serde(rename = "cmr")] ChannelMembersRemove,
-    #[serde(rename = "cj")] ChannelJoin,
-    #[serde(rename = "cl")] ChannelLeave,
-    #[serde(rename = "ci")] ChannelInfo,
-}
-
-impl Method {
-    pub(crate) fn value(self) -> i32 {
-        self as i32
-    }
-
-    pub(crate) fn is_service_rpc(self) -> bool {
-        self.value() <= Self::ChannelCreate.value()
-    }
-
-    pub(crate) fn is_channel_rpc(self) -> bool {
-        (Self::ChannelDelete.value()..=Self::ChannelInfo.value()).contains(&self.value())
-    }
-
-    pub(crate) fn is_owner_privileged_channel_rpc(self) -> bool {
-        (Self::ChannelDelete.value()..=Self::ChannelInfoUpdate.value()).contains(&self.value())
-    }
-
-    pub(crate) fn is_moderator_privileged_channel_rpc(self) -> bool {
-        (Self::ChannelMembersRoleUpdate.value()..=Self::ChannelMembersRemove.value()).contains(&self.value())
-    }
-
-    pub(crate) fn is_unprivileged_channel_rpc(self) -> bool {
-        (Self::ChannelJoin.value()..=Self::ChannelInfo.value()).contains(&self.value())
-    }
+    #[serde(rename = "sl")]
+    SessionList = 1,
+    #[serde(rename = "sr")]
+    SessionRevoke,
+    #[serde(rename = "cm")]
+    ContactMutate,
+    #[serde(rename = "cs")]
+    ContactSync,
+    #[serde(rename = "cc")]
+    ChannelCreate,
+    #[serde(rename = "cd")]
+    ChannelDelete,
+    #[serde(rename = "cot")]
+    ChannelOwnershipTransfer,
+    #[serde(rename = "csr")]
+    ChannelSessionKeyRotate,
+    #[serde(rename = "ciu")]
+    ChannelInfoUpdate,
+    #[serde(rename = "cru")]
+    ChannelMembersRoleUpdate,
+    #[serde(rename = "cmb")]
+    ChannelMembersBan,
+    #[serde(rename = "cmu")]
+    ChannelMembersUnban,
+    #[serde(rename = "cmr")]
+    ChannelMembersRemove,
+    #[serde(rename = "cj")]
+    ChannelJoin,
+    #[serde(rename = "cl")]
+    ChannelLeave,
+    #[serde(rename = "ci")]
+    ChannelInfo,
 }
 
 impl TryFrom<i32> for Method {
-    type Error = boson_api::Error;
+    type Error = Error;
 
-    fn try_from(value: i32) -> boson_api::Result<Self> {
-        use Method::*;
-        [
-            SessionList, SessionRevoke, ContactMutate, ContactSync, ChannelCreate,
-            ChannelDelete, ChannelOwnershipTransfer, ChannelSessionKeyRotate,
-            ChannelInfoUpdate, ChannelMembersRoleUpdate, ChannelMembersBan,
-            ChannelMembersUnban, ChannelMembersRemove, ChannelJoin, ChannelLeave, ChannelInfo,
-        ]
-        .into_iter()
-        .find(|method| method.value() == value)
-        .ok_or_else(|| boson_api::errors::ProtocolError::new(format!("Invalid RPC method: {value}")).into())
+    fn try_from(value: i32) -> Result<Self> {
+        match value {
+            1 => Ok(Method::SessionList),
+            2 => Ok(Method::SessionRevoke),
+            3 => Ok(Method::ContactMutate),
+            4 => Ok(Method::ContactSync),
+            5 => Ok(Method::ChannelCreate),
+            6 => Ok(Method::ChannelDelete),
+            7 => Ok(Method::ChannelOwnershipTransfer),
+            8 => Ok(Method::ChannelSessionKeyRotate),
+            9 => Ok(Method::ChannelInfoUpdate),
+            10 => Ok(Method::ChannelMembersRoleUpdate),
+            11 => Ok(Method::ChannelMembersBan),
+            12 => Ok(Method::ChannelMembersUnban),
+            13 => Ok(Method::ChannelMembersRemove),
+            14 => Ok(Method::ChannelJoin),
+            15 => Ok(Method::ChannelLeave),
+            16 => Ok(Method::ChannelInfo),
+            _ => Err(ArgumentError::new(format!("Invalid RPC method: {value}")).into()),
+        }
     }
 }

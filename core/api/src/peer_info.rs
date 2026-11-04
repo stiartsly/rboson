@@ -39,7 +39,7 @@ use crate::{
     Id,
     Identity,
     signature::{self, KeyPair, PrivateKey},
-    utils::codec
+    utils
 };
 
 #[derive(Default)]
@@ -560,20 +560,20 @@ impl fmt::Display for PeerInfo {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeerInfoRaw {
-    #[serde(rename = "id", with = "codec::id")]
+    #[serde(rename = "id", with = "utils::id")]
     pk: Id,
 
     #[serde(
         rename = "seq",
         default,
-        with = "codec::num",
+        with = "utils::num",
     )]
     seq: i32,
 
     #[serde(
         rename = "o",
         default,
-        with = "codec::id_opt",
+        with = "utils::id_opt",
         skip_serializing_if = "Option::is_none"
     )]
     nodeid: Option<Id>,
@@ -581,34 +581,34 @@ struct PeerInfoRaw {
     #[serde(
         rename = "os",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
+        skip_serializing_if = "utils::is_default"
     )]
     node_sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
-        with = "codec::bytes"
+        with = "utils::bytes"
     )]
     sig: Vec<u8>,
 
     #[serde(
         rename = "f",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     fingerprint: u64,
 
     #[serde(
         rename = "e",
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     endpoint: String,
 
     #[serde(
         rename = "ex",
         default,
-        with = "codec::bytes_opt",
+        with = "utils::bytes_opt",
     )]
     extra: Option<Vec<u8>>,
 }

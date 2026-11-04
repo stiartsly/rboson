@@ -28,20 +28,21 @@ use boson_api::{CryptoIdentity, Id, Identity, Result};
 
 /// Distinguishes one-to-one sessions from channel sessions, which keep a
 /// separate crypto context per sending member.
+#[derive(Clone)]
 enum ContextKind {
     User,
     Channel(HashMap<Id, CryptoContext>),
 }
 
-/// Session key material and cached crypto contexts for a single contact.
+#[derive(Clone)]
 pub(crate) struct SessionContext {
-    contact_id: Id,
-    user_identity: Arc<CryptoIdentity>,
-    session_identity: Arc<CryptoIdentity>,
+    contact_id          : Id,
+    user_identity       : Arc<CryptoIdentity>,
+    session_identity    : Arc<CryptoIdentity>,
 
-    rx_crypto_context: Option<CryptoContext>,
-    tx_crypto_context: Option<CryptoContext>,
-    kind: ContextKind,
+    rx_crypto_context   : Option<CryptoContext>,
+    tx_crypto_context   : Option<CryptoContext>,
+    kind                : ContextKind,
 }
 
 impl SessionContext {
@@ -62,31 +63,34 @@ impl SessionContext {
     }
 
     pub(crate) fn for_user(
-        contact_id: Id,
+        userid: Id,
         user_identity: Arc<CryptoIdentity>,
         session_identity: Arc<CryptoIdentity>,
     ) -> Self {
-        Self::new(contact_id, user_identity, session_identity, ContextKind::User)
+        Self::new(userid, user_identity, session_identity, ContextKind::User)
     }
 
     pub(crate) fn for_channel(
-        contact_id: Id,
+        userid: Id,
         user_identity: Arc<CryptoIdentity>,
         session_identity: Arc<CryptoIdentity>,
     ) -> Self {
-        Self::new(
-            contact_id,
-            user_identity,
-            session_identity,
-            ContextKind::Channel(HashMap::new()),
-        )
+        Self::new(userid, user_identity, session_identity, ContextKind::Channel(HashMap::new()))
     }
 
     pub(crate) fn session_id(&self) -> &Id {
         self.session_identity.id()
     }
 
-    pub(crate) fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
+    pub(crate) fn private_key(&self) -> &[u8] {
+        self.session_identity.signature_key().private_key().as_ref()
+    }
+
+    pub(crate) fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
+        self.session_identity.create_crypto_context(id)
+    }
+
+    pub(crate) fn sign_into(&self, data: &[u8]) -> Result<Vec<u8>> {
         self.session_identity.sign_into(data)
     }
 
@@ -94,39 +98,34 @@ impl SessionContext {
         self.session_identity.verify(data, signature)
     }
 
-    pub(crate) fn encrypt(&self, recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
+    pub(crate) fn encrypt_into(&self, recipient: &Id, data: &[u8]) -> Result<Vec<u8>> {
         self.session_identity.encrypt_into(recipient, data)
     }
 
-    pub(crate) fn decrypt(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
+    pub(crate) fn decrypt_into(&self, sender: &Id, data: &[u8]) -> Result<Vec<u8>> {
         self.session_identity.decrypt_into(sender, data)
-    }
-
-    pub(crate) fn create_crypto_context(&self, id: &Id) -> Result<CryptoContext> {
-        self.session_identity.create_crypto_context(id)
     }
 
     /// Uses the user's private key and the session's public key, as in the wire protocol.
     pub(crate) fn tx_crypto_context(&mut self) -> Result<&mut CryptoContext> {
-        match self.tx_crypto_context {
-            Some(ref mut context) => Ok(context),
-            None => {
-                let context = self
-                    .user_identity
-                    .create_crypto_context(self.session_identity.id())?;
-                Ok(self.tx_crypto_context.insert(context))
-            }
+        if self.tx_crypto_context.is_none() {
+            let context = self
+                .user_identity
+                .create_crypto_context(self.session_identity.id())?;
+            self.tx_crypto_context = Some(context);
         }
+        Ok(self.tx_crypto_context.as_mut().unwrap())
     }
 
     pub(crate) fn rx_crypto_context(&mut self) -> Result<&mut CryptoContext> {
-        match self.rx_crypto_context {
-            Some(ref mut context) => Ok(context),
-            None => {
-                let context = self.create_crypto_context(&self.contact_id)?;
-                Ok(self.rx_crypto_context.insert(context))
-            }
+
+        if self.rx_crypto_context.is_none() {
+            let context = self
+                .session_identity
+                .create_crypto_context(&self.contact_id)?;
+            self.rx_crypto_context = Some(context);
         }
+        Ok(self.rx_crypto_context.as_mut().unwrap())
     }
 
     /// Returns the receive context for `sender`, caching per member for channels.
@@ -137,7 +136,7 @@ impl SessionContext {
 
         match &mut self.kind {
             ContextKind::User => Err(ArgumentError::new(
-                "Invalid sender: expected the session contact",
+                "Invalid sender: the sender should be the contact",
             )),
             ContextKind::Channel(contexts) => match contexts.entry(*sender) {
                 Entry::Occupied(entry) => Ok(entry.into_mut()),

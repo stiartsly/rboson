@@ -21,7 +21,7 @@
 use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
-    utils::codec,
+    utils,
     Id,
     Value,
 };
@@ -69,53 +69,49 @@ struct StoreValueRequestRaw {
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        with = "codec::expected_seq",
+        with = "utils::expected_seq",
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "seq",
         default,
-        with = "codec::num",
+        with = "utils::num",
     )]
     seq: i32,
 
     #[serde(
         rename = "k",
         default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::id_opt",
     )]
     public_key: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::id_opt",
     )]
     recipient: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "sig",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     signature: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        with = "codec::bytes",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes",
+        skip_serializing_if = "utils::is_default"
     )]
     data: Vec<u8>,
 }

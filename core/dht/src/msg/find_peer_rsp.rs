@@ -21,7 +21,7 @@
 use crate::msg::lookup_rsp::{Data, LookupResponse};
 use boson_api::{
     errors::{Error, ProtocolError, Result},
-    utils::codec,
+    utils,
     NodeInfo,
     PeerInfo,
 };
@@ -68,86 +68,31 @@ impl LookupResponse for FindPeerResponse {
 struct FindPeerResponseRaw {
     #[serde(
         rename = "n4",
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes4: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "n6",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "tok",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     token: i32,
 
     #[serde(
         rename = "p",
         default,
-        with = "peers_codec",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::peers",
+        skip_serializing_if = "utils::is_default"
     )]
     peers: Vec<PeerInfo>,
-}
-
-mod peers_codec {
-    use serde::de::{self, SeqAccess, Visitor};
-    use serde::{Deserializer, Serialize, Serializer};
-    use std::fmt;
-    use std::result::Result as StdResult;
-    use boson_api::PeerInfo;
-
-    pub(crate) fn serialize<S>(peers: &Vec<PeerInfo>, se: S) -> StdResult<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if se.is_human_readable() {
-            peers.serialize(se)
-        } else {
-            let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
-            se.serialize_bytes(&packed)
-        }
-    }
-
-    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Vec<PeerInfo>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct PeersVisitor;
-
-        impl<'de> Visitor<'de> for PeersVisitor {
-            type Value = Vec<PeerInfo>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a CBOR byte string containing peers or a peer sequence")
-            }
-
-            fn visit_bytes<E>(self, packed: &[u8]) -> StdResult<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                serde_cbor::from_slice(packed)
-                    .map_err(|e| E::custom(format!("decoding packed peers failed: {e}")))
-            }
-
-            fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let mut peers = Vec::new();
-                while let Some(peer) = sequence.next_element()? {
-                    peers.push(peer);
-                }
-                Ok(peers)
-            }
-        }
-        de.deserialize_any(PeersVisitor)
-    }
 }
 
 impl Into<FindPeerResponseRaw> for FindPeerResponse {

@@ -30,8 +30,9 @@ use serde::{
 
 use boson_api::{
     errors::ArgumentError,
-    utils::codec,
-    Id, Result,
+    utils,
+    Id,
+    Result,
 };
 
 use super::{did_constants, DIDUrl};
@@ -251,14 +252,15 @@ pub struct Entity {
     id: String,
 
     #[serde(rename = "type",
-        default, skip_serializing_if = "Option::is_none")]
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     method_type: Option<VerificationMethodType>,
 
     #[serde(
         rename = "controller",
         default,
-        serialize_with = "controller_serde::serialize",
-        deserialize_with = "controller_serde::deserialize",
+        with = "controller_serde",
         skip_serializing_if = "Option::is_none"
     )]
     controller: Option<Id>,
@@ -266,7 +268,7 @@ pub struct Entity {
     #[serde(
         rename = "publicKeyMultibase",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     public_key_multibase: Option<String>,
 }
@@ -281,7 +283,7 @@ mod controller_serde {
     {
         match value {
             Some(v) if se.is_human_readable() => se.serialize_str(&v.to_did_string()),
-            _ => codec::id_opt::serialize(value, se),
+            _ => utils::id_opt::serialize(value, se),
         }
     }
 
@@ -290,7 +292,7 @@ mod controller_serde {
         D: Deserializer<'de>,
     {
         if !de.is_human_readable() {
-            return codec::id_opt::deserialize(de);
+            return utils::id_opt::deserialize(de);
         }
 
         Option::<String>::deserialize(de)?

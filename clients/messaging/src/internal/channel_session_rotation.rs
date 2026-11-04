@@ -20,18 +20,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use boson_api::Id;
+use boson_api::{utils, Id};
 
 /// Session-key rotation request for a channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChannelSessionKeyRotation {
     #[serde(rename = "sid")]
     session_id: Id,
-    #[serde(
-        rename = "sk",
-        serialize_with = "boson_api::utils::codec::bytes::serialize",
-        deserialize_with = "boson_api::utils::codec::bytes::deserialize"
-    )]
+    #[serde(rename = "sk", with = "utils::bytes")]
     session_key: Vec<u8>,
 }
 

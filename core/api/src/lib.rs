@@ -18,12 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Core Boson protocol primitives.
-
-// Migrated code that is not documented yet. Remove this allow as the crate is brought in line
-// with the workspace lints.
 #![allow(missing_docs)]
 
+pub mod crypto_context;
 pub mod crypto_identity;
 pub mod errors;
 pub mod id;
@@ -34,8 +31,6 @@ pub mod node_info;
 pub mod peer_info;
 pub mod value;
 pub mod version;
-
-pub(crate) mod crypto_context;
 
 pub use boson_crypto::{cryptobox, key_derivation, random, signature};
 
@@ -50,9 +45,6 @@ pub use crate::{
     peer_info::{PeerBuilder, PeerInfo},
     signature::Signature,
     value::{EncryptedBuilder, ImmutableBuilder, SignedBuilder, Value},
-};
-
-pub use crate::{
     crypto_context::CryptoContext,
 };
 
@@ -63,18 +55,31 @@ pub mod utils {
     pub mod promise;
     pub mod timer_client;
     pub mod timer_manager;
-    pub mod codec;
+    pub mod serde;
 
-    pub use codec::*;
+    pub use serde::*;
 }
 
 #[allow(unused_imports)]
 #[doc(hidden)]
 pub use crate::utils::{
-    handler::{BoxHandler, EasyHandler, LocalBoxHandler},
+    handler::{
+        LocalHandler as EasyHandler,
+        FactoryHandler,
+        BoxHandler,
+        LocalBoxHandler
+    },
     promise::{Promise, PromiseFuture},
-    timer_client::{BoxTimerClient, BoxTimerCmd, LocalBoxTimerClient, LocalBoxTimerCmd},
-    timer_manager::{BoxTimerManager, LocalBoxTimerManager},
+    timer_client::{
+        BoxTimerClient,
+        BoxTimerCmd,
+        LocalBoxTimerClient,
+        LocalBoxTimerCmd
+    },
+    timer_manager::{
+        BoxTimerManager,
+        LocalBoxTimerManager
+    },
 };
 
 #[macro_export]

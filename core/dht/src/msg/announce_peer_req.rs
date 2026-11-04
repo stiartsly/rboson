@@ -20,7 +20,7 @@
 
 use boson_api::{
     errors::{Error, Result},
-    utils::codec,
+    utils,
     Id,
     PeerInfo,
 };
@@ -65,43 +65,22 @@ struct AnnouncePeerRequestRaw {
     #[serde(rename = "tok")]
     token: i32,
 
-    #[serde(
-        rename = "cas",
-        with = "codec::expected_seq"
-    )]
+    #[serde(rename = "cas", with = "utils::expected_seq")]
     expected_seq: i32,
 
-    #[serde(rename = "k", with = "codec::id")]
+    #[serde(rename = "k", with = "utils::id")]
     id: Id,
 
-    #[serde(
-        rename = "seq",
-        default,
-        with = "codec::num",
-        skip_serializing_if = "codec::is_default"
-    )]
+    #[serde(rename = "seq", default, with = "utils::num")]
     seq: i32,
 
-    #[serde(
-        rename = "o",
-        default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "o", default, with = "utils::id_opt")]
     node_id: Option<Id>,
 
-    #[serde(
-        rename = "os",
-        default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
-    )]
+    #[serde(rename = "os", default, with = "utils::bytes_opt")]
     node_sig: Option<Vec<u8>>,
 
-    #[serde(
-        rename = "sig",
-        with = "codec::bytes"
-    )]
+    #[serde(rename = "sig", with = "utils::bytes")]
     sig: Vec<u8>,
 
     #[serde(rename = "f")]
@@ -110,12 +89,7 @@ struct AnnouncePeerRequestRaw {
     #[serde(rename = "e")]
     endpoint: String,
 
-    #[serde(
-        rename = "ex",
-        default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
-    )]
+    #[serde(rename = "ex", default, with = "utils::bytes_opt")]
     extra: Option<Vec<u8>>,
 }
 

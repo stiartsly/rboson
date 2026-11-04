@@ -27,8 +27,11 @@ use crate::{
     cryptobox::{self, Nonce},
     errors::{ArgumentError, Error, StateError},
     signature::{self, KeyPair, PrivateKey},
-    utils::codec,
-    CryptoIdentity, Id, Identity, Result,
+    utils,
+    CryptoIdentity,
+    Id,
+    Identity,
+    Result,
 };
 
 #[derive(Clone)]
@@ -505,45 +508,41 @@ struct SerdeValue {
     #[serde(
         rename = "k",
         default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::id_opt",
     )]
     pk: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::id_opt",
     )]
     recipient: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        with = "codec::nonce_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::nonce_opt"
     )]
     nonce: Option<Nonce>,
 
     #[serde(
         rename = "sig",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
-        with = "codec::bytes"
+        with = "utils::bytes"
     )]
     data: Vec<u8>,
 
     #[serde(
         rename = "seq",
         default,
-        with = "codec::num",
+        with = "utils::num",
     )]
     seq: i32,
 }

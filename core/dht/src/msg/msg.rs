@@ -393,7 +393,7 @@ struct JsonMessageRaw<'a> {
     type_: i32,
     #[serde(rename = "t")]
     txid: u32,
-    #[serde(rename = "v", serialize_with = "utils::codec::ver::serialize")]
+    #[serde(rename = "v", serialize_with = "utils::ver::serialize")]
     ver: i32,
 
     #[serde(rename = "q", skip_serializing_if = "Option::is_none")]

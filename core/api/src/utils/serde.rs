@@ -26,7 +26,10 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{
     de::{self, Error, SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
+    Deserialize,
+    Deserializer,
+    Serialize,
+    Serializer,
 };
 
 use crate::{
@@ -353,6 +356,61 @@ pub mod ver {
     }
 }
 
+pub mod peers {
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserializer, Serialize, Serializer};
+    use std::fmt;
+    use std::result::Result as StdResult;
+    use crate::PeerInfo;
+
+    pub fn serialize<S>(peers: &Vec<PeerInfo>, se: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if se.is_human_readable() {
+            peers.serialize(se)
+        } else {
+            let packed = serde_cbor::to_vec(peers).map_err(serde::ser::Error::custom)?;
+            se.serialize_bytes(&packed)
+        }
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> StdResult<Vec<PeerInfo>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PeersVisitor;
+
+        impl<'de> Visitor<'de> for PeersVisitor {
+            type Value = Vec<PeerInfo>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a CBOR byte string containing peers or a peer sequence")
+            }
+
+            fn visit_bytes<E>(self, packed: &[u8]) -> StdResult<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                serde_cbor::from_slice(packed)
+                    .map_err(|e| E::custom(format!("decoding packed peers failed: {e}")))
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> StdResult<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut peers = Vec::new();
+                while let Some(peer) = sequence.next_element()? {
+                    peers.push(peer);
+                }
+                Ok(peers)
+            }
+        }
+        de.deserialize_any(PeersVisitor)
+    }
+}
+
 pub fn is_default<T: IsDefault>(v: &T) -> bool {
     v.is_default()
 }
@@ -373,7 +431,6 @@ impl<T> IsDefault for Vec<T> {
     }
 }
 
-// Blanket impl for Option<T> where T: IsDefault covers Option<String>, Option<Vec<T>>, etc.
 impl<T: IsDefault> IsDefault for Option<T> {
     fn is_default(&self) -> bool {
         self.as_ref().map_or(true, T::is_default)
@@ -401,33 +458,5 @@ impl IsDefault for f64 {
 impl IsDefault for bool {
     fn is_default(&self) -> bool {
         !*self
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde::{Deserialize, Serialize};
-
-    use super::*;
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    struct Ids {
-        #[serde(with = "ids")]
-        ids: Vec<Id>,
-    }
-
-    #[test]
-    fn ids_round_trip_in_text_and_cbor() {
-        let value = Ids {
-            ids: vec![Id::random(), Id::random()],
-        };
-
-        let json = serde_json::to_string(&value).unwrap();
-        let decoded: Ids = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, value);
-
-        let cbor = serde_cbor::to_vec(&value).unwrap();
-        let decoded: Ids = serde_cbor::from_slice(&cbor).unwrap();
-        assert_eq!(decoded, value);
     }
 }

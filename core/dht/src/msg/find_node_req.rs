@@ -25,10 +25,7 @@ use crate::msg::lookup_req::{
     WANT6_MASK,
     WANT_TOKEN_MASK,
 };
-use boson_api::{
-    utils::codec,
-    Id,
-};
+use boson_api::{utils, Id};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -55,7 +52,7 @@ impl LookupRequest for FindNodeRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FindNodeRequestRaw {
-    #[serde(rename = "t", with = "codec::id")]
+    #[serde(rename = "t", with = "utils::id")]
     target: Id,
     #[serde(rename = "w")]
     want: i32,

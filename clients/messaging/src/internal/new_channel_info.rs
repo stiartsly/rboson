@@ -30,13 +30,13 @@ use boson_api::{utils, Id};
 pub(crate) struct NewChannelInfo {
     #[serde(
         rename = "sid",
-        with = "utils::codec::id"
+        with = "utils::id"
     )]
     session_id: Id,
 
     #[serde(
         rename = "sk",
-        with = "utils::codec::bytes"
+        with = "utils::bytes"
     )]
     session_key: Vec<u8>,
 

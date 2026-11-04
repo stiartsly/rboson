@@ -22,7 +22,7 @@ use super::lookup_rsp::{Data, LookupResponse};
 use boson_api::{
     cryptobox::Nonce,
     errors::{Error, ProtocolError, Result},
-    utils::codec,
+    utils,
     Id,
     NodeInfo,
     Value,
@@ -69,67 +69,63 @@ struct FindValueResponseRaw {
     #[serde(
         rename = "n4",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes4: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "n6",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "tok",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     token: i32,
 
     #[serde(
         rename = "k",
         default,
-        with = "codec::id_opt"
+        with = "utils::id_opt"
     )]
     pk: Option<Id>,
 
     #[serde(
         rename = "rec",
         default,
-        with = "codec::id_opt",
-        skip_serializing_if = "Option::is_none"
+        with = "utils::id_opt",
     )]
     rec: Option<Id>,
 
     #[serde(
         rename = "n",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     nonce: Option<Vec<u8>>,
 
     #[serde(
         rename = "seq",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     seq: i32,
 
     #[serde(
         rename = "sig",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     sig: Option<Vec<u8>>,
 
     #[serde(
         rename = "v",
         default,
-        with = "codec::bytes_opt",
-        skip_serializing_if = "codec::is_default"
+        with = "utils::bytes_opt",
     )]
     value: Option<Vec<u8>>,
 }

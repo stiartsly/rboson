@@ -34,7 +34,7 @@ use boson_api::{
         ArgumentError, BeforeValidPeriodError, ExpiredError, Result, SignatureError,
     },
     signature,
-    utils::{self, codec},
+    utils,
     CryptoIdentity, Error, Id,
 };
 
@@ -67,18 +67,16 @@ pub struct Credential {
     #[serde(
         rename = "v",
         default,
+        with = "date_opt",
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date_opt::serialize",
-        deserialize_with = "date_opt::deserialize"
     )]
     valid_from: Option<SystemTime>,
 
     #[serde(
         rename = "e",
         default,
+        with = "date_opt",
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date_opt::serialize",
-        deserialize_with = "date_opt::deserialize"
     )]
     valid_until: Option<SystemTime>,
 
@@ -88,16 +86,14 @@ pub struct Credential {
     #[serde(
         rename = "sat",
         default,
+        with = "date_opt",
         skip_serializing_if = "Option::is_none",
-        serialize_with = "date_opt::serialize",
-        deserialize_with = "date_opt::deserialize"
     )]
     signed_at: Option<SystemTime>,
 
     #[serde(
         rename = "sig",
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize",
+        with = "utils::bytes",
         skip_serializing_if = "Vec::is_empty"
     )]
     signature: Vec<u8>,

@@ -63,4 +63,5 @@ pub(crate) use {
     connection_listener::ClientConnectionListener,
     new_channel_info::NewChannelInfo,
     topic::Topic,
+    sessoin_context::SessionContext,
 };

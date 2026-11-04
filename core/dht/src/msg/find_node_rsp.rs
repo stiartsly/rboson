@@ -19,10 +19,8 @@
 // SOFTWARE.
 
 use crate::msg::lookup_rsp::{Data as LookupData, LookupResponse};
-use boson_api::{
-    utils::codec,
-    NodeInfo
-};
+use boson_api::{utils, NodeInfo};
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -56,21 +54,21 @@ struct FindNodeResponseRaw {
     #[serde(
         rename = "n4",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes4: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "n6",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     nodes6: Option<Vec<NodeInfo>>,
 
     #[serde(
         rename = "tok",
         default,
-        skip_serializing_if = "codec::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     token: i32,
 }

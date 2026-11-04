@@ -22,7 +22,7 @@ use std::{fmt, time::SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use boson_api::{signature, utils::codec, Id};
+use boson_api::{signature, utils, Id};
 
 use crate::{
     date::{date, to_millis},
@@ -79,11 +79,7 @@ pub struct Proof {
     #[serde(rename = "proofPurpose")]
     proof_purpose: ProofPurpose,
 
-    #[serde(
-        rename = "proofValue",
-        serialize_with = "codec::bytes::serialize",
-        deserialize_with = "codec::bytes::deserialize"
-    )]
+    #[serde(rename = "proofValue", with = "utils::bytes")]
     proof_value: Vec<u8>,
 }
 

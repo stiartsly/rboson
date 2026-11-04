@@ -26,7 +26,8 @@ use super::lookup_req::{
 };
 use boson_api::{
     errors::{Error, Result},
-    utils::codec, Id,
+    utils,
+    Id,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -60,7 +61,7 @@ impl LookupRequest for FindValueRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FindValueRequestRaw {
-    #[serde(rename = "t", with = "codec::id")]
+    #[serde(rename = "t", with = "utils::id")]
     target: Id,
 
     #[serde(rename = "w")]
@@ -69,7 +70,7 @@ struct FindValueRequestRaw {
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        with = "codec::expected_seq",
+        with = "utils::expected_seq",
     )]
     expected_seq: i32,
 }

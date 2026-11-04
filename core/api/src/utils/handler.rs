@@ -20,11 +20,11 @@
 
 use futures::future;
 
-pub struct EasyHandler<T> {
+pub struct LocalHandler<T> {
     cb: Box<dyn Fn(&T)>,
 }
 
-impl<T: 'static> EasyHandler<T> {
+impl<T: 'static> LocalHandler<T> {
     pub fn new<F>(cb: F) -> Self
     where
         F: Fn(&T) + 'static,
@@ -34,6 +34,23 @@ impl<T: 'static> EasyHandler<T> {
 
     pub fn cb(&self, value: &T) {
         (self.cb)(value);
+    }
+}
+
+pub struct FactoryHandler<T,R> {
+    cb: Box<dyn Fn(&T) -> R>
+}
+
+impl<T: 'static, R: 'static> FactoryHandler<T, R> {
+    pub fn new<F>(cb: F) -> Self
+    where
+        F: Fn(&T) -> R + 'static,
+    {
+        Self { cb: Box::new(cb) }
+    }
+
+    pub fn cb(&self, value: &T) -> R {
+        (self.cb)(value)
     }
 }
 
@@ -95,34 +112,5 @@ impl<T: 'static> Callable<T> for LocalBoxHandler<T> {
 }
 
 #[cfg(test)]
-mod unitests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_easy_consumer() {
-        let hd = EasyHandler::new(|value: &String| {
-            assert!("hello".to_string() == *value);
-        });
-        hd.cb(&"hello".to_string());
-    }
-
-    #[tokio::test]
-    async fn test_box_consumer() {
-        let hd = BoxHandler::new(|value: String| {
-            Box::pin(async move {
-                assert!("hello".to_string() == value);
-            })
-        });
-        hd.cb("hello".to_string()).await;
-    }
-
-    #[tokio::test]
-    async fn test_local_box_consumer() {
-        let hd = LocalBoxHandler::new(|value: String| {
-            Box::pin(async move {
-                assert_eq!("hello", value);
-            })
-        });
-        hd.cb("hello".to_string()).await;
-    }
-}
+#[path = "../unitests/test_handler.rs"]
+mod test_handler;

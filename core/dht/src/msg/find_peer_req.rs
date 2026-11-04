@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use boson_api::{
     errors::{Error, Result},
-    utils::codec, Id,
+    utils,
+    Id,
 };
 use crate::msg::lookup_req::{
     Data as LookupData,
@@ -73,7 +74,7 @@ impl LookupRequest for FindPeerRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FindPeerRequestRaw {
-    #[serde(rename = "t", with = "codec::id")]
+    #[serde(rename = "t", with = "utils::id")]
     target: Id,
 
     #[serde(rename = "w")]
@@ -82,14 +83,14 @@ struct FindPeerRequestRaw {
     #[serde(
         rename = "cas",
         default = "default_expected_seq",
-        with = "codec::expected_seq",
+        with = "utils::expected_seq",
     )]
     expected_seq: i32,
 
     #[serde(
         rename = "e",
         default = "i32::default",
-        with = "codec::num",
+        with = "utils::num",
     )]
     expected_count: i32,
 }

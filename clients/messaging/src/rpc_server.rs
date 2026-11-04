@@ -57,8 +57,8 @@ use boson_api::{signature, CryptoIdentity, Id, Identity};
 use super::internal::{
     ChannelInfo, ChannelSessionKeyRotation, ContactData, ContactMutation, ContactSync,
     ContentFormat, Handshake, HandshakeType, MessageContent, MutationData, NewChannelInfo,
-    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage, SyncType,
-    Topic,
+    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage,
+    SessionContext, SyncType, Topic,
 };
 use super::mqtt::{
     self, decode_cbor, decode_cbor_bytes, to_cbor, to_cbor_bytes, ClientHandle, Inbound,
@@ -120,7 +120,7 @@ struct DecodedContact {
 /// passed, so a malformed delta can never leave the session half updated.
 struct ContactState {
     contacts: HashMap<Id, Contact>,
-    sessions: HashMap<Id, CryptoIdentity>,
+    sessions: HashMap<Id, SessionContext>,
     channels: HashMap<Id, Channel>,
     revision: i32,
 }
@@ -146,7 +146,7 @@ pub(crate) struct RpcServer {
     user_identity: CryptoIdentity,
     device_identity: CryptoIdentity,
 
-    friend_sessions: Arc<Mutex<HashMap<Id, CryptoIdentity>>>,
+    friend_sessions: Arc<Mutex<HashMap<Id, SessionContext>>>,
     blocked_contacts: Arc<Mutex<HashSet<Id>>>,
 
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
@@ -443,6 +443,22 @@ impl RpcServer {
         }))
     }
 
+    /// Builds the cached session context for a contact or channel.
+    fn session_context(
+        &self,
+        contact_id: Id,
+        session: CryptoIdentity,
+        channel: bool,
+    ) -> SessionContext {
+        let user_identity = Arc::new(self.user_identity.clone());
+        let session_identity = Arc::new(session);
+        if channel {
+            SessionContext::for_channel(contact_id, user_identity, session_identity)
+        } else {
+            SessionContext::for_user(contact_id, user_identity, session_identity)
+        }
+    }
+
     fn origin_timestamp(clock: &std::sync::Mutex<i64>) -> Result<i64> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -640,7 +656,7 @@ impl RpcServer {
                 self.friend_sessions
                     .lock()
                     .unwrap()
-                    .insert(*sender, session);
+                    .insert(*sender, self.session_context(*sender, session, true));
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener
                     .on_channel_session_key_rotated(&channel);
@@ -772,8 +788,11 @@ impl RpcServer {
             if state.contacts.contains_key(&id) {
                 return Err(EncodingError::new("Snapshot contains duplicate contacts"));
             }
+            let is_channel = channel.is_some();
             if let Some(session) = session {
-                state.sessions.insert(id, session);
+                state
+                    .sessions
+                    .insert(id, self.session_context(id, session, is_channel));
             }
             if let Some(channel) = channel {
                 state.channels.insert(id, channel);
@@ -843,8 +862,11 @@ impl RpcServer {
                     } = self.decode_contact(opaque)?;
                     let id = *contact.id();
                     state.sessions.remove(&id);
+                    let is_channel = channel.is_some();
                     if let Some(session) = session {
-                        state.sessions.insert(id, session);
+                        state
+                            .sessions
+                            .insert(id, self.session_context(id, session, is_channel));
                     }
                     state.channels.remove(&id);
                     if let Some(channel) = channel {
@@ -1091,14 +1113,18 @@ impl RpcServer {
         } else if recipient == *self.user_id() {
             decrypt_payload(&self.user_identity, from, &payload, "notification")?
         } else if recipient == *from {
-            let session = self
-                .friend_sessions
-                .lock()
-                .unwrap()
-                .get(from)
-                .cloned()
+            let mut sessions = self.friend_sessions.lock().unwrap();
+            let session = sessions
+                .get_mut(from)
                 .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
-            decrypt_payload(&session, from, &payload, "channel notification envelope")?
+            session
+                .rx_crypto_context()?
+                .decrypt_into(&payload)
+                .map_err(|error| {
+                    AuthenticationError::new(format!(
+                        "Decrypting channel notification envelope failed: {error}"
+                    ))
+                })?
         } else {
             return Err(EncodingError::new("Invalid channel notification recipient"));
         };
@@ -1203,7 +1229,7 @@ impl RpcServer {
             .lock()
             .unwrap()
             .entry(friend_id)
-            .or_insert(session_identity);
+            .or_insert_with(|| self.session_context(friend_id, session_identity, false));
         self.on_friend_request_accepted(friend_id, timestamp, is_inbox);
         Ok(())
     }
@@ -1293,14 +1319,16 @@ impl RpcServer {
     ) -> Result<(Vec<u8>, HashMap<String, serde_json::Value>, Vec<u8>)> {
         let encrypted = binary_payload(payload.clone(), "Content")?;
         let content_bytes = {
-            let sessions = self.friend_sessions.lock().unwrap();
+            let mut sessions = self.friend_sessions.lock().unwrap();
             let session = sessions
-                .get(contact_id)
+                .get_mut(contact_id)
                 .ok_or_else(|| StateError::new(format!("No friend session for {contact_id}")))?;
             if outbox {
-                decrypt_payload(&self.user_identity, session.id(), &encrypted, "content")?
+                session.tx_crypto_context()?.decrypt_into(&encrypted)?
             } else {
-                decrypt_payload(session, from, &encrypted, "content")?
+                session
+                    .rx_crypto_context_for(from)?
+                    .decrypt_into(&encrypted)?
             }
         };
         let wire: MessageContent = decode_cbor_bytes(&content_bytes, "message content")?;
@@ -1702,10 +1730,10 @@ impl RpcServer {
             return Err(StateError::new("Friend request changed while accepting").into());
         }
 
-        self.friend_sessions
-            .lock()
-            .unwrap()
-            .insert(*user_id, session_identity);
+        self.friend_sessions.lock().unwrap().insert(
+            *user_id,
+            self.session_context(*user_id, session_identity, false),
+        );
         self.on_friend_request_accepted(*user_id, timestamp, false);
         Ok(())
     }
@@ -1795,10 +1823,10 @@ impl RpcServer {
 
         // 5. Apply the confirmed change to the local state.
         let contact = data.contact(confirmed)?;
-        self.friend_sessions
-            .lock()
-            .unwrap()
-            .insert(*user_id, session_identity);
+        self.friend_sessions.lock().unwrap().insert(
+            *user_id,
+            self.session_context(*user_id, session_identity, false),
+        );
         self.contacts.borrow_mut().insert(*user_id, contact.clone());
 
         // 6. Notify the application.
@@ -1810,7 +1838,10 @@ impl RpcServer {
     pub(crate) async fn block_user(&self, user_id: &Id) -> Result<Contact> {
         let _requests = self.requests.lock().await;
 
-        // 1. Validate: the user is a known, not yet blocked, non-channel contact.
+        // 1. Validate:
+        // - the user is a known,
+        // - not yet blocked,
+        // - non-channel contact.
         let contact = self.contact_snapshot(user_id)?;
         if contact.contact_type() == ContactType::Channel {
             return Err(ArgumentError::new("A channel cannot be blocked as a user").into());
@@ -1832,10 +1863,11 @@ impl RpcServer {
 
         let session = self.friend_sessions.lock().unwrap().get(user_id).cloned();
         if let Some(session) = session {
-            data.set_session_key(self.user_identity.encrypt_into(
-                self.user_id(),
-                session.signature_key().private_key().as_ref(),
-            )?);
+            data.set_session_key(
+                self.user_identity
+                    .encrypt_into(self.user_id(), session.private_key())?,
+
+            );
         }
         let opaque = data.encode_into(&self.user_identity)?;
         let mutation = ContactMutation::update(revision, opaque);
@@ -2084,7 +2116,7 @@ impl RpcServer {
             .get(channel_id)
             .cloned()
             .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-        let key = session.signature_key().private_key().as_ref().to_vec();
+        let key = session.private_key().to_vec();
         let key = match invitee {
             Some(id) => self.user_identity.encrypt_into(&id, &key)?,
             None => key,
@@ -2125,12 +2157,12 @@ impl RpcServer {
         }
     }
 
-    fn decode_channel_info(&self, value: Value) -> Result<(Channel, CryptoIdentity)> {
+    fn decode_channel_info(&self, value: Value) -> Result<(Channel, SessionContext)> {
         let info: ChannelInfo = decode_cbor(value, "channel info")?;
         self.channel_from_info(&info)
     }
 
-    fn channel_from_info(&self, info: &ChannelInfo) -> Result<(Channel, CryptoIdentity)> {
+    fn channel_from_info(&self, info: &ChannelInfo) -> Result<(Channel, SessionContext)> {
         let timestamp = |time: SystemTime| -> Result<i64> {
             let millis = time
                 .duration_since(UNIX_EPOCH)
@@ -2150,7 +2182,8 @@ impl RpcServer {
         let session = match info.session_key() {
             Some(key) => {
                 let key = self.user_identity.decrypt_into(self.user_id(), key)?;
-                CryptoIdentity::try_from(key.as_slice())?
+                let identity = CryptoIdentity::try_from(key.as_slice())?;
+                self.session_context(*info.channel_id(), identity, true)
             }
             None => self
                 .friend_sessions
@@ -2160,7 +2193,7 @@ impl RpcServer {
                 .cloned()
                 .ok_or_else(|| StateError::new("Channel session key is missing"))?,
         };
-        if session.id() != info.session_id() {
+        if session.session_id() != info.session_id() {
             return Err(EncodingError::new(
                 "Channel session key does not match session ID",
             ));
@@ -2193,11 +2226,10 @@ impl RpcServer {
         Ok((channel, session))
     }
 
-    async fn store_channel(&self, mut channel: Channel, session: CryptoIdentity) -> Result<()> {
-        let key = self.user_identity.encrypt_into(
-            self.user_id(),
-            session.signature_key().private_key().as_ref(),
-        )?;
+    async fn store_channel(&self, mut channel: Channel, session: SessionContext) -> Result<()> {
+        let key = self
+            .user_identity
+            .encrypt_into(self.user_id(), session.private_key())?;
         let mut data = ContactData::new(
             *channel.id(),
             ContactType::Channel as u8,
@@ -2312,24 +2344,23 @@ impl RpcServer {
                 "Only the channel owner can rotate the session key",
             ));
         }
-        let current_session = self
-            .friend_sessions
-            .lock()
-            .unwrap()
-            .get(channel_id)
-            .cloned()
-            .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-        if current_session.id() != &channel.session_id {
-            return Err(StateError::new(
-                "Channel session key does not match the channel",
-            ));
-        }
+        let keypair = signature::KeyPair::random();
+        let encrypted_key = {
+            let mut sessions = self.friend_sessions.lock().unwrap();
+            let current_session = sessions
+                .get_mut(channel_id)
+                .ok_or_else(|| StateError::new("Channel session key is missing"))?;
+            if current_session.session_id() != &channel.session_id {
+                return Err(StateError::new(
+                    "Channel session key does not match the channel",
+                ));
+            }
+            current_session
+                .tx_crypto_context()?
+                .encrypt_into(keypair.private_key().as_ref())?
+        };
 
         // 2. Build the request around a fresh session key pair.
-        let keypair = signature::KeyPair::random();
-        let encrypted_key = self
-            .user_identity
-            .encrypt_into(current_session.id(), keypair.private_key().as_ref())?;
         let session = CryptoIdentity::from(keypair.clone());
         let rotation = ChannelSessionKeyRotation::new(*session.id(), encrypted_key);
         let request = RPCRequest::rotate_channel_session_key(0, rotation);
@@ -2340,10 +2371,10 @@ impl RpcServer {
 
         // 5. Switch the local channel over to the new session key.
         channel.session_id = *session.id();
-        self.friend_sessions
-            .lock()
-            .unwrap()
-            .insert(*channel_id, session);
+        self.friend_sessions.lock().unwrap().insert(
+            *channel_id,
+            self.session_context(*channel_id, session, true),
+        );
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
@@ -2623,10 +2654,8 @@ impl RpcServer {
         let key = session
             .as_ref()
             .map(|session| {
-                self.user_identity.encrypt_into(
-                    self.user_id(),
-                    session.signature_key().private_key().as_ref(),
-                )
+                self.user_identity
+                    .encrypt_into(self.user_id(), session.private_key())
             })
             .transpose()?;
         if let Some(key) = &key {
@@ -3021,7 +3050,7 @@ struct SessionMessageBuilder {
     client: ClientHandle,
     user_identity: CryptoIdentity,
     device_identity: CryptoIdentity,
-    friend_sessions: Arc<std::sync::Mutex<HashMap<Id, CryptoIdentity>>>,
+    friend_sessions: Arc<std::sync::Mutex<HashMap<Id, SessionContext>>>,
     blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
     origin_clock: Arc<std::sync::Mutex<i64>>,
     conversation_contact: Option<Contact>,
@@ -3081,13 +3110,6 @@ impl MessageBuilder for SessionMessageBuilder {
                 .unwrap()
                 .clone()
                 .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-            let friend_identity = self
-                .friend_sessions
-                .lock()
-                .unwrap()
-                .get(&recipient)
-                .cloned()
-                .ok_or_else(|| StateError::new(format!("No friend session for {recipient}")))?;
             let body = self
                 .body
                 .ok_or_else(|| ArgumentError::new("Message content is required"))?;
@@ -3116,6 +3138,13 @@ impl MessageBuilder for SessionMessageBuilder {
                 },
             };
             let content_bytes = to_cbor_bytes(&content, "message content")?;
+            let encrypted = {
+                let mut sessions = self.friend_sessions.lock().unwrap();
+                let session = sessions
+                    .get_mut(&recipient)
+                    .ok_or_else(|| StateError::new(format!("No friend session for {recipient}")))?;
+                session.tx_crypto_context()?.encrypt_into(&content_bytes)?
+            };
             let (mut wire, payload) = Outbound {
                 user_identity: &self.user_identity,
                 device_identity: &self.device_identity,
@@ -3125,8 +3154,8 @@ impl MessageBuilder for SessionMessageBuilder {
                 &recipient,
                 CONTENT_MESSAGE,
                 timestamp,
-                content_bytes.clone(),
-                Some(friend_identity.id()),
+                encrypted,
+                None,
                 "content",
             )?;
             mqtt::publish_outbox(&mqtt, payload, "message").await?;

@@ -21,6 +21,7 @@
 use serde::Serialize;
 use serde_cbor::Value;
 
+use boson_api::{utils, Id};
 use super::{method::Method, params::ChannelMembersRole};
 use crate::{
     channel::{Permission, Role},
@@ -30,7 +31,6 @@ use crate::{
         NewChannelInfo
     },
 };
-use boson_api::{utils, Id};
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]

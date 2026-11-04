@@ -137,7 +137,7 @@ impl VerticleClient {
         until: Option<i64>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         let make_event = |promise| {
             Event::GetMessages(WithParams {
                 data: (conversation_id, until, limit, offset),
@@ -152,7 +152,7 @@ impl VerticleClient {
         conversation_id: Id,
         begin: i64,
         end: i64,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         let make_event = |promise| {
             Event::GetMessagesInRange(WithParams {
                 data: (conversation_id, begin, end),

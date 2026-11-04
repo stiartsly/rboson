@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::collections::HashMap;
 use boson_api::Id;
 use crate::{
     channel::{Channel, Permission, Role},
@@ -45,8 +46,8 @@ pub(crate) enum Event {
     GetConversations(NoParams<Vec<Conversation>>),
     RemoveConversation(WithParams<Id, ()>),
     RemoveConversations(WithParams<Vec<Id>, ()>),
-    GetMessages(WithParams<(Id, Option<i64>, usize, usize), Vec<Box<dyn Message>>>),
-    GetMessagesInRange(WithParams<(Id, i64, i64), Vec<Box<dyn Message>>>),
+    GetMessages(WithParams<(Id, Option<i64>, usize, usize), Vec<Message>>),
+    GetMessagesInRange(WithParams<(Id, i64, i64), Vec<Message>>),
     RemoveMessage(WithParams<i64, ()>),
     RemoveMessagesByIds(WithParams<Vec<i64>, ()>),
     RemoveMessagesInConversation(WithParams<Id, ()>),
@@ -63,11 +64,11 @@ pub(crate) enum Event {
         WithParams<
             (
                 Id,
-                std::collections::HashMap<String, serde_json::Value>,
+                HashMap<String, serde_json::Value>,
                 Vec<u8>,
                 bool,
             ),
-            Box<dyn Message>,
+            Message,
         >,
     ),
     RegisterFriendSession(WithParams<(Id, Vec<u8>, Option<String>), ()>),

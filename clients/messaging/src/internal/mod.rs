@@ -21,7 +21,7 @@
 pub(crate) mod codec;
 pub(crate) mod handshake;
 pub(crate) mod notification;
-pub(crate) mod photon_message;
+// pub(crate) mod photon_message;
 pub(crate) mod message_content;
 pub(crate) mod contac_data;
 pub(crate) mod contact_mutation;
@@ -50,7 +50,7 @@ pub(crate) mod contact {
 }
 
 pub(crate) use {
-    photon_message::PhotonMessage,
+    // photon_message::PhotonMessage,
     message_content::{ContentFormat, MessageContent},
     handshake::{Handshake, HandshakeType},
     notification::{Body as NotificationBody, Event as NotificationEvent, Notification},

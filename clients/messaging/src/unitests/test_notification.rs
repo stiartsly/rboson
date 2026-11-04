@@ -26,7 +26,6 @@ use crate::internal::{
     notification::Event as NotificationEvent,
 };
 
-
 fn channel() -> ChannelInfo {
     ChannelInfo::new(
         Id::random(),

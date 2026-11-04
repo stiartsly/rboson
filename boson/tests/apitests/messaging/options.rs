@@ -536,7 +536,7 @@ mod builder {
 
         struct TestMessageListener;
         impl MessageListener for TestMessageListener {
-            fn on_message(&self, _message: &dyn Message) {}
+            fn on_message(&self, _message: &Message) {}
         }
 
         struct TestChannelListener;

@@ -35,6 +35,7 @@ use boson::messaging::{
     FriendRequestListener,
     Message,
     MessageListener,
+    MessageOps,
     Options as MessagingOptions,
     OptionsBuilder as MessagingOptionsBuilder,
     SessionInfo,
@@ -236,7 +237,7 @@ impl PhotonMessageListener {
 }
 
 impl MessageListener for PhotonMessageListener {
-    fn on_message(&self, message: &dyn Message) {
+    fn on_message(&self, message: &Message) {
         let from = message.from().map(ToString::to_string).unwrap_or_else(|| "unknown".into());
         let content = message
             .payload_as_content()
@@ -245,7 +246,7 @@ impl MessageListener for PhotonMessageListener {
         self.output.println(format!("Message from {from}: {content}"));
     }
 
-    fn on_sent(&self, message: &dyn Message) {
+    fn on_sent(&self, message: &Message) {
         self.output
             .println(format!("Sent message {}", message.id()));
     }

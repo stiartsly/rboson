@@ -81,7 +81,7 @@ pub trait MessagingClient {
     fn message(
         &self,
         recipient: Option<Id>
-    ) -> Box<dyn MessageBuilder>;
+    ) -> MessageBuilder;
 
     /// Retrieves a specific conversation by its identifier.
     fn get_conversation(
@@ -113,7 +113,7 @@ pub trait MessagingClient {
         until: Option<i64>,
         limit: usize,
         offset: usize,
-    ) -> impl Future<Output = Result<Vec<Box<dyn Message>>>>;
+    ) -> impl Future<Output = Result<Vec<Message>>>;
 
     /// Retrieves a list of messages for a specific conversation within a time range.
     fn get_messages_in_range(
@@ -121,7 +121,7 @@ pub trait MessagingClient {
         conversation_id: &Id,
         begin: i64,
         end: i64,
-    ) -> impl Future<Output = Result<Vec<Box<dyn Message>>>>;
+    ) -> impl Future<Output = Result<Vec<Message>>>;
 
     /// Removes a specific message by its internal identifier.
     fn remove_message(

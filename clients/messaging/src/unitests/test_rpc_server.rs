@@ -29,7 +29,7 @@ fn seal_protects_for_the_recipient_and_envelopes_for_the_service() {
 
     // The service opens the envelope with the device key...
     let envelope = decrypt_payload(&service, device.id(), &payload, "envelope").unwrap();
-    let opened: PhotonMessage = decode_cbor_bytes(&envelope, "envelope").unwrap();
+    let opened: Message = decode_cbor_bytes(&envelope, "envelope").unwrap();
     assert_eq!(opened.recipient, *friend.id());
     // ...and only the friend can open the body.
     let body = binary_payload(opened.payload, "Handshake").unwrap();

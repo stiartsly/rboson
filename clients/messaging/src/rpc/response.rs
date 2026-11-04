@@ -22,12 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
 use boson_api::{Id, Result};
-
 use crate::errors::EncodingError;
-
 use super::{error::RPCError, method::Method};
 
-/// A decoded successful result, paired with the method that produced it.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum Params {

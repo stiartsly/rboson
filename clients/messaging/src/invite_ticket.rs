@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use boson_api::errors::{Error, Result};
-use boson_api::{Id, Identity};
+use boson_api::{utils, Id, Identity};
 use super::errors::{AuthenticationError, EncodingError};
 
 /// Default ticket lifetime: seven days in milliseconds.
@@ -40,21 +40,25 @@ pub const CONTENT_TYPE: &str = "application/invite-ticket";
 /// A signed channel invitation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteTicket {
-    #[serde(rename = "c")]
+    #[serde(rename = "c", with = "utils::id")]
     channel_id: Id,
-    #[serde(rename = "sid")]
+
+    #[serde(rename = "sid", with = "utils::id")]
     session_id: Id,
-    #[serde(rename = "i")]
+
+    #[serde(rename = "i", with = "utils::id")]
     inviter: Id,
-    #[serde(rename = "ie", skip_serializing_if = "Option::is_none")]
+
+    #[serde(rename = "ie", with = "utils::id_opt")]
     invitee: Option<Id>,
+
     #[serde(rename = "e")]
     expiration_ms: u64,
-    #[serde(rename = "sig")]
-    #[serde(with = "base64_bytes")]
+
+    #[serde(rename = "sig", with = "bytes_in_bas64")]
     signature: Vec<u8>,
-    #[serde(rename = "sk")]
-    #[serde(with = "base64_bytes")]
+
+    #[serde(rename = "sk", with = "bytes_in_bas64")]
     session_key: Vec<u8>,
 }
 
@@ -82,7 +86,7 @@ impl InviteTicket {
         })
     }
 
-    pub fn create(
+    pub(crate) fn create(
         inviter: &dyn Identity,
         channel_id: Id,
         session_id: Id,
@@ -91,15 +95,12 @@ impl InviteTicket {
         session_key: Vec<u8>,
     ) -> Result<Self> {
         let digest = Self::digest(
-            &channel_id,
-            &session_id,
-            inviter.id(),
-            invitee.as_ref(),
-            expiration_ms,
+            &channel_id, &session_id, inviter.id(), invitee.as_ref(), expiration_ms,
         );
         let signature = inviter
             .sign_into(&digest)
-            .map_err(|error| AuthenticationError::new(error.to_string()))?;
+            .map_err(|e| AuthenticationError::new(e.to_string()))?;
+
         Self::new(
             channel_id,
             session_id,
@@ -180,7 +181,7 @@ impl InviteTicket {
         )
     }
 
-    pub fn digest(
+    fn digest(
         channel_id: &Id,
         session_id: &Id,
         inviter: &Id,
@@ -188,44 +189,25 @@ impl InviteTicket {
         expiration_ms: u64,
     ) -> Vec<u8> {
         let mut sha256 = Sha256::new();
-        sha256.update(channel_id.as_bytes());
-        sha256.update(session_id.as_bytes());
-        sha256.update(inviter.as_bytes());
+        sha256.update(channel_id);
+        sha256.update(session_id);
+        sha256.update(inviter);
         if let Some(invitee) = invitee {
-            sha256.update(invitee.as_bytes());
+            sha256.update(invitee);
         }
         sha256.update(expiration_ms.to_be_bytes());
         sha256.finalize().to_vec()
     }
-
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self)
-            .map_err(|e| EncodingError::new(format!("Failed to encode invite ticket: {e}")).into())
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        serde_json::from_slice(bytes)
-            .map_err(|e| EncodingError::new(format!("Failed to decode invite ticket: {e}")).into())
-    }
 }
 
-mod base64_bytes {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use serde::{Deserialize, Deserializer, Serializer};
+impl FromStr for InviteTicket {
+    type Err = Error;
 
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&STANDARD.encode(bytes))
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let encoded = String::deserialize(deserializer)?;
-        STANDARD.decode(encoded).map_err(serde::de::Error::custom)
+    fn from_str(value: &str) -> Result<Self> {
+        serde_json::from_slice(value.as_bytes())
+            .map_err(|e| {
+                EncodingError::new(format!("Decoding invite ticket error: {e}")).into()
+            })
     }
 }
 
@@ -236,71 +218,27 @@ impl fmt::Display for InviteTicket {
     }
 }
 
-impl FromStr for InviteTicket {
-    type Err = Error;
+mod bytes_in_bas64 {
+    use std::result::Result as StdResult;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
 
-    fn from_str(value: &str) -> Result<Self> {
-        Self::from_bytes(value.as_bytes())
+    pub fn serialize<S>(bytes: &[u8], se: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        se.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> StdResult<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(de)?;
+        STANDARD.decode(encoded).map_err(serde::de::Error::custom)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::InviteTicket;
-    use boson_api::{CryptoIdentity, Id};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn named_ticket_is_signed_and_round_trips() {
-        let inviter = CryptoIdentity::new();
-        let channel_id = Id::random();
-        let session_id = Id::random();
-        let invitee = Id::random();
-        let expiration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
-            + 60_000;
-        let ticket = InviteTicket::create(
-            &inviter,
-            channel_id,
-            session_id,
-            Some(invitee),
-            expiration,
-            vec![7; 64],
-        )
-        .unwrap();
-
-        assert!(ticket.is_named_ticket());
-        assert!(ticket.is_genuine());
-        assert!(!ticket.is_expired());
-
-        let decoded = InviteTicket::from_bytes(&ticket.to_bytes().unwrap()).unwrap();
-        assert_eq!(decoded.channel_id(), &channel_id);
-        assert_eq!(decoded.session_id(), &session_id);
-        assert_eq!(decoded.invitee(), Some(&invitee));
-        assert!(decoded.is_genuine());
-        let json = ticket.to_string();
-        assert!(json.contains("\"sig\":\""));
-        assert!(json.contains("\"sk\":\""));
-    }
-
-    #[test]
-    fn revised_ticket_defensively_replaces_session_key() {
-        let inviter = CryptoIdentity::new();
-        let ticket = InviteTicket::create(
-            &inviter,
-            Id::random(),
-            Id::random(),
-            None,
-            u64::MAX,
-            vec![1; 64],
-        )
-        .unwrap();
-
-        let revised = ticket.revise(vec![2; 64]).unwrap();
-        assert!(revised.is_bearer_ticket());
-        assert!(revised.is_genuine());
-        assert_eq!(revised.session_key(), &[2; 64]);
-    }
-}
+#[path = "unitests/test_invite_ticket.rs"]
+mod test_invite_ticket;

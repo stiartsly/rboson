@@ -21,7 +21,9 @@
 mod channel_ops;
 mod contact_ops;
 mod conversation_ops;
+mod message_ops;
 
 pub use channel_ops::{ChannelEditorOps, ChannelOps};
 pub use contact_ops::{ContactEditorOps, ContactOps};
 pub use conversation_ops::ConversationOps;
+pub use message_ops::{MessageOps, MessageBuilderOps};

@@ -19,15 +19,14 @@
 // SOFTWARE.
 
 use std::{
-    collections::HashMap,
-    future::Future,
     cell::Cell,
     path::Path,
-    pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
+use boson_api::{logger, signature, Id};
+use boson_api::errors::{ArgumentError, Result, StateError};
 use crate::{
     channel::{Permission, Role, Channel},
     channel_listener::ChannelListener,
@@ -38,18 +37,16 @@ use crate::{
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     invite_ticket::InviteTicket,
-    message::{
-        content_type, ContentDisposition, Message, MessageBuilder, CONTENT_DISPOSITION_HEADER,
-    },
     message_listener::MessageListener,
     options::Options,
     session_info::SessionInfo,
     session_listener::SessionListener,
     verticle::{self, VerticleClient, VerticleOptions},
-    ClientConnectionListener, MessagingClient,
+    ClientConnectionListener,
+    MessagingClient,
+    message::{Message,MessageBuilder},
 };
-use boson_api::errors::{ArgumentError, Result, StateError};
-use boson_api::{logger, signature, Id};
+
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
@@ -249,7 +246,7 @@ impl Client {
         until: Option<i64>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         self.verticle_client()?
             .get_messages(*conversation_id, until, limit, offset)
             .await
@@ -261,7 +258,7 @@ impl Client {
         conversation_id: &Id,
         begin: i64,
         end: i64,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         self.verticle_client()?
             .get_messages_in_range(*conversation_id, begin, end)
             .await
@@ -290,13 +287,13 @@ impl Client {
     ///
     /// The builder captures the verticle sender as it is created, so a builder
     /// obtained while the client is stopped can never be sent later.
-    pub fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
+    pub fn message(&self, recipient: Option<Id>) -> MessageBuilder {
         let sender = self.verticle_ref().map(|verticle| verticle.sender());
-        Box::new(ComposedMessageBuilder::new(
+        MessageBuilder::new(
             recipient,
             sender,
             self.message_listener.clone(),
-        ))
+        )
     }
 }
 
@@ -653,7 +650,7 @@ impl MessagingClient for Client {
         self.is_ready()
     }
 
-    fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
+    fn message(&self, recipient: Option<Id>) -> MessageBuilder {
         self.message(recipient)
     }
 
@@ -679,7 +676,7 @@ impl MessagingClient for Client {
         until: Option<i64>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         self.get_messages(conversation_id, until, limit, offset)
             .await
     }
@@ -689,7 +686,7 @@ impl MessagingClient for Client {
         conversation_id: &Id,
         begin: i64,
         end: i64,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         self.get_messages_in_range(conversation_id, begin, end)
             .await
     }
@@ -848,148 +845,7 @@ impl MessagingClient for Client {
 // Message composition
 // ---------------------------------------------------------------------------
 
-/// Collects a message on the caller's side, then hands it to the verticle.
-///
-/// Nothing here touches the session: the builder only decides *what* to send,
-/// and [`Client::message`] captures the sender at construction time.
-struct ComposedMessageBuilder {
-    recipient: Option<Id>,
-    verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
-    message_listener: Arc<dyn MessageListener>,
-    content_type: Option<String>,
-    content_disposition: Option<ContentDisposition>,
-    headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
-    text: bool,
-}
 
-impl ComposedMessageBuilder {
-    fn new(
-        recipient: Option<Id>,
-        verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
-        message_listener: Arc<dyn MessageListener>,
-    ) -> Self {
-        Self {
-            recipient,
-            verticle_tx,
-            message_listener,
-            content_type: None,
-            content_disposition: None,
-            headers: Vec::new(),
-            body: None,
-            text: false,
-        }
-    }
-}
-
-impl MessageBuilder for ComposedMessageBuilder {
-    fn content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilder> {
-        self.content_type = Some(content_type.to_string());
-        self
-    }
-
-    fn content_disposition(
-        mut self: Box<Self>,
-        disposition: ContentDisposition,
-    ) -> Box<dyn MessageBuilder> {
-        self.content_disposition = Some(disposition);
-        self
-    }
-
-    fn text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilder> {
-        self.body = Some(text.as_bytes().to_vec());
-        self.text = true;
-        self
-    }
-
-    fn binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilder> {
-        self.body = Some(data);
-        self.text = false;
-        self
-    }
-
-    fn header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder> {
-        self.headers.push((key.to_string(), value.to_string()));
-        self
-    }
-
-    fn send(
-        self: Box<Self>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
-        Box::pin(async move {
-            let recipient = self
-                .recipient
-                .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
-            let body = self
-                .body
-                .ok_or_else(|| ArgumentError::new("Message content is required"))?;
-            let sender = self
-                .verticle_tx
-                .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-
-            let text = self.text;
-            let headers = merge_headers(
-                self.headers,
-                self.content_type,
-                self.content_disposition,
-                text,
-            );
-
-            let (promise, future) = verticle::Promise::pair();
-            sender
-                .send(verticle::Event::ContentMessage(
-                    verticle::WithParams {
-                        data: (recipient, headers, body, text),
-                        promise
-                    },
-                ))
-                .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-
-            let message = future.await.map_err(StateError::new)?;
-            self.message_listener.on_sent(message.as_ref());
-            Ok(message)
-        })
-    }
-}
-
-/// Folds the typed builder fields into the flat header map the verticle takes.
-///
-/// A binary body without an explicit [`MessageBuilder::content_type`] gets
-/// `application/octet-stream`. Note that an explicit type only counts when it
-/// came from `content_type`; a raw [`MessageBuilder::header`] of the same name
-/// is overwritten here — that matches the behaviour this method replaced.
-fn merge_headers(
-    headers: Vec<(String, String)>,
-    declared_type: Option<String>,
-    disposition: Option<ContentDisposition>,
-    text: bool,
-) -> HashMap<String, serde_json::Value> {
-    let mut merged: HashMap<String, serde_json::Value> = headers
-        .into_iter()
-        .map(|(key, value)| (key, serde_json::Value::String(value)))
-        .collect();
-
-    if let Some(declared_type) = declared_type {
-        merged.insert(
-            content_type::HEADER_NAME.into(),
-            serde_json::Value::String(declared_type),
-        );
-    } else if !text {
-        merged.insert(
-            content_type::HEADER_NAME.into(),
-            serde_json::Value::String(content_type::BINARY.into()),
-        );
-    }
-
-    if let Some(disposition) = disposition {
-        merged.insert(
-            CONTENT_DISPOSITION_HEADER.into(),
-            serde_json::Value::String(disposition.value()),
-        );
-    }
-
-    merged
-}
 
 fn ensure_members(members: &[Id]) -> Result<()> {
     if members.is_empty() {

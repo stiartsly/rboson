@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 use clap::{Arg, ArgMatches, Command};
-use boson::messaging::Client;
+use boson::messaging::{Client, MessageBuilderOps};
 use super::parse_id;
 
 pub(crate) fn cli() -> Command {
@@ -47,7 +47,7 @@ pub(crate) async fn execute(args: &ArgMatches, client: &Arc<Client>) {
         return;
     };
 
-    match client.message(Some(recipient)).text_body(content).send().await {
+    match client.message(Some(recipient)).with_text_body(content).send().await {
         Ok(_) => println!("Message sent to {recipient}"),
         Err(error) => println!("Sending message failed: {error}"),
     }

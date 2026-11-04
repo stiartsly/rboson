@@ -25,8 +25,6 @@ use serde::{Deserialize, Serialize};
 
 /// Information about a single device session for the current user.
 ///
-/// CBOR field names match the Java `SessionInfo` record:
-/// `id` = device_id, `o` = online, `lt` = last_active_ms, `la` = last_address.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     /// The boson `Id` of the device.
@@ -79,13 +77,7 @@ impl PartialEq for SessionInfo {
 
 impl fmt::Display for SessionInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "SessionInfo {{ device_id: {}, online: {}, last_active_ms: {}, last_address: {} }}",
-            self.device_id,
-            self.online,
-            self.last_active_ms,
-            self.last_address.as_deref().unwrap_or("N/A")
-        )
+        let json = serde_json::to_string(self).unwrap_or_default();
+        write!(f, "{}", json)
     }
 }

@@ -25,14 +25,14 @@ use boson_api::Id;
 ///
 #[derive(Debug, Clone)]
 pub struct FriendRequest {
-    user_id: Id,
+    user_id     : Id,
     initiator_id: Id,
-    hello: Option<String>,
-    accepted: bool,
+    hello       : Option<String>,
+    accepted    : bool,
 
-    created_at: SystemTime,
-    accepted_at: Option<SystemTime>,
-    updated_at: SystemTime
+    created_at  : SystemTime,
+    accepted_at : Option<SystemTime>,
+    updated_at  : SystemTime
 }
 
 impl FriendRequest {
@@ -45,9 +45,7 @@ impl FriendRequest {
         created_at: SystemTime
     ) -> Self {
         Self {
-            user_id,
-            initiator_id,
-            hello,
+            user_id, initiator_id, hello,
             accepted: false,
             created_at,
             accepted_at: None,
@@ -69,11 +67,6 @@ impl FriendRequest {
 
     pub fn is_accepted(&self) -> bool {
         self.accepted
-    }
-
-    #[allow(unused)]
-    pub(crate) fn accept(&mut self) {
-        self.accept_at(SystemTime::now());
     }
 
     pub(crate) fn accept_at(&mut self, accepted_at: SystemTime) {

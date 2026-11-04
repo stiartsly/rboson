@@ -20,22 +20,21 @@
 
 use std::{
     hash::Hash,
-    sync::Arc,
     time::SystemTime
 };
 use boson_api::Id;
 use boson_api::errors::{ArgumentError, Result};
+use crate::ops::{MessageOps, ConversationOps};
 use crate::{
     contact::{Contact, ContactType},
     invite_ticket::InviteTicket,
     message::Message,
-    ops::ConversationOps,
 };
 
 #[derive(Clone)]
 pub struct Conversation {
     contact: Contact,
-    last_message: Option<Arc<dyn Message>>,
+    last_message: Option<Message>,
     preview: Option<String>,
 }
 
@@ -50,19 +49,19 @@ impl Conversation {
         }
     }
 
-    pub(crate) fn update(&mut self, message: Arc<dyn Message>) -> Result<()> {
+    pub(crate) fn update(&mut self, message: Message) -> Result<()> {
         if message.conversation_id()
-                .map(|id| id != self.contact.id())
-                .unwrap_or(true) {
+            .map(|id| id != self.contact.id())
+            .unwrap_or(true) {
             return Err(ArgumentError::new("Message does not match the conversation"));
         }
 
-        self.preview = Self::preview_for(message.as_ref())?;
+        self.preview = Self::preview_for(&message)?;
         self.last_message = Some(message);
         Ok(())
     }
 
-    fn preview_for(message: &dyn Message) -> Result<Option<String>> {
+    fn preview_for(message: &Message) -> Result<Option<String>> {
         let Some(content) = message.payload_as_content() else {
             return Ok(None);
         };

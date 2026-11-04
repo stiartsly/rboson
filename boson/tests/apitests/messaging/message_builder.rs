@@ -22,7 +22,7 @@
 mod tests {
     use boson::{
         Id,
-        messaging::{Client, ContentDisposition, Options},
+        messaging::{Client, ContentDisposition, MessageBuilderOps, Options},
         signature::KeyPair,
     };
 
@@ -40,7 +40,7 @@ mod tests {
         let client = client();
         let missing_recipient = client
             .message(None)
-            .text_body("message")
+            .with_text_body("message")
             .send()
             .await
             .err()
@@ -60,10 +60,10 @@ mod tests {
         let recipient = Id::from(KeyPair::random().public_key());
         let not_running = client
             .message(Some(recipient))
-            .content_type("text/plain")
-            .content_disposition(ContentDisposition::attachment("message.txt"))
-            .header("X-Message-Test", "builder")
-            .text_body("builder message")
+            .with_content_type("text/plain")
+            .with_content_disposition(ContentDisposition::attachment("message.txt"))
+            .with_header("X-Message-Test", "builder")
+            .with_text_body("builder message")
             .send()
             .await
             .err()
@@ -73,8 +73,8 @@ mod tests {
 
         let binary_not_running = client
             .message(Some(recipient))
-            .content_type("application/octet-stream")
-            .binary_body(vec![0, 1, 2])
+            .with_content_type("application/octet-stream")
+            .with_binary_body(vec![0, 1, 2])
             .send()
             .await
             .err()

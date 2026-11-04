@@ -44,7 +44,8 @@ use crate::{
     conversation::Conversation,
     errors::{AuthenticationError, EncodingError, ProtocolError},
     invite_ticket::InviteTicket,
-    message::{Message, MessageBuilder, MessageType},
+    message::{Message, MessageType},
+    ops::{MessageBuilderOps, MessageOps},
     options::Options,
     session_info::SessionInfo,
     verticle::VerticleOptions,
@@ -57,8 +58,8 @@ use boson_api::{signature, CryptoIdentity, Id, Identity};
 use super::internal::{
     ChannelInfo, ChannelSessionKeyRotation, ContactData, ContactMutation, ContactSync,
     ContentFormat, Handshake, HandshakeType, MessageContent, MutationData, NewChannelInfo,
-    Notification, NotificationBody, NotificationEvent, OpaqueContact, PhotonMessage,
-    SessionContext, SyncType, Topic,
+    Notification, NotificationBody, NotificationEvent, OpaqueContact, SessionContext, SyncType,
+    Topic,
 };
 use super::mqtt::{
     self, decode_cbor, decode_cbor_bytes, to_cbor, to_cbor_bytes, ClientHandle, Inbound,
@@ -298,7 +299,7 @@ impl MemberUpdate {
 // Outbound (client -> service)
 //   1. collect    the operation builds its typed params from its arguments
 //   2. encode     params -> CBOR bytes          (`to_cbor_bytes`, `RPCRequest::serialize`)
-//   3. protect    body -> encrypted for the recipient, wrapped in a `PhotonMessage`
+//   3. protect    body -> encrypted for the recipient, wrapped in a `Message`
 //   4. envelope   message -> sealed for the service with the device key
 //                 (3 and 4 are `Outbound::seal`)
 //   5. publish    `MqttClient::publish`
@@ -306,7 +307,7 @@ impl MemberUpdate {
 //   7. finish     decode the reply, then update local state and listeners
 //
 // Inbound (service -> client) is the mirror image
-//   1. open       `MqttClient::interpret` opens the envelope into a `PhotonMessage`
+//   1. open       `MqttClient::interpret` opens the envelope into a `Message`
 //   2. classify   `RpcServer::classify` checks version, sender, topic and type
 //   3. unprotect  `unprotect_*` strip the inner encryption layer
 //   4. decode     CBOR bytes -> typed value
@@ -332,7 +333,7 @@ impl Outbound<'_> {
         body: Vec<u8>,
         inner: Option<&Id>,
         what: &str,
-    ) -> Result<(PhotonMessage, Vec<u8>)> {
+    ) -> Result<(Message, Vec<u8>)> {
         let body = match inner {
             Some(peer) => self
                 .user_identity
@@ -344,7 +345,7 @@ impl Outbound<'_> {
         };
         let created_at = u64::try_from(timestamp)
             .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
-        let message = PhotonMessage::new(
+        let message = Message::new(
             MESSAGE_VERSION,
             RpcServer::message_id(self.device_identity.id(), timestamp)?,
             *recipient,
@@ -1030,7 +1031,7 @@ impl RpcServer {
     /// The transport has already opened the envelope (stage 1), so this runs
     /// the remaining stages: classify, then hand over to the route's handler,
     /// which unprotects, decodes and applies the message.
-    async fn dispatch(&self, topic: Topic, message: PhotonMessage) -> Result<()> {
+    async fn dispatch(&self, topic: Topic, message: Message) -> Result<()> {
         let (route, from) = self.classify(topic, &message)?;
         match route {
             Route::RpcResponse => self.handle_device_rpc(message, &from),
@@ -1044,7 +1045,7 @@ impl RpcServer {
     ///
     /// The device inbox only ever carries RPC replies and notifications only
     /// come through the user inbox; everything else is routed by message type.
-    fn classify(&self, topic: Topic, message: &PhotonMessage) -> Result<(Route, Id)> {
+    fn classify(&self, topic: Topic, message: &Message) -> Result<(Route, Id)> {
         if message.version != MESSAGE_VERSION {
             return Err(ProtocolError::new(
                 message.version as i32,
@@ -1082,7 +1083,7 @@ impl RpcServer {
     /// Replies from the service are sealed with the device key only. Replies
     /// relayed on behalf of a channel peer carry a second layer that only this
     /// user can open, so they are decrypted twice.
-    fn handle_device_rpc(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+    fn handle_device_rpc(&self, message: Message, from: &Id) -> Result<()> {
         let payload = binary_payload(message.payload, "RPC response")?;
         let payload = if from == self.peer_id() {
             payload
@@ -1097,7 +1098,7 @@ impl RpcServer {
     /// Notifications about our own account are sealed for this user; channel
     /// notifications are sealed with the channel session key instead, which is
     /// why they need a lookup first.
-    async fn handle_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+    async fn handle_state_message(&self, message: Message, from: &Id) -> Result<()> {
         let home = from == self.peer_id() && message.recipient == *self.user_id();
         // A notification addressed to its own sender is a channel event, and
         // mutating channel state must not interleave with a pending request.
@@ -1136,7 +1137,7 @@ impl RpcServer {
     ///
     /// Handshakes travel through the outbox as well as the inbox: the copy we
     /// sent comes back to us, which is how we learn the service accepted it.
-    async fn handle_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
+    async fn handle_handshake(&self, topic: Topic, message: Message, from: Id) -> Result<()> {
         let timestamp = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let originated_here = message.id == Self::message_id(self.device_identity.id(), timestamp)?;
@@ -1237,7 +1238,7 @@ impl RpcServer {
     fn handle_content_message(
         &self,
         topic: Topic,
-        mut message: PhotonMessage,
+        mut message: Message,
         from: Id,
     ) -> Result<()> {
         let outbox = matches!(topic, Topic::UserOutbox);
@@ -1286,6 +1287,7 @@ impl RpcServer {
         };
         message.payload_bytes = content_bytes;
         message.content = Some(crate::message::Content::_new(headers, body));
+        message.conversation_id = Some(contact_id);
         let created_at = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let conversation_contact = self
@@ -1601,7 +1603,7 @@ impl RpcServer {
         _until: Option<i64>,
         _limit: usize,
         _offset: usize,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         Err(NotImplemented::new("get_messages"))
     }
 
@@ -1611,7 +1613,7 @@ impl RpcServer {
         _conversation_id: &Id,
         _begin: i64,
         _end: i64,
-    ) -> Result<Vec<Box<dyn Message>>> {
+    ) -> Result<Vec<Message>> {
         Err(NotImplemented::new("get_messages_in_range"))
     }
 
@@ -3019,8 +3021,8 @@ impl RpcServer {
 
 impl RpcServer {
     /// Starts composing an outgoing message to `recipient`.
-    pub(crate) fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilder> {
-        Box::new(SessionMessageBuilder {
+    pub(crate) fn message(&self, recipient: Option<Id>) -> SessionMessageBuilder {
+        SessionMessageBuilder {
             recipient,
             client: self.transport.client_handle(),
             user_identity: self.user_identity.clone(),
@@ -3036,7 +3038,7 @@ impl RpcServer {
             headers: Vec::new(),
             body: None,
             text: false,
-        })
+        }
     }
 }
 
@@ -3045,7 +3047,7 @@ impl RpcServer {
 /// The session itself stays on the verticle thread, so the builder captures the
 /// pieces it needs (identities, the MQTT handle, the conversation cache) and
 /// does all encoding and encryption on the caller's thread.
-struct SessionMessageBuilder {
+pub(crate) struct SessionMessageBuilder {
     recipient: Option<Id>,
     client: ClientHandle,
     user_identity: CryptoIdentity,
@@ -3063,41 +3065,35 @@ struct SessionMessageBuilder {
     text: bool,
 }
 
-impl MessageBuilder for SessionMessageBuilder {
-    fn content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilder> {
+impl MessageBuilderOps for SessionMessageBuilder {
+    fn with_content_type(mut self, content_type: &str) -> Self {
         self.content_type = Some(content_type.to_string());
         self
     }
 
-    fn content_disposition(
-        mut self: Box<Self>,
-        disposition: ContentDisposition,
-    ) -> Box<dyn MessageBuilder> {
+    fn with_content_disposition(mut self, disposition: ContentDisposition) -> Self {
         self.content_disposition = Some(disposition);
         self
     }
 
-    fn text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilder> {
+    fn with_text_body(mut self, text: &str) -> Self {
         self.body = Some(text.as_bytes().to_vec());
         self.text = true;
         self
     }
 
-    fn binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilder> {
+    fn with_binary_body(mut self, data: Vec<u8>) -> Self {
         self.body = Some(data);
         self.text = false;
         self
     }
 
-    fn header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilder> {
+    fn with_header(mut self, key: &str, value: &str) -> Self {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }
 
-    fn send(
-        self: Box<Self>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Message>>> + Send + 'static>> {
-        Box::pin(async move {
+    async fn send(self) -> Result<Message> {
             let recipient = self
                 .recipient
                 .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
@@ -3166,12 +3162,12 @@ impl MessageBuilder for SessionMessageBuilder {
             wire.sent_at = Some(SystemTime::now());
             wire.payload_bytes = content_bytes;
             wire.content = Some(crate::message::Content::_new(headers, body));
+            wire.conversation_id = Some(recipient);
             let contact = self
                 .conversation_contact
                 .unwrap_or_else(|| Contact::new(recipient, ContactType::Auto, timestamp));
             update_conversation(&self.conversations, contact, wire.clone())?;
-            Ok(Box::new(wire) as Box<dyn Message>)
-        })
+            Ok(wire)
     }
 }
 
@@ -3229,60 +3225,13 @@ fn headers_to_cbor(headers: &HashMap<String, serde_json::Value>) -> Result<HashM
 fn update_conversation(
     conversations: &Arc<Mutex<HashMap<Id, Conversation>>>,
     contact: Contact,
-    message: PhotonMessage,
+    message: Message,
 ) -> Result<()> {
-    let message = ConversationMessage {
-        message,
-        conversation_id: *contact.id(),
-    };
     let mut conversations = conversations.lock().unwrap();
     let conversation = conversations
         .entry(*contact.id())
         .or_insert_with(|| Conversation::new(contact));
-    conversation.update(Arc::new(message))
-}
-
-/// Pairs a wire message with the conversation it belongs to, so it can be
-/// handed out as the public [`Message`] trait object.
-struct ConversationMessage {
-    message: PhotonMessage,
-    conversation_id: Id,
-}
-
-impl Message for ConversationMessage {
-    fn id(&self) -> &Id {
-        self.message.id()
-    }
-    fn rid(&self) -> i64 {
-        self.message.rid()
-    }
-    fn conversation_id(&self) -> Option<&Id> {
-        Some(&self.conversation_id)
-    }
-    fn recipient(&self) -> &Id {
-        self.message.recipient()
-    }
-    fn message_type(&self) -> crate::message::MessageType {
-        self.message.message_type()
-    }
-    fn from(&self) -> Option<&Id> {
-        self.message.from()
-    }
-    fn created_at(&self) -> SystemTime {
-        self.message.created_at()
-    }
-    fn received_at(&self) -> Option<SystemTime> {
-        self.message.received_at()
-    }
-    fn sent_at(&self) -> Option<SystemTime> {
-        self.message.sent_at()
-    }
-    fn payload_as_bytes(&self) -> &[u8] {
-        self.message.payload_as_bytes()
-    }
-    fn payload_as_content(&self) -> Option<&crate::message::Content> {
-        self.message.payload_as_content()
-    }
+    conversation.update(message)
 }
 
 #[cfg(test)]

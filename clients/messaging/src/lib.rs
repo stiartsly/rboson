@@ -69,14 +69,19 @@ pub use {
     channel_member::ChannelMember,
     contact::{Contact, ContactType},
     contact_editor::ContactEditor,
-    ops::{ChannelEditorOps, ChannelOps, ContactEditorOps, ContactOps, ConversationOps},
+    ops::{
+        ChannelEditorOps, ChannelOps, ContactEditorOps, ContactOps, ConversationOps,
+        MessageBuilderOps, MessageOps,
+    },
     invite_ticket::InviteTicket,
     session_info::SessionInfo,
 };
 
 pub use message::{
-    Content, ContentDisposition, Type, Message, MessageBuilder,
-    MessageType, CONTENT_DISPOSITION_HEADER,
+    Content, ContentDisposition, Type,
+    Message, MessageBuilder,
+    MessageType,
+    CONTENT_DISPOSITION_HEADER,
 };
 
 pub(crate) use internal::ClientConnectionListener;

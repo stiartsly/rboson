@@ -18,27 +18,41 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use super::*;
 use serde_cbor::Value;
+use boson_api::Id;
+use crate::channel::Role;
+use super::ChannelMember;
 
 #[test]
-fn invalid_values() {
+fn test_invalid_values() {
     for (role, joined) in [("Unknown", 12), ("Owner", -1)] {
         let wire = Value::Map([
-            (Value::Text("id".into()), Value::Bytes(Id::default().as_bytes().to_vec())),
+            (Value::Text("id".into()), Value::Bytes(Id::random().as_bytes().to_vec())),
             (Value::Text("r".into()), Value::Text(role.into())),
             (Value::Text("j".into()), Value::Integer(joined.into())),
         ].into_iter().collect());
-        assert!(serde_cbor::from_slice::<ChannelMember>(&serde_cbor::to_vec(&wire).unwrap()).is_err());
+
+        let encoded = serde_cbor::to_vec(&wire).unwrap();
+        let decoded = serde_cbor::from_slice::<ChannelMember>(&encoded);
+        assert!(decoded.is_err());
     }
 }
 
 #[test]
-fn serde_channel_member() {
-    for role in [Role::Owner, Role::Moderator, Role::Member, Role::Banned] {
+fn test_serde() {
+    let roles = [
+        Role::Owner,
+        Role::Moderator,
+        Role::Member,
+        Role::Banned
+    ];
+
+    for role in roles {
         let member = ChannelMember::new(Id::random(), role, 12);
-        let bytes = serde_cbor::to_vec(&member).unwrap();
-        let Value::Map(fields) = serde_cbor::from_slice::<Value>(&bytes).unwrap() else {
+        let encoded = serde_cbor::to_vec(&member).unwrap();
+        let decoded = serde_cbor::from_slice::<Value>(&encoded).unwrap();
+
+        let Value::Map(fields) = decoded else {
             panic!("Channel member must serialize as a map");
         };
         assert_eq!(
@@ -46,7 +60,7 @@ fn serde_channel_member() {
             Some(&Value::Integer((role as i32).into()))
         );
 
-        let decoded: ChannelMember = serde_cbor::from_slice(&bytes).unwrap();
+        let decoded = serde_cbor::from_slice::<ChannelMember>(&encoded).unwrap();
         assert_eq!(decoded, member);
         assert_eq!(decoded.id(), member.id());
         assert_eq!(decoded.role(), role);

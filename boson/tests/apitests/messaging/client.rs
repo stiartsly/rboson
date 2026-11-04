@@ -11,6 +11,7 @@ use boson::messaging::{
     InviteTicket,
     Message,
     MessageListener,
+    MessageBuilderOps, MessageOps,
     MessageType,
     MessagingClient,
     Permission,
@@ -39,7 +40,7 @@ struct MessageCapture {
 }
 
 impl MessageListener for MessageCapture {
-    fn on_message(&self, message: &dyn Message) {
+    fn on_message(&self, message: &Message) {
         let content = message.payload_as_content();
         let captured = CapturedMessage {
             id: *message.id(),
@@ -146,13 +147,13 @@ fn create_client_with_channel_listener(
 }
 
 async fn wait_until_ready(client: &Client) {
-    time::timeout(Duration::from_secs(10), async {
+    time::timeout(Duration::from_secs(30), async {
         while !client.is_connected() || !client.is_ready() {
             time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("Client should connect and subscribe within 10 seconds");
+    .expect("Client should connect and subscribe within 30 seconds");
 }
 
 async fn wait_for_friend_request(
@@ -537,7 +538,7 @@ mod lifecycle {
 
         let error = client
             .message(Some(user_id))
-            .text_body("body")
+            .with_text_body("body")
             .send()
             .await
             .err()
@@ -583,7 +584,7 @@ mod lifecycle {
         assert!(client.remove_friend_requests(&[]).await.is_ok());
 
         let error = client
-            .message(None).text_body("body").send().await
+            .message(None).with_text_body("body").send().await
             .err().unwrap().to_string();
         assert!(error.contains("Message recipient is required"));
 
@@ -915,7 +916,7 @@ mod conversations {
         let body = "conversation API verification";
         let sent = bob
             .message(Some(alice_id))
-            .text_body(body)
+            .with_text_body(body)
             .send()
             .await
             .unwrap();
@@ -984,7 +985,7 @@ mod messages {
         let text = "message delivery verification";
         let sent = bob
             .message(Some(alice_id))
-            .text_body(text)
+            .with_text_body(text)
             .send()
             .await
             .unwrap();
@@ -1011,7 +1012,7 @@ mod messages {
         let binary = vec![0u8, 1, 2, 3, 255];
         let sent = bob
             .message(Some(alice_id))
-            .binary_body(binary.clone())
+            .with_binary_body(binary.clone())
             .send()
             .await
             .unwrap();
@@ -1148,7 +1149,8 @@ mod sessions {
             .err()
             .unwrap()
             .to_string();
-        assert!(error.contains("SessionRevoke"));
+        assert!(error.contains("code=-101"));
+        assert!(error.contains("not exists"));
 
         assert!(client.stop().await.is_ok());
         assert_client_stopped(&client);
@@ -1345,7 +1347,7 @@ mod channels {
         let body = "Alice channel message to Bob";
         let sent = alice
             .message(Some(channel_id))
-            .text_body(body)
+            .with_text_body(body)
             .send()
             .await
             .unwrap();

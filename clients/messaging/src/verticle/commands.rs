@@ -30,6 +30,7 @@ use boson_api::{
     Id,
     errors::{Result, StateError},
 };
+use crate::ops::MessageBuilderOps;
 use crate::{
     message::Message,
     rpc_server::RpcServer
@@ -367,20 +368,20 @@ async fn send_content_message(
     headers: HashMap<String, serde_json::Value>,
     body: Vec<u8>,
     text: bool,
-) -> Result<Box<dyn Message>> {
+) -> Result<Message> {
     let mut builder = engine.message(Some(recipient));
     for (key, value) in headers {
         let value = value
             .as_str()
             .ok_or_else(|| StateError::new(format!("Message header '{key}' is not text")))?;
-        builder = builder.header(&key, value);
+        builder = builder.with_header(&key, value);
     }
     builder = if text {
         let content =
             String::from_utf8(body).map_err(|error| StateError::new(error.to_string()))?;
-        builder.text_body(&content)
+        builder.with_text_body(&content)
     } else {
-        builder.binary_body(body)
+        builder.with_binary_body(body)
     };
     builder.send().await
 }

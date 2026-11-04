@@ -50,7 +50,7 @@ impl ConnectionListener for NoopConnectionListener {
 
 struct NoopMessageListener;
 impl MessageListener for NoopMessageListener {
-    fn on_message(&self, _message: &dyn super::Message) {}
+    fn on_message(&self, _message: &super::Message) {}
 }
 
 struct NoopChannelListener;

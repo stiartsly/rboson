@@ -56,8 +56,11 @@ pub mod session_listener;
 
 pub use {
     messaging_client::MessagingClient,
-    options::{Options, OptionsBuilder},
-    client::{Client},
+    options::{
+        Options,
+        OptionsBuilder,
+    },
+    client::Client,
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
     connection_listener::ConnectionListener,
@@ -65,24 +68,37 @@ pub use {
     message_listener::MessageListener,
     session_listener::SessionListener,
     channel_listener::ChannelListener,
-    channel::{Permission, Role},
+    channel::{
+        Permission,
+        Role,
+    },
     channel_member::ChannelMember,
-    contact::{Contact, ContactType},
+    contact::{
+        Contact,
+        ContactType,
+    },
     contact_editor::ContactEditor,
     ops::{
-        ChannelEditorOps, ChannelOps, ContactEditorOps, ContactOps, ConversationOps,
-        MessageBuilderOps, MessageOps,
+        ChannelEditorOps,
+        ChannelOps,
+        ContactEditorOps,
+        ContactOps,
+        ConversationOps,
+        MessageBuilderOps,
+        MessageOps,
     },
     invite_ticket::InviteTicket,
     session_info::SessionInfo,
 };
 
 pub use message::{
-    Content, ContentDisposition, Type,
-    Message, MessageBuilder,
+    Content,
+    ContentDisposition,
+    Type,
+    Message,
+    MessageBuilder,
     MessageType,
     CONTENT_DISPOSITION_HEADER,
 };
 
 pub(crate) use internal::ClientConnectionListener;
-

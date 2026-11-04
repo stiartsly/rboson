@@ -18,15 +18,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{Duration, SystemTime};
-use serde::{Deserialize, Serialize};
+use std::time::{
+    Duration,
+    SystemTime,
+};
 
-use boson_api::{utils, Id};
+use serde::{
+    Deserialize,
+    Serialize,
+};
+
+use boson_api::{
+    utils,
+    Id,
+};
+
 use crate::{
     channel::Permission,
-    internal::codec
+    internal::codec,
+    ChannelMember,
 };
-use crate::ChannelMember;
 
 /// Channel metadata and membership as sent by the service.
 #[derive(Serialize, Deserialize)]

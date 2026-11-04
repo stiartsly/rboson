@@ -19,14 +19,19 @@
 // SOFTWARE.
 
 use std::sync::Arc;
-use super::{ContextKind, SessionContext};
+
 use boson_api::{
     cryptobox::Nonce,
     errors::ArgumentError,
     CryptoIdentity,
     Id,
     Identity,
-    Signature
+    Signature,
+};
+
+use super::{
+    ContextKind,
+    SessionContext,
 };
 
 fn context(for_channel: bool, contact_id: Id) -> SessionContext {

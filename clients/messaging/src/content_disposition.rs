@@ -21,9 +21,13 @@
 use std::fmt;
 use unicode_normalization::{
     char::is_combining_mark,
-    UnicodeNormalization
+    UnicodeNormalization,
 };
-use boson_api::errors::{ArgumentError, Result};
+
+use boson_api::errors::{
+    ArgumentError,
+    Result,
+};
 
 pub const HEADER_NAME: &str = "Content-Disposition";
 

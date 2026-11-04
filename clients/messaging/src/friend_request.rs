@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 use std::time::SystemTime;
+
 use boson_api::Id;
 
 /// A pending or resolved friend request.

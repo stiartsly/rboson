@@ -18,16 +18,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde::{
+    Deserialize,
+    Serialize,
+};
+use serde_repr::{
+    Deserialize_repr,
+    Serialize_repr,
+};
 
 use boson_api::errors::{
     ArgumentError,
     Error,
     Result,
 };
-use super::{ContactMutation, OpaqueContact};
 
+use super::{
+    ContactMutation,
+    OpaqueContact,
+};
 #[derive(Serialize_repr, Deserialize_repr)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]

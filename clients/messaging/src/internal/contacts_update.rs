@@ -18,11 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Serialize, Deserialize};
-use crate::{
-    Contact
+use serde::{
+    Serialize,
+    Deserialize,
 };
 
+use crate::Contact;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactsUpdate {
     #[serde(rename = "v")]

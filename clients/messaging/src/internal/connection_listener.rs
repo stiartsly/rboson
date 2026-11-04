@@ -18,8 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::{
+    sync::atomic::{
+        AtomicBool,
+        Ordering,
+    },
+    sync::Arc,
+};
 
 use crate::ConnectionListener;
 

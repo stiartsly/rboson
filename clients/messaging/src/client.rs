@@ -22,13 +22,18 @@ use std::{
     cell::Cell,
     path::Path,
     sync::Arc,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool,Ordering}
 };
 
-use boson_api::{logger, signature, Id};
-use boson_api::errors::{ArgumentError, Result, StateError};
+use boson_api::{
+    logger,
+    signature,
+    Id,
+    Result,
+    errors::{ArgumentError, StateError},
+};
 use crate::{
-    channel::{Permission, Role, Channel},
+    channel::{Permission, Role,Channel},
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,
     contact::Contact,
@@ -41,12 +46,12 @@ use crate::{
     options::Options,
     session_info::SessionInfo,
     session_listener::SessionListener,
-    verticle::{self, VerticleClient, VerticleOptions},
+    verticle,
+    verticle::{VerticleClient, VerticleOptions },
     ClientConnectionListener,
     MessagingClient,
-    message::{Message,MessageBuilder},
+    message::{Message, MessageBuilder},
 };
-
 
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;

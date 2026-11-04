@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 use boson_api::Id;
+
 use crate::{
     ChannelMember,
     channel::Channel,

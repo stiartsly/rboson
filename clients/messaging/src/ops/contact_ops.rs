@@ -19,8 +19,12 @@
 // SOFTWARE.
 
 use boson_api::Id;
+
 use crate::{
-    contact::{Contact, ContactType},
+    contact::{
+        Contact,
+        ContactType,
+    },
     contact_editor::ContactEditor,
 };
 

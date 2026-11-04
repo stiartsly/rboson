@@ -21,15 +21,22 @@
 use std::{
     fmt,
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH}
 };
+use serde::{Serialize, Deserialize};
+use sha2::{Digest,Sha256};
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
-use boson_api::errors::{Error, Result};
-use boson_api::{utils, Id, Identity};
-use super::errors::{AuthenticationError, EncodingError};
+use boson_api::{
+    Error,
+    Result,
+    utils,
+    Id,
+    Identity,
+};
+use super::errors::{
+    AuthenticationError,
+    EncodingError,
+};
 
 /// Default ticket lifetime: seven days in milliseconds.
 pub const DEFAULT_EXPIRATION_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -220,8 +227,16 @@ impl fmt::Display for InviteTicket {
 
 mod bytes_in_bas64 {
     use std::result::Result as StdResult;
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use serde::{Deserialize, Deserializer, Serializer};
+
+    use base64::{
+        engine::general_purpose::STANDARD,
+        Engine,
+    };
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     pub fn serialize<S>(bytes: &[u8], se: S) -> StdResult<S::Ok, S::Error>
     where

@@ -18,8 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
 use std::borrow::Cow;
+
+use reedline::{
+    Prompt,
+    PromptEditMode,
+    PromptHistorySearch,
+};
 
 pub(crate) struct MyPrompt;
 

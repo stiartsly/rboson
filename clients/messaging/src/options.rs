@@ -19,7 +19,8 @@
 // SOFTWARE.
 
 use std::{
-    env, fs,
+    env,
+    fs,
     sync::Arc,
     path::{Path, PathBuf},
 };
@@ -28,8 +29,10 @@ use serde::Deserialize;
 use boson_api::{
     Id,
     PeerInfo,
+    Error,
+    Result,
+    errors::{ArgumentError, IOError},
     signature::{KeyPair, PrivateKey},
-    errors::{ArgumentError, Error, IOError, Result},
 };
 use super::{
     ConnectionListener,

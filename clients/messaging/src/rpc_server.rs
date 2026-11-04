@@ -28,48 +28,100 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use futures::{stream::FuturesUnordered, FutureExt};
+use futures::{
+    stream::FuturesUnordered,
+    FutureExt,
+};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use serde_cbor::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync;
 
+use boson_api::{
+    Result,
+    errors::{ArgumentError, NotImplemented, StateError},
+    signature,
+    CryptoIdentity,
+    Id,
+    Identity,
+};
+
 use crate::{
     channel::{Channel, Permission, Role},
     contact::{Contact, ContactType},
-    content_disposition::{ContentDisposition, HEADER_NAME as CONTENT_DISPOSITION_HEADER},
+    content_disposition::{
+        ContentDisposition,
+        HEADER_NAME as CONTENT_DISPOSITION_HEADER,
+    },
     content_type,
     conversation::Conversation,
-    errors::{AuthenticationError, EncodingError, ProtocolError},
+    errors::{
+        AuthenticationError,
+        EncodingError,
+        ProtocolError,
+    },
     invite_ticket::InviteTicket,
     message::{Message, MessageType},
     ops::{MessageBuilderOps, MessageOps},
     options::Options,
     session_info::SessionInfo,
     verticle::VerticleOptions,
-    ChannelListener, ChannelMember, ConnectionListener, ContactListener, FriendRequest,
-    FriendRequestListener, MessageListener, SessionListener,
+    ChannelListener,
+    ChannelMember,
+    ConnectionListener,
+    ContactListener,
+    FriendRequest,
+    FriendRequestListener,
+    MessageListener,
+    SessionListener,
 };
-use boson_api::errors::{ArgumentError, NotImplemented, Result, StateError};
-use boson_api::{signature, CryptoIdentity, Id, Identity};
 
-use super::internal::{
-    ChannelInfo, ChannelSessionKeyRotation, ContactData, ContactMutation, ContactSync,
-    ContentFormat, Handshake, HandshakeType, MessageContent, MutationData, NewChannelInfo,
-    Notification, NotificationBody, NotificationEvent, OpaqueContact, SessionContext, SyncType,
-    Topic,
-};
-use super::mqtt::{
-    self, decode_cbor, decode_cbor_bytes, to_cbor, to_cbor_bytes, ClientHandle, Inbound,
-    MqttClient, TransportEvent,
-};
-use super::rpc::{
-    call::Calls,
-    error::RPCError,
-    request::{ChannelInfoUpdate, JoinChannel, RPCRequest},
-    response::{Params as ResponseParams, RPCResponseMessage},
+use super::{
+    internal::{
+        ChannelInfo,
+        ChannelSessionKeyRotation,
+        ContactData,
+        ContactMutation,
+        ContactSync,
+        ContentFormat,
+        Handshake,
+        HandshakeType,
+        MessageContent,
+        MutationData,
+        NewChannelInfo,
+        Notification,
+        NotificationBody,
+        NotificationEvent,
+        OpaqueContact,
+        SessionContext,
+        SyncType,
+        Topic,
+    },
+    mqtt::{
+        self,
+        decode_cbor,
+        decode_cbor_bytes,
+        to_cbor,
+        to_cbor_bytes,
+        ClientHandle,
+        Inbound,
+        MqttClient,
+        TransportEvent,
+    },
+    rpc::{
+        call::Calls,
+        error::RPCError,
+        request::{
+            ChannelInfoUpdate,
+            JoinChannel,
+            RPCRequest,
+        },
+        response::{
+            Params as ResponseParams,
+            RPCResponseMessage,
+        },
+    },
 };
 
 const MESSAGE_VERSION: u8 = 2;

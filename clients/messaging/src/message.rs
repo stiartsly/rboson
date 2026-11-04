@@ -26,25 +26,23 @@ use std::{
 use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
-use boson_api::errors::{
+use boson_api::{
+    errors::{ArgumentError,StateError},
     Error,
     Result,
-    ArgumentError,
-    StateError
+    utils,
+    Id,
 };
-use boson_api::{utils, Id};
-
+use crate::{
+    verticle,
+    MessageListener,
+    ops::{MessageOps, MessageBuilderOps},
+};
 use super::content_type;
 pub use super::content_disposition::{
     ContentDisposition,
     Type,
     HEADER_NAME as CONTENT_DISPOSITION_HEADER,
-};
-
-use crate::{verticle, MessageListener};
-use crate::ops::{
-    MessageOps,
-    MessageBuilderOps,
 };
 
 // ---------------------------------------------------------------------------

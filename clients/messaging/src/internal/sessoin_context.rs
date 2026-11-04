@@ -18,13 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{
+    collections::hash_map::Entry,
+    collections::HashMap,
+    sync::Arc,
+};
 
-use boson_api::CryptoContext;
-use boson_api::errors::ArgumentError;
-use boson_api::{CryptoIdentity, Id, Identity, Result};
+use boson_api::{
+    CryptoContext,
+    errors::ArgumentError,
+    CryptoIdentity,
+    Id,
+    Identity,
+    Result,
+};
 
 /// Distinguishes one-to-one sessions from channel sessions, which keep a
 /// separate crypto context per sending member.

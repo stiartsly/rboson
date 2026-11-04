@@ -20,39 +20,44 @@
 
 #![allow(missing_docs)]
 
+use std::{
+    io::{
+        self,
+        Write,
+    },
+    sync::Arc,
+};
 use boson::{
     core::logger,
     errors::Result,
     Id,
+    messaging::{
+        channel::Channel,
+        ChannelListener,
+        Client,
+        ConnectionListener,
+        Contact,
+        ContactListener,
+        FriendRequestListener,
+        Message,
+        MessageListener,
+        MessageOps,
+        Options as MessagingOptions,
+        OptionsBuilder as MessagingOptionsBuilder,
+        SessionInfo,
+        SessionListener,
+    },
 };
-use boson::messaging::{
-    channel::Channel,
-    ChannelListener,
-    Client,
-    ConnectionListener,
-    Contact,
-    ContactListener,
-    FriendRequestListener,
-    Message,
-    MessageListener,
-    MessageOps,
-    Options as MessagingOptions,
-    OptionsBuilder as MessagingOptionsBuilder,
-    SessionInfo,
-    SessionListener,
-};
-
 use clap::Parser;
-use reedline::{ExternalPrinter, Reedline, Signal};
-use std::{
-    io::{self, Write},
-    sync::Arc,
+use reedline::{
+    ExternalPrinter,
+    Reedline,
+    Signal,
 };
 
 mod cmds;
 mod prompt;
 use prompt::MyPrompt;
-
 #[derive(Parser, Debug)]
 #[command(name = "chat", version = "1.0", about = "Photon chat")]
 struct Options {

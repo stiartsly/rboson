@@ -20,7 +20,11 @@
 
 use std::time::SystemTime;
 
-use boson_api::{Id, errors::Result};
+use boson_api::{
+    Id,
+    errors::Result,
+};
+
 use crate::contact::Contact;
 
 /// A conversation between the local user and another party (person or channel).

@@ -19,8 +19,7 @@
 // SOFTWARE.
 
 use std::{error::Error, fmt};
-
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 
 /// Wire-level RPC error codes shared with the service and the Java client.
 #[allow(dead_code)]

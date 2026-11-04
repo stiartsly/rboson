@@ -19,15 +19,19 @@
 // SOFTWARE.
 
 use std::fmt;
-use serde::{Deserialize, Serialize};
-use boson_api::Id;
+use serde::{Serialize, Deserialize};
+
+use boson_api::{
+    Id,
+    Result,
+    errors::ArgumentError,
+};
 use crate::{
     contact::{Contact, ContactType},
     contact_editor::ContactEditor,
-    ops::{ChannelEditorOps, ChannelOps, ContactOps},
+    ops::{ChannelEditorOps, ChannelOps,ContactOps},
     ChannelMember,
 };
-use boson_api::{Result, errors::ArgumentError};
 
 /// Controls who may invite new members to a channel.
 #[derive(Serialize, Deserialize)]
@@ -91,7 +95,6 @@ pub enum Role {
 }
 
 impl Role {
-    /// Returns `true` when this role is `Banned`.
     pub fn is_banned(&self) -> bool {
         return matches!(self, Role::Banned)
     }

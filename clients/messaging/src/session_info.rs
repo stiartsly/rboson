@@ -19,9 +19,9 @@
 // SOFTWARE.
 
 use std::fmt;
+use serde::{Serialize, Deserialize};
 
 use boson_api::Id;
-use serde::{Deserialize, Serialize};
 
 /// Information about a single device session for the current user.
 ///

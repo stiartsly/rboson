@@ -18,13 +18,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{
+    Duration,
+    SystemTime,
+    UNIX_EPOCH,
+};
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_cbor::Value;
 
-use crate::message::{Content, Message, MessageType};
-use boson_api::{utils, Id};
+use boson_api::{
+    utils,
+    Id,
+};
+
+use crate::message::{
+    Content,
+    Message,
+    MessageType,
+};
 
 /// Message envelope as it appears on the wire.
 ///

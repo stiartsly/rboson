@@ -20,12 +20,15 @@
 
 use std::{
     hash::Hash,
-    time::SystemTime
+    time::SystemTime,
 };
-use boson_api::Id;
-use boson_api::errors::{ArgumentError, Result};
-use crate::ops::{MessageOps, ConversationOps};
+
+use boson_api::{
+    Id,
+    errors::{Result, ArgumentError}
+};
 use crate::{
+    ops::{MessageOps, ConversationOps},
     contact::{Contact, ContactType},
     invite_ticket::InviteTicket,
     message::Message,

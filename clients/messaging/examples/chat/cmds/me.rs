@@ -19,7 +19,11 @@
 // SOFTWARE.
 
 use std::sync::Arc;
-use clap::{ArgMatches, Command};
+
+use clap::{
+    ArgMatches,
+    Command,
+};
 use boson::messaging::Client;
 
 pub(crate) fn cli() -> Command {

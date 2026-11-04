@@ -27,7 +27,7 @@ mod promise;
 
 use std::{
     result::Result as StdResult,
-    sync::Arc
+    sync::Arc,
 };
 use log::{debug, error};
 use tokio::{
@@ -35,10 +35,10 @@ use tokio::{
     task,
 };
 
-use boson_api::errors::{Result, StateError};
-
-use self::runtime::Verticle;
-
+use boson_api::errors::{
+    Result,
+    StateError,
+};
 use crate::{
     channel_listener::ChannelListener,
     connection_listener::ConnectionListener,
@@ -48,9 +48,9 @@ use crate::{
     session_listener::SessionListener,
     options::Options,
 };
-
 pub(crate) use client::VerticleClient;
 pub(crate) use event::{Event, WithParams};
+use runtime::Verticle;
 pub(crate) use promise::Promise;
 
 /// Everything needed to construct the messaging engine on its thread.

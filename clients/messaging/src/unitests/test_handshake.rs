@@ -18,8 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::internal::handshake::*;
 use serde_cbor::Value;
+
+use crate::internal::handshake::*;
 
 #[test]
 fn java_wire_roundtrip() {

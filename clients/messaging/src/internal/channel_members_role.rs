@@ -18,11 +18,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
-use crate::channel::Role;
-use crate::internal::codec;
 use boson_api::Id;
+
+use crate::{
+    channel::Role,
+    internal::codec,
+};
 
 /// Role change request for one or more channel members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,9 +48,9 @@ impl ChannelMembersRole {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_cbor::Value;
 
+    use super::*;
     #[test]
     fn serde_channel_members_role() {
         let dto = ChannelMembersRole::new(vec![Id::default()], Role::Moderator);

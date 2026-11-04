@@ -25,26 +25,53 @@ use std::{
     time::Duration,
 };
 use log::{debug, info, trace};
-use rumqttc::tokio_rustls::rustls::{
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    pki_types::{CertificateDer, ServerName, UnixTime},
-    ClientConfig, DigitallySignedStruct, Error as RustlsError, SignatureScheme,
-};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS, SubscribeFilter, TlsConfiguration,
+    tokio_rustls::rustls::client::danger::{
+        HandshakeSignatureValid,
+        ServerCertVerified,
+        ServerCertVerifier,
+    },
+    tokio_rustls::rustls::pki_types::{
+        CertificateDer,
+        ServerName,
+        UnixTime,
+    },
+    tokio_rustls::rustls::{
+        ClientConfig,
+        DigitallySignedStruct,
+        Error as RustlsError,
+        SignatureScheme,
+    },
+    AsyncClient,
+    Event,
+    EventLoop,
+    Incoming,
+    MqttOptions,
+    Publish,
+    QoS,
+    SubscribeFilter,
+    TlsConfiguration,
     Transport,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{
+    de::DeserializeOwned,
+    Serialize,
+};
 use serde_cbor::Value;
 
-use boson_api::{CryptoIdentity, Id, Identity};
-use boson_api::errors::{ArgumentError, Result, StateError};
+use boson_api::{
+    CryptoIdentity,
+    Id,
+    Identity,
+    Result,
+    errors::{ArgumentError, StateError}
+};
 use crate::{
     options::Options,
     errors::{AuthenticationError, EncodingError},
+    message::Message,
 };
 
-use crate::message::Message;
 use super::internal::Topic;
 
 /// The MQTT client handle, shared with the message builders on other threads.

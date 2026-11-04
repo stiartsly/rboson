@@ -19,15 +19,21 @@
 // SOFTWARE.
 
 use std::collections::HashMap;
+
 #[cfg(test)]
 use std::hash::Hash;
 
-#[cfg(test)]
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_cbor::Value;
 
+#[cfg(test)]
+use serde::de::DeserializeOwned;
+
 use boson_api::errors::Result;
+
 use crate::errors::EncodingError;
 
 /// Encoding of the message body carried by [`MessageContent`].

@@ -18,12 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
 use boson_api::{Id, Result};
 use crate::errors::EncodingError;
-use super::{error::RPCError, method::Method};
+use super::{
+    error::RPCError,
+    method::Method,
+};
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]

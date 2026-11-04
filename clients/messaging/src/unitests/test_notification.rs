@@ -19,11 +19,14 @@
 // SOFTWARE.
 
 use serde_cbor::Value;
-use crate::channel::{Permission, Role};
-use crate::internal::{
-    notification::*,
-    notification::Body as NotificationBody,
-    notification::Event as NotificationEvent,
+
+use crate::{
+    channel::{Permission, Role},
+    internal::{
+        notification::*,
+        notification::Body as NotificationBody,
+        notification::Event as NotificationEvent,
+    },
 };
 
 fn channel() -> ChannelInfo {

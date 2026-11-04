@@ -18,9 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
-use boson_api::{utils, Id};
+use boson_api::{
+    utils,
+    Id,
+};
 
 /// Session-key rotation request for a channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

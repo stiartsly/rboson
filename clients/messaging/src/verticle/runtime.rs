@@ -19,13 +19,16 @@
 // SOFTWARE.
 
 use std::rc::Rc;
-
 use futures::stream::StreamExt;
 use log::error;
 use tokio::{
     sync::mpsc,
     task,
-    time::{self, Duration, MissedTickBehavior},
+    time::{
+        self,
+        Duration,
+        MissedTickBehavior,
+    },
 };
 
 use boson_api::errors::Result;
@@ -34,7 +37,7 @@ use super::{
     commands,
     event::Event,
     transport,
-    VerticleOptions
+    VerticleOptions,
 };
 
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);

@@ -19,10 +19,12 @@
 // SOFTWARE.
 
 use std::rc::Rc;
-
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{mqtt::TransportEvent, rpc_server::RpcServer};
+use crate::{
+    mqtt::TransportEvent,
+    rpc_server::RpcServer,
+};
 
 /// One transport event plus the acknowledgement that lets the pump poll again.
 ///

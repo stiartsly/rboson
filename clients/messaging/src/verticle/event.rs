@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 use std::collections::HashMap;
+
 use boson_api::Id;
 use crate::{
     channel::{Channel, Permission, Role},

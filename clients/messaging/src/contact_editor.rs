@@ -18,8 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::contact::Contact;
-use crate::ops::ContactEditorOps;
+use crate::{
+    contact::Contact,
+    ops::ContactEditorOps,
+};
 
 pub struct ContactEditor {
     pub(crate) contact: Contact,

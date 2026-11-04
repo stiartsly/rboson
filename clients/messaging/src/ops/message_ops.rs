@@ -1,14 +1,18 @@
 use std::{
     time::SystemTime,
-    future::Future
+    future::Future,
 };
 
-use boson_api::{Id, Result};
+use boson_api::{
+    Id,
+    Result,
+};
+
 use crate::{
     Content,
     Message,
     MessageType,
-    message::ContentDisposition,
+    content_disposition::ContentDisposition,
 };
 
 /// A single message in a conversation.

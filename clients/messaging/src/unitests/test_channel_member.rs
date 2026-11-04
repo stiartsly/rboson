@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 use serde_cbor::Value;
+
 use boson_api::Id;
 use crate::channel::Role;
 use super::ChannelMember;

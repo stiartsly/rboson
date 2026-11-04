@@ -18,10 +18,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use super::*;
-use boson_api::{CryptoIdentity, Identity};
+use std::{
+    collections::HashMap,
+    time::Duration,
+};
+
+use boson_api::{
+    CryptoIdentity,
+    Identity,
+};
 use crate::options::OptionsBuilder;
-use std::{collections::HashMap, time::Duration};
+use super::*;
 
 pub(in crate) fn options() -> VerticleOptions {
     let mut builder = OptionsBuilder::new();
@@ -143,7 +150,10 @@ async fn starts_and_stops() {
 
 #[tokio::test]
 async fn sends_public_messages() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{
+        AsyncReadExt,
+        AsyncWriteExt,
+    };
 
     async fn packet(stream: &mut tokio::net::TcpStream) -> (u8, Vec<u8>) {
         let header = stream.read_u8().await.unwrap();

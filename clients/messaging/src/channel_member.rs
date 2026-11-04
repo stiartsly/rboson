@@ -18,10 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::{Id};
-use crate::channel::Role;
 use serde::{Serialize, Deserialize};
-pub(crate) use crate::internal::codec;
+
+use boson_api::Id;
+use crate::{
+    channel::Role,
+    internal::codec
+};
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

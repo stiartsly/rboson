@@ -18,8 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::path::Path;
-use std::fs;
+use std::{
+    path::Path,
+    fs,
+};
 use log::error;
 
 use boson_api::{
@@ -33,7 +35,6 @@ use crate::{
     message::Message,
     channel::Channel,
 };
-
 #[allow(unused)]
 #[derive(Debug)]
 pub(crate) struct Database;

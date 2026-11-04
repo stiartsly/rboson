@@ -18,24 +18,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use log::{debug, warn};
 use std::{
     cell::RefCell,
     collections::HashMap,
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context,Poll}
 };
+use log::{debug, warn};
 
-use super::{
-    method::Method,
-    response::{Params as ResponseParams, RPCResponseMessage},
+use boson_api::{
+    errors::StateError,
+    Id,
+    Promise,
+    PromiseFuture,
+    Result,
 };
 use crate::errors::{
     AuthenticationError,
-    EncodingError
+    EncodingError,
 };
-use boson_api::{errors::StateError, Id, Promise, PromiseFuture, Result};
+use super::{
+    method::Method,
+    response::{
+        Params as ResponseParams,
+        RPCResponseMessage,
+    },
+};
 
 struct PendingCall {
     method: Method,

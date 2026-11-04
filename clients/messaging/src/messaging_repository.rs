@@ -18,19 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{
+    de::DeserializeOwned,
+    Serialize,
+};
 
 use boson_api::{
     Id,
     Result,
     Error,
 };
-
 use crate::{
     message::Message,
     channel::Channel,
 };
-
 #[allow(unused)]
 pub(crate) trait MessagingRepository {
     fn put_config(&self, _key: &str, _value: Vec<u8>)-> Result<()>;

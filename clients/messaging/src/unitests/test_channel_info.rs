@@ -18,12 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::Id;
-use crate::{channel::Permission, internal::ChannelInfo};
-use super::ChannelMember;
-
-use crate::channel::Role;
 use serde_cbor::Value;
+
+use boson_api::Id;
+use crate::{
+    channel::Permission,
+    internal::ChannelInfo,
+    channel::Role,
+};
+use super::ChannelMember;
 
 #[test]
 fn test_channel_members() {
@@ -148,7 +151,11 @@ fn test_serde_metadata() {
     assert_eq!(decoded.members(), info.members());
     assert_eq!(decoded, info);
 
-    use std::hash::{Hash, Hasher};
+    use std::hash::{
+        Hash,
+        Hasher,
+    };
+
     let mut original_hash = std::collections::hash_map::DefaultHasher::new();
     let mut decoded_hash = std::collections::hash_map::DefaultHasher::new();
     info.hash(&mut original_hash);

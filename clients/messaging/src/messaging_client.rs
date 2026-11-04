@@ -20,10 +20,14 @@
 
 use std::{
     path::Path,
-    future::Future
+    future::Future,
 };
 
-use boson_api::{Id, signature, errors::Result};
+use boson_api::{
+    Id,
+    signature,
+    errors::Result,
+};
 use crate::{
     channel::{Channel, Permission, Role},
     contact::Contact,
@@ -31,7 +35,7 @@ use crate::{
     conversation::Conversation,
     friend_request::FriendRequest,
     invite_ticket::InviteTicket,
-    message::{Message, MessageBuilder},
+    message::{Message, MessageBuilder}
 };
 
 /// Default maximum number of messages returned by a range query.

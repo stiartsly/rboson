@@ -19,11 +19,18 @@
 // SOFTWARE.
 
 use std::fmt;
+
 use serde::Serialize;
 
-use crate::internal::codec;
-use crate::Permission;
-use boson_api::{utils, Id};
+use boson_api::{
+    utils,
+    Id,
+};
+
+use crate::{
+    internal::codec,
+    Permission,
+};
 
 /// Channel creation request sent to the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]

@@ -22,21 +22,26 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    rc::Rc
+    rc::Rc,
 };
-use futures::{FutureExt, stream::FuturesUnordered};
+use futures::{
+    FutureExt,
+    stream::FuturesUnordered,
+};
 
 use boson_api::{
     Id,
     errors::{Result, StateError},
 };
-use crate::ops::MessageBuilderOps;
 use crate::{
+    ops::MessageBuilderOps,
     message::Message,
-    rpc_server::RpcServer
+    rpc_server::RpcServer,
 };
-use super::promise::Promise;
-use super::event::{Event, WithParams, NoParams};
+use super::{
+    promise::Promise,
+    event::{Event, NoParams, WithParams}
+};
 
 pub(crate) type Pending = FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>;
 

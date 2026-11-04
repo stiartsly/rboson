@@ -7,15 +7,14 @@ use std::{
 use boson_api::{
     signature::KeyPair,
     CryptoIdentity,
-    Identity
+    Identity,
 };
-
 use crate::{
     connection_listener::ConnectionListener,
-    options::OptionsBuilder
+    options::OptionsBuilder,
 };
-use super::*;
 
+use super::*;
 #[derive(Clone, Default)]
 struct ThreadProbe(Arc<Mutex<Option<thread::ThreadId>>>);
 

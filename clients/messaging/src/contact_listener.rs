@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 use boson_api::Id;
+
 use crate::contact::Contact;
 
 /// The listener to handle events related to the contact list change events.

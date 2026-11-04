@@ -18,9 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::sync::{Arc, Mutex};
-use clap::{error, ArgMatches, Command};
-use boson::{messaging::Client, Id};
+use std::sync::{
+    Arc,
+    Mutex,
+};
+
+use clap::{
+    error,
+    ArgMatches,
+    Command,
+};
+use boson::{
+    messaging::Client,
+    Id,
+};
 
 macro_rules! println {
     () => {

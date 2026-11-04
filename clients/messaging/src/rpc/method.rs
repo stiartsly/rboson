@@ -18,13 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
+
 use boson_api::{
     errors::ArgumentError,
     Error,
-    Result
+    Result,
 };
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
 pub(crate) enum Method {

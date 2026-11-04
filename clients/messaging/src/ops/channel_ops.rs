@@ -19,8 +19,13 @@
 // SOFTWARE.
 
 use boson_api::Id;
+
 use crate::{
-    channel::{Channel, Permission, ChannelEditor},
+    channel::{
+        Channel,
+        Permission,
+        ChannelEditor,
+    },
     channel_member::ChannelMember,
     ops::ContactOps,
 };

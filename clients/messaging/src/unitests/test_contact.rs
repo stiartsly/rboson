@@ -18,13 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use serde_cbor::Value;
 
 use boson_api::Id;
 use crate::{
     internal::contact::ContactData,
     contact::Contact,
 };
-use serde_cbor::Value;
 
 fn new_contact_data(kind: u8, revision: i32) -> ContactData {
     let mut data = ContactData::new(Id::random(), kind, 100);

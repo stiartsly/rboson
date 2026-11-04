@@ -51,12 +51,28 @@ pub(crate) mod contact {
 
 pub(crate) use {
     // photon_message::PhotonMessage,
-    message_content::{ContentFormat, MessageContent},
-    handshake::{Handshake, HandshakeType},
-    notification::{Body as NotificationBody, Event as NotificationEvent, Notification},
+    message_content::{
+        ContentFormat,
+        MessageContent,
+    },
+    handshake::{
+        Handshake,
+        HandshakeType,
+    },
+    notification::{
+        Body as NotificationBody,
+        Event as NotificationEvent,
+        Notification,
+    },
     contac_data::ContactData,
-    contact_mutation::{ContactMutation, MutationData},
-    contact_sync::{ContactSync, SyncType},
+    contact_mutation::{
+        ContactMutation,
+        MutationData,
+    },
+    contact_sync::{
+        ContactSync,
+        SyncType,
+    },
     contact_opaque::OpaqueContact,
     channel_info::ChannelInfo,
     channel_session_rotation::ChannelSessionKeyRotation,

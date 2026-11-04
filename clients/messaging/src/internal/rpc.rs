@@ -20,13 +20,29 @@
 
 //! MQTT control frames retain the Java protocol's compact CBOR field names.
 //! Each pending call owns a oneshot promise; dropping its future unregisters it.
-use std::{cell::RefCell, collections::HashMap};
-use serde::{Deserialize, Serialize};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_cbor::Value;
 use tokio::sync::oneshot;
-use boson_api::{Id, errors::{Result, StateError}};
-use crate::errors::{AuthenticationError, EncodingError};
 
+use boson_api::{
+    Id,
+    errors::{
+        Result,
+        StateError,
+    },
+};
+
+use crate::errors::{
+    AuthenticationError,
+    EncodingError,
+};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Method {
     #[serde(rename = "sl")]
@@ -251,8 +267,9 @@ impl Calls {
 
         #[cfg(test)]
         mod tests {
-            use super::*;
             use std::time::Duration;
+
+            use super::*;
 
             fn response(id: i64, method: Method) -> Response {
                 Response { id, method, result: None, error: None }

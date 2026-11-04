@@ -22,14 +22,17 @@ use serde::Serialize;
 use serde_cbor::Value;
 
 use boson_api::{utils, Id};
-use super::{method::Method, params::ChannelMembersRole};
 use crate::{
     channel::{Permission, Role},
     internal::{
         ChannelSessionKeyRotation,
         ContactMutation,
-        NewChannelInfo
+        NewChannelInfo,
     },
+};
+use super::{
+    method::Method,
+    params::ChannelMembersRole,
 };
 
 #[derive(Debug, Serialize)]

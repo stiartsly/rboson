@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use std::thread::JoinHandle;
+
 use tokio::sync::mpsc;
 use log::warn;
 
@@ -34,8 +35,11 @@ use crate::{
     invite_ticket::InviteTicket,
     message::Message,
 };
-use super::event::{Event, NoParams, WithParams};
-use super::promise::Promise;
+
+use super::{
+    event::{Event, NoParams, WithParams},
+    promise::Promise,
+};
 
 const CHANNEL_CLOSED: &str = "verticle event channel closed";
 
@@ -45,7 +49,10 @@ pub(crate) struct VerticleClient {
 }
 
 impl VerticleClient {
-    pub(super) fn new(event_tx: mpsc::UnboundedSender<Event>, handle: JoinHandle<()>) -> Self {
+    pub(super) fn new(
+        event_tx: mpsc::UnboundedSender<Event>,
+        handle: JoinHandle<()>
+    ) -> Self {
         Self {
             event_tx,
             handle: Some(handle),

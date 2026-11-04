@@ -18,16 +18,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_cbor::Value;
 
-use boson_api::{CryptoIdentity, Id, Identity, Result, utils};
-use crate::{
-    contact::{Contact, ContactType},
-    errors::{AuthenticationError, EncodingError}
+use boson_api::{
+    CryptoIdentity,
+    Id,
+    Identity,
+    Result,
+    utils,
 };
-use super::OpaqueContact;
 
+use crate::{
+    contact::{
+        Contact,
+        ContactType,
+    },
+    errors::{
+        AuthenticationError,
+        EncodingError,
+    },
+};
+
+use super::OpaqueContact;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactData {
     #[serde(rename = "id")]

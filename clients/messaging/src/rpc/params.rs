@@ -21,12 +21,14 @@
 use serde::Serialize;
 
 use boson_api::{utils, Id};
-
-use crate::{channel::Role, internal::codec};
+use crate::{
+    channel::Role,
+    internal::codec,
+};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ChannelMembersRole {
-    #[serde(rename = "ids", serialize_with = "utils::ids::serialize")]
+    #[serde(rename = "ids", with = "utils::ids")]
     members: Vec<Id>,
 
     #[serde(rename = "r", with = "codec::role")]
@@ -44,7 +46,6 @@ mod tests {
     use serde_cbor::Value;
 
     use super::*;
-
     #[test]
     fn channel_members_role_serializes_ids_for_text_and_cbor() {
         let id = Id::random();

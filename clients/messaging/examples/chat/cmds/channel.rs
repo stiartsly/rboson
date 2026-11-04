@@ -18,11 +18,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{str::FromStr, sync::Arc};
-use clap::{arg, Arg, ArgMatches, Command};
-
+use std::{
+    str::FromStr,
+    sync::Arc,
+};
+use clap::{
+    arg,
+    Arg,
+    ArgMatches,
+    Command,
+};
 use boson::{
-    messaging::{Client, ContactOps, ContactType, InviteTicket, Permission},
+    messaging::{
+        Client,
+        ContactOps,
+        ContactType,
+        InviteTicket,
+        Permission,
+    },
     Id,
 };
 

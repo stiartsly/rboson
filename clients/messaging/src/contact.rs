@@ -18,16 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
+
 use boson_api::{
     Id,
-    errors::{Result, Error, ArgumentError}
+    Result,
+    Error,
+    errors::ArgumentError,
 };
 use crate::{
     errors::EncodingError,
     contact_editor::ContactEditor,
     ops::ContactOps,
-    internal::contact::ContactData
+    internal::contact::ContactData,
 };
 
 /// The type of a contact.

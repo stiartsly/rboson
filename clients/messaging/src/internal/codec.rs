@@ -22,9 +22,13 @@ use serde::{
     de::Error as DeError,
     Deserialize,
     Deserializer,
-    Serializer
+    Serializer,
 };
-use crate::channel::{Permission, Role};
+
+use crate::channel::{
+    Permission,
+    Role,
+};
 
 pub(crate) mod role {
     use super::*;

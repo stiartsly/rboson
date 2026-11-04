@@ -19,17 +19,33 @@
 // SOFTWARE.
 
 use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 
-use crate::errors::EncodingError;
-use crate::{ChannelMember, SessionInfo};
+use serde::{
+    Deserialize,
+    Serialize,
+};
+
 use boson_api::{
-    errors::{Error, Result},
+    errors::{
+        Error,
+        Result,
+    },
     Id,
 };
 
-use super::channel::{ChannelInfo, ChannelMembersRole};
-use super::contact::ContactSync;
+use crate::{
+    errors::EncodingError,
+    ChannelMember,
+    SessionInfo,
+};
+
+use super::{
+    channel::{
+        ChannelInfo,
+        ChannelMembersRole,
+    },
+    contact::ContactSync,
+};
 
 /// Notification event tag used on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

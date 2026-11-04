@@ -18,13 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
-use crate::errors::EncodingError;
 use boson_api::{
-    errors::{Error, Result},
+    errors::{
+        Error,
+        Result,
+    },
     Id,
 };
+
+use crate::errors::EncodingError;
 
 /// Friend-request handshake payload.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

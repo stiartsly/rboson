@@ -20,30 +20,29 @@
 
 use std::{
     collections::HashMap,
-    sync::Arc,
     time::{SystemTime, Duration, UNIX_EPOCH},
 };
 use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
 use boson_api::{
-    errors::{ArgumentError,StateError},
+    errors::ArgumentError,
     Error,
     Result,
     utils,
     Id,
 };
 use crate::{
-    verticle,
-    MessageListener,
     MessageOps,
-    MessageBuilderOps,
+    interfaces::ContentOps,
 };
 use super::content_type;
 pub use super::content_disposition::{
     ContentDisposition,
-    Type
+    ContentType,
+    HEADER_NAME as CONTENT_DISPOSITION_HEADER,
 };
+pub use crate::message_builder::MessageBuilder;
 
 // ---------------------------------------------------------------------------
 // MessageType
@@ -54,13 +53,13 @@ pub use super::content_disposition::{
 #[repr(i32)]
 pub enum MessageType {
     /// Initial handshake / key-exchange message.
-    HandshakeMessage = 0,
+    Handshake = 0,
     /// Regular user-visible content message.
-    ContentMessage = 1,
+    Content = 1,
     /// Control / signalling message (not user-visible).
-    ControlMessage = 2,
+    Control = 2,
     /// State-synchronisation message.
-    StateMessage = 3,
+    State = 3,
 }
 
 impl TryFrom<i32> for MessageType {
@@ -68,11 +67,11 @@ impl TryFrom<i32> for MessageType {
 
     fn try_from(value: i32) -> Result<Self> {
         match value {
-            0 => Ok(MessageType::HandshakeMessage),
-            1 => Ok(MessageType::ContentMessage),
-            2 => Ok(MessageType::ControlMessage),
-            3 => Ok(MessageType::StateMessage),
-            _ => Err(ArgumentError::new(format!("Unknown MessageType value: {}",value)))
+            0 => Ok(MessageType::Handshake),
+            1 => Ok(MessageType::Content),
+            2 => Ok(MessageType::Control),
+            3 => Ok(MessageType::State),
+            _ => Err(ArgumentError::new(format!("invalid message type: {}",value)))
         }
     }
 }
@@ -86,6 +85,25 @@ impl TryFrom<i32> for MessageType {
 pub struct Content {
     headers: HashMap<String, serde_json::Value>,
     body: Vec<u8>,
+}
+
+impl ContentOps for Content {
+    fn headers(&self) -> &HashMap<String, serde_json::Value> {
+        &self.headers
+    }
+
+    fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    fn as_text(&self) -> Result<String> {
+        String::from_utf8(self.body.clone())
+            .map_err(|error| crate::errors::EncodingError::new(error.to_string()).into())
+    }
+
+    fn as_binary(&self) -> Result<Vec<u8>> {
+        Ok(self.body.clone())
+    }
 }
 
 impl Content {
@@ -108,7 +126,7 @@ impl Content {
 
     /// The parsed content disposition, if the header is present and valid.
     pub fn content_disposition(&self) -> Result<Option<ContentDisposition>> {
-        let Some(value) = self.headers.get(ContentDisposition::HEADER_NAME) else {
+        let Some(value) = self.headers.get(CONTENT_DISPOSITION_HEADER) else {
             return Ok(None);
         };
         let value = value.as_str().ok_or_else(|| {
@@ -141,16 +159,21 @@ pub struct Message {
     #[serde(rename = "v")]
     pub(crate) version: u8,
 
-    #[serde(rename = "id")]
+    #[serde(rename = "id", with = "utils::id")]
     pub(crate) id: Id,
 
-    #[serde(rename = "r")]
+    #[serde(rename = "r", with = "utils::id")]
     pub(crate) recipient: Id,
 
     #[serde(rename = "y")]
     pub(crate) message_type: u8,
 
-    #[serde(rename = "f", default, with = "utils::id_opt")]
+    #[serde(
+        rename = "f",
+        default,
+        with = "utils::id_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) from: Option<Id>,
 
     #[serde(
@@ -231,7 +254,7 @@ impl MessageOps for Message {
 
     fn message_type(&self) -> MessageType {
         // Only content messages are surfaced through the public listener API.
-        MessageType::ContentMessage
+        MessageType::Content
     }
 
     fn from(&self) -> Option<&Id> {
@@ -257,133 +280,6 @@ impl MessageOps for Message {
     fn payload_as_content(&self) -> Option<&Content> {
         self.content.as_ref()
     }
-}
-
-pub struct MessageBuilder {
-    recipient: Option<Id>,
-    verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
-    message_listener: Arc<dyn MessageListener>,
-    content_type: Option<String>,
-    content_disposition: Option<ContentDisposition>,
-    headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
-    text: bool,
-}
-
-impl MessageBuilder {
-    pub(crate) fn new(
-        recipient: Option<Id>,
-        verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
-        message_listener: Arc<dyn MessageListener>,
-    ) -> Self {
-        Self {
-            recipient,
-            verticle_tx,
-            message_listener,
-            content_type: None,
-            content_disposition: None,
-            headers: Vec::new(),
-            body: None,
-            text: false,
-        }
-    }
-}
-
-
-impl MessageBuilderOps for MessageBuilder {
-    fn with_content_type(mut self, content_type: &str) -> Self {
-        self.content_type = Some(content_type.to_string());
-        self
-    }
-
-    fn with_content_disposition(mut self, disposition: ContentDisposition) -> Self {
-        self.content_disposition = Some(disposition);
-        self
-    }
-
-    fn with_text_body(mut self, text: &str) -> Self {
-        self.body = Some(text.as_bytes().to_vec());
-        self.text = true;
-        self
-    }
-
-    fn with_binary_body(mut self, data: Vec<u8>) -> Self {
-        self.body = Some(data);
-        self.text = false;
-        self
-    }
-
-    fn with_header(mut self, key: &str, value: &str) -> Self {
-        self.headers.push((key.to_string(), value.to_string()));
-        self
-    }
-
-    async fn send(self) -> Result<Message> {
-        let recipient = self
-            .recipient
-            .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
-        let body = self
-            .body
-            .ok_or_else(|| ArgumentError::new("Message content is required"))?;
-        let sender = self
-            .verticle_tx
-            .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-
-        let text = self.text;
-        let headers = merge_headers(
-            self.headers,
-            self.content_type,
-            self.content_disposition,
-            text,
-        );
-
-        let (promise, future) = verticle::Promise::pair();
-        sender
-            .send(verticle::Event::ContentMessage(
-                verticle::WithParams {
-                    data: (recipient, headers, body, text),
-                    promise
-                },
-            ))
-            .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
-
-        let message = future.await.map_err(StateError::new)?;
-        self.message_listener.on_sent(&message);
-        Ok(message)
-    }
-}
-
-fn merge_headers(
-    headers: Vec<(String, String)>,
-    declared_type: Option<String>,
-    disposition: Option<ContentDisposition>,
-    text: bool,
-) -> HashMap<String, serde_json::Value> {
-    let mut merged: HashMap<String, serde_json::Value> = headers
-        .into_iter()
-        .map(|(key, value)| (key, serde_json::Value::String(value)))
-        .collect();
-
-    if let Some(declared_type) = declared_type {
-        merged.insert(
-            content_type::HEADER_NAME.into(),
-            serde_json::Value::String(declared_type),
-        );
-    } else if !text {
-        merged.insert(
-            content_type::HEADER_NAME.into(),
-            serde_json::Value::String(content_type::BINARY.into()),
-        );
-    }
-
-    if let Some(disposition) = disposition {
-        merged.insert(
-            ContentDisposition::HEADER_NAME.into(),
-            serde_json::Value::String(disposition.value()),
-        );
-    }
-
-    merged
 }
 
 #[cfg(test)]

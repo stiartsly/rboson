@@ -18,25 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{
-    Deserialize,
-    Serialize,
-};
-use serde_repr::{
-    Deserialize_repr,
-    Serialize_repr,
-};
+use serde::{Serialize, Deserialize};
+use serde_repr::{Serialize_repr, Deserialize_repr};
 
 use boson_api::errors::{
     ArgumentError,
     Error,
     Result,
 };
-
 use super::{
     ContactMutation,
     OpaqueContact,
 };
+
 #[derive(Serialize_repr, Deserialize_repr)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -55,7 +49,7 @@ impl TryFrom<i32> for SyncType {
             1 => Ok(Self::Delta),
             2 => Ok(Self::Snapshot),
             _ => Err(ArgumentError::new(format!(
-                "Invalid contact sync type: {value}"
+                "Invalid contact sync: {value}"
             ))),
         }
     }
@@ -63,7 +57,7 @@ impl TryFrom<i32> for SyncType {
 
 /// A validated contact sync notification or response.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(try_from = "ContactSyncData")]
+#[serde(try_from = "ContactSyncRaw")]
 pub(crate) struct ContactSync {
     #[serde(rename = "v")]
     revision: i32,
@@ -73,32 +67,6 @@ pub(crate) struct ContactSync {
     mutations: Vec<ContactMutation>,
     #[serde(rename = "s", skip_serializing_if = "Vec::is_empty")]
     contacts: Vec<OpaqueContact>,
-}
-
-/// Raw sync payload; nullable lists are accepted and normalised to empty ones.
-#[derive(Deserialize)]
-struct ContactSyncData {
-    #[serde(rename = "v")]
-    revision: i32,
-    #[serde(rename = "t")]
-    kind: SyncType,
-    #[serde(rename = "d", default, skip_serializing_if = "utils::is_default")]
-    mutations: Option<Vec<ContactMutation>>,
-    #[serde(rename = "s", default, skip_serializing_if = "utils::is_default")]
-    contacts: Option<Vec<OpaqueContact>>,
-}
-
-impl TryFrom<ContactSyncData> for ContactSync {
-    type Error = Error;
-
-    fn try_from(data: ContactSyncData) -> Result<Self> {
-        Self::new(
-            data.revision,
-            data.kind,
-            data.mutations.unwrap_or_default(),
-            data.contacts.unwrap_or_default(),
-        )
-    }
 }
 
 impl ContactSync {
@@ -163,5 +131,42 @@ impl ContactSync {
 
     pub(crate) fn contacts(&self) -> &[OpaqueContact] {
         &self.contacts
+    }
+}
+
+
+#[derive(Deserialize)]
+struct ContactSyncRaw {
+    #[serde(rename = "v")]
+    revision: i32,
+
+    #[serde(rename = "t")]
+    kind: SyncType,
+
+    #[serde(
+        rename = "d",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
+    mutations: Option<Vec<ContactMutation>>,
+
+    #[serde(
+        rename = "s",
+        default,
+        skip_serializing_if = "utils::is_default"
+    )]
+    contacts: Option<Vec<OpaqueContact>>,
+}
+
+impl TryFrom<ContactSyncRaw> for ContactSync {
+    type Error = Error;
+
+    fn try_from(data: ContactSyncRaw) -> Result<Self> {
+        Self::new(
+            data.revision,
+            data.kind,
+            data.mutations.unwrap_or_default(),
+            data.contacts.unwrap_or_default(),
+        )
     }
 }

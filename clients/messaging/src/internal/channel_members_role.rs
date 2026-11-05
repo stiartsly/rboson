@@ -39,3 +39,7 @@ impl ChannelMembersRole {
         Self { member_ids, role }
     }
 }
+
+#[cfg(test)]
+#[path = "../unitests/test_channel_member_role.rs"]
+mod test_channel_member_role;

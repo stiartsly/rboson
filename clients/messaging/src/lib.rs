@@ -22,9 +22,9 @@
 // with the workspace lints.
 #![allow(missing_docs)]
 
+pub(crate) mod interfaces;
 pub(crate) mod internal;
 pub(crate) mod rpc;
-pub mod interfaces;
 
 pub(crate) mod mqtt;
 pub(crate) mod rpc_server;
@@ -32,27 +32,32 @@ pub(crate) mod verticle;
 
 pub mod client;
 pub mod options;
-pub mod channel;
-pub mod channel_member;
-pub mod contact;
-pub mod contact_editor;
 pub mod errors;
-pub mod conversation;
-pub mod friend_request;
-pub mod invite_ticket;
-pub mod message;
-pub mod content_type;
-pub mod content_disposition;
-
-pub mod session_info;
 pub mod messaging_client;
 
-pub mod channel_listener;
-pub mod connection_listener;
-pub mod contact_listener;
-pub mod friend_request_listener;
-pub mod message_listener;
+pub mod session_info;
 pub mod session_listener;
+pub mod connection_listener;
+
+pub mod friend_request;
+pub mod friend_request_listener;
+
+pub mod contact;
+pub mod contact_editor;
+pub mod contact_listener;
+
+pub mod invite_ticket;
+pub mod channel;
+pub mod channel_member;
+pub mod channel_listener;
+
+pub mod conversation;
+pub mod content;
+pub mod content_type;
+pub mod content_disposition;
+pub mod message;
+pub mod message_builder;
+pub mod message_listener;
 
 pub use {
     messaging_client::MessagingClient,
@@ -94,10 +99,11 @@ pub use {
 pub use message::{
     Content,
     ContentDisposition,
-    Type,
+    ContentType,
     Message,
     MessageBuilder,
     MessageType,
+    CONTENT_DISPOSITION_HEADER,
 };
 
 pub(crate) use internal::ClientConnectionListener;

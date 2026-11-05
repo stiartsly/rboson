@@ -991,7 +991,7 @@ mod messages {
             .unwrap();
         assert_eq!(sent.from(), Some(&bob_id));
         assert_eq!(sent.recipient(), &alice_id);
-        assert_eq!(sent.message_type(), MessageType::ContentMessage);
+        assert_eq!(sent.message_type(), MessageType::Content);
         assert!(sent.sent_at().is_some());
         assert!(sent.received_at().is_none());
         assert!(sent.created_at() <= SystemTime::now());

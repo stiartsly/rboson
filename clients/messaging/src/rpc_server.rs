@@ -127,9 +127,9 @@ const HANDSHAKE_MESSAGE: u8 = 0;
 
 // `MessageType` is an enum, so its discriminants cannot be used directly as
 // match patterns; these mirror them for the dispatch below.
-const CONTROL_MESSAGE: u8 = MessageType::ControlMessage as u8;
-const STATE_MESSAGE: u8 = MessageType::StateMessage as u8;
-const CONTENT_MESSAGE: u8 = MessageType::ContentMessage as u8;
+const CONTROL_MESSAGE: u8 = MessageType::Control as u8;
+const STATE_MESSAGE: u8 = MessageType::State as u8;
+const CONTENT_MESSAGE: u8 = MessageType::Content as u8;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 

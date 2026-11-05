@@ -210,7 +210,7 @@ async fn handles_requests() {
                         session_identity = Some(CryptoIdentity::try_from(key.as_slice()).unwrap());
                     } else {
                         assert_eq!(wire.recipient, friend_id);
-                        assert_eq!(wire.message_type, crate::message::MessageType::ContentMessage as u8);
+                        assert_eq!(wire.message_type, crate::message::MessageType::Content as u8);
                         let content: MessageContent = serde_cbor::from_slice(
                             &session_identity.as_ref().unwrap().decrypt_into(&user_id, &payload).unwrap(),
                         ).unwrap();
@@ -529,7 +529,7 @@ async fn routes_notifications() {
     let mut wire = WireMessage {
         version: MESSAGE_VERSION, id: Id::random(), recipient: *session.user_id(),
         from: Some(*peer.id()), created_at: 1234,
-        message_type: crate::message::MessageType::StateMessage as u8,
+        message_type: crate::message::MessageType::State as u8,
         payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
     };
     let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
@@ -546,7 +546,7 @@ async fn routes_notifications() {
     session.handle_user_publish(peer.id(), USER_INBOX, &envelope).unwrap();
     assert_eq!(session.contacts_revision.get(), 1);
     wire.from = Some(*CryptoIdentity::new().id());
-    wire.message_type = crate::message::MessageType::ControlMessage as u8;
+    wire.message_type = crate::message::MessageType::Control as u8;
     let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&wire).unwrap()).unwrap();
     assert!(session.handle_user_publish(peer.id(), DEVICE_INBOX, &envelope).is_err());
     assert_eq!(*observed.events.lock().unwrap(), vec![("session", other)]);
@@ -678,7 +678,7 @@ async fn uses_content_keys() {
             version: MESSAGE_VERSION, id: Id::random(),
             recipient: if outbox { *friend.id() } else { *session.user_id() },
             from: Some(from), created_at: 1234,
-            message_type: crate::message::MessageType::ContentMessage as u8,
+            message_type: crate::message::MessageType::Content as u8,
             payload: Value::Bytes(payload),
         };
         let envelope = peer.encrypt_into(session.device_id(), &serde_cbor::to_vec(&message).unwrap()).unwrap();
@@ -829,7 +829,7 @@ async fn syncs_device_inbox() {
                     let envelope = peer.decrypt_into(&device, &body[offset + 2..]).unwrap();
                     let message: WireMessage = serde_cbor::from_slice(&envelope).unwrap();
                     assert_eq!(message.recipient, *peer.id());
-                    assert_eq!(message.message_type, crate::message::MessageType::ControlMessage as u8);
+                    assert_eq!(message.message_type, crate::message::MessageType::Control as u8);
                     assert!(message.from.is_none());
                     let Value::Bytes(payload) = message.payload else { panic!("RPC payload should be binary") };
                     let request: RpcRequest = serde_cbor::from_slice(&payload).unwrap();
@@ -855,7 +855,7 @@ async fn syncs_device_inbox() {
                     let wire = WireMessage {
                         version: MESSAGE_VERSION, id: Id::random(), recipient: user,
                         from: Some(*peer.id()), created_at: request.id,
-                        message_type: crate::message::MessageType::ControlMessage as u8,
+                        message_type: crate::message::MessageType::Control as u8,
                         payload: Value::Bytes(serde_cbor::to_vec(&response).unwrap()),
                     };
                     let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();
@@ -871,7 +871,7 @@ async fn syncs_device_inbox() {
                         let wire = WireMessage {
                             version: MESSAGE_VERSION, id: Id::random(), recipient: user,
                             from: Some(*peer.id()), created_at: request.id,
-                            message_type: crate::message::MessageType::StateMessage as u8,
+                            message_type: crate::message::MessageType::State as u8,
                             payload: Value::Bytes(serde_cbor::to_vec(&notification).unwrap()),
                         };
                         let payload = peer.encrypt_into(&device, &serde_cbor::to_vec(&wire).unwrap()).unwrap();

@@ -31,12 +31,12 @@ use boson_api::errors::{
 
 /// How message content should be presented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Type {
+pub enum ContentType {
     Inline,
     Attachment,
 }
 
-impl Type {
+impl ContentType {
     pub fn parse(value: &str) -> Result<Self> {
         match value {
             "inline" => Ok(Self::Inline),
@@ -48,7 +48,7 @@ impl Type {
     }
 }
 
-impl fmt::Display for Type {
+impl fmt::Display for ContentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Inline => "inline",
@@ -62,12 +62,14 @@ impl fmt::Display for Type {
 /// potentially with a filename.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentDisposition {
-    disposition_type: Type,
+    disposition_type: ContentType,
     filename: Option<String>,
     ascii_filename: Option<String>,
     rfc5987_filename: Option<String>,
 
 }
+
+pub const HEADER_NAME: &str = ContentDisposition::HEADER_NAME;
 
 impl ContentDisposition {
     pub const HEADER_NAME: &str = "Content-Disposition";
@@ -75,7 +77,7 @@ impl ContentDisposition {
     /// An inline disposition with no filename.
     pub fn inline() -> Self {
         Self {
-            disposition_type: Type::Inline,
+            disposition_type: ContentType::Inline,
             filename: None,
             ascii_filename: None,
             rfc5987_filename: None,
@@ -84,15 +86,15 @@ impl ContentDisposition {
 
     /// An inline disposition carrying a filename hint.
     pub fn inline_with_name(filename: impl Into<String>) -> Self {
-        Self::with_filename(Type::Inline, filename.into())
+        Self::with_filename(ContentType::Inline, filename.into())
     }
 
     /// An attachment disposition.
     pub fn attachment(filename: impl Into<String>) -> Self {
-        Self::with_filename(Type::Attachment, filename.into())
+        Self::with_filename(ContentType::Attachment, filename.into())
     }
 
-    fn with_filename(disposition_type: Type, filename: String) -> Self {
+    fn with_filename(disposition_type: ContentType, filename: String) -> Self {
         match filename.is_empty() {
             true=> Self {
                 disposition_type,
@@ -111,7 +113,7 @@ impl ContentDisposition {
 
     pub fn parse(header: &str) -> Result<Self> {
         let mut parts = header.split(';');
-        let disposition_type = Type::parse(
+        let disposition_type = ContentType::parse(
             &parts.next().unwrap_or_default().trim().to_ascii_lowercase(),
         )?;
         let mut ascii_filename = None;
@@ -145,7 +147,7 @@ impl ContentDisposition {
         })
     }
 
-    pub fn get_type(&self) -> Type {
+    pub fn get_type(&self) -> ContentType {
         self.disposition_type
     }
 
@@ -163,11 +165,11 @@ impl ContentDisposition {
     }
 
     pub fn is_inline(&self) -> bool {
-        self.disposition_type == Type::Inline
+        self.disposition_type == ContentType::Inline
     }
 
     pub fn is_attachment(&self) -> bool {
-        self.disposition_type == Type::Attachment
+        self.disposition_type == ContentType::Attachment
     }
 
     pub fn value(&self) -> String {
@@ -185,7 +187,7 @@ impl ContentDisposition {
 
 impl fmt::Display for ContentDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", Self::HEADER_NAME,self.value())
+        write!(f, "{}: {}", Self::HEADER_NAME, self.value())
     }
 }
 

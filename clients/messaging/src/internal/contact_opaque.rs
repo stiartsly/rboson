@@ -18,28 +18,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
 use boson_api::{
+    utils,
     CryptoIdentity,
     Id,
     Identity,
     Result,
 };
-
 use crate::errors::{
     AuthenticationError,
     EncodingError,
 };
-
 use super::ContactData;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct OpaqueContact {
-    #[serde(rename = "id")]
+    #[serde(rename = "id", with = "utils::id")]
     id: Id,
 
     #[serde(rename = "v")]

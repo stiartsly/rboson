@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+
 pub(crate) mod utils;
 pub(crate) mod handshake;
 pub(crate) mod notification;
@@ -28,20 +29,23 @@ pub(crate) mod contact_sync;
 pub(crate) mod contact_opaque;
 pub(crate) mod topic;
 pub(crate) mod channel_info;
+pub(crate) mod channel_info_update;
 pub(crate) mod channel_members_role;
 pub(crate) mod channel_session_rotation;
 pub(crate) mod new_channel_info;
-pub(crate) mod sessoin_context;
+pub(crate) mod join_channel;
+pub(crate) mod session_context;
 pub(crate) mod connection_listener;
 
 pub(crate) use {
     channel_info::ChannelInfo,
     channel_members_role::ChannelMembersRole,
-};
+    channel_info_update::ChannelInfoUpdate,
 
-pub(crate) use {
     contact_data::ContactData,
     contact_sync::ContactSync,
+
+    join_channel::JoinChannel,
 };
 
 pub(crate) use {
@@ -69,5 +73,5 @@ pub(crate) use {
     connection_listener::ClientConnectionListener,
     new_channel_info::NewChannelInfo,
     topic::Topic,
-    sessoin_context::SessionContext,
+    session_context::SessionContext,
 };

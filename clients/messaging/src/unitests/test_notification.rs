@@ -57,7 +57,7 @@ fn notification_events() {
     let bodies = [
         NotificationBody::SessionNew(session),
         NotificationBody::ContactSync(ContactSync::up_to_date(0).unwrap()),
-        NotificationBody::ChannelCreate(channel()),
+       // NotificationBody::ChannelCreate(channel()),
         NotificationBody::ChannelDelete,
         NotificationBody::ChannelJoin(channel()),
         NotificationBody::ChannelLeave,

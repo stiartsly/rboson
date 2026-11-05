@@ -18,10 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{
-    Duration,
-    SystemTime,
-};
+use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
 
 use boson_api::{
@@ -48,8 +45,7 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "sk",
         default,
-        with = "api_utils::bytes_opt",
-        skip_serializing_if = "api_utils::is_default"
+        with = "api_utils::bytes_opt"
     )]
     session_key: Option<Vec<u8>>,
 
@@ -94,36 +90,6 @@ pub(crate) struct ChannelInfo {
 }
 
 impl ChannelInfo {
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        channel_id: Id,
-        owner_id: Id,
-        session_id: Id,
-        session_key: Option<Vec<u8>>,
-        permission: Permission,
-        name: Option<String>,
-        notice: Option<String>,
-        announce: bool,
-        created_at: u64,
-        updated_at: u64,
-        members: Vec<ChannelMember>,
-    ) -> Self {
-        Self {
-            channel_id,
-            owner_id,
-            session_id,
-            session_key,
-            permission,
-            name,
-            notice,
-            announce,
-            created_at,
-            updated_at,
-            members,
-        }
-    }
-
     pub(crate) fn channel_id(&self) -> &Id {
         &self.channel_id
     }
@@ -157,16 +123,20 @@ impl ChannelInfo {
     }
 
     pub(crate) fn created_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(self.created_at)
+        as_systemtime(self.created_at)
     }
 
     pub(crate) fn updated_at(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(self.updated_at)
+        as_systemtime(self.updated_at)
     }
 
     pub(crate) fn members(&self) -> &[ChannelMember] {
         &self.members
     }
+}
+
+fn as_systemtime(millis: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
 }
 
 #[cfg(test)]

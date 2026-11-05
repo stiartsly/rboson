@@ -58,14 +58,8 @@ impl TryFrom<i32> for Permission {
             1 => Ok(Permission::MemberInvite),
             2 => Ok(Permission::ModeratorInvite),
             3 => Ok(Permission::OwnerInvite),
-            _ => Err(ArgumentError::new("Invalid Permission value")),
+            _ => Err(ArgumentError::new(&format!("Invalid Permission {}", value))),
         }
-    }
-}
-
-impl From<Permission> for i32 {
-    fn from(p: Permission) -> i32 {
-        p as i32
     }
 }
 
@@ -156,12 +150,6 @@ pub struct Channel {
     pub(crate) notice: Option<String>,
     pub(crate) announced: bool,
     pub(crate) members: Vec<ChannelMember>,
-}
-
-impl From<&ChannelMember> for ChannelMember {
-    fn from(member: &ChannelMember) -> Self {
-        Self::new(*member.id(), member.role(), member.joined())
-    }
 }
 
 impl ContactOps for Channel {

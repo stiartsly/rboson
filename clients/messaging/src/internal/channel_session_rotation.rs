@@ -18,20 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Serialize, Deserialize};
 
-use boson_api::{
-    utils,
-    Id,
-};
+use boson_api::{utils, Id};
 
 /// Session-key rotation request for a channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChannelSessionKeyRotation {
-    #[serde(rename = "sid")]
+    #[serde(rename = "sid", with = "utils::id")]
     session_id: Id,
     #[serde(rename = "sk", with = "utils::bytes")]
     session_key: Vec<u8>,

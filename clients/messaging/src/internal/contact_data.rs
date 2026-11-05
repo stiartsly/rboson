@@ -34,7 +34,7 @@ use crate::{
 };
 use super::OpaqueContact;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContactData {
     #[serde(rename = "id")]
     pub(crate) id: Id,
@@ -95,15 +95,9 @@ impl ContactData {
         Self {
             id,
             kind,
-            session_key: None,
-            name: None,
-            remark: None,
-            tags: None,
-            muted: false,
-            blocked: false,
             created_at,
             updated_at: created_at,
-            revision: 0,
+            ..Default::default()
         }
     }
 

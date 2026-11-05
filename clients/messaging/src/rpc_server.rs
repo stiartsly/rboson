@@ -83,6 +83,8 @@ use super::{
         ContactMutation,
         ContactSync,
         ContentFormat,
+        ChannelInfoUpdate,
+        JoinChannel,
         Handshake,
         HandshakeType,
         MessageContent,
@@ -110,11 +112,7 @@ use super::{
     rpc::{
         call::Calls,
         error::RPCError,
-        request::{
-            ChannelInfoUpdate,
-            JoinChannel,
-            RPCRequest,
-        },
+        request::RPCRequest,
         response::{
             Params as ResponseParams,
             RPCResponseMessage,
@@ -315,8 +313,8 @@ impl MemberUpdate {
                 let removed: Vec<_> = channel
                     .members
                     .iter()
-                    .filter(|member| touched.contains(member.id()))
-                    .map(ChannelMember::from)
+                    .filter(|member| touched.contains(member.id()).clone())
+                    .cloned()
                     .collect();
                 channel
                     .members
@@ -332,8 +330,7 @@ impl MemberUpdate {
             .iter_mut()
             .filter(|member| touched.contains(member.id()))
             .map(|member| {
-                *member = ChannelMember::new(*member.id(), role, member.joined());
-                ChannelMember::from(&*member)
+                ChannelMember::new(*member.id(), role, member.joined())
             })
             .collect()
     }
@@ -722,7 +719,7 @@ impl RpcServer {
                 channel.members.push(member.clone());
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener
-                    .on_channel_member_joined(&channel, &ChannelMember::from(member));
+                    .on_channel_member_joined(&channel, &member.clone());
                 Ok(())
             }
             NotificationBody::ChannelMemberLeave(id) => {
@@ -736,7 +733,7 @@ impl RpcServer {
                 self.channels.borrow_mut().insert(*sender, channel.clone());
                 if let Some(member) = member {
                     self.channel_listener
-                        .on_channel_member_left(&channel, &ChannelMember::from(&member));
+                        .on_channel_member_left(&channel, &member);
                 }
                 Ok(())
             }

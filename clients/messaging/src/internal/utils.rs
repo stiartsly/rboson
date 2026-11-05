@@ -53,7 +53,7 @@ pub(crate) mod permission {
     where
         S: Serializer,
     {
-        se.serialize_i32(i32::from(*value))
+        se.serialize_i32(*value as i32)
     }
 
     pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Permission, D::Error>

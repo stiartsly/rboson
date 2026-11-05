@@ -28,12 +28,10 @@ use crate::{
         ChannelSessionKeyRotation,
         ContactMutation,
         NewChannelInfo,
+        ChannelMembersRole,
     },
 };
-use super::{
-    method::Method,
-    params::ChannelMembersRole,
-};
+use super::method::Method;
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]

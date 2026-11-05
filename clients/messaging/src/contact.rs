@@ -30,7 +30,7 @@ use crate::{
     errors::EncodingError,
     contact_editor::ContactEditor,
     ContactOps,
-    internal::contact::ContactData,
+    internal::ContactData,
 };
 
 /// The type of a contact.

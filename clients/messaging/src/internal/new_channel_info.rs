@@ -23,12 +23,12 @@ use std::fmt;
 use serde::Serialize;
 
 use boson_api::{
-    utils,
+    utils as api_utils,
     Id,
 };
 
 use crate::{
-    internal::codec,
+    internal::utils as internal_utils,
     Permission,
 };
 
@@ -37,17 +37,19 @@ use crate::{
 pub(crate) struct NewChannelInfo {
     #[serde(
         rename = "sid",
-        with = "utils::id"
+        with = "api_utils::id"
     )]
     session_id: Id,
 
     #[serde(
         rename = "sk",
-        with = "utils::bytes"
+        with = "api_utils::bytes"
     )]
     session_key: Vec<u8>,
 
-    #[serde(rename = "p", with = "codec::permission")]
+    #[serde(
+        rename = "p",
+        with = "internal_utils::permission")]
     permission: Permission,
 
     #[serde(
@@ -66,7 +68,7 @@ pub(crate) struct NewChannelInfo {
 
     #[serde(
         rename = "a",
-        skip_serializing_if = "utils::is_default"
+        skip_serializing_if = "api_utils::is_default"
     )]
     announce: bool,
 }

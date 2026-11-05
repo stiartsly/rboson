@@ -40,11 +40,9 @@ use crate::{
 };
 
 use super::{
-    channel::{
-        ChannelInfo,
-        ChannelMembersRole,
-    },
-    contact::ContactSync,
+    ChannelInfo,
+    ChannelMembersRole,
+    ContactSync
 };
 
 /// Notification event tag used on the wire.

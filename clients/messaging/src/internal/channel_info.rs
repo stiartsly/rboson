@@ -22,20 +22,15 @@ use std::time::{
     Duration,
     SystemTime,
 };
-
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Serialize, Deserialize};
 
 use boson_api::{
-    utils,
+    utils as api_utils,
     Id,
 };
-
 use crate::{
     channel::Permission,
-    internal::codec,
+    internal::utils as internal_utils,
     ChannelMember,
 };
 
@@ -43,24 +38,24 @@ use crate::{
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ChannelInfo {
-    #[serde(rename = "id")]
+    #[serde(rename = "id", with ="api_utils::id")]
     channel_id: Id,
-    #[serde(rename = "o")]
+    #[serde(rename = "o", with ="api_utils::id")]
     owner_id: Id,
-    #[serde(rename = "sid")]
+    #[serde(rename = "sid", with ="api_utils::id")]
     session_id: Id,
 
     #[serde(
         rename = "sk",
         default,
-        with = "utils::bytes_opt",
-        skip_serializing_if = "utils::is_default"
+        with = "api_utils::bytes_opt",
+        skip_serializing_if = "api_utils::is_default"
     )]
     session_key: Option<Vec<u8>>,
 
     #[serde(
         rename = "p",
-        with = "codec::permission"
+        with = "internal_utils::permission"
     )]
     permission: Permission,
 
@@ -73,14 +68,14 @@ pub(crate) struct ChannelInfo {
     #[serde(
         rename = "nt",
         default,
-        skip_serializing_if = "utils::is_default"
+        skip_serializing_if = "api_utils::is_default"
     )]
     notice: Option<String>,
 
     #[serde(
         rename = "a",
         default,
-        skip_serializing_if = "utils::is_default"
+        skip_serializing_if = "api_utils::is_default"
     )]
     announce: bool,
 

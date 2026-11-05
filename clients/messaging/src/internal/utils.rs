@@ -18,29 +18,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::result::Result as StdResult;
 use serde::{
-    de::Error as DeError,
+    de::Error,
     Deserialize,
     Deserializer,
     Serializer,
 };
 
-use crate::channel::{
-    Permission,
-    Role,
-};
+use crate::channel::{Permission, Role};
 
 pub(crate) mod role {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Role, se: S) -> Result<S::Ok, S::Error>
+    pub(crate) fn serialize<S>(value: &Role, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
         se.serialize_i32(i32::from(*value))
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Role, D::Error>
+    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Role, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -51,14 +49,14 @@ pub(crate) mod role {
 pub(crate) mod permission {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Permission, se: S) -> Result<S::Ok, S::Error>
+    pub(crate) fn serialize<S>(value: &Permission, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
         se.serialize_i32(i32::from(*value))
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> Result<Permission, D::Error>
+    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Permission, D::Error>
     where
         D: Deserializer<'de>,
     {

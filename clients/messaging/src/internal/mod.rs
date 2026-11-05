@@ -18,12 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-pub(crate) mod codec;
+pub(crate) mod utils;
 pub(crate) mod handshake;
 pub(crate) mod notification;
-// pub(crate) mod photon_message;
 pub(crate) mod message_content;
-pub(crate) mod contac_data;
+pub(crate) mod contact_data;
 pub(crate) mod contact_mutation;
 pub(crate) mod contact_sync;
 pub(crate) mod contact_opaque;
@@ -35,22 +34,17 @@ pub(crate) mod new_channel_info;
 pub(crate) mod sessoin_context;
 pub(crate) mod connection_listener;
 
-mod channel {
-    pub(crate) use super::{
-        channel_info::ChannelInfo,
-        channel_members_role::ChannelMembersRole,
-    };
-}
-
-pub(crate) mod contact {
-    pub(crate) use super::{
-        contac_data::ContactData,
-        contact_sync::ContactSync,
-    };
-}
+pub(crate) use {
+    channel_info::ChannelInfo,
+    channel_members_role::ChannelMembersRole,
+};
 
 pub(crate) use {
-    // photon_message::PhotonMessage,
+    contact_data::ContactData,
+    contact_sync::ContactSync,
+};
+
+pub(crate) use {
     message_content::{
         ContentFormat,
         MessageContent,
@@ -64,17 +58,13 @@ pub(crate) use {
         Event as NotificationEvent,
         Notification,
     },
-    contac_data::ContactData,
     contact_mutation::{
         ContactMutation,
         MutationData,
     },
-    contact_sync::{
-        ContactSync,
-        SyncType,
-    },
+    contact_sync::SyncType,
+
     contact_opaque::OpaqueContact,
-    channel_info::ChannelInfo,
     channel_session_rotation::ChannelSessionKeyRotation,
     connection_listener::ClientConnectionListener,
     new_channel_info::NewChannelInfo,

@@ -36,13 +36,13 @@ use boson_api::{
 use crate::{
     verticle,
     MessageListener,
-    ops::{MessageOps, MessageBuilderOps},
+    MessageOps,
+    MessageBuilderOps,
 };
 use super::content_type;
 pub use super::content_disposition::{
     ContentDisposition,
-    Type,
-    HEADER_NAME as CONTENT_DISPOSITION_HEADER,
+    Type
 };
 
 // ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ impl Content {
 
     /// The parsed content disposition, if the header is present and valid.
     pub fn content_disposition(&self) -> Result<Option<ContentDisposition>> {
-        let Some(value) = self.headers.get(CONTENT_DISPOSITION_HEADER) else {
+        let Some(value) = self.headers.get(ContentDisposition::HEADER_NAME) else {
             return Ok(None);
         };
         let value = value.as_str().ok_or_else(|| {
@@ -378,7 +378,7 @@ fn merge_headers(
 
     if let Some(disposition) = disposition {
         merged.insert(
-            CONTENT_DISPOSITION_HEADER.into(),
+            ContentDisposition::HEADER_NAME.into(),
             serde_json::Value::String(disposition.value()),
         );
     }

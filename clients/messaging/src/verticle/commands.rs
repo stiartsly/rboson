@@ -34,7 +34,7 @@ use boson_api::{
     errors::{Result, StateError},
 };
 use crate::{
-    ops::MessageBuilderOps,
+    MessageBuilderOps,
     message::Message,
     rpc_server::RpcServer,
 };

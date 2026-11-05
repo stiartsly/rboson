@@ -21,16 +21,14 @@
 use boson_api::Id;
 
 use crate::{
-    contact::{
-        Contact,
-        ContactType,
-    },
-    contact_editor::ContactEditor,
+    ContactType,
+    contact::Contact as ContactStruct,
+    contact_editor::ContactEditor as ContactEditorStruct
 };
 
 /// A contact entry in the local contact list.
 ///
-pub trait ContactOps: Send + Sync {
+pub trait Contact: Send + Sync {
     /// The unique boson `Id` of this contact.
     fn id(&self) -> &Id;
 
@@ -61,17 +59,12 @@ pub trait ContactOps: Send + Sync {
     /// Monotonically increasing revision counter for sync purposes.
     fn revision(&self) -> i32;
 
-    /// Returns `true` if `other` refers to the same contact as `self`.
-    fn is(&self, other: &dyn ContactOps) -> bool {
-        self.id() == other.id()
-    }
-
     /// Creates an editor that builds a new contact without mutating this one.
-    fn edit(&self) -> ContactEditor;
+    fn edit(&self) -> ContactEditorStruct;
 }
 
 // Builder for an immutable contact update.
-pub trait ContactEditorOps: Send + Sync {
+pub trait ContactEditor: Send + Sync {
     /// Set the user-defined remark (alias).
     fn remark(self: Box<Self>, remark: Option<String>) -> Self;
 
@@ -85,5 +78,5 @@ pub trait ContactEditorOps: Send + Sync {
     fn blocked(self: Box<Self>, blocked: bool) -> Self;
 
     /// Build the updated immutable contact.
-    fn build(self: Box<Self>) -> Contact;
+    fn build(self: Box<Self>) -> ContactStruct;
 }

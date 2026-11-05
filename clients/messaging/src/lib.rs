@@ -24,7 +24,7 @@
 
 pub(crate) mod internal;
 pub(crate) mod rpc;
-pub mod ops;
+pub mod interfaces;
 
 pub(crate) mod mqtt;
 pub(crate) mod rpc_server;
@@ -78,7 +78,7 @@ pub use {
         ContactType,
     },
     contact_editor::ContactEditor,
-    ops::{
+    interfaces::{
         ChannelEditorOps,
         ChannelOps,
         ContactEditorOps,
@@ -98,7 +98,6 @@ pub use message::{
     Message,
     MessageBuilder,
     MessageType,
-    CONTENT_DISPOSITION_HEADER,
 };
 
 pub(crate) use internal::ClientConnectionListener;

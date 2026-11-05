@@ -50,10 +50,7 @@ use boson_api::{
 use crate::{
     channel::{Channel, Permission, Role},
     contact::{Contact, ContactType},
-    content_disposition::{
-        ContentDisposition,
-        HEADER_NAME as CONTENT_DISPOSITION_HEADER,
-    },
+    content_disposition::ContentDisposition,
     content_type,
     conversation::Conversation,
     errors::{
@@ -63,7 +60,8 @@ use crate::{
     },
     invite_ticket::InviteTicket,
     message::{Message, MessageType},
-    ops::{MessageBuilderOps, MessageOps},
+    MessageBuilderOps,
+    MessageOps,
     options::Options,
     session_info::SessionInfo,
     verticle::VerticleOptions,
@@ -2440,7 +2438,7 @@ impl RpcServer {
     }
 
     /// Pushes changed channel metadata, sending only the fields that differ.
-    pub(crate) async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
+    pub(crate) async fn update_channel_info(&self, channel: &Channel) -> Result<()> {
         let _request = self.requests.lock().await;
         let mut current = self.channel_snapshot(channel.id())?;
         if current.owner != *self.user_id() {
@@ -3252,7 +3250,7 @@ fn build_message_headers(
 
     if let Some(disposition) = disposition {
         merged.insert(
-            CONTENT_DISPOSITION_HEADER.into(),
+            ContentDisposition::HEADER_NAME.into(),
             serde_json::Value::String(disposition.value()),
         );
     }

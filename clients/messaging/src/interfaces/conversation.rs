@@ -20,21 +20,17 @@
 
 use std::time::SystemTime;
 
-use boson_api::{
-    Id,
-    errors::Result,
-};
-
-use crate::contact::Contact;
+use boson_api::{Result, Id};
+use crate::contact::Contact as ContactStruct;
 
 /// A conversation between the local user and another party (person or channel).
 ///
-pub trait ConversationOps: Send + Sync {
+pub trait Conversation: Send + Sync {
     /// The unique identifier of this conversation (same as the participant's `Id`).
     fn id(&self) -> &Id;
 
     /// The contact representing the other participant.
-    fn contact(&self) -> &Contact;
+    fn contact(&self) -> &ContactStruct;
 
     /// Whether this is a channel (group) conversation.
     fn is_channel(&self) -> bool;

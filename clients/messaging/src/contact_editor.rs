@@ -20,7 +20,7 @@
 
 use crate::{
     contact::Contact,
-    ops::ContactEditorOps,
+    ContactEditorOps,
 };
 
 pub struct ContactEditor {

@@ -29,8 +29,6 @@ use boson_api::errors::{
     Result,
 };
 
-pub const HEADER_NAME: &str = "Content-Disposition";
-
 /// How message content should be presented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
@@ -72,6 +70,8 @@ pub struct ContentDisposition {
 }
 
 impl ContentDisposition {
+    pub const HEADER_NAME: &str = "Content-Disposition";
+
     /// An inline disposition with no filename.
     pub fn inline() -> Self {
         Self {
@@ -185,7 +185,7 @@ impl ContentDisposition {
 
 impl fmt::Display for ContentDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{HEADER_NAME}: {}", self.value())
+        write!(f, "{}: {}", Self::HEADER_NAME,self.value())
     }
 }
 

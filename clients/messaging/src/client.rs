@@ -513,7 +513,7 @@ impl Client {
     }
 
     /// Updates channel metadata.
-    pub async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
+    pub async fn update_channel_info(&self, channel: &Channel) -> Result<()> {
         self.verticle_client()?
             .update_channel_info(channel.edit_channel().build())
             .await

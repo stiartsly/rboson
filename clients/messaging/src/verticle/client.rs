@@ -389,7 +389,7 @@ impl VerticleClient {
         self.call(make_event).await
     }
 
-    pub(crate) async fn update_channel_info(&self, channel: Box<Channel>) -> Result<()> {
+    pub(crate) async fn update_channel_info(&self, channel: Channel) -> Result<()> {
         let make_event = |promise| {
             Event::UpdateChannelInfo(WithParams {
                 data: (channel),

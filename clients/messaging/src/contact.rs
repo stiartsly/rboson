@@ -29,7 +29,7 @@ use boson_api::{
 use crate::{
     errors::EncodingError,
     contact_editor::ContactEditor,
-    ops::ContactOps,
+    ContactOps,
     internal::contact::ContactData,
 };
 

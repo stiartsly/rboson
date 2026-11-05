@@ -18,21 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-mod channel_ops;
-mod contact_ops;
-mod conversation_ops;
-mod message_ops;
+mod channel;
+mod contact;
+mod conversation;
+mod message;
 
-pub use channel_ops::{
-    ChannelEditorOps,
-    ChannelOps,
-};
-pub use contact_ops::{
-    ContactEditorOps,
-    ContactOps,
-};
-pub use conversation_ops::ConversationOps;
-pub use message_ops::{
-    MessageOps,
-    MessageBuilderOps,
+pub use {
+    channel::ChannelEditor as ChannelEditorOps,
+    channel::Channel as ChannelOps,
+    contact::ContactEditor as ContactEditorOps,
+    contact::Contact as ContactOps,
+    conversation::Conversation as ConversationOps,
+    message::Message as MessageOps,
+    message::MessageBuilder as MessageBuilderOps,
+    message::Content as ContentOps,
 };

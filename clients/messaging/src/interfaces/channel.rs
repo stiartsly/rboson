@@ -21,19 +21,17 @@
 use boson_api::Id;
 
 use crate::{
-    channel::{
-        Channel,
-        Permission,
-        ChannelEditor,
-    },
+    channel::Channel as ChannelStruct,
+    channel::ChannelEditor as ChannelEditorStruct,
+    channel::Permission,
     channel_member::ChannelMember,
-    ops::ContactOps,
+    interfaces::ContactOps,
 };
 
 /// A channel contact – a group conversation on the boson network.
 ///
 /// Extends [`ContactOps`] with channel-specific information.
-pub trait ChannelOps: ContactOps + Sync + Send {
+pub trait Channel: ContactOps + Sync + Send {
     /// The channel's join / invite permission policy.
     fn permission(&self) -> Permission;
 
@@ -60,23 +58,23 @@ pub trait ChannelOps: ContactOps + Sync + Send {
     }
 
     /// Creates an editor that builds a new channel without mutating this one.
-    fn edit_channel(&self) -> Box<ChannelEditor>;
+    fn edit_channel(&self) -> ChannelEditorStruct;
 }
 
 /// Builder for an immutable channel update.
-pub trait ChannelEditorOps: Send + Sync {
+pub trait ChannelEditor: Send + Sync {
     /// Update the channel permission.
-    fn permission(self: Box<Self>, permission: Permission) -> Box<ChannelEditor>;
+    fn permission(self, permission: Permission) -> Self;
 
     /// Update the channel's display name.
-    fn name(self: Box<Self>, name: String) -> Box<ChannelEditor>;
+    fn name(self, name: String) -> Self;
 
     /// Update the channel notice.
-    fn notice(self: Box<Self>, notice: Option<String>) -> Box<ChannelEditor>;
+    fn notice(self, notice: Option<String>) -> Self;
 
     /// Update whether the channel is announced.
-    fn announced(self: Box<Self>, announced: bool) -> Box<ChannelEditor>;
+    fn announced(self, announced: bool) -> Self;
 
     /// Build the updated immutable channel.
-    fn build(self: Box<Self>) -> Box<Channel>;
+    fn build(self) -> ChannelStruct;
 }

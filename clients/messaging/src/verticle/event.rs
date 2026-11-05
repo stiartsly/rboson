@@ -81,7 +81,7 @@ pub(crate) enum Event {
     CreateInviteTicket(WithParams<(Id, Option<Id>), InviteTicket>),
     TransferChannelOwnership(WithParams<(Id, Id), ()>),
     RotateChannelSessionKey(WithParams<Id, ()>),
-    UpdateChannelInfo(WithParams<Box<Channel>, ()>),
+    UpdateChannelInfo(WithParams<Channel, ()>),
     SetChannelMemberRole(WithParams<(Id, Vec<Id>, Role), ()>),
     BanChannelMembers(WithParams<(Id, Vec<Id>), ()>),
     UnbanChannelMembers(WithParams<(Id, Vec<Id>), ()>),

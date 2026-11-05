@@ -29,7 +29,8 @@ use boson_api::{
 use crate::{
     contact::{Contact, ContactType},
     contact_editor::ContactEditor,
-    ops::{ChannelEditorOps, ChannelOps,ContactOps},
+    ChannelEditorOps,
+    ChannelOps,ContactOps,
     ChannelMember,
 };
 
@@ -241,8 +242,8 @@ impl ChannelOps for Channel {
             .cloned()
     }
 
-    fn edit_channel(&self) -> Box<ChannelEditor> {
-        Box::new(ChannelEditor(self.clone()))
+    fn edit_channel(&self) -> ChannelEditor {
+        ChannelEditor(self.clone())
     }
 }
 
@@ -326,8 +327,8 @@ impl Channel {
         self.member(member_id).is_some()
     }
 
-    pub fn edit_channel(&self) -> Box<ChannelEditor> {
-        Box::new(ChannelEditor(self.clone()))
+    pub fn edit_channel(&self) -> ChannelEditor {
+        ChannelEditor(self.clone())
     }
 }
 
@@ -335,28 +336,28 @@ impl Channel {
 pub struct ChannelEditor(Channel);
 
 impl ChannelEditorOps for ChannelEditor {
-    fn permission(mut self: Box<Self>, permission: Permission) -> Box<ChannelEditor> {
+    fn permission(mut self, permission: Permission) -> ChannelEditor {
         self.0.permission = permission;
         self
     }
 
-    fn name(mut self: Box<Self>, name: String) -> Box<ChannelEditor> {
+    fn name(mut self, name: String) -> ChannelEditor {
         self.0.contact.set_name(Some(name));
         self
     }
 
-    fn notice(mut self: Box<Self>, notice: Option<String>) -> Box<ChannelEditor> {
+    fn notice(mut self, notice: Option<String>) -> ChannelEditor {
         self.0.notice = notice;
         self
     }
 
-    fn announced(mut self: Box<Self>, announced: bool) -> Box<ChannelEditor> {
+    fn announced(mut self, announced: bool) -> ChannelEditor {
         self.0.announced = announced;
         self
     }
 
-    fn build(self: Box<Self>) -> Box<Channel> {
-        Box::new(self.0)
+    fn build(self) -> Channel {
+        self.0
     }
 }
 
@@ -381,7 +382,7 @@ impl ChannelEditor {
         self
     }
 
-    pub fn build(self) -> Box<Channel> {
-        Box::new(self.0)
+    pub fn build(self) -> Channel {
+        self.0
     }
 }

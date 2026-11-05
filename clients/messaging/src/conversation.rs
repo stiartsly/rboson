@@ -28,7 +28,8 @@ use boson_api::{
     errors::{Result, ArgumentError}
 };
 use crate::{
-    ops::{MessageOps, ConversationOps},
+    MessageOps,
+    ConversationOps,
     contact::{Contact, ContactType},
     invite_ticket::InviteTicket,
     message::Message,

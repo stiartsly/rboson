@@ -32,63 +32,97 @@ use crate::{
 };
 use super::promise::Promise;
 
-pub(crate) struct NoParams<T> {
-    pub(crate) promise: Promise<T>,
+pub(crate) struct Body<Input, Output> {
+    pub(crate) params: Input,
+    pub(crate) result: Promise<Output>,
 }
-pub(crate) struct WithParams<D, T> {
-    pub(crate) data: D,
-    pub(crate) promise: Promise<T>,
+
+impl<Input, Output> Body<Input, Output> {
+    pub(crate) fn new(params: Input, result: Promise<Output>) -> Self {
+        Self { params, result }
+    }
 }
 
 pub(crate) enum Event {
-    Start(NoParams<()>),
-    Stop(NoParams<()>),
-    GetConversation(WithParams<Id, Option<Conversation>>),
-    GetConversations(NoParams<Vec<Conversation>>),
-    RemoveConversation(WithParams<Id, ()>),
-    RemoveConversations(WithParams<Vec<Id>, ()>),
-    GetMessages(WithParams<(Id, Option<i64>, usize, usize), Vec<Message>>),
-    GetMessagesInRange(WithParams<(Id, i64, i64), Vec<Message>>),
-    RemoveMessage(WithParams<i64, ()>),
-    RemoveMessagesByIds(WithParams<Vec<i64>, ()>),
-    RemoveMessagesInConversation(WithParams<Id, ()>),
-    GetSessions(NoParams<Vec<SessionInfo>>),
-    RevokeSession(WithParams<Id, ()>),
-    FriendRequest(WithParams<(Id, Option<String>), ()>),
-    FriendAccept(WithParams<Id, ()>),
-    GetFriendRequest(WithParams<Id, Option<FriendRequest>>),
-    GetFriendRequests(NoParams<Vec<FriendRequest>>),
-    RemoveFriendRequest(WithParams<Id, ()>),
-    RemoveFriendRequests(WithParams<Vec<Id>, ()>),
-    ClearFriendRequests(NoParams<()>),
-    ContentMessage(
-        WithParams<
-            (
-                Id,
-                HashMap<String, serde_json::Value>,
-                Vec<u8>,
-                bool,
-            ),
-            Message,
-        >,
-    ),
-    RegisterFriendSession(WithParams<(Id, Vec<u8>, Option<String>), ()>),
-    BlockUser(WithParams<Id, Contact>),
-    CreateChannel(WithParams<(Permission, String, Option<String>, bool), Box<Channel>>),
-    RemoveChannel(WithParams<Id, ()>),
-    JoinChannel(WithParams<InviteTicket, Box<Channel>>),
-    LeaveChannel(WithParams<Id, ()>),
-    CreateInviteTicket(WithParams<(Id, Option<Id>), InviteTicket>),
-    TransferChannelOwnership(WithParams<(Id, Id), ()>),
-    RotateChannelSessionKey(WithParams<Id, ()>),
-    UpdateChannelInfo(WithParams<Channel, ()>),
-    SetChannelMemberRole(WithParams<(Id, Vec<Id>, Role), ()>),
-    BanChannelMembers(WithParams<(Id, Vec<Id>), ()>),
-    UnbanChannelMembers(WithParams<(Id, Vec<Id>), ()>),
-    RemoveChannelMembers(WithParams<(Id, Vec<Id>), ()>),
-    GetContact(WithParams<Id, Option<Contact>>),
-    GetContacts(NoParams<Vec<Contact>>),
-    UpdateContact(WithParams<Contact, ()>),
-    RemoveContacts(WithParams<Vec<Id>, ()>),
-    ClearContacts(NoParams<()>),
+    Start(Body<(), ()>),
+    Stop(Body<(), ()>),
+    GetConversations(Body<Option<Id>, Vec<Conversation>>),
+    RemoveConversations(Body<Vec<Id>, ()>),
+    GetMessages(Body<MsgPaginationParams, Vec<Message>>),
+    RemoveMessages(Body<MsgIdsParams, ()>),
+    GetSessions(Body<(), Vec<SessionInfo>>),
+    RevokeSession(Body<Id, ()>),
+    FriendRequest(Body<FriendRequestParams, ()>),
+    FriendAccept(Body<Id, ()>),
+    GetFriendRequests(Body<Option<Id>, Vec<FriendRequest>>),
+    RemoveFriendRequests(Body<Vec<Id>, ()>),
+    ContentMessage(Body<MsgContentParams, Message>),
+    RegisterFriendSession(Body<AddFriendParams, ()>),
+    BlockUser(Body<Id, Contact>),
+    CreateChannel(Body<NewChannelParams, Box<Channel>>),
+    RemoveChannel(Body<Id, ()>),
+    JoinChannel(Body<InviteTicket, Box<Channel>>),
+    LeaveChannel(Body<Id, ()>),
+    CreateInviteTicket(Body<(Id, Option<Id>), InviteTicket>),
+    TransferChannelOwnership(Body<(Id, Id), ()>),
+    RotateChannelSessionKey(Body<Id, ()>),
+    UpdateChannelInfo(Body<Channel, ()>),
+    OperateChannelMembers(Body<OperateChannelMembersParams, ()>),
+    GetContacts(Body<Option<Id>, Vec<Contact>>),
+    UpdateContact(Body<Contact, ()>),
+    RemoveContacts(Body<Option<Vec<Id>>, ()>),
+}
+
+// Pagination for fetching messages within a conversation
+pub(crate) struct MsgPaginationParams {
+    pub(crate) conversation_id: Id,
+    pub(crate) until: Option<i64>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) offset: Option<usize>,
+    pub(crate) begin: Option<i64>,
+    pub(crate) end : Option<i64>,
+}
+
+// Identifiers for messages to be removed
+pub(crate) struct MsgIdsParams {
+    pub(crate) conversation_id: Option<Id>,
+    pub(crate) messages: Option<Vec<i64>>,
+}
+
+// Parameters for sending a content message
+pub(crate) struct MsgContentParams {
+    pub(crate) conversation_id: Id,
+    pub(crate) metadata: HashMap<String, serde_json::Value>,
+    pub(crate) content: Vec<u8>,
+    pub(crate) is_encrypted: bool,
+}
+
+pub(crate) struct FriendRequestParams {
+    pub(crate) user_id: Id,
+    pub(crate) hello: Option<String>,
+}
+
+pub(crate) struct AddFriendParams {
+    pub(crate) user_id: Id,
+    pub(crate) session_key: Vec<u8>,
+    pub(crate) remark: Option<String>,
+}
+
+pub(crate) struct NewChannelParams {
+    pub(crate) permission: Permission,
+    pub(crate) name: String,
+    pub(crate) notice: Option<String>,
+    pub(crate) announcement: bool,
+}
+
+pub(crate) const OPERATE_SET_MEMBER_ROLE: u8 = 0;
+pub(crate) const OPERATE_BAN_MEMBERS: u8 = 1;
+pub(crate) const OPERATE_UNBAN_MEMBERS: u8 = 2;
+pub(crate) const OPERATE_REMOVE_MEMBERS: u8 = 3;
+
+pub(crate) struct OperateChannelMembersParams {
+    pub(crate) operation: u8,
+    pub(crate) channel_id: Id,
+    pub(crate) member_ids: Vec<Id>,
+    pub(crate) role: Option<Role>,
 }

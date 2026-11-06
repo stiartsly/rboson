@@ -40,7 +40,11 @@ use crate::{
 };
 use super::{
     promise::Promise,
-    event::{Event, NoParams, WithParams}
+    event::{
+        Event, Body,
+        OPERATE_SET_MEMBER_ROLE, OPERATE_BAN_MEMBERS,
+        OPERATE_UNBAN_MEMBERS, OPERATE_REMOVE_MEMBERS,
+    },
 };
 
 pub(crate) type Pending = FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>;
@@ -63,304 +67,247 @@ pub(super) fn handle(
     let rpc = rpc.clone();
     let mut stop = false;
     match event {
-        Event::Start(NoParams {promise }) => {
+        Event::Start(Body {params: (), result: promise }) => {
             respond(pending, promise, async move {
                 rpc.start().await
             });
         }
-        Event::Stop(NoParams { promise}) => {
+        Event::Stop(Body {params: (), result: promise}) => {
             stop = true;
             respond(pending, promise, async move {
                 rpc.stop().await
             });
         }
-        Event::GetConversation(WithParams {data: id, promise}) => {
+        Event::GetConversations(Body {params: id, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.get_conversation(&id).await
+                match id {
+                    Some(id) => Ok(rpc.get_conversation(&id).await?.into_iter().collect()),
+                    None => rpc.get_conversations().await,
+                }
             });
         }
-        Event::GetConversations(NoParams {promise}) => {
-            respond(pending, promise, async move {
-                rpc.get_conversations().await
-            });
-        }
-        Event::RemoveConversation(WithParams {data: id, promise}) => {
-            respond(pending, promise, async move {
-                rpc.remove_conversation(&id).await
-            });
-        }
-        Event::RemoveConversations(WithParams {data: ids, promise}) => {
+        Event::RemoveConversations(Body {params: ids, result: promise}) => {
             respond(pending, promise, async move {
                 rpc.remove_conversations(&ids).await
             });
         }
-        Event::GetMessages(WithParams {data: (conversation_id, until, limit, offset), promise}) => {
+        Event::GetMessages(Body {params, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.get_messages(&conversation_id, until, limit, offset).await
+                match (params.begin, params.end) {
+                    (Some(begin), Some(end)) => {
+                        rpc.get_messages_in_range(&params.conversation_id, begin, end).await
+                    }
+                    _ => {
+                        rpc.get_messages(
+                            &params.conversation_id,
+                            params.until,
+                            params.limit.unwrap_or_default(),
+                            params.offset.unwrap_or_default(),
+                        ).await
+                    }
+                }
             });
         }
-        Event::GetMessagesInRange(WithParams {
-            data: (conversation_id, begin, end),
-            promise,
-        }) => {
+        Event::RemoveMessages(Body {params, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.get_messages_in_range(&conversation_id, begin, end
-                ).await });
-        }
-        Event::RemoveMessage(WithParams {
-            data: message_id,
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.remove_message(message_id).await
+                if let Some(messages) = params.messages {
+                    rpc.remove_messages_by_ids(&messages).await
+                } else if let Some(conversation_id) = params.conversation_id {
+                    rpc.remove_messages_in_conversation(&conversation_id).await
+                } else {
+                    Ok(())
+                }
             });
         }
-        Event::RemoveMessagesByIds(WithParams {
-            data: message_ids,
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.remove_messages_by_ids(&message_ids).await
-            });
-        }
-        Event::RemoveMessagesInConversation(WithParams {
-            data: conversation_id,
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.remove_messages_in_conversation(&conversation_id).await
-            });
-        }
-        Event::GetSessions(NoParams {promise }) => {
+        Event::GetSessions(Body {params: (), result: promise}) => {
             respond(pending, promise, async move {
                 rpc.get_sessions().await
             });
         }
-        Event::RevokeSession(WithParams {
-            data: device_id,
-            promise,
+        Event::RevokeSession(Body {
+            params: device_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.revoke_session(&device_id).await
             });
         }
-        Event::FriendRequest(WithParams {
-            data: (user_id, hello),
-            promise,
+        Event::FriendRequest(Body {
+            params,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
-                rpc.friend_request(&user_id, hello).await
+                rpc.friend_request(&params.user_id, params.hello).await
             });
         }
-        Event::FriendAccept(WithParams {
-            data: user_id,
-            promise,
+        Event::FriendAccept(Body {
+            params: user_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.accept_friend_request(&user_id).await
             });
         }
-        Event::GetFriendRequest(WithParams {
-            data: user_id,
-            promise,
-        }) => {
+        Event::GetFriendRequests(Body {params: id, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.get_friend_request(&user_id).await
+                match id {
+                    Some(user_id) => Ok(rpc.get_friend_request(&user_id).await?.into_iter().collect()),
+                    None => rpc.get_friend_requests().await,
+                }
             });
         }
-        Event::GetFriendRequests(NoParams { promise }) => {
-            respond( pending, promise, async move {
-                rpc.get_friend_requests().await
-            });
-        }
-        Event::RemoveFriendRequest(WithParams {
-            data: user_id,
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.remove_friend_request(&user_id).await
-            });
-        }
-        Event::RemoveFriendRequests(WithParams {
-            data: user_ids,
-            promise,
+        Event::RemoveFriendRequests(Body {
+            params: user_ids,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.remove_friend_requests(&user_ids).await
             });
         }
-        Event::ClearFriendRequests(NoParams {
-            promise,
+        Event::ContentMessage(Body {
+            params,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
-                rpc.clear_friend_requests().await
+                send_content_message(
+                    &rpc,
+                    params.conversation_id,
+                    params.metadata,
+                    params.content,
+                    params.is_encrypted,
+                ).await
             });
         }
-        Event::ContentMessage(WithParams {
-            data: (recipient, headers, body, text),
-            promise,
+        Event::RegisterFriendSession(Body {
+            params,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
-                send_content_message(&rpc, recipient, headers, body, text).await
+                rpc.add_friend(&params.user_id, params.session_key, params.remark).await
             });
         }
-        Event::RegisterFriendSession(WithParams {
-            data: (user_id, session_key, remark),
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.add_friend(&user_id, session_key, remark).await
-            });
-        }
-        Event::BlockUser(WithParams {
-            data: user_id,
-            promise,
+        Event::BlockUser(Body {
+            params: user_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.block_user(&user_id).await
             });
         }
 
-        Event::CreateChannel(WithParams {
-            data: (permission, name, notice, announcement),
-            promise,
+        Event::CreateChannel(Body {
+            params,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
-                rpc.create_channel(permission, name, notice, announcement).await
+                rpc.create_channel(params.permission, params.name, params.notice, params.announcement).await
             });
         }
-        Event::RemoveChannel(WithParams {
-            data: channel_id,
-            promise,
+        Event::RemoveChannel(Body {
+            params: channel_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.remove_channel(&channel_id).await
             });
         }
 
-        Event::JoinChannel(WithParams {
-            data: ticket,
-            promise,
+        Event::JoinChannel(Body {
+            params: ticket,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.join_channel(ticket).await
             });
         }
 
-        Event::LeaveChannel(WithParams {
-            data: channel_id,
-            promise,
+        Event::LeaveChannel(Body {
+            params: channel_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.leave_channel(&channel_id).await
             });
         }
 
-        Event::CreateInviteTicket(WithParams {
-            data: (channel_id, invitee),
-            promise,
+        Event::CreateInviteTicket(Body {
+            params: (channel_id, invitee),
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.create_invite_ticket(&channel_id, invitee).await
             });
         }
 
-        Event::TransferChannelOwnership(WithParams {
-            data: (channel_id, new_owner),
-            promise,
+        Event::TransferChannelOwnership(Body {
+            params: (channel_id, new_owner),
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.transfer_channel_ownership(&channel_id, new_owner).await
             });
         }
 
-        Event::RotateChannelSessionKey(WithParams {
-            data: channel_id,
-            promise,
+        Event::RotateChannelSessionKey(Body {
+            params: channel_id,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.rotate_channel_session_key(&channel_id).await
             });
         }
 
-        Event::UpdateChannelInfo(WithParams {
-            data: channel,
-            promise,
+        Event::UpdateChannelInfo(Body {
+            params: channel,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
                 rpc.update_channel_info(&channel).await
             });
         }
 
-        Event::SetChannelMemberRole(WithParams {
-            data: (channel_id, member_ids, role),
-            promise,
+        Event::OperateChannelMembers(Body {
+            params,
+            result: promise,
         }) => {
             respond(pending, promise, async move {
-                rpc.set_channel_members_role(&channel_id, &member_ids, role).await
+                match params.operation {
+                    OPERATE_SET_MEMBER_ROLE => {
+                        let role = params.role.ok_or_else(|| StateError::new("Missing member role"))?;
+                        rpc.set_channel_members_role(&params.channel_id, &params.member_ids, role).await
+                    }
+                    OPERATE_BAN_MEMBERS => {
+                        rpc.ban_channel_members(&params.channel_id, &params.member_ids).await
+                    }
+                    OPERATE_UNBAN_MEMBERS => {
+                        rpc.unban_channel_members(&params.channel_id, &params.member_ids).await
+                    }
+                    OPERATE_REMOVE_MEMBERS => {
+                        rpc.remove_channel_members(&params.channel_id, &params.member_ids).await
+                    }
+                    _ => Err(StateError::new("Unknown channel member operation").into()),
+                }
             });
         }
-
-        Event::BanChannelMembers(WithParams {
-            data: (channel_id, member_ids),
-            promise,
-        }) => {
+        Event::GetContacts(Body {params: id, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.ban_channel_members(&channel_id, &member_ids).await
+                match id {
+                    Some(id) => Ok(rpc.get_contact(&id).await?.into_iter().collect()),
+                    None => rpc.get_contacts().await,
+                }
             });
         }
-        Event::UnbanChannelMembers(WithParams {
-            data: (channel_id, member_ids),
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.unban_channel_members(&channel_id, &member_ids).await
-            });
-        }
-        Event::RemoveChannelMembers(WithParams {
-            data: (channel_id, members),
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.remove_channel_members(&channel_id, &members).await
-            });
-        }
-        Event::GetContact(WithParams {
-            data: id,
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.get_contact(&id).await
-            });
-        }
-        Event::GetContacts(NoParams {
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.get_contacts().await
-            });
-        }
-        Event::UpdateContact(WithParams {
-            data: contact,
-            promise,
-        }) => {
+        Event::UpdateContact(Body {params: contact, result: promise}) => {
             respond(pending, promise, async move {
                 rpc.update_contact(&contact).await
             });
         }
-        Event::RemoveContacts(WithParams {
-            data: ids,
-            promise,
-        }) => {
+        Event::RemoveContacts(Body {params: ids, result: promise}) => {
             respond(pending, promise, async move {
-                rpc.remove_contacts(&ids).await
-            });
-        }
-        Event::ClearContacts(NoParams {
-            promise,
-        }) => {
-            respond(pending, promise, async move {
-                rpc.clear_contacts().await
+                match ids {
+                    Some(ids) => rpc.remove_contacts(&ids).await,
+                    None => rpc.clear_contacts().await,
+                }
             });
         }
     }

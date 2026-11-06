@@ -1771,15 +1771,6 @@ impl RpcServer {
         Ok(conversations)
     }
 
-    /// Drops a conversation locally; the peer is not notified.
-    pub(crate) async fn remove_conversation(&self, id: &Id) -> Result<()> {
-        self.repository
-            .borrow_mut()
-            .remove_messages_in_conversation(id)?;
-        self.conversations.lock().unwrap().remove(id);
-        Ok(())
-    }
-
     /// Drops several conversations locally.
     pub(crate) async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
         for id in ids {
@@ -1963,16 +1954,6 @@ impl RpcServer {
         let borrowed = self.friend_requests.borrow();
         let requests = borrowed.values().cloned().collect::<Vec<_>>();
         Ok(requests)
-    }
-
-    /// Dismisses a pending friend request without accepting it.
-    pub(crate) async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
-        let _ = self.requests.lock().await;
-        self.repository
-            .borrow_mut()
-            .remove_friend_request(user_id)?;
-        self.friend_requests.borrow_mut().remove(user_id);
-        Ok(())
     }
 
     /// Dismisses several pending friend requests.

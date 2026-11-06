@@ -49,7 +49,7 @@ use crate::{
     options::Options,
 };
 pub(crate) use client::VerticleClient;
-pub(crate) use event::{Event, WithParams};
+pub(crate) use event::{Event, Body, MsgContentParams};
 use runtime::Verticle;
 pub(crate) use promise::Promise;
 

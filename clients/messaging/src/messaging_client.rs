@@ -88,27 +88,16 @@ pub trait MessagingClient {
     ) -> MessageBuilder;
 
     /// Retrieves a specific conversation by its identifier.
-    fn get_conversation(
-        &self,
-        id: &Id
-    ) -> impl Future<Output = Result<Option<Conversation>>>;
+    fn conversation(&self, id: &Id) -> impl Future<Output = Result<Option<Conversation>>>;
 
     /// Retrieves all conversations for the local user.
-    fn get_conversations(
-        &self
-    ) -> impl Future<Output = Result<Vec<Conversation>>>;
+    fn conversations(&self) -> impl Future<Output = Result<Vec<Conversation>>>;
 
     /// Removes a conversation and all its associated messages.
-    fn remove_conversation(
-        &self,
-        id: &Id
-    ) -> impl Future<Output = Result<()>>;
+    fn remove_conversation(&self, id: &Id) -> impl Future<Output = Result<()>>;
 
     /// Removes multiple conversations and all their associated messages.
-    fn remove_conversations(
-        &self,
-        ids: &[Id]
-    ) -> impl Future<Output = Result<()>>;
+    fn remove_conversations(&self, ids: &[Id]) -> impl Future<Output = Result<()>>;
 
     /// Retrieves a list of messages for a specific conversation with pagination support.
     fn get_messages(

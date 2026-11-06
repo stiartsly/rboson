@@ -486,8 +486,8 @@ mod lifecycle {
         )
         .unwrap();
 
-        assert!(client.get_conversation(&user_id).await.is_err());
-        assert!(client.get_conversations().await.is_err());
+        assert!(client.conversation(&user_id).await.is_err());
+        assert!(client.conversations().await.is_err());
         assert!(client.remove_conversation(&user_id).await.is_err());
         assert!(client.remove_conversations(&[user_id]).await.is_err());
 
@@ -908,10 +908,10 @@ mod conversations {
         reset_clients(&bob, &alice).await;
         make_friends_with_keypair(&bob, &alice, KeyPair::random()).await;
 
-        assert!(bob.get_conversation(&alice_id).await.unwrap().is_none());
-        assert!(alice.get_conversation(&bob_id).await.unwrap().is_none());
-        assert!(bob.get_conversations().await.unwrap().is_empty());
-        assert!(alice.get_conversations().await.unwrap().is_empty());
+        assert!(bob.conversation(&alice_id).await.unwrap().is_none());
+        assert!(alice.conversation(&bob_id).await.unwrap().is_none());
+        assert!(bob.conversations().await.unwrap().is_empty());
+        assert!(alice.conversations().await.unwrap().is_empty());
 
         let body = "conversation API verification";
         let sent = bob
@@ -925,7 +925,7 @@ mod conversations {
         assert_eq!(captured.text.as_deref(), Some(body));
 
         let bob_conversation = bob
-            .get_conversation(&alice_id)
+            .conversation(&alice_id)
             .await
             .unwrap()
             .expect("Sending a message should create a conversation");
@@ -935,12 +935,12 @@ mod conversations {
         assert_eq!(bob_conversation.preview().unwrap(), Some(body));
         assert!(bob_conversation.updated_at().is_some());
 
-        let bob_conversations = bob.get_conversations().await.unwrap();
+        let bob_conversations = bob.conversations().await.unwrap();
         assert_eq!(bob_conversations.len(), 1);
         assert_eq!(bob_conversations[0].id(), &alice_id);
 
         let alice_conversation = alice
-            .get_conversation(&bob_id)
+            .conversation(&bob_id)
             .await
             .unwrap()
             .expect("Receiving a message should create a conversation");
@@ -949,18 +949,18 @@ mod conversations {
         assert!(!alice_conversation.is_channel());
         assert_eq!(alice_conversation.preview().unwrap(), Some(body));
 
-        let alice_conversations = alice.get_conversations().await.unwrap();
+        let alice_conversations = alice.conversations().await.unwrap();
         assert_eq!(alice_conversations.len(), 1);
         assert_eq!(alice_conversations[0].id(), &bob_id);
 
         assert!(bob.remove_conversations(&[]).await.is_ok());
         assert!(bob.remove_conversation(&alice_id).await.is_ok());
-        assert!(bob.get_conversation(&alice_id).await.unwrap().is_none());
-        assert!(bob.get_conversations().await.unwrap().is_empty());
+        assert!(bob.conversation(&alice_id).await.unwrap().is_none());
+        assert!(bob.conversations().await.unwrap().is_empty());
 
         assert!(alice.remove_conversations(&[bob_id]).await.is_ok());
-        assert!(alice.get_conversation(&bob_id).await.unwrap().is_none());
-        assert!(alice.get_conversations().await.unwrap().is_empty());
+        assert!(alice.conversation(&bob_id).await.unwrap().is_none());
+        assert!(alice.conversations().await.unwrap().is_empty());
 
         reset_clients(&bob, &alice).await;
         stop_clients(&bob, &alice).await;
@@ -1366,7 +1366,7 @@ mod channels {
         );
 
         let conversation = bob
-            .get_conversation(&channel_id)
+            .conversation(&channel_id)
             .await
             .unwrap()
             .expect("A channel message should create a conversation");
@@ -1376,7 +1376,7 @@ mod channels {
         assert_eq!(conversation.contact().contact_type(), ContactType::Channel);
         assert_eq!(conversation.preview().unwrap(), Some(body));
         assert!(bob
-            .get_conversations()
+            .conversations()
             .await
             .unwrap()
             .iter()

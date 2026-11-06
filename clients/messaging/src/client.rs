@@ -211,27 +211,21 @@ impl Client {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conversations
-// ---------------------------------------------------------------------------
-
+#[cfg_attr(doc, doc = "Conversations API")]
 impl Client {
-    /// Looks up a single conversation by contact id.
-    pub async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
-        self.verticle_client()?.get_conversation(*id).await
+    pub async fn conversation(&self, id: &Id) -> Result<Option<Conversation>> {
+        let conversations = self.verticle_client()?.get_conversations(Some(*id)).await?;
+        Ok(conversations.into_iter().next())
     }
 
-    /// Lists every known conversation.
-    pub async fn get_conversations(&self) -> Result<Vec<Conversation>> {
-        self.verticle_client()?.get_conversations().await
+    pub async fn conversations(&self) -> Result<Vec<Conversation>> {
+        self.verticle_client()?.get_conversations(None).await
     }
 
-    /// Drops the conversation with `id`. The peer is not notified.
     pub async fn remove_conversation(&self, id: &Id) -> Result<()> {
-        self.verticle_client()?.remove_conversation(*id).await
+        self.remove_conversations(&[*id]).await
     }
 
-    /// Drops several conversations in one round trip.
     pub async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
         self.verticle_client()?
             .remove_conversations(ids.to_vec())
@@ -345,7 +339,7 @@ impl Client {
         self.verticle_client()?
             .friend_request(user_id, hello.map(Into::into))
             .await
-            //.map_err(|e| e.into())
+            .map_err(|e| e.into())
     }
 
     /// Accepts a pending friend request.
@@ -637,11 +631,11 @@ impl MessagingClient for Client {
     }
 
     async fn start(&self) -> Result<()> {
-        self.start().await
+        self.start().await.into()
     }
 
     async fn stop(&self) -> Result<()> {
-        self.stop().await
+        self.stop().await.into()
     }
 
     fn is_running(&self) -> bool {
@@ -660,12 +654,12 @@ impl MessagingClient for Client {
         self.message(recipient)
     }
 
-    async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
-        self.get_conversation(id).await
+    async fn conversation(&self, id: &Id) -> Result<Option<Conversation>> {
+        self.conversation(id).await
     }
 
-    async fn get_conversations(&self) -> Result<Vec<Conversation>> {
-        self.get_conversations().await
+    async fn conversations(&self) -> Result<Vec<Conversation>> {
+        self.conversations().await
     }
 
     async fn remove_conversation(&self, id: &Id) -> Result<()> {

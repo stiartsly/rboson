@@ -123,10 +123,15 @@ impl MessageBuilderOps for MessageBuilder {
         let (promise, future) = verticle::Promise::pair();
         sender
             .send(verticle::Event::ContentMessage(
-                verticle::WithParams {
-                    data: (recipient, headers, body, text),
-                    promise
-                },
+                verticle::Body::new(
+                    verticle::MsgContentParams {
+                        conversation_id: recipient,
+                        metadata: headers,
+                        content: body,
+                        is_encrypted: text,
+                    },
+                    promise,
+                ),
             ))
             .map_err(|_| StateError::new("Messaging verticle event channel closed"))?;
 

@@ -22,16 +22,15 @@ use serde::{Serialize, Deserialize};
 
 use boson_api::{utils, Id};
 
-/// Session-key rotation request for a channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ChannelSessionKeyRotation {
+pub(crate) struct SessionKeyRotation {
     #[serde(rename = "sid", with = "utils::id")]
     session_id: Id,
     #[serde(rename = "sk", with = "utils::bytes")]
     session_key: Vec<u8>,
 }
 
-impl ChannelSessionKeyRotation {
+impl SessionKeyRotation {
     pub(crate) fn new(session_id: Id, session_key: Vec<u8>) -> Self {
         Self {
             session_id,

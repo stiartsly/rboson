@@ -246,7 +246,7 @@ async fn check_friend_requests(client: &Client, user_id: Id, accepted: bool) {
 
 async fn check_friend_contact(client: &Client, user_id: &Id) {
     let contact = client
-        .get_contact(user_id)
+        .contact(user_id)
         .await
         .unwrap()
         .expect("The friend contact should be present");
@@ -328,7 +328,7 @@ async fn create_channel(
     name: &str,
     notice: Option<&str>,
     announce: bool,
-) -> Box<Channel> {
+) -> Channel {
     client
         .create_channel(permission, name, notice, announce)
         .await
@@ -339,7 +339,7 @@ async fn create_channel_with_member(
     bob: &Client,
     alice: &Client,
     name: &str,
-) -> (Id, Box<Channel>) {
+) -> (Id, Channel) {
     let channel = create_channel(bob, Permission::OwnerInvite, name, None, false).await;
     let channel_id = *channel.id();
     assert!(channel.has_member(bob.user_id()));
@@ -530,8 +530,8 @@ mod lifecycle {
         assert!(client.unban_channel_members(&channel_id, &[user_id]).await.is_err());
         assert!(client.remove_channel_members(&channel_id, &[user_id]).await.is_err());
 
-        assert!(client.get_contact(&user_id).await.is_err());
-        assert!(client.get_contacts().await.is_err());
+        assert!(client.contact(&user_id).await.is_err());
+        assert!(client.contacts().await.is_err());
         assert!(client.remove_contact(&user_id).await.is_err());
         assert!(client.remove_contacts(&[user_id]).await.is_err());
         assert!(client.clear_contacts().await.is_err());
@@ -604,7 +604,7 @@ mod friend_requests {
     use super::*;
 
     async fn remove_friend_contact_if_present(client: &Client, friend_id: &Id) {
-        if client.get_contact(friend_id).await.unwrap().is_some() {
+        if client.contact(friend_id).await.unwrap().is_some() {
             client.remove_contact(friend_id).await.unwrap();
         }
     }
@@ -734,7 +734,7 @@ mod friend_requests {
 
         check_friend_contact(&sender, &recipient_id).await;
         check_friend_contact(&recipient, &sender_id).await;
-        let contact = sender.get_contact(&recipient_id).await.unwrap().unwrap();
+        let contact = sender.contact(&recipient_id).await.unwrap().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Friend);
         assert!(contact.revision() > 0);
 
@@ -745,7 +745,7 @@ mod friend_requests {
             .await
             .unwrap()
             .is_none());
-        assert!(sender.get_contact(&recipient_id).await.unwrap().is_some());
+        assert!(sender.contact(&recipient_id).await.unwrap().is_some());
 
         clear_friend_requests(&sender, &recipient).await;
         tokio::join!(
@@ -767,7 +767,7 @@ mod friend_requests {
 
         make_friends_with_keypair(&bob, &alice, KeyPair::random()).await;
 
-        let bob_contacts = bob.get_contacts().await.unwrap();
+        let bob_contacts = bob.contacts().await.unwrap();
         let bob_friends: Vec<_> = bob_contacts
             .iter()
             .filter(|contact| contact.contact_type() == ContactType::Friend)
@@ -776,11 +776,11 @@ mod friend_requests {
         assert_eq!(bob_friends[0].id(), &alice_id);
         assert_eq!(bob_friends[0].remark(), Some("hello,alice"));
 
-        let bob_contact = bob.get_contact(&alice_id).await.unwrap().unwrap();
+        let bob_contact = bob.contact(&alice_id).await.unwrap().unwrap();
         assert_eq!(bob_contact.contact_type(), ContactType::Friend);
         assert_eq!(bob_contact.remark(), Some("hello,alice"));
 
-        let alice_contacts = alice.get_contacts().await.unwrap();
+        let alice_contacts = alice.contacts().await.unwrap();
         let alice_friends: Vec<_> = alice_contacts
             .iter()
             .filter(|contact| contact.contact_type() == ContactType::Friend)
@@ -789,14 +789,14 @@ mod friend_requests {
         assert_eq!(alice_friends[0].id(), &bob_id);
         assert_eq!(alice_friends[0].remark(), Some("hello,bob"));
 
-        let alice_contact = alice.get_contact(&bob_id).await.unwrap().unwrap();
+        let alice_contact = alice.contact(&bob_id).await.unwrap().unwrap();
         assert_eq!(alice_contact.contact_type(), ContactType::Friend);
         assert_eq!(alice_contact.remark(), Some("hello,bob"));
 
         assert!(bob.clear_contacts().await.is_ok());
-        assert!(bob.get_contacts().await.unwrap().is_empty());
+        assert!(bob.contacts().await.unwrap().is_empty());
         assert!(alice.clear_contacts().await.is_ok());
-        assert!(alice.get_contacts().await.unwrap().is_empty());
+        assert!(alice.contacts().await.unwrap().is_empty());
 
         clear_friend_requests(&bob, &alice).await;
         stop_clients(&bob, &alice).await;
@@ -822,7 +822,7 @@ mod contacts {
         make_friends_by_request(&bob, &alice).await;
 
         let contact = bob
-            .get_contact(&alice_id)
+            .contact(&alice_id)
             .await
             .unwrap()
             .expect("The friend contact should exist");
@@ -831,14 +831,14 @@ mod contacts {
         assert!(contact.created_at() > 0);
         assert!(contact.updated_at() >= contact.created_at());
 
-        let updated = Box::new(contact.edit()).remark(Some("Alice".to_string()));
-        let updated = Box::new(updated).tags(Some("work,friends".to_string()));
-        let updated = Box::new(updated).muted(true);
-        let updated = Box::new(updated).blocked(true);
-        let updated = Box::new(updated).build();
+        let updated = contact.edit().remark(Some("Alice".to_string()))
+            .tags(Some("work,friends".to_string()))
+            .muted(true)
+            .blocked(true)
+            .build();
         assert!(bob.update_contact(updated).await.is_ok());
 
-        let updated_contact = bob.get_contact(&alice_id).await.unwrap().unwrap();
+        let updated_contact = bob.contact(&alice_id).await.unwrap().unwrap();
         assert_eq!(updated_contact.remark(), Some("Alice"));
         assert_eq!(updated_contact.tags(), Some("work,friends"));
         assert!(updated_contact.is_muted());
@@ -848,21 +848,22 @@ mod contacts {
 
         // A second update advances the revision again, so the original copy
         // really becomes stale.
-        let second_update = Box::new(updated_contact.edit()).remark(Some("Alice Updated".to_string()));
-        let second_update = Box::new(second_update).build();
+        let second_update = updated_contact
+            .edit()
+            .remark(Some("Alice Updated".to_string()))
+            .build();
         assert!(bob.update_contact(second_update).await.is_ok());
-        let latest = bob.get_contact(&alice_id).await.unwrap().unwrap();
+        let latest = bob.contact(&alice_id).await.unwrap().unwrap();
         assert_eq!(latest.remark(), Some("Alice Updated"));
         assert!(latest.revision() > updated_contact.revision());
 
         // A stale copy must not overwrite a newer revision.
-        let stale = Box::new(contact.edit()).remark(Some("stale".to_string()));
-        let stale = Box::new(stale).build();
+        let stale = contact.edit().remark(Some("stale".to_string())).build();
         let error = bob.update_contact(stale).await.err().unwrap().to_string();
         assert!(error.contains("older than the current version"));
 
         // An unchanged edit is rejected as a no-op.
-        let no_change = Box::new(latest.edit()).build();
+        let no_change = latest.edit().build();
         let error = bob
             .update_contact(no_change)
             .await
@@ -871,18 +872,18 @@ mod contacts {
             .to_string();
         assert!(error.contains("No changes detected"));
 
-        let contacts = bob.get_contacts().await.unwrap();
+        let contacts = bob.contacts().await.unwrap();
         assert_eq!(contacts.len(), 1);
         assert_eq!(contacts[0].id(), &alice_id);
 
         // remove_contact removes a single contact.
         assert!(bob.remove_contact(&alice_id).await.is_ok());
-        assert!(bob.get_contact(&alice_id).await.unwrap().is_none());
-        assert!(alice.get_contact(&bob_id).await.unwrap().is_some());
+        assert!(bob.contact(&alice_id).await.unwrap().is_none());
+        assert!(alice.contact(&bob_id).await.unwrap().is_some());
 
         // remove_contacts removes a batch on the other side.
         assert!(alice.remove_contacts(&[bob_id]).await.is_ok());
-        assert!(alice.get_contact(&bob_id).await.unwrap().is_none());
+        assert!(alice.contact(&bob_id).await.unwrap().is_none());
 
         reset_clients(&bob, &alice).await;
         stop_clients(&bob, &alice).await;
@@ -1191,10 +1192,10 @@ mod channels {
         assert!(channel.has_member(bob.user_id()));
         assert!(channel.member(bob.user_id()).is_some());
 
-        let contact = bob.get_contact(&channel_id).await.unwrap().unwrap();
+        let contact = bob.contact(&channel_id).await.unwrap().unwrap();
         assert_eq!(contact.contact_type(), ContactType::Channel);
         assert_eq!(contact.name(), Some("API channel creation"));
-        let contacts = bob.get_contacts().await.unwrap();
+        let contacts = bob.contacts().await.unwrap();
         assert!(contacts
             .iter()
             .any(|contact| contact.id() == &channel_id));
@@ -1238,7 +1239,7 @@ mod channels {
             .build();
         assert!(bob.update_channel_info(&updated).await.is_ok());
 
-        let updated_contact = bob.get_contact(&channel_id).await.unwrap().unwrap();
+        let updated_contact = bob.contact(&channel_id).await.unwrap().unwrap();
         assert_eq!(
             updated_contact.name(),
             Some("API channel creation updated")
@@ -1262,7 +1263,7 @@ mod channels {
         assert!(error.contains("owner cannot leave"));
 
         assert!(bob.remove_channel(&channel_id).await.is_ok());
-        assert!(bob.get_contact(&channel_id).await.unwrap().is_none());
+        assert!(bob.contact(&channel_id).await.unwrap().is_none());
         let error = bob
             .remove_channel(&channel_id)
             .await
@@ -1383,11 +1384,11 @@ mod channels {
             .any(|conversation| conversation.id() == &channel_id));
 
         assert!(alice.leave_channel(&channel_id).await.is_ok());
-        assert!(alice.get_contact(&channel_id).await.unwrap().is_none());
+        assert!(alice.contact(&channel_id).await.unwrap().is_none());
         assert!(alice.leave_channel(&channel_id).await.is_err());
 
         assert!(bob.remove_channel(&channel_id).await.is_ok());
-        assert!(bob.get_contact(&channel_id).await.unwrap().is_none());
+        assert!(bob.contact(&channel_id).await.unwrap().is_none());
 
         reset_clients(&bob, &alice).await;
         stop_clients(&bob, &alice).await;

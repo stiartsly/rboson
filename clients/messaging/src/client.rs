@@ -407,12 +407,12 @@ impl Client {
 
 impl Client {
     /// Looks up a single contact.
-    pub async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
+    pub async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
         self.verticle_client()?.get_contact(*id).await
     }
 
     /// Lists every known contact.
-    pub async fn get_contacts(&self) -> Result<Vec<Contact>> {
+    pub async fn contacts(&self) -> Result<Vec<Contact>> {
         self.verticle_client()?.get_contacts().await
     }
 
@@ -448,14 +448,13 @@ impl Client {
 // ---------------------------------------------------------------------------
 
 impl Client {
-    /// Creates a new channel.
     pub async fn create_channel(
         &self,
         permission: Permission,
         name: impl Into<String>,
         notice: Option<impl Into<String>>,
         announce: bool,
-    ) -> Result<Box<Channel>> {
+    ) -> Result<Channel> {
         let name = name.into().trim().to_string();
         if name.is_empty() {
             return Err(ArgumentError::new("Channel name is required"));
@@ -473,7 +472,7 @@ impl Client {
     }
 
     /// Joins a channel using an invite ticket.
-    pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
+    pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Channel> {
         self.verticle_client()?.join_channel(ticket).await
     }
 
@@ -524,8 +523,8 @@ impl Client {
         members: &[Id],
         role: Role,
     ) -> Result<()> {
-        ensure_members(members)?;
-        ensure_role(role)?;
+        check_members(members)?;
+        check_role(role)?;
 
         self.verticle_client()?
             .set_channel_members_role(*channel_id, members.to_vec(), role)
@@ -534,7 +533,7 @@ impl Client {
 
     /// Bans a set of channel members.
     pub async fn ban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
-        ensure_members(members)?;
+        check_members(members)?;
         self.verticle_client()?
             .ban_channel_members(*channel_id, members.to_vec())
             .await
@@ -542,7 +541,7 @@ impl Client {
 
     /// Unbans a set of channel members.
     pub async fn unban_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
-        ensure_members(members)?;
+        check_members(members)?;
         self.verticle_client()?
             .unban_channel_members(*channel_id, members.to_vec())
             .await
@@ -550,7 +549,7 @@ impl Client {
 
     /// Removes a set of channel members.
     pub async fn remove_channel_members(&self, channel_id: &Id, members: &[Id]) -> Result<()> {
-        ensure_members(members)?;
+        check_members(members)?;
         self.verticle_client()?
             .remove_channel_members(*channel_id, members.to_vec())
             .await
@@ -758,7 +757,7 @@ impl MessagingClient for Client {
         name: String,
         notice: Option<String>,
         announce: bool,
-    ) -> Result<Box<Channel>> {
+    ) -> Result<Channel> {
         self.create_channel(perms, name, notice, announce).await
     }
 
@@ -766,7 +765,7 @@ impl MessagingClient for Client {
         self.remove_channel(channel_id).await
     }
 
-    async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
+    async fn join_channel(&self, ticket: InviteTicket) -> Result<Channel> {
         self.join_channel(ticket).await
     }
 
@@ -775,14 +774,14 @@ impl MessagingClient for Client {
     }
 
     async fn create_invite_ticket(
-        &self,
-        channel_id: &Id,
-        invitee: Option<Id>,
+        &self, channel_id: &Id, invitee: Option<Id>,
     ) -> Result<InviteTicket> {
         self.create_invite_ticket(channel_id, invitee).await
     }
 
-    async fn transfer_channel_ownership(&self, channel_id: &Id, new_owner: Id) -> Result<()> {
+    async fn transfer_channel_ownership(
+        &self, channel_id: &Id, new_owner: Id
+    ) -> Result<()> {
         self.transfer_channel_ownership(channel_id, new_owner).await
     }
 
@@ -790,15 +789,12 @@ impl MessagingClient for Client {
         self.rotate_channel_session_key(channel_id).await
     }
 
-    async fn update_channel_info(&self, channel: &Box<Channel>) -> Result<()> {
+    async fn update_channel_info(&self, channel: &Channel) -> Result<()> {
         self.update_channel_info(channel).await
     }
 
     async fn set_channel_members_role(
-        &self,
-        channel_id: &Id,
-        members: &[Id],
-        role: Role,
+        &self, channel_id: &Id, members: &[Id], role: Role,
     ) -> Result<()> {
         self.set_channel_members_role(channel_id, members, role)
             .await
@@ -816,12 +812,12 @@ impl MessagingClient for Client {
         self.remove_channel_members(channel_id, members).await
     }
 
-    async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
-        self.get_contact(id).await
+    async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
+        self.contact(id).await
     }
 
-    async fn get_contacts(&self) -> Result<Vec<Contact>> {
-        self.get_contacts().await
+    async fn contacts(&self) -> Result<Vec<Contact>> {
+        self.contacts().await
     }
 
     async fn update_contact(&self, contact: Contact) -> Result<()> {
@@ -841,20 +837,15 @@ impl MessagingClient for Client {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Message composition
-// ---------------------------------------------------------------------------
-
-
-
-fn ensure_members(members: &[Id]) -> Result<()> {
+// Helper functions
+fn check_members(members: &[Id]) -> Result<()> {
     if members.is_empty() {
         return Err(ArgumentError::new("No members specified"));
     }
     Ok(())
 }
 
-fn ensure_role(role: Role) -> Result<()> {
+fn check_role(role: Role) -> Result<()> {
     if role == Role::Owner || role == Role::Banned {
         return Err(ArgumentError::new(
             "Owner and Banned roles cannot be assigned with this operation",

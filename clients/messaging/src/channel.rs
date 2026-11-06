@@ -19,23 +19,17 @@
 // SOFTWARE.
 
 use std::fmt;
-use serde::{Serialize, Deserialize};
 
 use boson_api::{
-    Id,
     Result,
     errors::ArgumentError,
 };
 use crate::{
-    contact::{Contact, ContactType},
-    contact_editor::ContactEditor,
+    ChannelOps,
     ChannelEditorOps,
-    ChannelOps,ContactOps,
-    ChannelMember,
+    ChannelMemberOps,
 };
 
-/// Controls who may invite new members to a channel.
-#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Permission {
@@ -47,6 +41,12 @@ pub enum Permission {
     ModeratorInvite = 2,
     /// Only the channel owner may invite.
     OwnerInvite = 3,
+}
+
+impl Permission {
+    pub fn from_i32(value: i32) -> Self {
+        Self::try_from(value).unwrap_or(Self::Public)
+    }
 }
 
 impl TryFrom<i32> for Permission {
@@ -75,7 +75,6 @@ impl fmt::Display for Permission {
 }
 
 /// Role of a member within a channel.
-#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Role {
@@ -90,6 +89,10 @@ pub enum Role {
 }
 
 impl Role {
+    pub fn from_i32(value: i32) -> Self {
+        Self::try_from(value).unwrap_or(Self::Member)
+    }
+
     pub fn is_banned(&self) -> bool {
         return matches!(self, Role::Banned)
     }
@@ -104,7 +107,7 @@ impl TryFrom<i32> for Role {
             1 => Ok(Role::Moderator),
             2 => Ok(Role::Member),
             -1 => Ok(Role::Banned),
-            _ => Err(ArgumentError::new("Invalid Role value")),
+            _ => Err(ArgumentError::new(&format!("Invalid Role {}", value))),
         }
     }
 }
@@ -118,14 +121,8 @@ impl TryFrom<&str> for Role {
             "Moderator" => Ok(Role::Moderator),
             "Member" => Ok(Role::Member),
             "Banned" => Ok(Role::Banned),
-            _ => Err(ArgumentError::new("Invalid Role value")),
+            _ => Err(ArgumentError::new(&format!("Invalid Role {}", value))),
         }
-    }
-}
-
-impl From<Role> for i32 {
-    fn from(r: Role) -> i32 {
-        r as i32
     }
 }
 
@@ -140,237 +137,6 @@ impl fmt::Display for Role {
     }
 }
 
-/// Channel implementation backed by a local contact and its membership list.
-#[derive(Clone)]
-pub struct Channel {
-    pub(crate) contact: Contact,
-    pub(crate) owner: Id,
-    pub(crate) session_id: Id,
-    pub(crate) permission: Permission,
-    pub(crate) notice: Option<String>,
-    pub(crate) announced: bool,
-    pub(crate) members: Vec<ChannelMember>,
-}
-
-impl ContactOps for Channel {
-    fn id(&self) -> &Id {
-        self.contact.id()
-    }
-
-    fn contact_type(&self) -> ContactType {
-        self.contact.contact_type()
-    }
-
-    fn name(&self) -> Option<&str> {
-        self.contact.name()
-    }
-
-    fn remark(&self) -> Option<&str> {
-        self.contact.remark()
-    }
-
-    fn tags(&self) -> Option<&str> {
-        self.contact.tags()
-    }
-
-    fn is_muted(&self) -> bool {
-        self.contact.is_muted()
-    }
-
-    fn is_blocked(&self) -> bool {
-        self.contact.is_blocked()
-    }
-
-    fn created_at(&self) -> i64 {
-        self.contact.created_at()
-    }
-
-    fn updated_at(&self) -> i64 {
-        self.contact.updated_at()
-    }
-
-    fn revision(&self) -> i32 {
-        self.contact.revision()
-    }
-
-    fn edit(&self) -> ContactEditor {
-        self.contact.edit()
-    }
-}
-
-impl ChannelOps for Channel {
-    fn permission(&self) -> Permission {
-        self.permission
-    }
-
-    fn notice(&self) -> Option<&str> {
-        self.notice.as_deref()
-    }
-
-    fn is_announced(&self) -> bool {
-        self.announced
-    }
-
-    fn size(&self) -> usize {
-        self.members.len()
-    }
-
-    fn banned(&self) -> usize {
-        self.members.iter().filter(|member| member.is_banned()).count()
-    }
-
-    fn members(&self) -> Vec<ChannelMember> {
-        self.members.clone()
-    }
-
-    fn member(&self, member_id: &Id) -> Option<ChannelMember> {
-        self.members
-            .iter()
-            .find(|member| member.id() == member_id)
-            .cloned()
-    }
-
-    fn edit_channel(&self) -> ChannelEditor {
-        ChannelEditor(self.clone())
-    }
-}
-
-impl Channel {
-    pub fn id(&self) -> &Id {
-        self.contact.id()
-    }
-
-    pub fn contact_type(&self) -> ContactType {
-        self.contact.contact_type()
-    }
-
-    pub fn name(&self) -> Option<&str> {
-        self.contact.name()
-    }
-
-    pub fn remark(&self) -> Option<&str> {
-        self.contact.remark()
-    }
-
-    pub fn tags(&self) -> Option<&str> {
-        self.contact.tags()
-    }
-
-    pub fn is_muted(&self) -> bool {
-        self.contact.is_muted()
-    }
-
-    pub fn is_blocked(&self) -> bool {
-        self.contact.is_blocked()
-    }
-
-    pub fn created_at(&self) -> i64 {
-        self.contact.created_at()
-    }
-
-    pub fn updated_at(&self) -> i64 {
-        self.contact.updated_at()
-    }
-
-    pub fn revision(&self) -> i32 {
-        self.contact.revision()
-    }
-
-    pub fn edit(&self) -> ContactEditor {
-        self.contact.edit()
-    }
-
-    pub fn permission(&self) -> Permission {
-        self.permission
-    }
-
-    pub fn notice(&self) -> Option<&str> {
-        self.notice.as_deref()
-    }
-
-    pub fn is_announced(&self) -> bool {
-        self.announced
-    }
-
-    pub fn size(&self) -> usize {
-        self.members.len()
-    }
-
-    pub fn banned(&self) -> usize {
-        self.members.iter().filter(|member| member.is_banned()).count()
-    }
-
-    pub fn members(&self) -> Vec<ChannelMember> {
-        self.members.clone()
-    }
-
-    pub fn member(&self, member_id: &Id) -> Option<ChannelMember> {
-        self.members
-            .iter()
-            .find(|member| member.id() == member_id)
-            .cloned()
-    }
-
-    pub fn has_member(&self, member_id: &Id) -> bool {
-        self.member(member_id).is_some()
-    }
-
-    pub fn edit_channel(&self) -> ChannelEditor {
-        ChannelEditor(self.clone())
-    }
-}
-
-/// Immutable update builder for [`Channel`].
-pub struct ChannelEditor(Channel);
-
-impl ChannelEditorOps for ChannelEditor {
-    fn permission(mut self, permission: Permission) -> ChannelEditor {
-        self.0.permission = permission;
-        self
-    }
-
-    fn name(mut self, name: String) -> ChannelEditor {
-        self.0.contact.set_name(Some(name));
-        self
-    }
-
-    fn notice(mut self, notice: Option<String>) -> ChannelEditor {
-        self.0.notice = notice;
-        self
-    }
-
-    fn announced(mut self, announced: bool) -> ChannelEditor {
-        self.0.announced = announced;
-        self
-    }
-
-    fn build(self) -> Channel {
-        self.0
-    }
-}
-
-impl ChannelEditor {
-    pub fn permission(mut self, permission: Permission) -> Self {
-        self.0.permission = permission;
-        self
-    }
-
-    pub fn name(mut self, name: String) -> Self {
-        self.0.contact.set_name(Some(name));
-        self
-    }
-
-    pub fn notice(mut self, notice: Option<String>) -> Self {
-        self.0.notice = notice;
-        self
-    }
-
-    pub fn announced(mut self, announced: bool) -> Self  {
-        self.0.announced = announced;
-        self
-    }
-
-    pub fn build(self) -> Channel {
-        self.0
-    }
-}
+pub type Channel = Box<dyn ChannelOps>;
+pub type ChannelMember = Box<dyn ChannelMemberOps>;
+pub type ChannelEditor = Box<dyn ChannelEditorOps>;

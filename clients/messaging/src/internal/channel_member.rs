@@ -18,59 +18,57 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::time::SystemTime;
 use serde::{Serialize, Deserialize};
 
 use boson_api::Id;
-use crate::{
-    channel::Role,
-    internal::utils,
-};
+use crate::channel::Role;
+use crate::interfaces::ChannelMemberOps;
+use crate::internal::serde_utils::role;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ChannelMember {
+pub struct PhotonChannelMember {
     id: Id,
-    #[serde(rename = "r", with = "utils::role")]
-    role: Role,
+    #[serde(rename = "r", with = "role")]
+    role: i32,
     #[serde(rename = "j")]
     joined: u64,
 }
 
-/// A single member of a channel, combining identity and role.
-impl ChannelMember {
-    pub(crate) fn new(id: Id, role: Role, joined: u64) -> Self {
-        Self { id, role, joined }
-    }
-
-    pub(crate) fn id(&self) -> &Id {
-        &self.id
-    }
-
-    pub(crate) fn role(&self) -> Role {
-        self.role
-    }
-
-    pub(crate) fn joined(&self) -> u64 {
-        self.joined
-    }
-
-    pub(crate) fn is_owner(&self) -> bool {
-        self.role == Role::Owner
-    }
-
-    pub(crate) fn is_moderator(&self) -> bool {
-        self.role == Role::Moderator
-    }
-
-    pub(crate) fn is_member(&self) -> bool {
-        self.role == Role::Member
-    }
-
-    pub(crate) fn is_banned(&self) -> bool {
-        self.role == Role::Banned
+impl PhotonChannelMember {
+    pub fn new(id: Id, role: Role, joined: u64) -> Self {
+        Self {
+            id,
+            role: role as i32,
+            joined
+        }
     }
 }
 
+impl ChannelMemberOps for PhotonChannelMember {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn role(&self) -> Role {
+        Role::from_i32(self.role)
+    }
+
+    fn joined(&self) -> SystemTime {
+        to_system_time(self.joined)
+    }
+
+    fn clone_box(&self) -> Box<dyn crate::ChannelMemberOps> {
+        Box::new(self.clone())
+    }
+}
+
+#[inline]
+fn to_system_time(secs: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs)
+}
+
 #[cfg(test)]
-#[path = "unitests/test_channel_member.rs"]
+#[path = "../unitests/test_channel_member.rs"]
 mod test_channel_member;

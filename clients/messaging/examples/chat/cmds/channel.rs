@@ -31,7 +31,7 @@ use clap::{
 use boson::{
     messaging::{
         Client,
-        ContactOps,
+        Contact,
         ContactType,
         InviteTicket,
         Permission,
@@ -184,7 +184,7 @@ async fn info(args: &ArgMatches, client: &Arc<Client>) {
     let Some(id) = parse_id(args.get_one::<String>("ID").unwrap()) else {
         return;
     };
-    match client.get_contact(&id).await {
+    match client.contact(&id).await {
         Ok(Some(contact)) if contact.contact_type() == ContactType::Channel => {
             print_contact(&contact)
         }
@@ -195,7 +195,7 @@ async fn info(args: &ArgMatches, client: &Arc<Client>) {
 }
 
 async fn list(client: &Arc<Client>) {
-    match client.get_contacts().await {
+    match client.contacts().await {
         Ok(contacts) => {
             for contact in contacts
                 .iter()
@@ -208,7 +208,7 @@ async fn list(client: &Arc<Client>) {
     }
 }
 
-fn print_contact(contact: &dyn ContactOps) {
+fn print_contact(contact: &Contact) {
     println!(
         "{} name={} muted={} blocked={}",
         contact.id(),

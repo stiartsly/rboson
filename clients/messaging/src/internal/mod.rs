@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
-pub(crate) mod utils;
+pub(crate) mod serde;
 pub(crate) mod handshake;
 pub(crate) mod notification;
 pub(crate) mod message_content;
@@ -37,6 +36,11 @@ pub(crate) mod join_channel;
 pub(crate) mod session_context;
 pub(crate) mod connection_listener;
 
+
+pub(crate) mod channel;
+pub(crate) mod contact;
+pub(crate) mod channel_member;
+
 pub(crate) use {
     channel_info::ChannelInfo,
     channel_members_role::ChannelMembersRole,
@@ -46,6 +50,10 @@ pub(crate) use {
     contact_sync::ContactSync,
 
     join_channel::JoinChannel,
+
+    channel::PhotonChannel,
+    contact::PhotonContact,
+    channel_member::PhotonChannelMember
 };
 
 pub(crate) use {
@@ -69,9 +77,11 @@ pub(crate) use {
     contact_sync::SyncType,
 
     contact_opaque::OpaqueContact,
-    channel_session_rotation::ChannelSessionKeyRotation,
+    channel_session_rotation::SessionKeyRotation as ChannelSessionKeyRotation,
     connection_listener::ClientConnectionListener,
     new_channel_info::NewChannelInfo,
     topic::Topic,
     session_context::SessionContext,
+
+    serde as serde_utils,
 };

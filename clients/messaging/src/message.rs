@@ -39,7 +39,7 @@ use crate::{
 use super::content_type;
 pub use super::content_disposition::{
     ContentDisposition,
-    ContentType,
+    ContentDispositionType,
     HEADER_NAME as CONTENT_DISPOSITION_HEADER,
 };
 pub use crate::message_builder::MessageBuilder;

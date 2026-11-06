@@ -22,7 +22,8 @@ use serde_cbor::Value;
 
 use boson_api::Id;
 use crate::channel::Role;
-use super::ChannelMember;
+use crate::internal::PhotonChannelMember;
+use crate::ChannelMemberOps;
 
 #[test]
 fn test_invalid_values() {
@@ -34,7 +35,7 @@ fn test_invalid_values() {
         ].into_iter().collect());
 
         let encoded = serde_cbor::to_vec(&wire).unwrap();
-        let decoded = serde_cbor::from_slice::<ChannelMember>(&encoded);
+        let decoded = serde_cbor::from_slice::<PhotonChannelMember>(&encoded);
         assert!(decoded.is_err());
     }
 }
@@ -49,7 +50,7 @@ fn test_serde() {
     ];
 
     for role in roles {
-        let member = ChannelMember::new(Id::random(), role, 12);
+        let member = PhotonChannelMember::new(Id::random(), role, 12);
         let encoded = serde_cbor::to_vec(&member).unwrap();
         let decoded = serde_cbor::from_slice::<Value>(&encoded).unwrap();
 
@@ -61,10 +62,10 @@ fn test_serde() {
             Some(&Value::Integer((role as i32).into()))
         );
 
-        let decoded = serde_cbor::from_slice::<ChannelMember>(&encoded).unwrap();
+        let decoded = serde_cbor::from_slice::<PhotonChannelMember>(&encoded).unwrap();
         assert_eq!(decoded, member);
         assert_eq!(decoded.id(), member.id());
         assert_eq!(decoded.role(), role);
-        assert_eq!(decoded.joined(), 12);
+        assert_eq!(decoded.joined(), std::time::UNIX_EPOCH + std::time::Duration::from_secs(12));
     }
 }

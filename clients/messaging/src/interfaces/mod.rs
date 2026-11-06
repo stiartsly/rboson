@@ -24,10 +24,13 @@ mod conversation;
 mod message;
 
 pub use {
-    channel::ChannelEditor as ChannelEditorOps,
     channel::Channel as ChannelOps,
-    contact::ContactEditor as ContactEditorOps,
+    channel::ChannelMember as ChannelMemberOps,
+    channel::ChannelEditor as ChannelEditorOps,
+
     contact::Contact as ContactOps,
+    contact::ContactEditor as ContactEditorOps,
+
     conversation::Conversation as ConversationOps,
     message::Message as MessageOps,
     message::MessageBuilder as MessageBuilderOps,

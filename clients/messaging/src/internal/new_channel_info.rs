@@ -22,30 +22,20 @@ use std::fmt;
 use serde::Serialize;
 
 use boson_api::{utils, Id};
-use crate::{
-    internal::utils as internal_utils,
-    Permission,
-};
+use crate::Permission;
+use crate::internal::serde_utils::permission;
 
 /// Channel creation request sent to the service.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct NewChannelInfo {
-    #[serde(
-        rename = "sid",
-        with = "utils::id"
-    )]
+    #[serde(rename = "sid", with = "utils::id")]
     session_id: Id,
 
-    #[serde(
-        rename = "sk",
-        with = "utils::bytes"
-    )]
+    #[serde(rename = "sk", with = "utils::bytes")]
     session_key: Vec<u8>,
 
-    #[serde(
-        rename = "p",
-        with = "internal_utils::permission")]
-    permission: Permission,
+    #[serde(rename = "p", with = "permission")]
+    permission: i32,
 
     #[serde(
         rename = "n",
@@ -80,7 +70,7 @@ impl NewChannelInfo {
         Self {
             session_id,
             session_key,
-            permission,
+            permission: permission as i32,
             name,
             notice,
             announce,

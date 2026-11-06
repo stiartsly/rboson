@@ -18,13 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use boson_api::Id;
+use std::time::SystemTime;
 
+use boson_api::Id;
 use crate::{
-    channel::Channel as ChannelStruct,
-    channel::ChannelEditor as ChannelEditorStruct,
-    channel::Permission,
-    channel_member::ChannelMember,
+    channel::{Permission, Role},
     interfaces::ContactOps,
 };
 
@@ -48,33 +46,92 @@ pub trait Channel: ContactOps + Sync + Send {
     fn banned(&self) -> usize;
 
     /// Members ordered by join time, with unbanned members first.
-    fn members(&self) -> Vec<ChannelMember>;
+    fn members(&self) -> Vec<Box<dyn ChannelMember>>;
 
     /// Look up a member by ID.
-    fn member(&self, member_id: &Id) -> Option<ChannelMember>;
+    fn member(&self, member_id: &Id) -> Option<Box<dyn ChannelMember>>;
 
     fn has_member(&self, member_id: &Id) -> bool {
         self.member(member_id).is_some()
     }
 
     /// Creates an editor that builds a new channel without mutating this one.
-    fn edit_channel(&self) -> ChannelEditorStruct;
+    fn edit_channel(&self) -> Box<dyn ChannelEditor>;
+
+    /// Clones this channel into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn Channel>;
+
+    fn owner(&self) -> Id;
+    fn session_id(&self) -> Id;
+    fn contact_box(&self) -> Box<dyn crate::ContactOps>;
+    fn set_contact_revision(&mut self, revision: i32);
+    fn set_owner(&mut self, owner: Id);
+    fn set_session_id(&mut self, session_id: Id);
+    fn set_permission(&mut self, permission: Permission);
+    fn set_notice(&mut self, notice: Option<String>);
+    fn set_announced(&mut self, announced: bool);
+    fn set_name(&mut self, name: Option<String>);
+    fn set_updated_at(&mut self, updated_at: i64);
+    fn upsert_member(&mut self, id: Id, role: Role, joined: SystemTime);
+    fn update_member_roles(&mut self, ids: &[Id], role: Role) -> Vec<Box<dyn ChannelMember>>;
+    fn remove_members(&mut self, ids: &[Id]) -> Vec<Box<dyn ChannelMember>>;
+}
+
+impl Clone for Box<dyn Channel> {
+    fn clone(&self) -> Self {
+        Channel::clone_box(&**self)
+    }
+}
+
+pub trait ChannelMember: Send + Sync {
+    /// The ID of the channel member.
+    fn id(&self) -> &Id;
+
+    /// The role of the channel member.
+    fn role(&self) -> Role;
+
+    /// Whether the member is the channel owner.
+    fn is_owner(&self) -> bool {
+        self.role() == Role::Owner
+    }
+
+    /// Whether the member is a channel moderator.
+    fn is_moderator(&self) -> bool {
+        self.role() == Role::Moderator
+    }
+
+    /// Whether the member is banned from the channel.
+    fn is_banned(&self) -> bool {
+        self.role() == Role::Banned
+    }
+
+    /// The time when the member joined the channel.
+    fn joined(&self) -> SystemTime;
+
+    /// Clones this member into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn ChannelMember>;
+}
+
+impl Clone for Box<dyn ChannelMember> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 /// Builder for an immutable channel update.
 pub trait ChannelEditor: Send + Sync {
     /// Update the channel permission.
-    fn permission(self, permission: Permission) -> Self;
+    fn permission(self: Box<Self>, permission: Permission) -> Box<dyn ChannelEditor>;
 
     /// Update the channel's display name.
-    fn name(self, name: String) -> Self;
+    fn name(self: Box<Self>, name: String) -> Box<dyn ChannelEditor>;
 
     /// Update the channel notice.
-    fn notice(self, notice: Option<String>) -> Self;
+    fn notice(self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditor>;
 
     /// Update whether the channel is announced.
-    fn announced(self, announced: bool) -> Self;
+    fn announced(self: Box<Self>, announced: bool) -> Box<dyn ChannelEditor>;
 
     /// Build the updated immutable channel.
-    fn build(self) -> ChannelStruct;
+    fn build(self: Box<Self>) -> Box<dyn Channel>;
 }

@@ -288,7 +288,7 @@ impl VerticleClient {
         name: String,
         notice: Option<String>,
         announcement: bool,
-    ) -> Result<Box<Channel>> {
+    ) -> Result<Channel> {
         let make_event = |promise| {
             Event::CreateChannel(Body::new(
                 NewChannelParams { permission, name, notice, announcement },
@@ -305,7 +305,7 @@ impl VerticleClient {
         self.call(make_event).await
     }
 
-    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Box<Channel>> {
+    pub(crate) async fn join_channel(&self, ticket: InviteTicket) -> Result<Channel> {
         let make_event = |promise| {
             Event::JoinChannel(Body::new(ticket, promise))
         };
@@ -456,14 +456,14 @@ impl VerticleClient {
 
     pub(crate) async fn remove_contacts(&self, ids: Vec<Id>) -> Result<()> {
         let make_event = |promise| {
-            Event::RemoveContacts(Body::new(Some(ids), promise))
+            Event::RemoveContacts(Body::new(ids, promise))
         };
         self.call(make_event).await
     }
 
     pub(crate) async fn clear_contacts(&self) -> Result<()> {
         let make_event = |promise| {
-            Event::RemoveContacts(Body::new(None, promise))
+            Event::ClearContacts(Body::new((), promise))
         };
         self.call(make_event).await
     }

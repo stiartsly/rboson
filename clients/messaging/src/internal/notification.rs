@@ -35,14 +35,14 @@ use boson_api::{
 
 use crate::{
     errors::EncodingError,
-    ChannelMember,
     SessionInfo,
 };
 
 use super::{
     ChannelInfo,
     ChannelMembersRole,
-    ContactSync
+    ContactSync,
+    PhotonChannelMember,
 };
 
 /// Notification event tag used on the wire.
@@ -164,7 +164,7 @@ pub(crate) enum Body {
     #[serde(rename = "cmr")]
     ChannelMembersRemove(Vec<Id>),
     #[serde(rename = "cmj")]
-    ChannelMemberJoin(ChannelMember),
+    ChannelMemberJoin(PhotonChannelMember),
     #[serde(rename = "cml")]
     ChannelMemberLeave(Id),
 }

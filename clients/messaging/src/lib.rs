@@ -45,12 +45,10 @@ pub mod friend_request;
 pub mod friend_request_listener;
 
 pub mod contact;
-pub mod contact_editor;
 pub mod contact_listener;
 
 pub mod invite_ticket;
 pub mod channel;
-pub mod channel_member;
 pub mod channel_listener;
 
 pub mod conversation;
@@ -78,34 +76,39 @@ pub use {
     channel::{
         Permission,
         Role,
+        Channel,
     },
-    channel_member::ChannelMember,
-    contact::{
-        Contact,
-        ContactType,
-    },
-    contact_editor::ContactEditor,
-    interfaces::{
-        ChannelEditorOps,
-        ChannelOps,
-        ContactEditorOps,
-        ContactOps,
-        ConversationOps,
-        MessageBuilderOps,
-        MessageOps,
-    },
+    channel::ChannelMember,
+
+    contact::{Contact, ContactType},
+    contact::ContactEditor,
+
     invite_ticket::InviteTicket,
     session_info::SessionInfo,
+};
+
+pub use interfaces::{
+    ChannelOps,
+    ChannelEditorOps,
+    ChannelMemberOps,
+
+    ContactOps,
+    ContactEditorOps,
+
+    ConversationOps,
+    MessageBuilderOps,
+    MessageOps,
 };
 
 pub use message::{
     Content,
     ContentDisposition,
-    ContentType,
+    ContentDispositionType,
     Message,
     MessageBuilder,
     MessageType,
     CONTENT_DISPOSITION_HEADER,
 };
+pub use content_type::ContentType;
 
 pub(crate) use internal::ClientConnectionListener;

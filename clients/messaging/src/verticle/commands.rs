@@ -289,12 +289,15 @@ pub(super) fn handle(
                 }
             });
         }
-        Event::GetContacts(Body {params: id, result: promise}) => {
+        Event::GetContacts(Body {params: id_opt, result: promise}) => {
             respond(pending, promise, async move {
+                /*
                 match id {
                     Some(id) => Ok(rpc.get_contact(&id).await?.into_iter().collect()),
                     None => rpc.get_contacts().await,
                 }
+                */
+                rpc.get_contacts(id_opt.as_ref()).await
             });
         }
         Event::UpdateContact(Body {params: contact, result: promise}) => {
@@ -304,10 +307,12 @@ pub(super) fn handle(
         }
         Event::RemoveContacts(Body {params: ids, result: promise}) => {
             respond(pending, promise, async move {
-                match ids {
-                    Some(ids) => rpc.remove_contacts(&ids).await,
-                    None => rpc.clear_contacts().await,
-                }
+                rpc.remove_contacts(&ids).await
+            });
+        }
+        Event::ClearContacts(Body {params: _, result: promise}) => {
+            respond(pending, promise, async move {
+                rpc.clear_contacts().await
             });
         }
     }

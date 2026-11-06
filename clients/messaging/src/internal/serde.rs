@@ -31,35 +31,43 @@ use crate::channel::{Permission, Role};
 pub(crate) mod role {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Role, se: S) -> StdResult<S::Ok, S::Error>
+    pub(crate) fn serialize<S>(value: &i32, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        se.serialize_i32(i32::from(*value))
+        se.serialize_i32(*value)
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Role, D::Error>
+    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Role::try_from(i32::deserialize(de)?).map_err(D::Error::custom)
+        let value = i32::deserialize(de)?;
+        let _ = Role::try_from(value).map_err(
+            |e| D::Error::custom(e.to_string())
+        )?;
+        Ok(value)
     }
 }
 
 pub(crate) mod permission {
     use super::*;
 
-    pub(crate) fn serialize<S>(value: &Permission, se: S) -> StdResult<S::Ok, S::Error>
+    pub(crate) fn serialize<S>(value: &i32, se: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        se.serialize_i32(*value as i32)
+        se.serialize_i32(*value)
     }
 
-    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<Permission, D::Error>
+    pub(crate) fn deserialize<'de, D>(de: D) -> StdResult<i32, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Permission::try_from(i32::deserialize(de)?).map_err(D::Error::custom)
+        let value = i32::deserialize(de)?;
+        let _ = Permission::try_from(value).map_err(
+            |e| D::Error::custom(e.to_string())
+        )?;
+        Ok(value)
     }
 }

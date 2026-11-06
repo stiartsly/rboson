@@ -153,7 +153,7 @@ async fn accept_friend(client: &Arc<Client>, user_idstr: &str) {
 }
 
 async fn list_friends(client: &Arc<Client>) {
-    let contacts = match client.get_contacts().await {
+    let contacts = match client.contacts().await {
         Ok(v) => v,
         Err(e) => {
             println!("Listing friends failed: {e}");
@@ -179,7 +179,7 @@ async fn show_info(client: &Arc<Client>, user_idstr: &str) {
         return;
     };
 
-    let contact = match client.get_contact(&userid).await {
+    let contact = match client.contact(&userid).await {
         Ok(v) => v,
         Err(e) => {
             println!("Retrieving user details failed: {e}");

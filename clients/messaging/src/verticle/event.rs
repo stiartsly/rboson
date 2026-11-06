@@ -59,18 +59,20 @@ pub(crate) enum Event {
     ContentMessage(Body<MsgContentParams, Message>),
     RegisterFriendSession(Body<AddFriendParams, ()>),
     BlockUser(Body<Id, Contact>),
-    CreateChannel(Body<NewChannelParams, Box<Channel>>),
+    CreateChannel(Body<NewChannelParams, Channel>),
     RemoveChannel(Body<Id, ()>),
-    JoinChannel(Body<InviteTicket, Box<Channel>>),
+    JoinChannel(Body<InviteTicket, Channel>),
     LeaveChannel(Body<Id, ()>),
     CreateInviteTicket(Body<(Id, Option<Id>), InviteTicket>),
     TransferChannelOwnership(Body<(Id, Id), ()>),
     RotateChannelSessionKey(Body<Id, ()>),
     UpdateChannelInfo(Body<Channel, ()>),
     OperateChannelMembers(Body<OperateChannelMembersParams, ()>),
+
     GetContacts(Body<Option<Id>, Vec<Contact>>),
     UpdateContact(Body<Contact, ()>),
-    RemoveContacts(Body<Option<Vec<Id>>, ()>),
+    RemoveContacts(Body<Vec<Id>, ()>),
+    ClearContacts(Body<(), ()>)
 }
 
 // Pagination for fetching messages within a conversation

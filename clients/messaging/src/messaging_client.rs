@@ -218,7 +218,7 @@ pub trait MessagingClient {
         name: String,
         notice: Option<String>,
         announce: bool,
-    ) -> impl Future<Output = Result<Box<Channel>>>;
+    ) -> impl Future<Output = Result<Channel>>;
 
     /// Removes a channel (owner only).
     fn remove_channel(
@@ -230,7 +230,7 @@ pub trait MessagingClient {
     fn join_channel(
         &self,
         ticket: InviteTicket
-    ) -> impl Future<Output = Result<Box<Channel>>>;
+    ) -> impl Future<Output = Result<Channel>>;
 
     /// Leaves a channel.
     fn leave_channel(
@@ -261,7 +261,7 @@ pub trait MessagingClient {
     /// Updates channel metadata.
     fn update_channel_info(
         &self,
-        channel: &Box<Channel>
+        channel: &Channel
     ) -> impl Future<Output = Result<()>>;
 
     /// Updates the roles of a set of channel members.
@@ -298,13 +298,13 @@ pub trait MessagingClient {
     // -----------------------------------------------------------------
 
     /// Looks up a contact by `Id`.
-    fn get_contact(
+    fn contact(
         &self,
         id: &Id
     ) -> impl Future<Output = Result<Option<Contact>>>;
 
     /// Retrieves all contacts.
-    fn get_contacts(
+    fn contacts(
         &self
     ) -> impl Future<Output = Result<Vec<Contact>>>;
 

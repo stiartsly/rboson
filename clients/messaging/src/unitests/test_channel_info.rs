@@ -27,9 +27,7 @@ use boson_api::Id;
 use crate::{
     channel::Permission,
     internal::ChannelInfo,
-    channel::Role,
 };
-use super::ChannelMember;
 
 #[test]
 fn test_serde() {
@@ -73,7 +71,7 @@ fn test_serde() {
 
     for permission in [-1, 4] {
         let mut wire = channel_info.clone();
-        wire.insert(Value::Text("p".into()), Value::Integer(permission.into()));
+        wire.insert(Value::Text("p".into()), Value::Integer(permission));
 
         let info = from_value::<ChannelInfo>(Value::Map(wire));
         assert!(info.is_err());

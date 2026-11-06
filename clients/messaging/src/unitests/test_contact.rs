@@ -22,8 +22,8 @@ use serde_cbor::Value;
 
 use boson_api::Id;
 use crate::{
-    internal::ContactData,
-    contact::Contact,
+    internal::{ContactData, PhotonContact},
+    ContactOps,
 };
 
 fn new_contact_data(kind: u8, revision: i32) -> ContactData {
@@ -42,14 +42,14 @@ fn new_contact_data(kind: u8, revision: i32) -> ContactData {
 fn test_serde() {
     for kind in 0..=2 {
         let contact_data = new_contact_data(kind, 7);
-        let contact = Contact::try_from(contact_data.clone()).unwrap();
+        let contact = PhotonContact::try_from(contact_data.clone()).unwrap();
         let encoded = serde_cbor::to_vec(&contact).unwrap();
         assert_eq!(
             serde_cbor::from_slice::<Value>(&encoded).unwrap(),
             serde_cbor::value::to_value(&contact_data).unwrap(),
         );
 
-        let decoded = serde_cbor::from_slice::<Contact>(&encoded).unwrap();
+        let decoded = serde_cbor::from_slice::<PhotonContact>(&encoded).unwrap();
         assert_eq!(decoded.id(), contact.id());
         assert_eq!(decoded.contact_type(), contact.contact_type());
         assert_eq!(decoded.name(), contact.name());
@@ -65,12 +65,13 @@ fn test_serde() {
 
 #[test]
 fn test_contact_editor() {
-    let contact = Contact::try_from(new_contact_data(1, 0)).unwrap();
-    let editor = Box::new(contact.edit()).remark(Some("updated".into()));
-    let editor = Box::new(editor).tags(None);
-    let editor = Box::new(editor).muted(false);
-    let editor = Box::new(editor).blocked(false);
-    let edited = Box::new(editor).build();
+    let contact = PhotonContact::try_from(new_contact_data(1, 0)).unwrap();
+    let editor = contact.edit();
+    let editor = editor.remark(Some("updated".into()));
+    let editor = editor.tags(None);
+    let editor = editor.muted(false);
+    let editor = editor.blocked(false);
+    let edited = editor.build();
 
     assert_eq!(edited.id(), contact.id());
     assert_eq!(edited.remark(), Some("updated"));

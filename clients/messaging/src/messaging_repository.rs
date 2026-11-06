@@ -32,7 +32,7 @@ use boson_api::{
 
 use crate::{
     channel::Channel,
-    channel_member::ChannelMember,
+    channel::ChannelMember,
     contact::{Contact, ContactType},
     content::{
         ContentFormat,
@@ -40,7 +40,11 @@ use crate::{
     },
     conversation::Conversation,
     friend_request::FriendRequest,
-    internal::ContactData,
+    internal::{
+        ContactData,
+        PhotonChannelMember,
+        PhotonContact,
+    },
     message::{
         Content,
         Message,
@@ -187,7 +191,7 @@ impl MessagingRepository {
         let stored = channel_to_stored(channel, session_key);
         self.store.put_contact(revision, &stored)?;
         let members: Vec<StoredChannelMember> = channel
-            .members
+            .members()
             .iter()
             .map(|member| member_to_stored(channel.id(), member))
             .collect();
@@ -275,11 +279,26 @@ impl MessagingRepository {
         stored_to_contact(stored)
     }
 
+    pub(crate) fn photon_contact_from_stored(&self, stored: &StoredContact) -> Result<PhotonContact> {
+        stored_to_photon_contact(stored)
+    }
+
     pub(crate) fn channel_members(&mut self, channel_id: &Id) -> Result<Vec<ChannelMember>> {
         self.store
             .get_all_channel_members(channel_id)?
             .iter()
             .map(stored_to_member)
+            .collect()
+    }
+
+    pub(crate) fn photon_channel_members(
+        &mut self,
+        channel_id: &Id,
+    ) -> Result<Vec<PhotonChannelMember>> {
+        self.store
+            .get_all_channel_members(channel_id)?
+            .iter()
+            .map(stored_to_photon_member)
             .collect()
     }
 
@@ -458,19 +477,33 @@ fn contact_to_stored(contact: &Contact, session_key: Option<&[u8]>) -> StoredCon
 }
 
 fn channel_to_stored(channel: &Channel, session_key: &[u8]) -> StoredContact {
-    let mut stored = contact_to_stored(&channel.contact, Some(session_key));
-    stored.contact_type = ContactType::Channel as i32;
-    stored.channel = Some(StoredChannel {
+    StoredContact {
         id: *channel.id(),
-        owner: channel.owner,
-        permission: channel.permission as i32,
-        notice: channel.notice.clone(),
-        announce: channel.announced,
-    });
-    stored
+        contact_type: ContactType::Channel as i32,
+        session_key: Some(session_key.to_vec()),
+        name: channel.name().map(ToOwned::to_owned),
+        remark: channel.remark().map(ToOwned::to_owned),
+        tags: channel.tags().map(ToOwned::to_owned),
+        muted: channel.is_muted(),
+        blocked: channel.is_blocked(),
+        revision: channel.revision(),
+        created_at: channel.created_at(),
+        updated_at: channel.updated_at(),
+        channel: Some(StoredChannel {
+            id: *channel.id(),
+            owner: channel.owner(),
+            permission: channel.permission() as i32,
+            notice: channel.notice().map(ToOwned::to_owned),
+            announce: channel.is_announced(),
+        }),
+    }
 }
 
 fn stored_to_contact(stored: &StoredContact) -> Result<Contact> {
+    Ok(Box::new(stored_to_photon_contact(stored)?))
+}
+
+fn stored_to_photon_contact(stored: &StoredContact) -> Result<PhotonContact> {
     let mut data = ContactData::new(
         stored.id,
         u8::try_from(stored.contact_type)
@@ -484,7 +517,7 @@ fn stored_to_contact(stored: &StoredContact) -> Result<Contact> {
     data.blocked = stored.blocked;
     data.updated_at = stored.updated_at;
     data.revision = stored.revision;
-    Contact::try_from(data)
+    PhotonContact::try_from(data)
 }
 
 fn member_to_stored(channel_id: &Id, member: &ChannelMember) -> StoredChannelMember {
@@ -492,12 +525,20 @@ fn member_to_stored(channel_id: &Id, member: &ChannelMember) -> StoredChannelMem
         id: *member.id(),
         channel_id: *channel_id,
         role: member.role() as i32,
-        joined: member.joined() as i64,
+        joined: member
+            .joined()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0),
     }
 }
 
 fn stored_to_member(stored: &StoredChannelMember) -> Result<ChannelMember> {
-    Ok(ChannelMember::new(
+    Ok(Box::new(stored_to_photon_member(stored)?))
+}
+
+fn stored_to_photon_member(stored: &StoredChannelMember) -> Result<PhotonChannelMember> {
+    Ok(PhotonChannelMember::new(
         stored.id,
         crate::channel::Role::try_from(stored.role)?,
         u64::try_from(stored.joined)
@@ -576,9 +617,10 @@ mod tests {
         repository.open(&path).unwrap();
 
         let contact_id = id(1);
-        let mut contact = Contact::new(contact_id, ContactType::Friend, 1);
+        let mut contact = PhotonContact::new(contact_id, ContactType::Friend, 1);
         contact.name = Some("friend".into());
         contact.revision = 1;
+        let contact: Contact = Box::new(contact);
         repository.put_contact(1, &contact, None).unwrap();
         let stored = repository.stored_contacts().unwrap();
         assert_eq!(stored.len(), 1);

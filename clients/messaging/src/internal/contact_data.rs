@@ -125,7 +125,7 @@ impl ContactData {
     pub(crate) fn contact(&self, revision: i32) -> Result<Contact> {
         let mut data = self.clone();
         data.revision = revision;
-        Contact::try_from(data)
+        Ok(Box::new(super::PhotonContact::try_from(data)?) as Contact)
     }
 
     /// Decrypts and parses the session identity, if this contact has one.

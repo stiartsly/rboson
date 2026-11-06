@@ -20,11 +20,7 @@
 
 use boson_api::Id;
 
-use crate::{
-    ContactType,
-    contact::Contact as ContactStruct,
-    contact_editor::ContactEditor as ContactEditorStruct
-};
+use crate::ContactType;
 
 /// A contact entry in the local contact list.
 ///
@@ -60,23 +56,35 @@ pub trait Contact: Send + Sync {
     fn revision(&self) -> i32;
 
     /// Creates an editor that builds a new contact without mutating this one.
-    fn edit(&self) -> ContactEditorStruct;
+    fn edit(&self) -> Box<dyn ContactEditor>;
+
+    /// Clones this contact into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn Contact>;
+
+    /// Updates the local revision counter.
+    fn set_revision(&mut self, revision: i32);
+}
+
+impl Clone for Box<dyn Contact> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 // Builder for an immutable contact update.
 pub trait ContactEditor: Send + Sync {
     /// Set the user-defined remark (alias).
-    fn remark(self: Box<Self>, remark: Option<String>) -> Self;
+    fn remark(self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditor>;
 
     /// Set the user-defined tags.
-    fn tags(self: Box<Self>, tags: Option<String>) -> Self;
+    fn tags(self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditor>;
 
     /// Toggle the muted state.
-    fn muted(self: Box<Self>, muted: bool) -> Self;
+    fn muted(self: Box<Self>, muted: bool) -> Box<dyn ContactEditor>;
 
     /// Toggle the blocked state.
-    fn blocked(self: Box<Self>, blocked: bool) -> Self;
+    fn blocked(self: Box<Self>, blocked: bool) -> Box<dyn ContactEditor>;
 
     /// Build the updated immutable contact.
-    fn build(self: Box<Self>) -> ContactStruct;
+    fn build(self: Box<Self>) -> Box<dyn Contact>;
 }

@@ -21,57 +21,43 @@
 use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
 
-use boson_api::{
-    utils as api_utils,
-    Id,
-};
-use crate::{
-    channel::Permission,
-    internal::utils as internal_utils,
-    ChannelMember,
+use boson_api::{utils, Id};
+use crate::Permission;
+use super::{
+    PhotonChannelMember,
+    serde_utils::permission
 };
 
 /// Channel metadata and membership as sent by the service.
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ChannelInfo {
-    #[serde(rename = "id", with ="api_utils::id")]
+    #[serde(rename = "id", with ="utils::id")]
     channel_id: Id,
-    #[serde(rename = "o", with ="api_utils::id")]
+    #[serde(rename = "o", with ="utils::id")]
     owner_id: Id,
-    #[serde(rename = "sid", with ="api_utils::id")]
+    #[serde(rename = "sid", with ="utils::id")]
     session_id: Id,
 
-    #[serde(
-        rename = "sk",
-        default,
-        with = "api_utils::bytes_opt"
-    )]
+    #[serde(rename = "sk", default, with = "utils::bytes_opt")]
     session_key: Option<Vec<u8>>,
 
-    #[serde(
-        rename = "p",
-        with = "internal_utils::permission"
-    )]
-    permission: Permission,
+    #[serde(rename = "p", with = "permission")]
+    permission: i32,
 
-    #[serde(
-        rename = "n",
-        default
-    )]
+    #[serde(rename = "n", default)]
     name: Option<String>,
 
-    #[serde(
-        rename = "nt",
+    #[serde(rename = "nt",
         default,
-        skip_serializing_if = "api_utils::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     notice: Option<String>,
 
     #[serde(
         rename = "a",
         default,
-        skip_serializing_if = "api_utils::is_default"
+        skip_serializing_if = "utils::is_default"
     )]
     announce: bool,
 
@@ -86,7 +72,7 @@ pub(crate) struct ChannelInfo {
         default,
         skip_serializing_if = "Vec::is_empty"
     )]
-    members: Vec<ChannelMember>,
+    members: Vec<PhotonChannelMember>,
 }
 
 impl ChannelInfo {
@@ -107,7 +93,7 @@ impl ChannelInfo {
     }
 
     pub(crate) fn permission(&self) -> Permission {
-        self.permission
+        Permission::from_i32(self.permission)
     }
 
     pub(crate) fn name(&self) -> Option<&str> {
@@ -123,19 +109,19 @@ impl ChannelInfo {
     }
 
     pub(crate) fn created_at(&self) -> SystemTime {
-        as_systemtime(self.created_at)
+        to_system_time(self.created_at)
     }
 
     pub(crate) fn updated_at(&self) -> SystemTime {
-        as_systemtime(self.updated_at)
+        to_system_time(self.updated_at)
     }
 
-    pub(crate) fn members(&self) -> &[ChannelMember] {
+    pub(crate) fn members(&self) -> &[PhotonChannelMember] {
         &self.members
     }
 }
 
-fn as_systemtime(millis: u64) -> SystemTime {
+fn to_system_time(millis: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
 }
 

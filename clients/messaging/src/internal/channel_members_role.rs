@@ -22,21 +22,22 @@ use serde::{Serialize, Deserialize};
 
 use boson_api::Id;
 use crate::channel::Role;
-use super::utils;
 
-/// Role change request for one or more channel members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChannelMembersRole {
     #[serde(rename = "ids")]
     member_ids: Vec<Id>,
 
-    #[serde(rename = "r", with = "utils::role")]
-    role: Role,
+    #[serde(rename = "r")]
+    role: i32,
 }
 
 impl ChannelMembersRole {
     pub(crate) fn new(member_ids: Vec<Id>, role: Role) -> Self {
-        Self { member_ids, role }
+        Self {
+            member_ids,
+            role: role as i32
+        }
     }
 }
 

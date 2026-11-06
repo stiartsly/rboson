@@ -19,19 +19,41 @@
 // SOFTWARE.
 
 pub const HEADER_NAME: &str = "Content-Type";
-pub const TEXT      : &str = "text/plain";
 
-pub const JSON      : &str = "application/json";
-pub const CBOR      : &str = "application/cbor";
-pub const BINARY    : &str = "application/octet-stream";
+pub const TEXT: &str = "text/plain";
+pub const BINARY: &str = "application/octet-stream";
 
-pub const IMAGE_JPEG: &str = "image/jpeg";
-pub const IMAGE_PNG : &str = "image/png";
-pub const IMAGE_WEBP: &str = "image/webp";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentType {
+    TextPlain,
+    ApplicationJson,
+    ApplicationCbor,
+    ApplicationOctetStream,
+    ImageJpeg,
+    ImagePng,
+    ImageWebp,
+    AudioAac,
+    AudioMp3,
+    AudioWebm,
+    VideoMp4,
+    VideoWebm,
+}
 
-pub const AUDIO_AAC : &str = "audio/aac";
-pub const AUDIO_MP3 : &str = "audio/mpeg";
-pub const AUDIO_WEBM: &str = "audio/webm";
-
-pub const VIDEO_MP4 : &str = "video/mp4";
-pub const VIDEO_WEBM: &str = "video/webm";
+impl ContentType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TextPlain => "text/plain",
+            Self::ApplicationJson => "application/json",
+            Self::ApplicationCbor => "application/cbor",
+            Self::ApplicationOctetStream => "application/octet-stream",
+            Self::ImageJpeg => "image/jpeg",
+            Self::ImagePng => "image/png",
+            Self::ImageWebp => "image/webp",
+            Self::AudioAac => "audio/aac",
+            Self::AudioMp3 => "audio/mpeg",
+            Self::AudioWebm => "audio/webm",
+            Self::VideoMp4 => "video/mp4",
+            Self::VideoWebm => "video/webm",
+        }
+    }
+}

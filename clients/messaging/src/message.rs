@@ -156,6 +156,9 @@ impl Content {
 // ---------------------------------------------------------------------------
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(skip)]
+    pub(crate) rid: i64,
+
     #[serde(rename = "v")]
     pub(crate) version: u8,
 
@@ -213,6 +216,7 @@ impl Message {
         payload: Value,
     ) -> Self {
         Self {
+            rid: 0,
             version,
             id,
             recipient,
@@ -235,7 +239,7 @@ impl MessageOps for Message {
     }
 
     fn rid(&self) -> i64 {
-        0
+        self.rid
     }
 
     fn conversation_id(&self) -> Option<&Id> {

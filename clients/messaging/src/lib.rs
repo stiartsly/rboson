@@ -24,6 +24,8 @@
 
 pub(crate) mod interfaces;
 pub(crate) mod internal;
+pub(crate) mod messaging_repository;
+pub(crate) mod persistence;
 pub(crate) mod rpc;
 
 pub(crate) mod mqtt;

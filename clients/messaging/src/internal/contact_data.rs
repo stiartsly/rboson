@@ -117,6 +117,10 @@ impl ContactData {
         self.session_key = Some(session_key);
     }
 
+    pub(crate) fn session_key(&self) -> Option<&[u8]> {
+        self.session_key.as_deref()
+    }
+
     /// Materialises a public [`Contact`] with the revision from the envelope.
     pub(crate) fn contact(&self, revision: i32) -> Result<Contact> {
         let mut data = self.clone();

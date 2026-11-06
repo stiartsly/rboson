@@ -18,6 +18,7 @@ categories.workspace = true
 boson-crypto.workspace = true
 boson-api.workspace = true
 boson-http.workspace = true
+diesel.workspace = true
 base64.workspace = true
 bs58.workspace = true
 futures.workspace = true

@@ -40,7 +40,7 @@ use tokio::sync;
 
 use boson_api::{
     Result,
-    errors::{ArgumentError, NotImplemented, StateError},
+    errors::{ArgumentError, StateError},
     signature,
     CryptoIdentity,
     Id,
@@ -60,6 +60,7 @@ use crate::{
     },
     invite_ticket::InviteTicket,
     message::{Message, MessageType},
+    messaging_repository::MessagingRepository,
     MessageBuilderOps,
     MessageOps,
     options::Options,
@@ -201,6 +202,7 @@ pub(crate) struct RpcServer {
     friend_requests: RefCell<HashMap<Id, FriendRequest>>,
     contacts: RefCell<HashMap<Id, Contact>>,
     channels: RefCell<HashMap<Id, Channel>>,
+    repository: Rc<RefCell<MessagingRepository>>,
     conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
@@ -458,6 +460,8 @@ impl RpcServer {
             device_identity.clone(),
         );
 
+        let repository = MessagingRepository::new();
+
         Ok(Rc::new(Self {
             options: options.options,
             transport,
@@ -480,6 +484,7 @@ impl RpcServer {
             friend_requests: RefCell::new(HashMap::new()),
             contacts: RefCell::new(HashMap::new()),
             channels: RefCell::new(HashMap::new()),
+            repository: Rc::new(RefCell::new(repository)),
             conversations: Arc::new(Mutex::new(HashMap::new())),
 
             connection_listener: options.connection_listener.clone(),
@@ -492,6 +497,31 @@ impl RpcServer {
     }
 
     /// Builds the cached session context for a contact or channel.
+    fn persisted_session_key(&self, contact_id: &Id) -> Result<Vec<u8>> {
+        let session = self
+            .friend_sessions
+            .lock()
+            .unwrap()
+            .get(contact_id)
+            .cloned()
+            .ok_or_else(|| StateError::new("Contact session key is missing"))?;
+        self.user_identity
+            .encrypt_into(self.user_id(), session.private_key())
+    }
+
+    fn persist_contact(&self, contact: &Contact, session_key: Option<&[u8]>) -> Result<()> {
+        self.repository
+            .borrow_mut()
+            .put_contact(self.contacts_revision.get(), contact, session_key)
+    }
+
+    fn persist_channel(&self, channel: &Channel) -> Result<()> {
+        let key = self.persisted_session_key(channel.id())?;
+        self.repository
+            .borrow_mut()
+            .put_channel(self.contacts_revision.get(), channel, &key)
+    }
+
     fn session_context(
         &self,
         contact_id: Id,
@@ -505,6 +535,98 @@ impl RpcServer {
         } else {
             SessionContext::for_user(contact_id, user_identity, session_identity)
         }
+    }
+
+    /// Rehydrates the in-memory contact/channel/conversation caches from the
+    /// local SQLite store. Listener callbacks are not replayed on startup.
+    fn restore_state(&self) -> Result<()> {
+        let (revision, stored_contacts, friend_requests, conversations) = {
+            let mut repository = self.repository.borrow_mut();
+            (
+                repository.contacts_revision()?,
+                repository.stored_contacts()?,
+                repository.friend_requests()?,
+                repository.conversations()?,
+            )
+        };
+
+        let mut contacts = HashMap::new();
+        let mut sessions = HashMap::new();
+        let mut channels = HashMap::new();
+        for stored in stored_contacts {
+            let session = match stored.session_key.as_deref() {
+                Some(key) => {
+                    let key = self.user_identity.decrypt_into(self.user_id(), key)?;
+                    let identity = CryptoIdentity::try_from(key.as_slice())?;
+                    Some(self.session_context(
+                        stored.id,
+                        identity,
+                        stored.contact_type == ContactType::Channel as i32,
+                    ))
+                }
+                None => None,
+            };
+
+            if stored.contact_type == ContactType::Channel as i32 {
+                let Some(session) = session else {
+                    warn!("Skipping persisted channel {} without a session key", stored.id);
+                    continue;
+                };
+                let Some(metadata) = stored.channel.as_ref() else {
+                    warn!("Skipping persisted channel {} without metadata", stored.id);
+                    continue;
+                };
+                let contact = self
+                    .repository
+                    .borrow()
+                    .contact_from_stored(&stored)?;
+                let members = self
+                    .repository
+                    .borrow_mut()
+                    .channel_members(&stored.id)?;
+                let channel = Channel {
+                    contact: contact.clone(),
+                    owner: metadata.owner,
+                    session_id: *session.session_id(),
+                    permission: Permission::try_from(metadata.permission)?,
+                    notice: metadata.notice.clone(),
+                    announced: metadata.announce,
+                    members,
+                };
+                sessions.insert(stored.id, session);
+                contacts.insert(stored.id, contact);
+                channels.insert(stored.id, channel);
+            } else {
+                let contact = self
+                    .repository
+                    .borrow()
+                    .contact_from_stored(&stored)?;
+                if let Some(session) = session {
+                    sessions.insert(stored.id, session);
+                }
+                contacts.insert(stored.id, contact);
+            }
+        }
+
+        let blocked = contacts
+            .values()
+            .filter(|contact| contact.is_blocked())
+            .map(|contact| *contact.id())
+            .collect();
+        *self.contacts.borrow_mut() = contacts;
+        *self.friend_sessions.lock().unwrap() = sessions;
+        *self.channels.borrow_mut() = channels;
+        *self.blocked_contacts.lock().unwrap() = blocked;
+        *self.friend_requests.borrow_mut() = friend_requests
+            .into_iter()
+            .map(|request| (*request.user_id(), request))
+            .collect();
+        *self.conversations.lock().unwrap() = conversations
+            .into_iter()
+            .map(|conversation| (*conversation.id(), conversation))
+            .collect();
+        self.contacts_revision.set(revision);
+        Ok(())
     }
 
     fn origin_timestamp(clock: &std::sync::Mutex<i64>) -> Result<i64> {
@@ -527,14 +649,11 @@ impl RpcServer {
     /// against. The body is encrypted for the recipient unless that is the
     /// service itself.
     async fn rpc_call(&self, recipient: &Id, request: RPCRequest) -> Result<ResponseParams> {
-        // if self.stopping.get() || !self.connected.get() {
-        //     return Err(StateError::new("Messaging client is not connected"));
-        //}
 
         let transport = self.transport.clone();
         let timestamp = Self::origin_timestamp(&self.origin_clock)?;
         let method = request.method();
-        // The reply is matched to the pending call by this ID.
+
         let request = request.with_id(timestamp);
         let body = serde_cbor::to_vec(&request)
             .map_err(|error| EncodingError::new(format!("Encoding RPC request failed: {error}")))?;
@@ -1343,6 +1462,9 @@ impl RpcServer {
             .get(&contact_id)
             .cloned()
             .unwrap_or_else(|| Contact::new(contact_id, ContactType::Auto, created_at));
+        if let Err(error) = self.repository.borrow_mut().put_message(&mut message) {
+            warn!("Persisting inbound message failed: {error}");
+        }
         update_conversation(&self.conversations, conversation_contact, message.clone())?;
         if outbox {
             if message.id != Self::message_id(self.device_id(), created_at)? {
@@ -1435,10 +1557,11 @@ impl RpcServer {
             debug!("Ignoring duplicate or stale friend request from {user_id}");
             return;
         }
-        self.friend_requests.borrow_mut().insert(
-            user_id,
-            FriendRequest::new(user_id, initiator_id, Some(hello.clone()), created_at),
-        );
+        let request = FriendRequest::new(user_id, initiator_id, Some(hello.clone()), created_at);
+        if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
+            warn!("Persisting friend request failed: {error}");
+        }
+        self.friend_requests.borrow_mut().insert(user_id, request);
 
         if notify {
             self.friend_request_listener
@@ -1471,6 +1594,11 @@ impl RpcServer {
                 return;
             }
             request.accept_at(accepted_at);
+        }
+        if let Some(request) = self.friend_requests.borrow().get(&user_id).cloned() {
+            if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
+                warn!("Persisting accepted friend request failed: {error}");
+            }
         }
 
         if self
@@ -1548,9 +1676,13 @@ impl RpcServer {
             session.signature_key().private_key().as_ref(),
         )?);
         data.revision = revision;
+        let session_key = data.session_key().map(|key| key.to_vec());
         let mutation = ContactMutation::add(revision, data.encode_into(&self.user_identity)?);
         self.apply_contact_mutation(mutation, revision, "Friend contact revision is outdated")
             .await?;
+        if let Some(contact) = self.contacts.borrow().get(user_id).cloned() {
+            self.persist_contact(&contact, session_key.as_deref())?;
+        }
         Ok(())
     }
 
@@ -1608,18 +1740,29 @@ impl RpcServer {
 impl RpcServer {
     /// Looks up a conversation by contact id.
     pub(crate) async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
-        Ok(self.conversations.lock().unwrap().get(id).cloned())
+        if let Some(conversation) = self.conversations.lock().unwrap().get(id).cloned() {
+            return Ok(Some(conversation));
+        }
+        let conversation = self.repository.borrow_mut().conversation(id)?;
+        if let Some(conversation) = conversation.clone() {
+            self.conversations
+                .lock()
+                .unwrap()
+                .insert(*id, conversation);
+        }
+        Ok(conversation)
     }
 
     /// Lists every known conversation, oldest activity first.
     pub(crate) async fn get_conversations(&self) -> Result<Vec<Conversation>> {
-        let mut conversations = self
-            .conversations
-            .lock()
-            .unwrap()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let stored = self.repository.borrow_mut().conversations()?;
+        let mut cache = self.conversations.lock().unwrap();
+        for conversation in stored {
+            cache
+                .entry(*conversation.id())
+                .or_insert(conversation);
+        }
+        let mut conversations = cache.values().cloned().collect::<Vec<_>>();
         conversations.sort_by(|left, right| {
             left.updated_at()
                 .cmp(&right.updated_at())
@@ -1630,12 +1773,20 @@ impl RpcServer {
 
     /// Drops a conversation locally; the peer is not notified.
     pub(crate) async fn remove_conversation(&self, id: &Id) -> Result<()> {
+        self.repository
+            .borrow_mut()
+            .remove_messages_in_conversation(id)?;
         self.conversations.lock().unwrap().remove(id);
         Ok(())
     }
 
     /// Drops several conversations locally.
     pub(crate) async fn remove_conversations(&self, ids: &[Id]) -> Result<()> {
+        for id in ids {
+            self.repository
+                .borrow_mut()
+                .remove_messages_in_conversation(id)?;
+        }
         let mut conversations = self.conversations.lock().unwrap();
         for id in ids {
             conversations.remove(id);
@@ -1646,40 +1797,52 @@ impl RpcServer {
     /// Reads a page of history. Not implemented yet.
     pub(crate) async fn get_messages(
         &self,
-        _conversation_id: &Id,
-        _until: Option<i64>,
-        _limit: usize,
-        _offset: usize,
+        conversation_id: &Id,
+        until: Option<i64>,
+        limit: usize,
+        offset: usize,
     ) -> Result<Vec<Message>> {
-        Err(NotImplemented::new("get_messages"))
+        self.repository.borrow_mut().messages_before(
+            conversation_id,
+            until.unwrap_or(i64::MAX),
+            limit,
+            offset,
+        )
     }
 
     /// Reads history in a timestamp range. Not implemented yet.
     pub(crate) async fn get_messages_in_range(
         &self,
-        _conversation_id: &Id,
-        _begin: i64,
-        _end: i64,
+        conversation_id: &Id,
+        begin: i64,
+        end: i64,
     ) -> Result<Vec<Message>> {
-        Err(NotImplemented::new("get_messages_in_range"))
+        self.repository
+            .borrow_mut()
+            .messages_in_range(conversation_id, begin, end)
     }
 
     /// Removes a message. Not implemented yet.
-    pub(crate) async fn remove_message(&self, _message_id: i64) -> Result<()> {
-        Err(NotImplemented::new("remove_message"))
+    pub(crate) async fn remove_message(&self, message_id: i64) -> Result<()> {
+        self.repository.borrow_mut().remove_message(message_id)?;
+        Ok(())
     }
 
     /// Removes messages by id. Not implemented yet.
-    pub(crate) async fn remove_messages_by_ids(&self, _message_ids: &[i64]) -> Result<()> {
-        Err(NotImplemented::new("remove_messages_by_ids"))
+    pub(crate) async fn remove_messages_by_ids(&self, message_ids: &[i64]) -> Result<()> {
+        self.repository.borrow_mut().remove_messages(message_ids)?;
+        Ok(())
     }
 
     /// Clears a conversation's history. Not implemented yet.
     pub(crate) async fn remove_messages_in_conversation(
         &self,
-        _conversation_id: &Id,
+        conversation_id: &Id,
     ) -> Result<()> {
-        Err(NotImplemented::new("remove_messages_in_conversation"))
+        self.repository
+            .borrow_mut()
+            .remove_messages_in_conversation(conversation_id)?;
+        Ok(())
     }
 
     /// Lists the sessions of every device of the user.
@@ -1715,9 +1878,9 @@ impl RpcServer {
     /// Sends a friend request and records it as pending.
     pub(crate) async fn friend_request(&self, user_id: &Id, hello: Option<String>) -> Result<()> {
         let _ = self.requests.lock().await;
-        if user_id == self.user_identity.id() {
-            return Err(ArgumentError::new("Cannot send friend request to yourself"));
-        }
+
+
+        assert!(user_id != self.user_identity.id());
 
         info!("Sending friend request to {user_id}");
         let timestamp = self
@@ -1730,6 +1893,7 @@ impl RpcServer {
             hello,
             Self::timestamp(timestamp),
         );
+        self.repository.borrow_mut().put_friend_request(&request)?;
         self.friend_requests.borrow_mut().insert(*user_id, request);
         Ok(())
     }
@@ -1804,6 +1968,9 @@ impl RpcServer {
     /// Dismisses a pending friend request without accepting it.
     pub(crate) async fn remove_friend_request(&self, user_id: &Id) -> Result<()> {
         let _ = self.requests.lock().await;
+        self.repository
+            .borrow_mut()
+            .remove_friend_request(user_id)?;
         self.friend_requests.borrow_mut().remove(user_id);
         Ok(())
     }
@@ -1811,6 +1978,11 @@ impl RpcServer {
     /// Dismisses several pending friend requests.
     pub(crate) async fn remove_friend_requests(&self, user_ids: &[Id]) -> Result<()> {
         let _ = self.requests.lock().await;
+        for user_id in user_ids {
+            self.repository
+                .borrow_mut()
+                .remove_friend_request(user_id)?;
+        }
         let mut borrowed_mut = self.friend_requests.borrow_mut();
         for user_id in user_ids {
             borrowed_mut.remove(user_id);
@@ -1821,6 +1993,7 @@ impl RpcServer {
     /// Dismisses every pending friend request.
     pub(crate) async fn clear_friend_requests(&self) -> Result<()> {
         let _ = self.requests.lock().await;
+        self.repository.borrow_mut().clear_friend_requests()?;
         self.friend_requests.borrow_mut().clear();
         Ok(())
     }
@@ -1877,6 +2050,7 @@ impl RpcServer {
             self.session_context(*user_id, session_identity, false),
         );
         self.contacts.borrow_mut().insert(*user_id, contact.clone());
+        self.persist_contact(&contact, data.session_key())?;
 
         // 6. Notify the application.
         self.contact_listener.on_contact_added(&contact);
@@ -1937,6 +2111,7 @@ impl RpcServer {
         let blocked = data.contact(confirmed)?;
         self.contacts.borrow_mut().insert(*user_id, blocked.clone());
         self.blocked_contacts.lock().unwrap().insert(*user_id);
+        self.persist_contact(&blocked, data.session_key())?;
 
         // 6. Notify the application.
         self.contact_listener
@@ -2290,7 +2465,7 @@ impl RpcServer {
         let Value::Map(mut document) = to_cbor(&data, "channel contact")? else {
             return Err(EncodingError::new("Channel contact is not a map"));
         };
-        insert_channel_fields(&mut document, &channel, key);
+        insert_channel_fields(&mut document, &channel, key.clone());
         let document = to_cbor_bytes(&Value::Map(document), "channel contact")?;
         let document = self.user_identity.encrypt_into(self.user_id(), &document)?;
 
@@ -2311,7 +2486,8 @@ impl RpcServer {
             .borrow_mut()
             .insert(*channel.id(), channel.contact.clone());
         self.contact_listener.on_contact_added(&channel.contact);
-        self.channels.borrow_mut().insert(*channel.id(), channel);
+        self.channels.borrow_mut().insert(*channel.id(), channel.clone());
+        self.repository.borrow_mut().put_channel(revision, &channel, &key)?;
         Ok(())
     }
 
@@ -2323,6 +2499,9 @@ impl RpcServer {
         self.channels.borrow_mut().remove(id);
         self.contacts.borrow_mut().remove(id);
         self.friend_sessions.lock().unwrap().remove(id);
+        self.repository
+            .borrow_mut()
+            .remove_contact(self.contacts_revision.get(), id)?;
         self.contact_listener.on_contacts_removed(&[*id]);
         Ok(())
     }
@@ -2375,6 +2554,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         self.channel_listener
@@ -2427,6 +2607,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         self.channel_listener
@@ -2480,6 +2661,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel.id(), current.clone());
+        self.persist_channel(&current)?;
         self.channel_listener.on_channel_updated(&current);
         Ok(())
     }
@@ -2511,6 +2693,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         if !changed.is_empty() {
@@ -2540,6 +2723,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         if !changed.is_empty() {
@@ -2573,6 +2757,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         if !changed.is_empty() {
@@ -2606,6 +2791,7 @@ impl RpcServer {
         self.channels
             .borrow_mut()
             .insert(*channel_id, channel.clone());
+        self.persist_channel(&channel)?;
 
         // 6. Notify the application.
         if !changed.is_empty() {
@@ -2717,7 +2903,7 @@ impl RpcServer {
             let Value::Map(mut document) = to_cbor(&data, "channel contact")? else {
                 return Err(EncodingError::new("Channel contact is not a map").into());
             };
-            insert_channel_fields(&mut document, &channel, key);
+            insert_channel_fields(&mut document, &channel, key.clone());
             let document = to_cbor_bytes(&Value::Map(document), "channel contact")?;
             let document = self.user_identity.encrypt_into(self.user_id(), &document)?;
             OpaqueContact::new(*contact.id(), next_revision, Value::Bytes(document))
@@ -2752,6 +2938,16 @@ impl RpcServer {
         } else {
             self.blocked_contacts.lock().unwrap().remove(updated.id());
         }
+        if let Some(channel) = self.channels.borrow().get(updated.id()).cloned() {
+            self.persist_channel(&channel)?;
+        } else {
+            let session_key = self.persisted_session_key(updated.id()).ok();
+            self.repository.borrow_mut().put_contact(
+                self.contacts_revision.get(),
+                &updated,
+                session_key.as_deref(),
+            )?;
+        }
         // 6. Notify the application.
         self.contact_listener.on_contacts_updated(&[updated]);
         Ok(())
@@ -2762,14 +2958,10 @@ impl RpcServer {
 
         let _request = self.requests.lock().await;
 
-        // 1. Validate: the removal must be based on the latest known revision.
         let revision = self.contacts_revision.get();
-
-        // 2. Build the request.
         let mutation = ContactMutation::remove(revision, ids.to_vec());
         let request = RPCRequest::contact_mutate(0, mutation);
 
-        // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.rpc_call(self.peer_id(), request).await?;
         let confirmed = match result {
             ResponseParams::Revision(confirmed) => confirmed,
@@ -2787,6 +2979,9 @@ impl RpcServer {
             self.contacts.borrow_mut().remove(id);
             self.channels.borrow_mut().remove(id);
         }
+        self.repository
+            .borrow_mut()
+            .remove_contacts(confirmed, ids)?;
         // 6. Notify the application.
         self.contact_listener.on_contacts_removed(ids);
         Ok(())
@@ -2819,6 +3014,7 @@ impl RpcServer {
         self.blocked_contacts.lock().unwrap().clear();
         self.contacts.borrow_mut().clear();
         self.channels.borrow_mut().clear();
+        self.repository.borrow_mut().clear_contacts(confirmed)?;
         self.contact_listener.on_contacts_cleared();
         Ok(())
     }
@@ -3028,6 +3224,13 @@ impl RpcServer {
             return Ok(());
         }
 
+        if !self.repository.borrow().is_open() {
+            self.repository
+                .borrow_mut()
+                .open(self.options.database_path())?;
+        }
+        self.restore_state()?;
+
         let session = self.clone();
         let revision = self.contacts_revision.get();
         self.transport
@@ -3048,6 +3251,7 @@ impl RpcServer {
         let result = self.stop_transport().await;
         self.close_transport("Messaging session stopped");
         self.transport.clear_eventloop().await;
+        self.repository.borrow_mut().close();
         result
     }
 

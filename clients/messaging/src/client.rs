@@ -341,10 +341,11 @@ impl Client {
         if &user_id == self.user_id() {
             return Err(ArgumentError::new("Cannot send friend request to yourself"));
         }
+
         self.verticle_client()?
             .friend_request(user_id, hello.map(Into::into))
             .await
-            .map_err(|e| e.into())
+            //.map_err(|e| e.into())
     }
 
     /// Accepts a pending friend request.

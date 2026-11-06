@@ -383,6 +383,7 @@ dependencies = [
  "boson-http",
  "bs58",
  "clap",
+ "diesel",
  "futures",
  "log",
  "once_cell",

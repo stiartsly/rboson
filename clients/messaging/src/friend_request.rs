@@ -39,6 +39,26 @@ pub struct FriendRequest {
 impl FriendRequest {
     const EXPIRATION_SECS: u128 = 60 * 60 * 24 * 7; // 1 week in seconds
 
+    pub(crate) fn restore(
+        user_id: Id,
+        initiator_id: Id,
+        hello: Option<String>,
+        accepted: bool,
+        created_at: SystemTime,
+        accepted_at: Option<SystemTime>,
+        updated_at: SystemTime,
+    ) -> Self {
+        Self {
+            user_id,
+            initiator_id,
+            hello,
+            accepted,
+            created_at,
+            accepted_at,
+            updated_at,
+        }
+    }
+
     pub(crate) fn new(
         user_id: Id,
         initiator_id: Id,

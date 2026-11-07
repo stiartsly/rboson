@@ -48,11 +48,12 @@ use boson_api::{
 };
 
 use crate::{
+    ConversationOps,
     channel::{Channel, Permission, Role},
     contact::{Contact, ContactType},
     content_disposition::ContentDisposition,
     content_type,
-    conversation::Conversation,
+    internal::PhotonConversation,
     errors::{
         AuthenticationError,
         EncodingError,
@@ -208,7 +209,7 @@ pub(crate) struct RpcServer {
     contacts_cache: RefCell<HashMap<Id, Contact>>,
     channels: RefCell<HashMap<Id, Channel>>,
     repository: Rc<RefCell<MessagingRepository>>,
-    conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
+    conversations: Arc<Mutex<HashMap<Id, PhotonConversation>>>,
 
     connection_listener: Arc<dyn ConnectionListener>,
     message_listener: Arc<dyn MessageListener>,
@@ -1700,7 +1701,7 @@ impl RpcServer {
 
 impl RpcServer {
     /// Looks up a conversation by contact id.
-    pub(crate) async fn get_conversation(&self, id: &Id) -> Result<Option<Conversation>> {
+    pub(crate) async fn get_conversation(&self, id: &Id) -> Result<Option<PhotonConversation>> {
         if let Some(conversation) = self.conversations.lock().unwrap().get(id).cloned() {
             return Ok(Some(conversation));
         }
@@ -1715,7 +1716,7 @@ impl RpcServer {
     }
 
     /// Lists every known conversation, oldest activity first.
-    pub(crate) async fn get_conversations(&self) -> Result<Vec<Conversation>> {
+    pub(crate) async fn get_conversations(&self) -> Result<Vec<PhotonConversation>> {
         let stored = self.repository.borrow_mut().conversations()?;
         let mut cache = self.conversations.lock().unwrap();
         for conversation in stored {
@@ -3248,7 +3249,7 @@ pub(crate) struct SessionMessageBuilder {
     blocked_contacts: Arc<std::sync::Mutex<HashSet<Id>>>,
     origin_clock: Arc<std::sync::Mutex<i64>>,
     conversation_contact: Option<Contact>,
-    conversations: Arc<Mutex<HashMap<Id, Conversation>>>,
+    conversations: Arc<Mutex<HashMap<Id, PhotonConversation>>>,
     peer_id: Id,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
@@ -3419,14 +3420,14 @@ fn headers_to_cbor(headers: &HashMap<String, serde_json::Value>) -> Result<HashM
 
 /// Folds a message into its conversation, creating the conversation on demand.
 fn update_conversation(
-    conversations: &Arc<Mutex<HashMap<Id, Conversation>>>,
+    conversations: &Arc<Mutex<HashMap<Id, PhotonConversation>>>,
     contact: Contact,
     message: Message,
 ) -> Result<()> {
     let mut conversations = conversations.lock().unwrap();
     let conversation = conversations
         .entry(*contact.id())
-        .or_insert_with(|| Conversation::new(contact));
+        .or_insert_with(|| PhotonConversation::new(contact));
     conversation.update(message)
 }
 

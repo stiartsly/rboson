@@ -41,12 +41,14 @@ pub(crate) mod message_builder;
 
 pub(crate) mod photon_channel;
 pub(crate) mod photon_contact;
+pub(crate) mod photon_conversation;
 pub(crate) mod channel_member;
 
 pub(crate) use {
     channel_info::ChannelInfo,
     channel_members_role::ChannelMembersRole,
     channel_info_update::ChannelInfoUpdate,
+    photon_conversation::PhotonConversation,
 
     contact_data::ContactData,
     contact_sync::ContactSync,

@@ -34,6 +34,7 @@ use boson_api::{
     errors::{Result, StateError},
 };
 use crate::{
+    conversation::Conversation,
     MessageBuilderOps,
     message::Message,
     rpc_server::RpcServer,
@@ -81,8 +82,18 @@ pub(super) fn handle(
         Event::GetConversations(Body {params: id, result: promise}) => {
             respond(pending, promise, async move {
                 match id {
-                    Some(id) => Ok(rpc.get_conversation(&id).await?.into_iter().collect()),
-                    None => rpc.get_conversations().await,
+                    Some(id) => Ok(rpc
+                        .get_conversation(&id)
+                        .await?
+                        .map(|conversation| Box::new(conversation) as Conversation)
+                        .into_iter()
+                        .collect()),
+                    None => Ok(rpc
+                        .get_conversations()
+                        .await?
+                        .into_iter()
+                        .map(|conversation| Box::new(conversation) as Conversation)
+                        .collect()),
                 }
             });
         }

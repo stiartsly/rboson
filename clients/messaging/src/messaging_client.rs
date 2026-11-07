@@ -31,7 +31,7 @@ use boson_api::{
 use crate::{
     channel::{Channel, Permission, Role},
     contact::Contact,
-    session_info::SessionInfo,
+    SessionInfo,
     conversation::Conversation,
     friend_request::FriendRequest,
     invite_ticket::InviteTicket,

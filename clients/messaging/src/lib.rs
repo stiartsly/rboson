@@ -80,6 +80,7 @@ pub use {
 
     contact::{Contact, ContactType},
     contact::ContactEditor,
+    conversation::Conversation,
 
     invite_ticket::InviteTicket,
     session_info::SessionInfo,

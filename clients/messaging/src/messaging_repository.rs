@@ -33,7 +33,7 @@ use crate::{
     channel::Channel,
     channel::ChannelMember,
     contact::{Contact, ContactType},
-    conversation::Conversation,
+    internal::PhotonConversation,
     friend_request::FriendRequest,
     internal::{
         ContactData,
@@ -306,18 +306,18 @@ impl MessagingRepository {
             .collect())
     }
 
-    pub(crate) fn conversations(&mut self) -> Result<Vec<Conversation>> {
+    pub(crate) fn conversations(&mut self) -> Result<Vec<PhotonConversation>> {
         self.store
             .get_all_conversations()?
             .into_iter()
-            .map(stored_to_conversation)
+            .map(stored_to_photon_conversation)
             .collect()
     }
 
-    pub(crate) fn conversation(&mut self, id: &Id) -> Result<Option<Conversation>> {
+    pub(crate) fn conversation(&mut self, id: &Id) -> Result<Option<PhotonConversation>> {
         self.store
             .get_conversation(id)?
-            .map(stored_to_conversation)
+            .map(stored_to_photon_conversation)
             .transpose()
     }
 }
@@ -538,9 +538,9 @@ fn stored_to_friend_request(stored: StoredFriendRequest) -> Result<FriendRequest
     ))
 }
 
-fn stored_to_conversation(stored: StoredConversation) -> Result<Conversation> {
+fn stored_to_photon_conversation(stored: StoredConversation) -> Result<PhotonConversation> {
     let contact = stored_to_contact(&stored.contact)?;
-    let mut conversation = Conversation::new(contact);
+    let mut conversation = PhotonConversation::new(contact);
     if let Some(message) = stored.last_message {
         let message: Message = Box::new(stored_to_message(message)?);
         conversation.update(message)?;
@@ -552,6 +552,7 @@ fn stored_to_conversation(stored: StoredConversation) -> Result<Conversation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConversationOps;
 
     fn id(value: u8) -> Id {
         let mut bytes = [0u8; 32];

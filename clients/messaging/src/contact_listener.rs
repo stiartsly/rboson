@@ -19,8 +19,7 @@
 // SOFTWARE.
 
 use boson_api::Id;
-
-use crate::contact::Contact;
+use crate::Contact;
 
 /// The listener to handle events related to the contact list change events.
 pub trait ContactListener: Send + Sync {

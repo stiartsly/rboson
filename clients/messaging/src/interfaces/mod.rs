@@ -30,9 +30,9 @@ pub use {
 
     contact::Contact as ContactOps,
     contact::ContactEditor as ContactEditorOps,
-
     conversation::Conversation as ConversationOps,
+
     message::Message as MessageOps,
+    message::MessageContent as MessageContentOps,
     message::MessageBuilder as MessageBuilderOps,
-    message::Content as ContentOps,
 };

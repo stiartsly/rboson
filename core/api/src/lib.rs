@@ -120,6 +120,20 @@ macro_rules! as_secs {
 }
 
 #[macro_export]
+macro_rules! from_ms {
+    ($time:expr) => {
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis($time)
+    };
+}
+
+#[macro_export]
+macro_rules! from_secs {
+    ($time:expr) => {
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs($time)
+    };
+}
+
+#[macro_export]
 macro_rules! unwrap {
     ($val:expr) => {{
         $val.as_ref().unwrap()

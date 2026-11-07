@@ -11,7 +11,6 @@ use boson::messaging::{
     InviteTicket,
     Message,
     MessageListener,
-    MessageBuilderOps, MessageOps,
     MessageType,
     MessagingClient,
     Permission,
@@ -42,6 +41,7 @@ struct MessageCapture {
 impl MessageListener for MessageCapture {
     fn on_message(&self, message: &Message) {
         let content = message.payload_as_content();
+        let content = content.as_deref();
         let captured = CapturedMessage {
             id: *message.id(),
             from: message.from().copied(),
@@ -51,8 +51,7 @@ impl MessageListener for MessageCapture {
                 .unwrap_or_default(),
             body: content.map(|content| content.body().to_vec()),
             text: content
-                .and_then(|content| content.as_text())
-                .map(ToString::to_string),
+                .and_then(|content| content.as_text().ok()),
         };
         self.received
             .send(captured)
@@ -497,7 +496,7 @@ mod lifecycle {
         assert!(client.remove_messages_by_ids(&[1, 2]).await.is_err());
         assert!(client.remove_messages_in_conversation(&user_id).await.is_err());
 
-        assert!(client.get_sessions().await.is_err());
+        assert!(client.sessions().await.is_err());
         assert!(client.revoke_session(&user_id).await.is_err());
 
         assert!(client.friend_request(user_id, Some("hello")).await.is_err());
@@ -999,7 +998,7 @@ mod messages {
 
         let content = sent.payload_as_content().unwrap();
         assert_eq!(content.content_type(), "text/plain");
-        assert_eq!(content.as_text(), Some(text));
+        assert_eq!(content.as_text().unwrap(), text);
         assert_eq!(content.body(), text.as_bytes());
 
         let captured = receive_captured(&mut received_rx).await;
@@ -1020,8 +1019,8 @@ mod messages {
         assert_eq!(sent.recipient(), &alice_id);
         let content = sent.payload_as_content().unwrap();
         assert_eq!(content.content_type(), "application/octet-stream");
-        assert_eq!(content.as_binary(), binary);
-        assert_eq!(content.as_text(), None);
+        assert_eq!(content.as_binary().unwrap(), binary);
+        assert!(content.as_text().is_err());
 
         let captured = receive_captured(&mut received_rx).await;
         assert_eq!(captured.id, *sent.id());
@@ -1114,42 +1113,46 @@ mod sessions {
 
     #[tokio::test]
     #[serial]
-    async fn test_sessions_and_revoke() {
+    async fn test_sessions() {
         let client = Client::new(Options::load(BOB_YAML).unwrap());
         assert!(client.start().await.is_ok());
         wait_until_ready(&client).await;
 
-        let sessions = client.get_sessions().await.unwrap();
+        let rc = client.sessions().await;
+        assert!(rc.is_ok());
+
+        let sessions = rc.unwrap();
         let current = sessions
             .iter()
-            .find(|session| session.device_id() == client.device_id())
-            .expect("The current device session should be listed");
-        assert!(current.is_online());
-        assert!(current.last_active_ms() > 0);
-        assert_eq!(
-            sessions
-                .iter()
-                .filter(|session| session.device_id() == client.device_id())
-                .count(),
-            1
+            .find(|session|session.device_id() == client.device_id());
+        assert!(
+            current.is_some(),
+            "The current device session should be listed"
         );
 
-        let error = client
-            .revoke_session(client.device_id())
-            .await
-            .err()
-            .unwrap()
-            .to_string();
+        let current = current.unwrap();
+        assert!(current.is_online());
+        assert!(current.last_active_timestamp() > std::time::UNIX_EPOCH);
+
+        let count  = sessions
+            .iter()
+            .filter(|session| session.device_id() == client.device_id())
+            .count();
+        assert!(count == 1,
+            "Expected exactly one session for the current device"
+        );
+
+        let rc = client.revoke_session(client.device_id()).await;
+        assert!(rc.is_err());
+        let error = rc.err().unwrap().to_string();
         assert!(error.contains("Cannot revoke the current session"));
 
         // Revoking an unrelated device is rejected by the service.
         let unknown_device = Id::from(KeyPair::random().public_key());
-        let error = client
-            .revoke_session(&unknown_device)
-            .await
-            .err()
-            .unwrap()
-            .to_string();
+        let rc = client.revoke_session(&unknown_device).await;
+        assert!(rc.is_err());
+
+        let error = rc.err().unwrap().to_string();
         assert!(error.contains("code=-101"));
         assert!(error.contains("not exists"));
 

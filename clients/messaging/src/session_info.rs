@@ -18,17 +18,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::fmt;
+use std::{
+    fmt,
+    hash,
+    time::SystemTime,
+};
 use serde::{Serialize, Deserialize};
 
-use boson_api::Id;
+use boson_api::{Id, utils};
 
 /// Information about a single device session for the current user.
 ///
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     /// The boson `Id` of the device.
-    #[serde(rename = "id")]
+    #[serde(rename = "id", with = "utils::id")]
     device_id: Id,
 
     /// Whether this device is currently online.
@@ -37,13 +41,13 @@ pub struct SessionInfo {
 
     /// Timestamp (milliseconds since UNIX epoch) of the last activity.
     #[serde(rename = "lt", default)]
-    last_active_ms: i64,
+    last_active_ms: u64,
 
     /// Last known network address (IP:port string), if available.
     #[serde(
         rename = "la",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "utils::is_default"
     )]
     last_address: Option<String>,
 }
@@ -57,8 +61,8 @@ impl SessionInfo {
         self.online
     }
 
-    pub fn last_active_ms(&self) -> i64 {
-        self.last_active_ms
+    pub fn last_active_timestamp(&self) -> SystemTime {
+        boson_api::from_ms!(self.last_active_ms)
     }
 
     pub fn last_address(&self) -> Option<&str> {
@@ -75,9 +79,22 @@ impl PartialEq for SessionInfo {
     }
 }
 
+impl hash::Hash for SessionInfo {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.device_id.hash(state);
+        self.online.hash(state);
+        self.last_active_ms.hash(state);
+        self.last_address.hash(state);
+    }
+}
+
 impl fmt::Display for SessionInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let json = serde_json::to_string(self).unwrap_or_default();
-        write!(f, "{}", json)
+        write!(f, "SessionInfo[deviceId={}, online={}, lastActive={}, lastAddress={}]",
+            self.device_id,
+            self.online,
+            self.last_active_ms,
+            self.last_address.as_deref().unwrap_or("None")
+        )
     }
 }

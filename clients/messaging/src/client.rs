@@ -50,6 +50,7 @@ use crate::{
     verticle::{VerticleClient, VerticleOptions },
     ClientConnectionListener,
     MessagingClient,
+    internal,
     message::{Message, MessageBuilder},
 };
 
@@ -288,11 +289,11 @@ impl Client {
     /// obtained while the client is stopped can never be sent later.
     pub fn message(&self, recipient: Option<Id>) -> MessageBuilder {
         let sender = self.verticle_ref().map(|verticle| verticle.sender());
-        MessageBuilder::new(
+        Box::new(internal::ClientMessageBuilder::new(
             recipient,
             sender,
             self.message_listener.clone(),
-        )
+        ))
     }
 }
 
@@ -302,7 +303,7 @@ impl Client {
 
 impl Client {
     /// Lists the sessions currently authorised for this user.
-    pub async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
+    pub async fn sessions(&self) -> Result<Vec<SessionInfo>> {
         self.verticle_client()?.get_sessions().await
     }
 
@@ -702,8 +703,8 @@ impl MessagingClient for Client {
         self.remove_messages_in_conversation(conversation_id).await
     }
 
-    async fn get_sessions(&self) -> Result<Vec<SessionInfo>> {
-        self.get_sessions().await
+    async fn sessions(&self) -> Result<Vec<SessionInfo>> {
+        self.sessions().await
     }
 
     async fn revoke_session(&self, device_id: &Id) -> Result<()> {

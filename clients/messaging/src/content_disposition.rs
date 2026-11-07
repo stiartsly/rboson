@@ -26,7 +26,6 @@ use unicode_normalization::{
     char::is_combining_mark,
     UnicodeNormalization,
 };
-
 use boson_api::{
     errors::ArgumentError,
     Error,
@@ -116,12 +115,11 @@ impl ContentDisposition {
 
     fn with_filename(disposition_type: ContentDispositionType, filename: String) -> Self {
         match filename.is_empty() {
-            true=> Self {
-                disposition_type,
-                ascii_filename: None,
-                rfc5987_filename: None,
-                filename: None,
-            },
+            true=> {
+                let mut disposition = Self::inline();
+                disposition.disposition_type = disposition_type;
+                return disposition;
+            }
             false=> Self {
                 disposition_type,
                 ascii_filename: Some(ascii_fallback(&filename)),

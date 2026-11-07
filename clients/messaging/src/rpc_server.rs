@@ -50,7 +50,6 @@ use boson_api::{
 use crate::{
     channel::{Channel, Permission, Role},
     contact::{Contact, ContactType},
-    ContactOps,
     content_disposition::ContentDisposition,
     content_type,
     conversation::Conversation,
@@ -60,8 +59,9 @@ use crate::{
         ProtocolError,
     },
     invite_ticket::InviteTicket,
-    message::{Message, MessageType},
+    message::MessageType,
     messaging_repository::MessagingRepository,
+    Message,
     MessageBuilderOps,
     MessageOps,
     options::Options,
@@ -90,7 +90,7 @@ use super::{
         JoinChannel,
         Handshake,
         HandshakeType,
-        MessageContent,
+        PhotonContent,
         MutationData,
         NewChannelInfo,
         Notification,
@@ -99,6 +99,7 @@ use super::{
         OpaqueContact,
         PhotonChannel,
         PhotonContact,
+        PhotonMessage,
         SessionContext,
         SyncType,
         Topic,
@@ -367,7 +368,7 @@ impl Outbound<'_> {
         body: Vec<u8>,
         inner: Option<&Id>,
         what: &str,
-    ) -> Result<(Message, Vec<u8>)> {
+    ) -> Result<(PhotonMessage, Vec<u8>)> {
         let body = match inner {
             Some(peer) => self
                 .user_identity
@@ -379,7 +380,7 @@ impl Outbound<'_> {
         };
         let created_at = u64::try_from(timestamp)
             .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
-        let message = Message::new(
+        let message = PhotonMessage::new(
             MESSAGE_VERSION,
             RpcServer::message_id(self.device_identity.id(), timestamp)?,
             *recipient,
@@ -1166,7 +1167,7 @@ impl RpcServer {
     /// The transport has already opened the envelope (stage 1), so this runs
     /// the remaining stages: classify, then hand over to the route's handler,
     /// which unprotects, decodes and applies the message.
-    async fn dispatch(&self, topic: Topic, message: Message) -> Result<()> {
+    async fn dispatch(&self, topic: Topic, message: PhotonMessage) -> Result<()> {
         let (route, from) = self.classify(topic, &message)?;
         match route {
             Route::RpcResponse => self.handle_device_rpc(message, &from),
@@ -1180,7 +1181,7 @@ impl RpcServer {
     ///
     /// The device inbox only ever carries RPC replies and notifications only
     /// come through the user inbox; everything else is routed by message type.
-    fn classify(&self, topic: Topic, message: &Message) -> Result<(Route, Id)> {
+    fn classify(&self, topic: Topic, message: &PhotonMessage) -> Result<(Route, Id)> {
         if message.version != MESSAGE_VERSION {
             return Err(ProtocolError::new(
                 message.version as i32,
@@ -1218,7 +1219,7 @@ impl RpcServer {
     /// Replies from the service are sealed with the device key only. Replies
     /// relayed on behalf of a channel peer carry a second layer that only this
     /// user can open, so they are decrypted twice.
-    fn handle_device_rpc(&self, message: Message, from: &Id) -> Result<()> {
+    fn handle_device_rpc(&self, message: PhotonMessage, from: &Id) -> Result<()> {
         let payload = binary_payload(message.payload, "RPC response")?;
         let payload = if from == self.peer_id() {
             payload
@@ -1233,7 +1234,7 @@ impl RpcServer {
     /// Notifications about our own account are sealed for this user; channel
     /// notifications are sealed with the channel session key instead, which is
     /// why they need a lookup first.
-    async fn handle_state_message(&self, message: Message, from: &Id) -> Result<()> {
+    async fn handle_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
         let home = from == self.peer_id() && message.recipient == *self.user_id();
         // A notification addressed to its own sender is a channel event, and
         // mutating channel state must not interleave with a pending request.
@@ -1272,7 +1273,7 @@ impl RpcServer {
     ///
     /// Handshakes travel through the outbox as well as the inbox: the copy we
     /// sent comes back to us, which is how we learn the service accepted it.
-    async fn handle_handshake(&self, topic: Topic, message: Message, from: Id) -> Result<()> {
+    async fn handle_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
         let timestamp = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let originated_here = message.id == Self::message_id(self.device_identity.id(), timestamp)?;
@@ -1373,7 +1374,7 @@ impl RpcServer {
     fn handle_content_message(
         &self,
         topic: Topic,
-        mut message: Message,
+        mut message: PhotonMessage,
         from: Id,
     ) -> Result<()> {
         let outbox = matches!(topic, Topic::UserOutbox);
@@ -1407,7 +1408,7 @@ impl RpcServer {
                 "Content message has an unexpected recipient",
             ));
         }
-        let (content_bytes, headers, body) =
+        let (content_bytes, content) =
             self.open_content(&contact_id, outbox, &from, &message.payload)?;
         message.from = Some(from);
         message.received_at = if outbox {
@@ -1421,7 +1422,7 @@ impl RpcServer {
             None
         };
         message.payload_bytes = content_bytes;
-        message.content = Some(crate::message::Content::_new(headers, body));
+        message.content = Some(content);
         message.conversation_id = Some(contact_id);
         let created_at = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
@@ -1434,13 +1435,14 @@ impl RpcServer {
         if let Err(error) = self.repository.borrow_mut().put_message(&mut message) {
             warn!("Persisting inbound message failed: {error}");
         }
-        update_conversation(&self.conversations, conversation_contact, message.clone())?;
+        let boxed_message: Message = Box::new(message.clone());
+        update_conversation(&self.conversations, conversation_contact, boxed_message.clone())?;
         if outbox {
             if message.id != Self::message_id(self.device_id(), created_at)? {
-                self.message_listener.on_sent(&message);
+                self.message_listener.on_sent(&boxed_message);
             }
         } else {
-            self.message_listener.on_message(&message);
+            self.message_listener.on_message(&boxed_message);
         }
         Ok(())
     }
@@ -1456,7 +1458,7 @@ impl RpcServer {
         outbox: bool,
         from: &Id,
         payload: &Value,
-    ) -> Result<(Vec<u8>, HashMap<String, serde_json::Value>, Vec<u8>)> {
+    ) -> Result<(Vec<u8>, PhotonContent)> {
         let encrypted = binary_payload(payload.clone(), "Content")?;
         let content_bytes = {
             let mut sessions = self.friend_sessions.lock().unwrap();
@@ -1471,22 +1473,12 @@ impl RpcServer {
                     .decrypt_into(&encrypted)?
             }
         };
-        let wire: MessageContent = decode_cbor_bytes(&content_bytes, "message content")?;
-        let body = match (wire.format, wire.body) {
-            (ContentFormat::Text, Value::Text(text)) => text.into_bytes(),
-            (ContentFormat::Binary, Value::Bytes(bytes)) => bytes,
-            _ => return Err(EncodingError::new("Unsupported message content body")),
-        };
-        let mut headers = HashMap::new();
-        for (key, value) in wire.headers {
-            headers.insert(
-                key,
-                serde_json::to_value(value).map_err(|error| {
-                    EncodingError::new(format!("Malformed content header: {error}"))
-                })?,
-            );
+        let wire: PhotonContent = decode_cbor_bytes(&content_bytes, "message content")?;
+        let content = PhotonContent::new(wire.headers, wire.format, wire.body)?;
+        if !matches!(content.format(), ContentFormat::Text | ContentFormat::Binary) {
+            return Err(EncodingError::new("Unsupported message content body"));
         }
-        Ok((content_bytes, headers, body))
+        Ok((content_bytes, content))
     }
 
     fn timestamp(timestamp: i64) -> SystemTime {
@@ -1762,12 +1754,13 @@ impl RpcServer {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Message>> {
-        self.repository.borrow_mut().messages_before(
+        let messages = self.repository.borrow_mut().messages_before(
             conversation_id,
             until.unwrap_or(i64::MAX),
             limit,
             offset,
-        )
+        )?;
+        Ok(messages.into_iter().map(|message| Box::new(message) as Message).collect())
     }
 
     /// Reads history in a timestamp range. Not implemented yet.
@@ -1777,9 +1770,10 @@ impl RpcServer {
         begin: i64,
         end: i64,
     ) -> Result<Vec<Message>> {
-        self.repository
+        let messages = self.repository
             .borrow_mut()
-            .messages_in_range(conversation_id, begin, end)
+            .messages_in_range(conversation_id, begin, end)?;
+        Ok(messages.into_iter().map(|message| Box::new(message) as Message).collect())
     }
 
     /// Removes a message. Not implemented yet.
@@ -2345,8 +2339,8 @@ impl RpcServer {
             i64::try_from(millis)
                 .map_err(|_| EncodingError::new("Channel timestamp is out of range").into())
         };
-        let created_at = timestamp(info.created_at())?;
-        let updated_at = timestamp(info.updated_at())?;
+        let created_at = info.created_at();
+        let updated_at = info.updated_at();
         if updated_at < created_at {
             return Err(EncodingError::new("Invalid channel timestamps"));
         }
@@ -2372,9 +2366,9 @@ impl RpcServer {
                 "Channel session key does not match session ID",
             ));
         }
-        let mut data = ContactData::new(*info.channel_id(), ContactType::Channel as u8, created_at);
+        let mut data = ContactData::new(*info.channel_id(), ContactType::Channel as u8, created_at as i64);
         data.name = info.name().map(ToString::to_string);
-        data.updated_at = updated_at;
+        data.updated_at = updated_at as i64;
         let channel: Channel = Box::new(PhotonChannel::new(
             PhotonContact::try_from(data)?,
             *info.owner_id(),
@@ -3219,8 +3213,8 @@ impl RpcServer {
 
 impl RpcServer {
     /// Starts composing an outgoing message to `recipient`.
-    pub(crate) fn message(&self, recipient: Option<Id>) -> SessionMessageBuilder {
-        SessionMessageBuilder {
+    pub(crate) fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilderOps> {
+        Box::new(SessionMessageBuilder {
             recipient,
             client: self.transport.client_handle(),
             user_identity: self.user_identity.clone(),
@@ -3236,7 +3230,7 @@ impl RpcServer {
             headers: Vec::new(),
             body: None,
             text: false,
-        }
+        })
     }
 }
 
@@ -3264,65 +3258,67 @@ pub(crate) struct SessionMessageBuilder {
 }
 
 impl MessageBuilderOps for SessionMessageBuilder {
-    fn with_content_type(mut self, content_type: &str) -> Self {
+    fn with_content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilderOps> {
         self.content_type = Some(content_type.to_string());
         self
     }
 
-    fn with_content_disposition(mut self, disposition: ContentDisposition) -> Self {
+    fn with_content_disposition(mut self: Box<Self>, disposition: ContentDisposition) -> Box<dyn MessageBuilderOps> {
         self.content_disposition = Some(disposition);
         self
     }
 
-    fn with_text_body(mut self, text: &str) -> Self {
+    fn with_text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilderOps> {
         self.body = Some(text.as_bytes().to_vec());
         self.text = true;
         self
     }
 
-    fn with_binary_body(mut self, data: Vec<u8>) -> Self {
+    fn with_binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilderOps> {
         self.body = Some(data);
         self.text = false;
         self
     }
 
-    fn with_header(mut self, key: &str, value: &str) -> Self {
+    fn with_header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilderOps> {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }
 
-    async fn send(self) -> Result<Message> {
-            let recipient = self
+    fn send(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<Message>> + Send>> {
+        Box::pin(async move {
+            let this = *self;
+            let recipient = this
                 .recipient
                 .ok_or_else(|| ArgumentError::new("Message recipient is required"))?;
-            if self.blocked_contacts.lock().unwrap().contains(&recipient) {
+            if this.blocked_contacts.lock().unwrap().contains(&recipient) {
                 return Err(StateError::new("Cannot send a message to a blocked contact").into());
             }
-            let mqtt: mqtt::Client = self
+            let mqtt: mqtt::Client = this
                 .client
                 .lock()
                 .unwrap()
                 .clone()
                 .ok_or_else(|| StateError::new("Messaging client is not running"))?;
-            let body = self
+            let body = this
                 .body
                 .ok_or_else(|| ArgumentError::new("Message content is required"))?;
             let headers = build_message_headers(
-                self.headers,
-                self.content_type,
-                self.content_disposition,
-                self.text,
+                this.headers,
+                this.content_type,
+                this.content_disposition,
+                this.text,
             );
 
-            let timestamp = RpcServer::origin_timestamp(&self.origin_clock)?;
-            let content = MessageContent {
+            let timestamp = RpcServer::origin_timestamp(&this.origin_clock)?;
+            let content = PhotonContent {
                 headers: headers_to_cbor(&headers)?,
-                format: if self.text {
+                format: if this.text {
                     ContentFormat::Text
                 } else {
                     ContentFormat::Binary
                 },
-                body: if self.text {
+                body: if this.text {
                     Value::Text(
                         String::from_utf8(body.clone())
                             .map_err(|_| EncodingError::new("Text message is not UTF-8"))?,
@@ -3333,16 +3329,16 @@ impl MessageBuilderOps for SessionMessageBuilder {
             };
             let content_bytes = to_cbor_bytes(&content, "message content")?;
             let encrypted = {
-                let mut sessions = self.friend_sessions.lock().unwrap();
+                let mut sessions = this.friend_sessions.lock().unwrap();
                 let session = sessions
                     .get_mut(&recipient)
                     .ok_or_else(|| StateError::new(format!("No friend session for {recipient}")))?;
                 session.tx_crypto_context()?.encrypt_into(&content_bytes)?
             };
             let (mut wire, payload) = Outbound {
-                user_identity: &self.user_identity,
-                device_identity: &self.device_identity,
-                peer_id: &self.peer_id,
+                user_identity: &this.user_identity,
+                device_identity: &this.device_identity,
+                peer_id: &this.peer_id,
             }
             .seal(
                 &recipient,
@@ -3356,16 +3352,18 @@ impl MessageBuilderOps for SessionMessageBuilder {
 
             // The returned message mirrors what a recipient would see, so the
             // caller can render it without a round trip.
-            wire.from = Some(*self.user_identity.id());
+            wire.from = Some(*this.user_identity.id());
             wire.sent_at = Some(SystemTime::now());
             wire.payload_bytes = content_bytes;
-            wire.content = Some(crate::message::Content::_new(headers, body));
+            wire.content = Some(content);
             wire.conversation_id = Some(recipient);
-            let contact = self
+            let contact = this
                 .conversation_contact
                 .unwrap_or_else(|| Box::new(PhotonContact::new(recipient, ContactType::Auto, timestamp)) as Contact);
-            update_conversation(&self.conversations, contact, wire.clone())?;
-            Ok(wire)
+            let boxed_message: Message = Box::new(wire);
+            update_conversation(&this.conversations, contact, boxed_message.clone())?;
+            Ok(boxed_message)
+        })
     }
 }
 

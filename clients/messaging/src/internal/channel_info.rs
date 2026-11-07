@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
 
 use boson_api::{utils, Id};
@@ -108,21 +107,17 @@ impl ChannelInfo {
         self.announce
     }
 
-    pub(crate) fn created_at(&self) -> SystemTime {
-        to_system_time(self.created_at)
+    pub(crate) fn created_at(&self) -> u64 {
+        self.created_at
     }
 
-    pub(crate) fn updated_at(&self) -> SystemTime {
-        to_system_time(self.updated_at)
+    pub(crate) fn updated_at(&self) -> u64 {
+        self.updated_at
     }
 
     pub(crate) fn members(&self) -> &[PhotonChannelMember] {
         &self.members
     }
-}
-
-fn to_system_time(millis: u64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
 }
 
 #[cfg(test)]

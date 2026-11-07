@@ -21,7 +21,7 @@
 pub(crate) mod serde;
 pub(crate) mod handshake;
 pub(crate) mod notification;
-pub(crate) mod message_content;
+pub(crate) mod photon_content;
 pub(crate) mod contact_data;
 pub(crate) mod contact_mutation;
 pub(crate) mod contact_sync;
@@ -36,9 +36,11 @@ pub(crate) mod join_channel;
 pub(crate) mod session_context;
 pub(crate) mod connection_listener;
 
+pub(crate) mod photon_message;
+pub(crate) mod message_builder;
 
-pub(crate) mod channel;
-pub(crate) mod contact;
+pub(crate) mod photon_channel;
+pub(crate) mod photon_contact;
 pub(crate) mod channel_member;
 
 pub(crate) use {
@@ -51,15 +53,18 @@ pub(crate) use {
 
     join_channel::JoinChannel,
 
-    channel::PhotonChannel,
-    contact::PhotonContact,
-    channel_member::PhotonChannelMember
+    photon_channel::PhotonChannel,
+    photon_contact::PhotonContact,
+    channel_member::PhotonChannelMember,
+
+    photon_message::PhotonMessage,
+    message_builder::ClientMessageBuilder,
 };
 
 pub(crate) use {
-    message_content::{
+    photon_content::{
         ContentFormat,
-        MessageContent,
+        PhotonContent,
     },
     handshake::{
         Handshake,

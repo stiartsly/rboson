@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 use std::{
-    collections::HashMap,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -34,21 +33,17 @@ use crate::{
     channel::Channel,
     channel::ChannelMember,
     contact::{Contact, ContactType},
-    content::{
-        ContentFormat,
-        MessageContent,
-    },
     conversation::Conversation,
     friend_request::FriendRequest,
     internal::{
         ContactData,
         PhotonChannelMember,
         PhotonContact,
+        PhotonContent,
+        PhotonMessage,
     },
-    message::{
-        Content,
-        Message,
-    },
+    Message,
+    MessageContentOps,
     MessageOps,
     persistence::{
         database::SqliteMessagingStore,
@@ -89,13 +84,13 @@ impl MessagingRepository {
         self.store.get_contacts_revision()
     }
 
-    pub(crate) fn put_message(&mut self, message: &mut Message) -> Result<()> {
+    pub(crate) fn put_message(&mut self, message: &mut PhotonMessage) -> Result<()> {
         let stored = message_to_stored(message)?;
         message.rid = self.store.put_message(&stored)?;
         Ok(())
     }
 
-    pub(crate) fn update_message_sent_time(&mut self, message: &Message) -> Result<()> {
+    pub(crate) fn update_message_sent_time(&mut self, message: &PhotonMessage) -> Result<()> {
         let sent_at = message
             .sent_at
             .map(time_to_millis)
@@ -110,7 +105,7 @@ impl MessagingRepository {
         until: i64,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<Vec<PhotonMessage>> {
         self.store
             .get_messages_before(conversation_id, until, limit, offset)?
             .into_iter()
@@ -123,7 +118,7 @@ impl MessagingRepository {
         conversation_id: &Id,
         begin: i64,
         end: i64,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<Vec<PhotonMessage>> {
         self.store
             .get_messages_in_range(conversation_id, begin, end)?
             .into_iter()
@@ -342,11 +337,11 @@ fn millis_to_time(millis: i64) -> Result<SystemTime> {
     Ok(UNIX_EPOCH + Duration::from_millis(millis))
 }
 
-fn message_to_stored(message: &Message) -> Result<StoredMessage> {
+fn message_to_stored(message: &PhotonMessage) -> Result<StoredMessage> {
     let payload = if !message.payload_bytes.is_empty() {
         Some(message.payload_bytes.clone())
     } else if let Some(content) = &message.content {
-        Some(serialize_content(content)?)
+        Some(content.serialize()?)
     } else {
         None
     };
@@ -391,25 +386,7 @@ fn message_to_stored(message: &Message) -> Result<StoredMessage> {
     })
 }
 
-fn serialize_content(content: &Content) -> Result<Vec<u8>> {
-    let mut headers = HashMap::new();
-    for (key, value) in content.headers() {
-        headers.insert(
-            key.clone(),
-            serde_cbor::value::to_value(value).map_err(|error| {
-                StateError::new(format!("Invalid message content header: {error}"))
-            })?,
-        );
-    }
-    let content = MessageContent::new(
-        headers,
-        ContentFormat::Binary,
-        serde_cbor::Value::Bytes(content.body().to_vec()),
-    )?;
-    content.serialize()
-}
-
-fn stored_to_message(stored: StoredMessage) -> Result<Message> {
+fn stored_to_message(stored: StoredMessage) -> Result<PhotonMessage> {
     let payload = stored.payload.unwrap_or_default();
     let version = u8::try_from(stored.version)
         .map_err(|_| StateError::new("Invalid message version"))?;
@@ -418,7 +395,7 @@ fn stored_to_message(stored: StoredMessage) -> Result<Message> {
     let created_at = u64::try_from(stored.created_at)
         .map_err(|_| StateError::new("Invalid message timestamp"))?;
 
-    let mut message = Message::new(
+    let mut message = PhotonMessage::new(
         version,
         stored.id,
         stored.recipient,
@@ -437,24 +414,7 @@ fn stored_to_message(stored: StoredMessage) -> Result<Message> {
     }
     message.payload_bytes = payload;
     if !message.payload_bytes.is_empty() {
-        let content = MessageContent::parse(&message.payload_bytes)?;
-        let mut headers = HashMap::new();
-        for (key, value) in content.headers() {
-            headers.insert(
-                key.clone(),
-                serde_json::to_value(value).map_err(|error| {
-                    StateError::new(format!("Invalid message content header: {error}"))
-                })?,
-            );
-        }
-        let body = match content.body() {
-            serde_cbor::Value::Text(text) => text.as_bytes().to_vec(),
-            serde_cbor::Value::Bytes(bytes) => bytes.clone(),
-            _ => {
-                return Err(StateError::new("Unsupported message content body").into());
-            }
-        };
-        message.content = Some(Content::_new(headers, body));
+        message.content = Some(PhotonContent::parse(&message.payload_bytes)?);
     }
     Ok(message)
 }
@@ -568,13 +528,13 @@ fn stored_to_friend_request(stored: StoredFriendRequest) -> Result<FriendRequest
         stored.initiator,
         stored.hello,
         stored.accepted,
-        millis_to_time(stored.created_at)?,
+        stored.created_at as u64,
         if stored.accepted_at > 0 {
-            Some(millis_to_time(stored.accepted_at)?)
+            Some(stored.accepted_at as u64)
         } else {
             None
         },
-        millis_to_time(stored.updated_at)?,
+        stored.updated_at as u64,
     ))
 }
 
@@ -582,7 +542,8 @@ fn stored_to_conversation(stored: StoredConversation) -> Result<Conversation> {
     let contact = stored_to_contact(&stored.contact)?;
     let mut conversation = Conversation::new(contact);
     if let Some(message) = stored.last_message {
-        conversation.update(stored_to_message(message)?)?;
+        let message: Message = Box::new(stored_to_message(message)?);
+        conversation.update(message)?;
     }
     Ok(conversation)
 }
@@ -629,7 +590,7 @@ mod tests {
             Some("friend")
         );
 
-        let mut message = Message::new(
+        let mut message = PhotonMessage::new(
             2,
             id(2),
             id(3),

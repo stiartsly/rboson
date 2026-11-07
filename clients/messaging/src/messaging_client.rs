@@ -139,15 +139,10 @@ pub trait MessagingClient {
     // -----------------------------------------------------------------
 
     /// Lists all known device sessions for the authenticated user.
-    fn get_sessions(
-        &self
-    ) -> impl Future<Output = Result<Vec<SessionInfo>>>;
+    fn sessions(&self) -> impl Future<Output = Result<Vec<SessionInfo>>>;
 
     /// Revokes (logs out) the session identified by `device_id`.
-    fn revoke_session(
-        &self,
-        device_id: &Id
-    ) -> impl Future<Output = Result<()>>;
+    fn revoke_session(&self, device_id: &Id) -> impl Future<Output = Result<()>>;
 
     // -----------------------------------------------------------------
     // Friends

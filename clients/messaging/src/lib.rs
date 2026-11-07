@@ -52,11 +52,9 @@ pub mod channel;
 pub mod channel_listener;
 
 pub mod conversation;
-pub mod content;
 pub mod content_type;
 pub mod content_disposition;
 pub mod message;
-pub mod message_builder;
 pub mod message_listener;
 
 pub use {
@@ -96,18 +94,21 @@ pub use interfaces::{
     ContactEditorOps,
 
     ConversationOps,
+    MessageContentOps,
     MessageBuilderOps,
     MessageOps,
 };
 
-pub use message::{
-    Content,
+pub use content_disposition::{
     ContentDisposition,
     ContentDispositionType,
+    HEADER_NAME as CONTENT_DISPOSITION_HEADER,
+};
+pub use message::{
     Message,
+    MessageContent,
     MessageBuilder,
     MessageType,
-    CONTENT_DISPOSITION_HEADER,
 };
 pub use content_type::ContentType;
 

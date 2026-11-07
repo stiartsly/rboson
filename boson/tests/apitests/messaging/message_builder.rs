@@ -22,7 +22,7 @@
 mod tests {
     use boson::{
         Id,
-        messaging::{Client, ContentDisposition, MessageBuilderOps, Options},
+        messaging::{Client, ContentDisposition, Options},
         signature::KeyPair,
     };
 

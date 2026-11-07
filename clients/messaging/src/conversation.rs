@@ -72,7 +72,7 @@ impl Conversation {
         let content_type = content.content_type();
 
         let snippet = if content_type.starts_with("text/") {
-            let Some(body) = content.as_text() else {
+            let Ok(body) = content.as_text() else {
                 return Ok(None);
             };
             let body = body.trim();

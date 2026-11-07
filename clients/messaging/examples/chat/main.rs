@@ -41,7 +41,6 @@ use boson::{
         FriendRequestListener,
         Message,
         MessageListener,
-        MessageOps,
         Options as MessagingOptions,
         OptionsBuilder as MessagingOptionsBuilder,
         SessionInfo,
@@ -246,8 +245,8 @@ impl MessageListener for PhotonMessageListener {
         let from = message.from().map(ToString::to_string).unwrap_or_else(|| "unknown".into());
         let content = message
             .payload_as_content()
-            .and_then(|content| content.as_text())
-            .unwrap_or("<binary message>");
+            .and_then(|content| content.as_text().ok())
+            .unwrap_or_else(|| "<binary message>".to_string());
         self.output.println(format!("Message from {from}: {content}"));
     }
 

@@ -69,10 +69,9 @@ use boson_api::{
 use crate::{
     options::Options,
     errors::{AuthenticationError, EncodingError},
-    message::Message,
 };
 
-use super::internal::Topic;
+use super::internal::{PhotonMessage, Topic};
 
 /// The MQTT client handle, shared with the message builders on other threads.
 pub(crate) type Client = AsyncClient;
@@ -103,7 +102,7 @@ pub(crate) enum Inbound {
     /// variants, and this value is built on every poll.
     Message {
         topic: Topic,
-        message: Box<Message>,
+        message: Box<PhotonMessage>,
     },
     /// A publish we cannot use; the topic is kept for the log line.
     Unusable { topic: String, reason: String },
@@ -203,7 +202,7 @@ pub(crate) fn to_cbor_bytes<T: Serialize>(value: &T, what: &str) -> Result<Vec<u
 pub(crate) fn seal_envelope(
     device_identity: &CryptoIdentity,
     peer_id: &Id,
-    message: &Message,
+    message: &PhotonMessage,
     what: &str,
 ) -> Result<Vec<u8>> {
     let encoded = to_cbor_bytes(message, what)?;
@@ -514,7 +513,7 @@ impl MqttClient {
     }
 
     /// Decrypts an envelope from the service and decodes the message inside.
-    fn open(&self, payload: &[u8]) -> Result<Message> {
+    fn open(&self, payload: &[u8]) -> Result<PhotonMessage> {
         let envelope = self.device_identity
             .decrypt_into(self.options.peer_id(), payload)
             .map_err(|error| AuthenticationError::new(format!("Decrypting message envelope failed: {error}")))?;

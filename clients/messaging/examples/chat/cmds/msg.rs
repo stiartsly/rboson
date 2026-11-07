@@ -25,10 +25,7 @@ use clap::{
     ArgMatches,
     Command,
 };
-use boson::messaging::{
-    Client,
-    MessageBuilderOps,
-};
+use boson::messaging::Client;
 
 use super::parse_id;
 

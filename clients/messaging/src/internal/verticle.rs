@@ -18,12 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-mod client;
-mod commands;
-mod event;
-mod runtime;
-mod transport;
-mod promise;
+#[path = "../verticle/client.rs"]       mod client;
+#[path = "../verticle/commands.rs"]     mod commands;
+#[path = "../verticle/event.rs"]        mod event;
+#[path = "../verticle/runtime.rs"]      mod runtime;
+#[path = "../verticle/transport.rs"]    mod transport;
+#[path = "../verticle/promise.rs"]      mod promise;
 
 use std::{
     result::Result as StdResult,
@@ -40,14 +40,15 @@ use boson_api::errors::{
     StateError,
 };
 use crate::{
-    channel_listener::ChannelListener,
-    connection_listener::ConnectionListener,
-    contact_listener::ContactListener,
-    friend_request_listener::FriendRequestListener,
-    message_listener::MessageListener,
-    session_listener::SessionListener,
+    ChannelListener,
+    ConnectionListener,
+    ContactListener,
+    FriendRequestListener,
+    MessageListener,
+    SessionListener,
     options::Options,
 };
+
 pub(crate) use client::VerticleClient;
 pub(crate) use event::{Event, Body, MsgContentParams};
 use runtime::Verticle;
@@ -65,7 +66,6 @@ pub(crate) struct VerticleOptions {
     pub(crate) friend_request_listener: Arc<dyn FriendRequestListener>,
 }
 
-/// Creates the one dedicated physical thread that owns the messaging engine.
 pub(crate) async fn deploy(options: VerticleOptions) -> Result<VerticleClient> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
     let (startup_tx, startup_rx) = oneshot::channel::<StdResult<(), String>>();

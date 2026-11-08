@@ -35,10 +35,11 @@ use boson_api::{
 };
 use crate::{
     conversation::Conversation,
-    MessageBuilderOps,
     message::Message,
-    rpc_server::RpcServer,
 };
+
+use crate::internal::rpc_server::RpcServer;
+
 use super::{
     promise::Promise,
     event::{

@@ -48,84 +48,87 @@ use boson_api::{
 };
 
 use crate::{
-    ConversationOps,
     channel::{Channel, Permission, Role},
     contact::{Contact, ContactType},
     content_disposition::ContentDisposition,
     content_type,
-    internal::PhotonConversation,
     errors::{
         AuthenticationError,
         EncodingError,
         ProtocolError,
     },
-    invite_ticket::InviteTicket,
     message::MessageType,
-    messaging_repository::MessagingRepository,
-    Message,
-    MessageBuilderOps,
-    MessageOps,
     options::Options,
     session_info::SessionInfo,
-    verticle::VerticleOptions,
     ChannelListener,
     ChannelMember,
-    ChannelMemberOps,
     ConnectionListener,
     ContactListener,
     FriendRequest,
     FriendRequestListener,
+    InviteTicket,
+    Message,
     MessageListener,
     SessionListener,
 };
 
-use super::{
-    internal::{
-        ChannelInfo,
-        ChannelSessionKeyRotation,
-        ContactData,
-        ContactMutation,
-        ContactSync,
-        ContentFormat,
-        ChannelInfoUpdate,
-        JoinChannel,
-        Handshake,
-        HandshakeType,
-        PhotonContent,
-        MutationData,
-        NewChannelInfo,
-        Notification,
-        NotificationBody,
-        NotificationEvent,
-        OpaqueContact,
-        PhotonChannel,
-        PhotonContact,
-        PhotonMessage,
-        SessionContext,
-        SyncType,
-        Topic,
-    },
-    mqtt::{
-        self,
-        decode_cbor,
-        decode_cbor_bytes,
-        to_cbor,
-        to_cbor_bytes,
-        ClientHandle,
-        Inbound,
-        MqttClient,
-        TransportEvent,
-    },
-    rpc::{
-        call::Calls,
-        error::RPCError,
-        request::RPCRequest,
-        response::{
-            Params as ResponseParams,
-            RPCResponseMessage,
-        },
+use crate::interfaces::{
+    ChannelMemberOps,
+    ConversationOps,
+    MessageBuilderOps,
+    MessageOps,
+};
+
+use crate::internal::{
+    ChannelInfo,
+    ChannelSessionKeyRotation,
+    ContactData,
+    ContactMutation,
+    ContactSync,
+    ContentFormat,
+    ChannelInfoUpdate,
+    JoinChannel,
+    Handshake,
+    HandshakeType,
+    PhotonContent,
+    MutationData,
+    NewChannelInfo,
+    Notification,
+    NotificationBody,
+    NotificationEvent,
+    OpaqueContact,
+    PhotonChannel,
+    PhotonContact,
+    PhotonMessage,
+    PhotonConversation,
+    SessionContext,
+    SyncType,
+    Topic,
+    MessagingRepository,
+};
+
+use crate::rpc::{
+    call::Calls,
+    error::RPCError,
+    request::RPCRequest,
+    response::{
+        Params as ResponseParams,
+        RPCResponseMessage,
     },
 };
+
+use super::mqtt::{
+    self,
+    decode_cbor,
+    decode_cbor_bytes,
+    to_cbor,
+    to_cbor_bytes,
+    ClientHandle,
+    Inbound,
+    MqttClient,
+    TransportEvent,
+};
+use super::verticle::VerticleOptions;
 
 const MESSAGE_VERSION: u8 = 2;
 const HANDSHAKE_MESSAGE: u8 = 0;
@@ -2332,14 +2335,6 @@ impl RpcServer {
     }
 
     fn channel_from_info(&self, info: &ChannelInfo) -> Result<(Channel, SessionContext)> {
-        let timestamp = |time: SystemTime| -> Result<i64> {
-            let millis = time
-                .duration_since(UNIX_EPOCH)
-                .map_err(|error| EncodingError::new(format!("Invalid channel timestamp: {error}")))?
-                .as_millis();
-            i64::try_from(millis)
-                .map_err(|_| EncodingError::new("Channel timestamp is out of range").into())
-        };
         let created_at = info.created_at();
         let updated_at = info.updated_at();
         if updated_at < created_at {
@@ -2763,13 +2758,6 @@ impl RpcServer {
 // ---------------------------------------------------------------------------
 
 impl RpcServer {
-    /// Looks up a single contact.
-    pub(crate) async fn get_contact(&self, id: &Id) -> Result<Option<Contact>> {
-        let _request = self.requests.lock().await;
-
-        Ok(self.contacts_cache.borrow().get(id).cloned())
-    }
-
     /// Lists every known contact.
     pub(crate) async fn get_contact_list(&self) -> Result<Vec<Contact>> {
         let _request = self.requests.lock().await;
@@ -3432,5 +3420,5 @@ fn update_conversation(
 }
 
 #[cfg(test)]
-#[path = "unitests/test_rpc_server.rs"]
+#[path = "../unitests/test_rpc_server.rs"]
 mod test_rpc_server;

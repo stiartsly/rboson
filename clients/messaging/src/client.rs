@@ -26,32 +26,42 @@ use std::{
 };
 
 use boson_api::{
+    errors::{
+        ArgumentError,
+        StateError,
+    },
     logger,
     signature,
     Id,
     Result,
-    errors::{ArgumentError, StateError},
 };
+
 use crate::{
-    channel::{Permission, Role,Channel},
-    channel_listener::ChannelListener,
-    connection_listener::ConnectionListener,
+    channel::{Channel, Permission,Role},
+    ChannelListener,
+    ConnectionListener,
     contact::Contact,
-    contact_listener::ContactListener,
+    ContactListener,
     conversation::Conversation,
     friend_request::FriendRequest,
-    friend_request_listener::FriendRequestListener,
+    FriendRequestListener,
     invite_ticket::InviteTicket,
-    message_listener::MessageListener,
+    message::{ Message, MessageBuilder},
+    MessageListener,
     options::Options,
     session_info::SessionInfo,
-    session_listener::SessionListener,
-    verticle,
-    verticle::{VerticleClient, VerticleOptions },
-    ClientConnectionListener,
+    SessionListener,
     MessagingClient,
-    internal,
-    message::{Message, MessageBuilder},
+};
+
+use crate::internal::{
+    self,
+    verticle::{
+        self,
+        VerticleClient,
+        VerticleOptions,
+    },
+    ClientConnectionListener
 };
 
 /// Default maximum number of messages returned by a range query.

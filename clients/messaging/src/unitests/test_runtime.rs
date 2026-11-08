@@ -47,7 +47,7 @@ fn options() -> VerticleOptions {
 #[tokio::test]
 async fn commands_run_on_the_verticle_and_stop_cleanly() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let client = crate::verticle::deploy(options()).await.unwrap();
+        let client = crate::internal::verticle::deploy(options()).await.unwrap();
         assert!(client.get_contacts().await.unwrap().is_empty());
         client.stop().await.unwrap();
     })
@@ -77,7 +77,7 @@ async fn lifecycle_callbacks_run_on_the_verticle_thread() {
     };
 
     tokio::time::timeout(Duration::from_secs(5), async {
-        let client = crate::verticle::deploy(verticle).await.unwrap();
+        let client = crate::internal::verticle::deploy(verticle).await.unwrap();
         client.start().await.unwrap();
         let callback_thread = *probe.0.lock().unwrap();
         assert!(

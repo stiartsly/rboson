@@ -64,6 +64,3 @@ impl TryFrom<i32> for MessageType {
 pub type Message = Box<dyn MessageOps>;
 pub type MessageContent = Box<dyn MessageContentOps>;
 pub type MessageBuilder = Box<dyn MessageBuilderOps>;
-
-#[cfg(test)]
-use crate::content_disposition::ContentDisposition;

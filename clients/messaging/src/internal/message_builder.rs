@@ -36,17 +36,22 @@ use boson_api::{
 
 use crate::{
     content_type,
-    verticle,
     ContentDisposition,
     Message,
-    MessageBuilderOps,
     MessageListener,
     CONTENT_DISPOSITION_HEADER,
 };
 
+use crate::interfaces::MessageBuilderOps;
+
+use super::{
+    verticle,
+    verticle::Event,
+};
+
 pub struct ClientMessageBuilder {
     recipient: Option<Id>,
-    verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
+    verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
     message_listener: Arc<dyn MessageListener>,
     content_type: Option<String>,
     content_disposition: Option<ContentDisposition>,
@@ -58,7 +63,7 @@ pub struct ClientMessageBuilder {
 impl ClientMessageBuilder {
     pub(crate) fn new(
         recipient: Option<Id>,
-        verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<verticle::Event>>,
+        verticle_tx: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
         message_listener: Arc<dyn MessageListener>,
     ) -> Self {
         Self {

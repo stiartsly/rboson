@@ -24,13 +24,8 @@
 
 pub(crate) mod interfaces;
 pub(crate) mod internal;
-pub(crate) mod messaging_repository;
-pub(crate) mod persistence;
+pub(crate) mod database;
 pub(crate) mod rpc;
-
-pub(crate) mod mqtt;
-pub(crate) mod rpc_server;
-pub(crate) mod verticle;
 
 pub mod client;
 pub mod options;
@@ -58,31 +53,49 @@ pub mod message;
 pub mod message_listener;
 
 pub use {
-    messaging_client::MessagingClient,
-    options::{
-        Options,
-        OptionsBuilder,
-    },
+    options::{Options, OptionsBuilder},
     client::Client,
+
+    messaging_client::MessagingClient,
+
     friend_request::FriendRequest,
     friend_request_listener::FriendRequestListener,
+
     connection_listener::ConnectionListener,
     contact_listener::ContactListener,
     message_listener::MessageListener,
     session_listener::SessionListener,
     channel_listener::ChannelListener,
+
+    invite_ticket::InviteTicket,
     channel::{
         Permission,
         Role,
         Channel,
+        ChannelMember
     },
-    channel::ChannelMember,
 
-    contact::{Contact, ContactType},
-    contact::ContactEditor,
+    contact::{
+        Contact,
+        ContactType,
+        ContactEditor
+    },
+
     conversation::Conversation,
+    message::{
+        Message,
+        MessageContent,
+        MessageBuilder,
+        MessageType,
+    },
+    content_type::ContentType,
 
-    invite_ticket::InviteTicket,
+    content_disposition::{
+        ContentDisposition,
+        ContentDispositionType,
+        HEADER_NAME as CONTENT_DISPOSITION_HEADER,
+    },
+
     session_info::SessionInfo,
 };
 
@@ -99,18 +112,3 @@ pub use interfaces::{
     MessageBuilderOps,
     MessageOps,
 };
-
-pub use content_disposition::{
-    ContentDisposition,
-    ContentDispositionType,
-    HEADER_NAME as CONTENT_DISPOSITION_HEADER,
-};
-pub use message::{
-    Message,
-    MessageContent,
-    MessageBuilder,
-    MessageType,
-};
-pub use content_type::ContentType;
-
-pub(crate) use internal::ClientConnectionListener;

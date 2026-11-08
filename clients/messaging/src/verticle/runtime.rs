@@ -32,7 +32,9 @@ use tokio::{
 };
 
 use boson_api::errors::Result;
-use crate::rpc_server::RpcServer;
+
+use crate::internal::rpc_server::RpcServer;
+
 use super::{
     commands,
     event::Event,

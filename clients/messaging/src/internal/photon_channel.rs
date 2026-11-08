@@ -18,14 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{fmt, collections::HashMap, time::SystemTime};
+use std::time::SystemTime;
 use serde::{Serialize, Deserialize};
 
 use boson_api::{
     utils,
     Id,
-    Result,
-    errors::ArgumentError,
 };
 use crate::{
     channel::{Permission, Role},

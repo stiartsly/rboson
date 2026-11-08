@@ -483,7 +483,7 @@ impl SessionListener for Observed {
 }
 
 fn session(observed: &Observed) -> Rc<MqttSession> {
-    let mut options = crate::verticle::tests::options();
+    let mut options = crate::internal::verticle::tests::options();
     options.message_listener = Arc::new(observed.clone());
     options.contact_listener = Arc::new(observed.clone());
     options.session_listener = Arc::new(observed.clone());
@@ -790,7 +790,7 @@ async fn syncs_device_inbox() {
             builder.with_user_keypair(boson_api::signature::KeyPair::random());
             builder.with_device_keypair(boson_api::signature::KeyPair::random());
             builder.with_data_dir(std::env::temp_dir());
-            let mut options = crate::verticle::tests::options();
+            let mut options = crate::internal::verticle::tests::options();
             options.options = Arc::new(builder.build().unwrap());
             options.contact_listener = Arc::new(observed.clone());
             let session = MqttSession::new(options).unwrap();

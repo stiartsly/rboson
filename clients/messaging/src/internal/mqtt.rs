@@ -71,7 +71,7 @@ use crate::{
     errors::{AuthenticationError, EncodingError},
 };
 
-use super::internal::{PhotonMessage, Topic};
+use super::{PhotonMessage, Topic};
 
 /// The MQTT client handle, shared with the message builders on other threads.
 pub(crate) type Client = AsyncClient;

@@ -30,22 +30,15 @@ use boson_api::{
 };
 
 use crate::{
-    channel::Channel,
-    channel::ChannelMember,
-    contact::{Contact, ContactType},
-    internal::PhotonConversation,
-    friend_request::FriendRequest,
-    internal::{
-        ContactData,
-        PhotonChannelMember,
-        PhotonContact,
-        PhotonContent,
-        PhotonMessage,
+    channel::{
+        Channel,
+        ChannelMember,
     },
-    Message,
-    MessageContentOps,
-    MessageOps,
-    persistence::{
+    contact::{
+        Contact,
+        ContactType,
+    },
+    database::{
         database::SqliteMessagingStore,
         MessagingStore,
         StoredChannel,
@@ -55,6 +48,22 @@ use crate::{
         StoredFriendRequest,
         StoredMessage,
     },
+    friend_request::FriendRequest,
+    Message,
+};
+
+use crate::interfaces::{
+    MessageContentOps,
+    MessageOps,
+};
+
+use crate::internal::{
+    ContactData,
+    PhotonChannelMember,
+    PhotonContact,
+    PhotonContent,
+    PhotonConversation,
+    PhotonMessage,
 };
 
 pub(crate) struct MessagingRepository {

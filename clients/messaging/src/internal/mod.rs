@@ -44,30 +44,12 @@ pub(crate) mod photon_contact;
 pub(crate) mod photon_conversation;
 pub(crate) mod channel_member;
 
-pub(crate) use {
-    channel_info::ChannelInfo,
-    channel_members_role::ChannelMembersRole,
-    channel_info_update::ChannelInfoUpdate,
-    photon_conversation::PhotonConversation,
-
-    contact_data::ContactData,
-    contact_sync::ContactSync,
-
-    join_channel::JoinChannel,
-
-    photon_channel::PhotonChannel,
-    photon_contact::PhotonContact,
-    channel_member::PhotonChannelMember,
-
-    photon_message::PhotonMessage,
-    message_builder::ClientMessageBuilder,
-};
+pub(crate) mod messaging_repository;
+pub(crate) mod mqtt;
+pub(crate) mod rpc_server;
+pub(crate) mod verticle;
 
 pub(crate) use {
-    photon_content::{
-        ContentFormat,
-        PhotonContent,
-    },
     handshake::{
         Handshake,
         HandshakeType,
@@ -77,18 +59,32 @@ pub(crate) use {
         Event as NotificationEvent,
         Notification,
     },
-    contact_mutation::{
-        ContactMutation,
-        MutationData,
-    },
-    contact_sync::SyncType,
 
-    contact_opaque::OpaqueContact,
     channel_session_rotation::SessionKeyRotation as ChannelSessionKeyRotation,
-    connection_listener::ClientConnectionListener,
     new_channel_info::NewChannelInfo,
-    topic::Topic,
-    session_context::SessionContext,
+    channel_info::ChannelInfo,
+    channel_members_role::ChannelMembersRole,
+    channel_info_update::ChannelInfoUpdate,
 
+    contact_data::ContactData,
+    contact_sync::{ContactSync, SyncType},
+    contact_mutation::{ContactMutation, MutationData},
+    contact_opaque::OpaqueContact,
+
+    join_channel::JoinChannel,
+
+    photon_channel::PhotonChannel,
+    photon_contact::PhotonContact,
+    channel_member::PhotonChannelMember,
+    photon_conversation::PhotonConversation,
+    photon_message::PhotonMessage,
+    photon_content::{ContentFormat, PhotonContent},
+
+    connection_listener::ClientConnectionListener,
+    message_builder::ClientMessageBuilder,
+
+    session_context::SessionContext,
     serde as serde_utils,
+    topic::Topic,
+    messaging_repository::MessagingRepository
 };

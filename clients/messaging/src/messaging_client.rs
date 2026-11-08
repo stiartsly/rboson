@@ -30,12 +30,13 @@ use boson_api::{
 };
 use crate::{
     channel::{Channel, Permission, Role},
-    contact::Contact,
+    Contact,
     SessionInfo,
-    conversation::Conversation,
-    friend_request::FriendRequest,
-    invite_ticket::InviteTicket,
-    message::{Message, MessageBuilder}
+    Conversation,
+    FriendRequest,
+    InviteTicket,
+    Message,
+    MessageBuilder
 };
 
 /// Default maximum number of messages returned by a range query.

@@ -21,7 +21,7 @@
 use std::rc::Rc;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{
+use crate::internal::{
     mqtt::TransportEvent,
     rpc_server::RpcServer,
 };

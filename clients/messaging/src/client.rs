@@ -484,6 +484,15 @@ impl Client {
 
     /// Joins a channel using an invite ticket.
     pub async fn join_channel(&self, ticket: InviteTicket) -> Result<Channel> {
+        if !ticket.is_genuine()
+            || ticket.is_expired()
+            || ticket.invitee().is_some_and(|id| id != self.user_id())
+        {
+            return Err(ArgumentError::new(
+                "Invalid, expired or incorrectly addressed channel ticket",
+            ));
+        }
+
         self.verticle_client()?.join_channel(ticket).await
     }
 

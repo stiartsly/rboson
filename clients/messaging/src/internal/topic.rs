@@ -18,6 +18,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::{
+    fmt,
+    str::FromStr
+};
+
+use boson_api::{
+    Error,
+    Result,
+    errors::ArgumentError,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Topic {
     UserInbox,
@@ -27,13 +38,6 @@ pub(crate) enum Topic {
 }
 
 impl Topic {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::UserInbox,
-        Self::UserOutbox,
-        Self::DeviceInbox,
-        Self::DeviceOutbox,
-    ];
-
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::UserInbox => "u/i",
@@ -42,10 +46,38 @@ impl Topic {
             Self::DeviceOutbox => "d/o",
         }
     }
+}
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|topic| topic.as_str() == value)
+impl AsRef<str> for Topic {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl FromStr for Topic {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "u/i" => Ok(Self::UserInbox),
+            "u/o" => Ok(Self::UserOutbox),
+            "d/i" => Ok(Self::DeviceInbox),
+            "d/o" => Ok(Self::DeviceOutbox),
+            _ => Err(ArgumentError::new(format!("Invalid topic {}", value)))
+        }
+    }
+}
+
+impl TryFrom<&str> for Topic {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        value.parse()
+    }
+}
+
+impl fmt::Display for Topic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }

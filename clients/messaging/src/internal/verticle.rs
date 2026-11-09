@@ -22,7 +22,6 @@
 #[path = "../verticle/commands.rs"]     mod commands;
 #[path = "../verticle/event.rs"]        mod event;
 #[path = "../verticle/runtime.rs"]      mod runtime;
-#[path = "../verticle/transport.rs"]    mod transport;
 #[path = "../verticle/promise.rs"]      mod promise;
 
 use std::{

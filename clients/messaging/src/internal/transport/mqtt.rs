@@ -26,22 +26,7 @@ use std::{
 };
 use log::{debug, info, trace};
 use rumqttc::{
-    tokio_rustls::rustls::client::danger::{
-        HandshakeSignatureValid,
-        ServerCertVerified,
-        ServerCertVerifier,
-    },
-    tokio_rustls::rustls::pki_types::{
-        CertificateDer,
-        ServerName,
-        UnixTime,
-    },
-    tokio_rustls::rustls::{
-        ClientConfig,
-        DigitallySignedStruct,
-        Error as RustlsError,
-        SignatureScheme,
-    },
+    tokio_rustls::rustls::ClientConfig,
     AsyncClient,
     Event,
     EventLoop,
@@ -64,6 +49,7 @@ use boson_api::{
     Id,
     Identity,
     Result,
+    Error,
     errors::{ArgumentError, StateError}
 };
 use crate::{
@@ -72,6 +58,10 @@ use crate::{
 };
 
 use super::{PhotonMessage, Topic};
+
+#[path = "cert_verifier.rs"]
+mod cert_verifier;
+use cert_verifier::BosonServerCertVerifier;
 
 /// The MQTT client handle, shared with the message builders on other threads.
 pub(crate) type Client = AsyncClient;
@@ -108,66 +98,6 @@ pub(crate) enum Inbound {
     Unusable { topic: String, reason: String },
     /// The transport failed; the connection is gone until the next retry.
     Failed { error: String },
-}
-
-#[derive(Debug)]
-struct BosonServerCertVerifier {
-    #[allow(dead_code)]
-    expected_peer_id: Option<Id>,
-}
-
-impl ServerCertVerifier for BosonServerCertVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> StdResult<ServerCertVerified, RustlsError> {
-        debug!(
-            "TLS: verifying server certificate for {:?}, peer_id={:?}",
-            server_name, self.expected_peer_id
-        );
-        // Accept self-signed / Boson peer certificates bound to the messaging node identity
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> StdResult<HandshakeSignatureValid, RustlsError> {
-        rumqttc::tokio_rustls::rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
-                .signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> StdResult<HandshakeSignatureValid, RustlsError> {
-        rumqttc::tokio_rustls::rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
-                .signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -230,22 +160,6 @@ pub(crate) fn validate_outbox_packet(payload_len: usize) -> Result<()> {
     Ok(())
 }
 
-/// Publishes an already sealed payload to the device outbox.
-///
-/// Used by the message builders, which hold the client handle but not the
-/// [`Mqtt`] itself because they run on the caller's thread.
-pub(crate) async fn publish_outbox(client: &AsyncClient, payload: Vec<u8>, what: &str) -> Result<()> {
-    validate_outbox_packet(payload.len())?;
-    client.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, payload)
-        .await
-        .map_err(|error| StateError::new(format!("Publishing {what} failed: {error}")).into())
-}
-
-/// Maps a broker topic name onto one of the topics we subscribe to.
-fn parse_topic(name: &str) -> Option<Topic> {
-    Topic::parse(name)
-}
-
 // ---------------------------------------------------------------------------
 // Transport state
 // ---------------------------------------------------------------------------
@@ -297,8 +211,6 @@ impl MqttClient {
             .ok_or_else(|| StateError::new("Messaging client is not running").into())
     }
 
-    /// Builds the MQTT password: a fresh nonce signed with the device key.
-    ///
     /// The nonce makes every connection's proof unique, which is what stops a
     /// captured password from being replayed on the next reconnect.
     pub(crate) fn password(&self) -> Result<String> {
@@ -313,8 +225,6 @@ impl MqttClient {
         Ok(bs58::encode(proof).into_string())
     }
 
-    /// Builds and installs the client and its event loop.
-    ///
     /// `contacts_revision` travels in the password as a query parameter, and
     /// `on_connecting` fires once the endpoint has been validated, just before
     /// the socket is opened.
@@ -349,9 +259,7 @@ impl MqttClient {
         mqtt_opts.set_max_packet_size(MAX_INCOMING_PACKET_SIZE, MAX_MESSAGE_SIZE);
         let is_tls = endpoint.scheme() == "mqtts" || endpoint.scheme() == "ssl" || port == 9083;
         if is_tls {
-            let verifier = BosonServerCertVerifier {
-                expected_peer_id: Some(*options.peer_id()),
-            };
+            let verifier = BosonServerCertVerifier::new(Some(*options.peer_id()));
             let client_config = ClientConfig::builder()
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(verifier))
@@ -412,21 +320,25 @@ impl MqttClient {
         }
     }
 
-    /// Subscribes to the three topics this client reads.
     pub(crate) async fn subscribe_topics(&self) -> Result<()> {
         let client = self.client()?;
-        client.subscribe_many([
-            SubscribeFilter::new(Topic::UserInbox.as_str().to_string(), QoS::AtLeastOnce),
-            SubscribeFilter::new(Topic::UserOutbox.as_str().to_string(), QoS::AtLeastOnce),
-            SubscribeFilter::new(Topic::DeviceInbox.as_str().to_string(), QoS::AtLeastOnce),
-        ]).await
-            .map_err(|error| StateError::new(format!("Subscribing topics failed: {error}")).into())
+        let topics = [
+            SubscribeFilter::new(Topic::UserInbox.to_string(), QoS::AtLeastOnce),
+            SubscribeFilter::new(Topic::UserOutbox.to_string(), QoS::AtLeastOnce),
+            SubscribeFilter::new(Topic::DeviceInbox.to_string(), QoS::AtLeastOnce),
+        ];
+        client.subscribe_many(topics).await.map_err(|e|
+            StateError::new(format!("Subscribing topics failed: {e}")).into()
+        )
     }
 
-    /// Publishes an already sealed payload.
     pub(crate) async fn publish(&self, payload: Vec<u8>, what: &str) -> Result<()> {
         let client = self.client()?;
-        publish_outbox(&client, payload, what).await
+        //Self::publish_outbox(&client, payload, what).await
+        validate_outbox_packet(payload.len())?;
+        client.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, payload)
+            .await
+            .map_err(|error| StateError::new(format!("Publishing {what} failed: {error}")).into())
     }
 
     /// Replaces the credentials the event loop will present on reconnect.
@@ -442,81 +354,18 @@ impl MqttClient {
         }
     }
 
-    /// Translates one poll result, or returns `None` for events the RPC server
-    /// has no interest in (acks, pings, outgoing packets).
-    pub(crate) fn interpret(&self, event: TransportEvent) -> Option<Inbound> {
-        match event {
-            Ok(Event::Incoming(Incoming::ConnAck(connack))) => Some(Inbound::Connected {
-                session_present: connack.session_present,
-                accepted: connack.code == rumqttc::ConnectReturnCode::Success,
-            }),
-            Ok(Event::Incoming(Incoming::SubAck(suback))) => {
-                debug!(
-                    "Received SubAck for packet {:?}, return codes: {:?}",
-                    suback.pkid, suback.return_codes
-                );
-                let accepted = suback.return_codes.len() == 3
-                    && suback.return_codes.iter()
-                        .all(|code| matches!(code, rumqttc::SubscribeReasonCode::Success(_)));
-                Some(Inbound::Subscribed { accepted })
-            }
-            Ok(Event::Incoming(Incoming::Publish(publish))) => Some(self.open_publish(publish)),
-            Ok(Event::Incoming(Incoming::PubAck(puback))) => {
-                trace!("Received PubAck for packet id {}", puback.pkid);
-                None
-            }
-            Ok(Event::Incoming(Incoming::PingResp)) => {
-                trace!("Received PingResp from messaging server");
-                None
-            }
-            Ok(Event::Outgoing(outgoing)) => {
-                trace!("Sent outgoing MQTT packet: {:?}", outgoing);
-                None
-            }
-            Ok(other) => {
-                trace!("MQTT event: {:?}", other);
-                None
-            }
-            Err(error) => Some(Inbound::Failed { error: error.to_string() }),
-        }
-    }
-
-    /// Opens one publish: validates the envelope, decrypts it and decodes the
-    /// CBOR document inside.
-    fn open_publish(&self, publish: Publish) -> Inbound {
-        debug!(
-            "Processing publish message on topic '{}', QoS: {:?}, payload size: {} bytes",
-            publish.topic,
-            publish.qos,
-            publish.payload.len()
-        );
-        if publish.payload.len() > MAX_INCOMING_PACKET_SIZE {
-            return Inbound::Unusable {
-                topic: publish.topic.clone(),
-                reason: "payload exceeds the incoming packet size limit".into(),
-            };
-        }
-        let Some(topic) = parse_topic(&publish.topic) else {
-            return Inbound::Unusable {
-                topic: publish.topic.clone(),
-                reason: "unexpected topic".into(),
-            };
-        };
-
-        match self.open(publish.payload.as_ref()) {
-            Ok(message) => Inbound::Message { topic, message: Box::new(message) },
-            Err(error) => Inbound::Unusable {
-                topic: publish.topic,
-                reason: error.to_string(),
-            },
-        }
-    }
-
-    /// Decrypts an envelope from the service and decodes the message inside.
-    fn open(&self, payload: &[u8]) -> Result<PhotonMessage> {
-        let envelope = self.device_identity
-            .decrypt_into(self.options.peer_id(), payload)
-            .map_err(|error| AuthenticationError::new(format!("Decrypting message envelope failed: {error}")))?;
-        decode_cbor_bytes(&envelope, "messaging envelope")
-    }
 }
+
+/// Publishes an already sealed payload to the device outbox.
+///
+/// Used by the message builders, which hold the client handle but not the
+/// [`Mqtt`] itself because they run on the caller's thread.
+pub(crate) async fn publish_outbox(client: &AsyncClient, payload: Vec<u8>, what: &str) -> Result<()> {
+    validate_outbox_packet(payload.len())?;
+    client.publish(Topic::DeviceOutbox.as_str(), QoS::AtLeastOnce, false, payload)
+        .await
+        .map_err(|error| StateError::new(format!("Publishing {what} failed: {error}")).into())
+}
+
+#[path = "packet.rs"]
+mod packet;

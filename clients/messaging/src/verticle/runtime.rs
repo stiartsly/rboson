@@ -23,7 +23,6 @@ use futures::stream::StreamExt;
 use log::error;
 use tokio::{
     sync::mpsc,
-    task,
     time::{
         self,
         Duration,
@@ -33,12 +32,11 @@ use tokio::{
 
 use boson_api::errors::Result;
 
-use crate::internal::rpc_server::RpcServer;
+use crate::internal::transport::RpcServer;
 
 use super::{
     commands,
     event::Event,
-    transport,
     VerticleOptions,
 };
 
@@ -47,8 +45,6 @@ const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);
 pub(super) struct Verticle {
     rpc_server: Rc<RpcServer>,
     event_rx: mpsc::UnboundedReceiver<Event>,
-    transport_rx: Option<mpsc::UnboundedReceiver<transport::Delivery>>,
-    transport_task: Option<task::JoinHandle<()>>,
 }
 
 impl Verticle {
@@ -59,24 +55,7 @@ impl Verticle {
         Ok(Self {
             rpc_server      : RpcServer::new(options)?,
             event_rx,
-            transport_rx    : None,
-            transport_task  : None,
         })
-    }
-
-    /// Starts the MQTT pump once the session is running.
-    ///
-    /// The pump owns the only loop around `EventLoop::poll`, so stopping a
-    /// command or timer never cancels a partially polled transport.
-    fn ensure_transport_pump(&mut self) {
-        if self.transport_task.is_some() || !self.rpc_server.is_running() {
-            return;
-        }
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.transport_rx = Some(rx);
-        let rpc = self.rpc_server.clone();
-        self.transport_task = Some(task::spawn_local(transport::run(rpc, tx)));
     }
 
     pub(super) async fn run_loop(&mut self) {
@@ -96,12 +75,9 @@ impl Verticle {
             if !quit {
                 self.rpc_server.schedule_contact_sync(&mut pending);
             }
-            self.ensure_transport_pump();
 
             let rpc = self.rpc_server.clone();
             let event_rx = &mut self.event_rx;
-            let transport_rx = &mut self.transport_rx;
-            let transport_closed;
 
             tokio::select! {
                 event = event_rx.recv(), if !quit => {
@@ -115,47 +91,21 @@ impl Verticle {
                         // then stop the session exactly once below.
                         None => quit = true,
                     }
-                    transport_closed = false;
                 }
-                delivery = async {
-                    match transport_rx.as_mut() {
-                        Some(rx) => rx.recv().await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    match delivery {
-                        Some((event, ack)) => {
-                            rpc.handle_mqtt_event(event, &mut pending);
-                            // The event loop lock is free again; let the pump
-                            // poll the next packet. Credential refreshes happen
-                            // in handle_mqtt_event before this point.
-                            let _ = ack.send(());
-                            transport_closed = false;
-                        }
-                        None => transport_closed = true,
-                    }
+                event = rpc.poll_transport(), if !quit && rpc.is_running() => {
+                    rpc.handle_transport_event(event, &mut pending);
                 }
                 Some(()) = pending.next(), if !pending.is_empty() => {
-                    transport_closed = false;
                 }
                 _ = maintenance.tick() => {
                     if rpc.is_running() {
                         rpc.maintenance();
                     }
-                    transport_closed = false;
                 }
                 else => break,
             }
-
-            if transport_closed && !quit {
-                error!("Messaging transport pump stopped unexpectedly");
-                quit = true;
-            }
         }
 
-        if let Some(handle) = self.transport_task.take() {
-            handle.abort();
-        }
         if let Err(error) = self.rpc_server.stop().await {
             error!("Stopping messaging session failed: {error}");
         }

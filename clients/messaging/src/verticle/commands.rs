@@ -38,7 +38,7 @@ use crate::{
     message::Message,
 };
 
-use crate::internal::rpc_server::RpcServer;
+use crate::internal::transport::RpcServer;
 
 use super::{
     promise::Promise,

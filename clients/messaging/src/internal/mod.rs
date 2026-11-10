@@ -45,7 +45,6 @@ pub(crate) mod photon_conversation;
 pub(crate) mod channel_member;
 
 pub(crate) mod messaging_repository;
-pub(crate) mod transport;
 pub(crate) mod verticle;
 
 pub(crate) use {

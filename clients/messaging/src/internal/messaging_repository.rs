@@ -267,7 +267,7 @@ impl MessagingRepository {
         self.store.clear_friend_requests()
     }
 
-    pub(crate) fn friend_requests(&mut self) -> Result<Vec<FriendRequest>> {
+    pub(crate) fn load_friend_requests(&mut self) -> Result<Vec<FriendRequest>> {
         self.store
             .get_friend_requests()?
             .into_iter()
@@ -275,7 +275,7 @@ impl MessagingRepository {
             .collect()
     }
 
-    pub(crate) fn stored_contacts(&mut self) -> Result<Vec<StoredContact>> {
+    pub(crate) fn load_contacts(&mut self) -> Result<Vec<StoredContact>> {
         self.store.get_all_contacts()
     }
 
@@ -315,7 +315,7 @@ impl MessagingRepository {
             .collect())
     }
 
-    pub(crate) fn conversations(&mut self) -> Result<Vec<PhotonConversation>> {
+    pub(crate) fn load_conversations(&mut self) -> Result<Vec<PhotonConversation>> {
         self.store
             .get_all_conversations()?
             .into_iter()
@@ -593,7 +593,7 @@ mod tests {
         contact.revision = 1;
         let contact: Contact = Box::new(contact);
         repository.put_contact(1, &contact, None).unwrap();
-        let stored = repository.stored_contacts().unwrap();
+        let stored = repository.load_contacts().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(
             repository.contact_from_stored(&stored[0]).unwrap().name(),
@@ -626,7 +626,7 @@ mod tests {
             SystemTime::UNIX_EPOCH + Duration::from_millis(10),
         );
         repository.put_friend_request(&request).unwrap();
-        assert_eq!(repository.friend_requests().unwrap().len(), 1);
+        assert_eq!(repository.load_friend_requests().unwrap().len(), 1);
 
         repository.close();
         cleanup(&path);

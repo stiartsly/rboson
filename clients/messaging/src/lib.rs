@@ -24,6 +24,7 @@
 
 pub(crate) mod interfaces;
 pub(crate) mod internal;
+pub(crate) mod transport;
 pub(crate) mod database;
 pub(crate) mod rpc;
 

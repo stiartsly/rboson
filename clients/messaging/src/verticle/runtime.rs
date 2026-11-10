@@ -32,7 +32,7 @@ use tokio::{
 
 use boson_api::errors::Result;
 
-use crate::internal::transport::RpcServer;
+use crate::transport::RpcServer;
 
 use super::{
     commands,
@@ -66,6 +66,13 @@ impl Verticle {
         let mut maintenance = time::interval(MAINTENANCE_INTERVAL);
         maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        // `EventLoop::poll` is not cancellation safe: dropping the future while it
+        // is mid-read can lose an inbound packet or its acknowledgement. Keep one
+        // poll future pinned across select iterations and only replace it after it
+        // completes.
+        let poll_rpc = self.rpc_server.clone();
+        let mut poll_event = Box::pin(poll_rpc.poll_event());
+
         loop {
             // Stop only after every command already accepted has settled.
             if quit && pending.is_empty() {
@@ -92,8 +99,12 @@ impl Verticle {
                         None => quit = true,
                     }
                 }
-                event = rpc.poll_transport(), if !quit && rpc.is_running() => {
-                    rpc.handle_transport_event(event, &mut pending);
+                event = &mut poll_event, if !quit && rpc.is_running() => {
+                    match event {
+                        Ok(event) => rpc.dispatch_event(event, &mut pending),
+                        Err(error) => rpc.handle_poll_error(&error.to_string()),
+                    }
+                    poll_event = Box::pin(poll_rpc.poll_event());
                 }
                 Some(()) = pending.next(), if !pending.is_empty() => {
                 }

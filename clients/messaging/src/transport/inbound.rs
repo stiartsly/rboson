@@ -1,25 +1,39 @@
-use super::*;
+use super::prelude::*;
 use super::outbound::update_conversation;
 
-impl RpcServer {
-    /// Handles one decrypted inbound content message and forwards it to the message listener.
-    pub(crate) fn on_msg(
-        &self,
-        topic: Topic,
-        message: PhotonMessage,
-        from: &Id,
-    ) -> Result<()> {
-        self.handle_content_message(topic, message, *from)
-    }
+fn is_channel_notification(body: &NotificationBody) -> bool {
+    matches!(
+        body,
+        NotificationBody::ChannelCreate(_)
+            | NotificationBody::ChannelJoin(_)
+            | NotificationBody::ChannelDelete
+            | NotificationBody::ChannelLeave
+            | NotificationBody::ChannelOwnershipTransfer(_)
+            | NotificationBody::ChannelSessionKeyRotate(_)
+            | NotificationBody::ChannelInfoUpdate(_)
+            | NotificationBody::ChannelMembersRoleUpdate(_)
+            | NotificationBody::ChannelMembersBan(_)
+            | NotificationBody::ChannelMembersUnban(_)
+            | NotificationBody::ChannelMembersRemove(_)
+            | NotificationBody::ChannelMemberJoin(_)
+            | NotificationBody::ChannelMemberLeave(_)
+    )
+}
 
-    /// Handles one decrypted inbound RPC response and completes the pending call.
-    pub(crate) fn on_rpc_response(
-        &self,
-        message: PhotonMessage,
-        from: &Id,
-    ) -> Result<()> {
-        self.handle_device_rpc(message, from)
+fn notification_echoes_back(
+    notification: &Notification,
+    timestamp: i64,
+    user_id: &Id,
+    device_id: &Id,
+) -> Result<bool> {
+    if notification.source() != *user_id || !is_channel_notification(notification.body()) {
+        return Ok(false);
     }
+    Ok(notification.id() == RpcServer::message_id(device_id, timestamp)?)
+}
+
+impl RpcServer {
+
 
     /// Decodes a service notification and dispatches it.
     ///
@@ -76,7 +90,7 @@ impl RpcServer {
                 }
                 let id = *channel.id();
                 let known = self.channels_cache.borrow().contains_key(&id);
-                self.friend_sessions.lock().unwrap().insert(id, session);
+                self.session_contexts.lock().unwrap().insert(id, session);
                 self.contacts_cache
                     .borrow_mut()
                     .entry(id)
@@ -100,7 +114,7 @@ impl RpcServer {
                     return Ok(());
                 };
                 self.contacts_cache.borrow_mut().remove(sender);
-                self.friend_sessions.lock().unwrap().remove(sender);
+                self.session_contexts.lock().unwrap().remove(sender);
                 if event == NotificationEvent::ChannelDelete {
                     self.channel_listener.on_channel_deleted(&channel);
                 } else {
@@ -116,7 +130,7 @@ impl RpcServer {
                     ));
                 }
                 let session = self
-                    .friend_sessions
+                    .session_contexts
                     .lock()
                     .unwrap()
                     .get(sender)
@@ -135,13 +149,76 @@ impl RpcServer {
                     ))
                 })?;
                 channel.set_session_id(*session.id());
-                self.friend_sessions
+                self.session_contexts
                     .lock()
                     .unwrap()
                     .insert(*sender, self.session_context(*sender, session, true));
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener
                     .on_channel_session_key_rotated(&channel);
+                Ok(())
+            }
+            NotificationBody::ChannelOwnershipTransfer(new_owner) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                let old_owner = channel.owner();
+                channel.set_owner(*new_owner);
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener
+                    .on_channel_ownership_transferred(&channel, &old_owner, new_owner);
+                Ok(())
+            }
+            NotificationBody::ChannelInfoUpdate(changes) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                for (key, value) in changes {
+                    let serde_cbor::Value::Text(key) = key else { continue; };
+                    match (key.as_str(), value) {
+                        ("p", serde_cbor::Value::Integer(permission)) =>
+                            channel.set_permission(Permission::from_i32(*permission as i32)),
+                        ("n", serde_cbor::Value::Text(name)) =>
+                            channel.set_name(Some(name.clone())),
+                        ("n", serde_cbor::Value::Null) => channel.set_name(None),
+                        ("nt", serde_cbor::Value::Text(notice)) =>
+                            channel.set_notice(Some(notice.clone())),
+                        ("nt", serde_cbor::Value::Null) => channel.set_notice(None),
+                        ("a", serde_cbor::Value::Bool(announced)) =>
+                            channel.set_announced(*announced),
+                        _ => {}
+                    }
+                }
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener.on_channel_updated(&channel);
+                Ok(())
+            }
+            NotificationBody::ChannelMembersRoleUpdate(update) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                let changed = channel.update_member_roles(update.member_ids(), update.role());
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener
+                    .on_channel_members_role_updated(&channel, &changed);
+                Ok(())
+            }
+            NotificationBody::ChannelMembersBan(ids) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                let changed = channel.update_member_roles(ids, Role::Banned);
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener
+                    .on_channel_members_banned(&channel, &changed);
+                Ok(())
+            }
+            NotificationBody::ChannelMembersUnban(ids) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                let changed = channel.update_member_roles(ids, Role::Member);
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener
+                    .on_channel_members_unbanned(&channel, &changed);
+                Ok(())
+            }
+            NotificationBody::ChannelMembersRemove(ids) => {
+                let mut channel = self.channel_snapshot(sender)?;
+                let removed = channel.remove_members(ids);
+                self.channels_cache.borrow_mut().insert(*sender, channel.clone());
+                self.channel_listener
+                    .on_channel_members_removed(&channel, &removed);
                 Ok(())
             }
             NotificationBody::ChannelMemberJoin(member) => {
@@ -223,7 +300,7 @@ impl RpcServer {
         let previous = self.contacts_cache.borrow().clone();
         let mut state = ContactState {
             contacts: previous.clone(),
-            sessions: self.friend_sessions.lock().unwrap().clone(),
+            sessions: self.session_contexts.lock().unwrap().clone(),
             channels: self.channels_cache.borrow().clone(),
             revision,
         };
@@ -400,7 +477,7 @@ impl RpcServer {
             .map(|contact| *contact.id())
             .collect();
         *self.contacts_cache.borrow_mut() = state.contacts;
-        *self.friend_sessions.lock().unwrap() = state.sessions;
+        *self.session_contexts.lock().unwrap() = state.sessions;
         *self.channels_cache.borrow_mut() = state.channels;
         self.contacts_revision.set(state.revision);
 
@@ -441,7 +518,7 @@ impl RpcServer {
         let request = RPCRequest::contact_sync(0, revision);
 
         // 3. Send it to the home peer and 4. decode the delta it reports.
-        let result = self.rpc_call(self.peer_id(), request).await?;
+        let result = self.send_control(self.peer_id(), request).await?;
         let ResponseParams::ContactSync(document) = result else {
             return Err(EncodingError::new("RPC result is not a contact sync").into());
         };
@@ -463,7 +540,7 @@ impl RpcServer {
         outdated: &str,
     ) -> Result<i32> {
         let request = RPCRequest::contact_mutate(0, mutation);
-        let result = self.rpc_call(self.peer_id(), request).await?;
+        let result = self.send_control(self.peer_id(), request).await?;
         let ResponseParams::Revision(revision) = result else {
             return Err(EncodingError::new("RPC result is not a contact revision").into());
         };
@@ -495,60 +572,47 @@ impl RpcServer {
         callback(self.connection_listener.as_ref());
     }
 
-    /// The transport has already opened the envelope (stage 1), so this runs
-    /// the remaining stages:
-    /// - classify, then,
-    /// - hand over to the route's handler, which unprotects, decodes and applies the message.
+    /// The transport has already opened the envelope (stage 1), so this validates
+    /// the sender, topic and message type and hands the message to the matching
+    /// handler, which unprotects, decodes and applies it.
     pub(super) async fn dispatch(
         &self,
         topic: Topic,
         message: PhotonMessage
     ) -> Result<()> {
-        let (route, from) = self.classify(topic, &message)?;
-        match route {
-            Route::RpcResponse => self.on_rpc_response(message, &from),
-            Route::Notification => self.handle_state_message(message, &from).await,
-            Route::Handshake => self.handle_handshake(topic, message, from).await,
-            Route::Content => self.on_msg(topic, message, &from),
-        }
-    }
-
-    /// Inbound stage 2: decides what a message is for, or rejects it.
-    ///
-    /// The device inbox only ever carries RPC replies and notifications only
-    /// come through the user inbox; everything else is routed by message type.
-    pub(super) fn classify(&self, topic: Topic, message: &PhotonMessage) -> Result<(Route, Id)> {
         if message.version != MESSAGE_VERSION {
             return Err(ProtocolError::new(
-                message.version as i32,
-                "Unsupported message version",
+                message.version as i32,"Unsupported message version",
             ));
         }
-        let from = message
-            .from()
-            .copied()
-            .ok_or_else(|| EncodingError::new("Incoming message has no sender"))?;
+        let from = message.from().copied().ok_or_else(
+            || EncodingError::new("Incoming message has no sender")
+        )?;
 
-        let message_type = message.message_type;
-        let route = match (topic, message_type) {
+        match (topic, message.message_type) {
             (Topic::DeviceInbox, mt) if mt == MessageType::Control as u8
                 && (message.recipient == *self.user_id()
                     || message.recipient == *self.device_id()) =>
             {
-                Route::RpcResponse
+                self.handle_device_rpc(message, &from).map_err(|e|e.into())
             }
             (Topic::DeviceInbox, _) => {
-                return Err(EncodingError::new("Invalid device RPC response"));
+                return Err(EncodingError::new("Invalid device RPC response").into());
             }
-            (Topic::UserInbox, mt) if mt == MessageType::State as u8 => Route::Notification,
+            (Topic::UserInbox, mt) if mt == MessageType::State as u8 => {
+                self.on_state_message(message, &from).await.map_err(|e|e.into())
+            }
             (_, mt) if mt == MessageType::State as u8 => {
-                return Err(EncodingError::new("Invalid home-peer notification"));
+                return Err(EncodingError::new("Invalid home-peer notification").into());
             }
-            (_, mt) if mt == MessageType::Handshake as u8 => Route::Handshake,
-            (_, mt) if mt == MessageType::Content as u8 => Route::Content,
+            (_, mt) if mt == MessageType::Handshake as u8 => {
+                self.on_handshake(topic, message, from).await.map_err(|e|e.into())
+            }
+            (_, mt) if mt == MessageType::Content as u8 => {
+                self.handle_content_message(topic, message, from).map_err(|e|e.into())
+            }
             _ => return Err(EncodingError::new("Unsupported user message type").into()),
-        };
-        Ok((route, from))
+        }
     }
 
     /// Handles a reply to a control RPC.
@@ -566,20 +630,8 @@ impl RpcServer {
         self.handle_rpc_response(&payload, from)
     }
 
-    /// Handles a service notification.
-    ///
-    /// Notifications about our own account are sealed for this user; channel
-    /// notifications are sealed with the channel session key instead, which is
-    /// why they need a lookup first.
-    pub(super) async fn handle_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+    pub(super) async fn on_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
         let home = from == self.peer_id() && message.recipient == *self.user_id();
-        // A notification addressed to its own sender is a channel event, and
-        // mutating channel state must not interleave with a pending request.
-        let _request = if !home && message.recipient == *from {
-            Some(self.requests.lock().await)
-        } else {
-            None
-        };
         let recipient = message.recipient;
         let payload = binary_payload(message.payload, "Notification")?;
         let payload = if home {
@@ -587,7 +639,7 @@ impl RpcServer {
         } else if recipient == *self.user_id() {
             decrypt_payload(&self.user_identity, from, &payload, "notification")?
         } else if recipient == *from {
-            let mut sessions = self.friend_sessions.lock().unwrap();
+            let mut sessions = self.session_contexts.lock().unwrap();
             let session = sessions
                 .get_mut(from)
                 .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
@@ -606,11 +658,7 @@ impl RpcServer {
             .map_err(|e| e.into())
     }
 
-    /// Handles a friend handshake.
-    ///
-    /// Handshakes travel through the outbox as well as the inbox: the copy we
-    /// sent comes back to us, which is how we learn the service accepted it.
-    pub(super) async fn handle_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
+    pub(super) async fn on_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
         let timestamp = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let originated_here = message.id == Self::message_id(self.device_identity.id(), timestamp)?;
@@ -674,7 +722,7 @@ impl RpcServer {
     ) -> Result<()> {
         let _request = self.requests.lock().await;
         if self
-            .friend_requests
+            .friend_requests_cache
             .borrow()
             .get(&friend_id)
             .is_some_and(|request| request.is_accepted())
@@ -699,7 +747,7 @@ impl RpcServer {
             })?;
         self.store_friend_contact(&friend_id, &session_identity)
             .await?;
-        self.friend_sessions
+        self.session_contexts
             .lock()
             .unwrap()
             .entry(friend_id)
@@ -798,7 +846,7 @@ impl RpcServer {
     ) -> Result<(Vec<u8>, PhotonContent)> {
         let encrypted = binary_payload(payload.clone(), "Content")?;
         let content_bytes = {
-            let mut sessions = self.friend_sessions.lock().unwrap();
+            let mut sessions = self.session_contexts.lock().unwrap();
             let session = sessions
                 .get_mut(contact_id)
                 .ok_or_else(|| StateError::new(format!("No friend session for {contact_id}")))?;
@@ -847,7 +895,7 @@ impl RpcServer {
         }
         let created_at = Self::timestamp(timestamp);
         if self
-            .friend_requests
+            .friend_requests_cache
             .borrow()
             .get(&user_id)
             .is_some_and(|request| request.is_accepted() || request.created_at() >= created_at)
@@ -859,7 +907,7 @@ impl RpcServer {
         if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
             warn!("Persisting friend request failed: {error}");
         }
-        self.friend_requests.borrow_mut().insert(user_id, request);
+        self.friend_requests_cache.borrow_mut().insert(user_id, request);
 
         if notify {
             self.friend_request_listener
@@ -875,7 +923,7 @@ impl RpcServer {
 
         let accepted_at = Self::timestamp(timestamp);
         {
-            let mut requests = self.friend_requests.borrow_mut();
+            let mut requests = self.friend_requests_cache.borrow_mut();
             let Some(request) = requests.get_mut(&user_id) else {
                 return;
             };
@@ -893,7 +941,7 @@ impl RpcServer {
             }
             request.accept_at(accepted_at);
         }
-        if let Some(request) = self.friend_requests.borrow().get(&user_id).cloned() {
+        if let Some(request) = self.friend_requests_cache.borrow().get(&user_id).cloned() {
             if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
                 warn!("Persisting accepted friend request failed: {error}");
             }
@@ -926,7 +974,7 @@ impl RpcServer {
     }
 
     pub(super) fn pending_friend_request(&self, user_id: &Id, initiator_id: &Id) -> Result<FriendRequest> {
-        let requests = self.friend_requests.borrow();
+        let requests = self.friend_requests_cache.borrow();
         let request = requests
             .get(user_id)
             .ok_or_else(|| ArgumentError::new(format!("No friend request found for {user_id}")))?;
@@ -992,26 +1040,28 @@ impl RpcServer {
             .map_err(|error| EncodingError::new(error.to_string()).into())
     }
 
-    /// Disconnects the transport and reports the state change to listeners.
-    pub(super) async fn stop_transport(&self) -> Result<()> {
-        info!("Stopping messaging session...");
-        if !self.transport.is_open() {
-            return Ok(());
-        }
-        debug!("Disconnecting MQTT client...");
-        let result = self.transport.disconnect().await;
-
-        if self.connected.replace(false) {
-            self.notify_connection(|l| l.on_disconnected());
-        }
-        info!("Messaging session stopped");
-        result
-    }
-
     /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
     fn handle_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
-        self.pending_rpc
+        self.pending_calls
             .respond(RPCResponseMessage::parse(payload)?, sender)
             .map_err(|e| e.into())
     }
+}
+
+fn binary_payload(payload: Value, what: &str) -> Result<Vec<u8>> {
+    match payload {
+        Value::Bytes(bytes) => Ok(bytes),
+        _ => Err(EncodingError::new(format!("{what} payload is not binary"))),
+    }
+}
+
+fn decrypt_payload(
+    identity: &CryptoIdentity,
+    sender: &Id,
+    cipher: &[u8],
+    what: &str,
+) -> Result<Vec<u8>> {
+    identity.decrypt_into(sender, cipher).map_err(|error| {
+        AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into()
+    })
 }

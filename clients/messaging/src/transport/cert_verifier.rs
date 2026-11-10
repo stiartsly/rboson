@@ -1,38 +1,35 @@
 use std::result::Result as StdResult;
-
 use log::debug;
-use rumqttc::{
-    tokio_rustls::rustls::client::danger::{
+use rumqttc::tokio_rustls::rustls::{
+    client::danger::{
         HandshakeSignatureValid,
         ServerCertVerified,
         ServerCertVerifier,
     },
-    tokio_rustls::rustls::pki_types::{
+    pki_types::{
         CertificateDer,
         ServerName,
         UnixTime,
     },
-    tokio_rustls::rustls::{
-        DigitallySignedStruct,
-        Error as RustlsError,
-        SignatureScheme,
-    },
+    crypto,
+    DigitallySignedStruct,
+    Error as RustlsError,
+    SignatureScheme,
 };
 use boson_api::Id;
 
 #[derive(Debug)]
-pub(super) struct BosonServerCertVerifier {
-    #[allow(dead_code)]
+pub(super) struct CertVerifier {
     expected_peer_id: Option<Id>,
 }
 
-impl BosonServerCertVerifier {
+impl CertVerifier {
     pub(super) fn new(expected_peer_id: Option<Id>) -> Self {
         Self { expected_peer_id }
     }
 }
 
-impl ServerCertVerifier for BosonServerCertVerifier {
+impl ServerCertVerifier for CertVerifier {
     fn verify_server_cert(
         &self,
         _end_entity: &CertificateDer<'_>,
@@ -55,11 +52,11 @@ impl ServerCertVerifier for BosonServerCertVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> StdResult<HandshakeSignatureValid, RustlsError> {
-        rumqttc::tokio_rustls::rustls::crypto::verify_tls12_signature(
+        crypto::verify_tls12_signature(
             message,
             cert,
             dss,
-            &rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+            &crypto::aws_lc_rs::default_provider()
                 .signature_verification_algorithms,
         )
     }
@@ -70,17 +67,17 @@ impl ServerCertVerifier for BosonServerCertVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> StdResult<HandshakeSignatureValid, RustlsError> {
-        rumqttc::tokio_rustls::rustls::crypto::verify_tls13_signature(
+        crypto::verify_tls13_signature(
             message,
             cert,
             dss,
-            &rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+            &crypto::aws_lc_rs::default_provider()
                 .signature_verification_algorithms,
         )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        rumqttc::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+        crypto::aws_lc_rs::default_provider()
             .signature_verification_algorithms
             .supported_schemes()
     }

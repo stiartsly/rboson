@@ -33,6 +33,14 @@ pub(crate) struct ChannelMembersRole {
 }
 
 impl ChannelMembersRole {
+    pub(crate) fn member_ids(&self) -> &[Id] {
+        &self.member_ids
+    }
+
+    pub(crate) fn role(&self) -> Role {
+        Role::from_i32(self.role)
+    }
+
     pub(crate) fn new(member_ids: Vec<Id>, role: Role) -> Self {
         Self {
             member_ids,

@@ -40,16 +40,13 @@ use crate::errors::{
 };
 use super::{
     method::Method,
-    response::{
-        Params as ResponseParams,
-        RPCResponseMessage,
-    },
+    response::{Params, RpcResponse},
 };
 
 struct PendingCall {
     method: Method,
     recipient: Id,
-    promise: Promise<ResponseParams>,
+    promise: Promise<Params>,
 }
 
 #[derive(Default)]
@@ -60,11 +57,11 @@ pub(crate) struct Calls {
 pub(crate) struct CallFuture<'a> {
     calls: &'a Calls,
     id: i64,
-    future: PromiseFuture<ResponseParams>,
+    future: PromiseFuture<Params>,
 }
 
 impl Future for CallFuture<'_> {
-    type Output = Result<ResponseParams>;
+    type Output = Result<Params>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.get_mut().future).poll(context)
@@ -90,11 +87,7 @@ impl Calls {
         let (promise, future) = Promise::pair();
         self.pending.borrow_mut().insert(
             id,
-            PendingCall {
-                method,
-                recipient,
-                promise,
-            },
+            PendingCall { method, recipient, promise },
         );
         Ok(CallFuture {
             calls: self,
@@ -103,44 +96,38 @@ impl Calls {
         })
     }
 
-    pub(crate) fn respond(&self, response: RPCResponseMessage, sender: &Id) -> Result<()> {
-        if self
-            .pending
-            .borrow()
-            .get(&response.id)
-            .is_some_and(|call| &call.recipient != sender)
-        {
+    pub(crate) fn respond(&self, response: RpcResponse, from: &Id) -> Result<()> {
+        let rsp_id = response.id();
+        let method = response.method();
+
+        let call = self.pending.borrow_mut().remove(&rsp_id);
+        let Some(call) = call else {
+            debug!("Ignoring RPC response {} without a pending call",rsp_id);
+            return Ok(());
+        };
+
+        if &call.recipient != from {
             return Err(AuthenticationError::new(
                 "RPC response sender does not match request recipient",
             ));
         }
-        let Some(call) = self.pending.borrow_mut().remove(&response.id) else {
-            debug!(
-                "Ignoring RPC response {} without a pending call",
-                response.id
-            );
-            return Ok(());
-        };
-        let result = if call.method != response.method {
-            Err(EncodingError::new(format!(
+
+        if call.method != method {
+            return Err(EncodingError::new(format!(
                 "RPC response method '{:?}' does not match '{:?}'",
-                response.method, call.method
-            ))
-            .into())
-        } else {
-            response.into_result()
-        };
-        if let Err(error) = &result {
-            warn!("{error}");
+                method, call.method
+            )).into())
         }
-        call.promise.complete(result);
+
+        call.promise.complete(response.result());
         Ok(())
     }
 
-    pub(crate) fn fail_all(&self, reason: &str) {
+    pub(crate) fn clear(&self, reason: &str) {
         for (_, call) in self.pending.take() {
-            call.promise
-                .complete(Err(StateError::new(reason.to_string()).into()));
+            call.promise.complete(
+                Err(StateError::new(reason.to_string()).into())
+            );
         }
     }
 }

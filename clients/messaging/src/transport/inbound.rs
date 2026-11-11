@@ -1,61 +1,141 @@
 use super::prelude::*;
 use super::outbound::update_conversation;
 
-fn is_channel_notification(body: &NotificationBody) -> bool {
-    matches!(
-        body,
-        NotificationBody::ChannelCreate(_)
-            | NotificationBody::ChannelJoin(_)
-            | NotificationBody::ChannelDelete
-            | NotificationBody::ChannelLeave
-            | NotificationBody::ChannelOwnershipTransfer(_)
-            | NotificationBody::ChannelSessionKeyRotate(_)
-            | NotificationBody::ChannelInfoUpdate(_)
-            | NotificationBody::ChannelMembersRoleUpdate(_)
-            | NotificationBody::ChannelMembersBan(_)
-            | NotificationBody::ChannelMembersUnban(_)
-            | NotificationBody::ChannelMembersRemove(_)
-            | NotificationBody::ChannelMemberJoin(_)
-            | NotificationBody::ChannelMemberLeave(_)
-    )
-}
-
-fn notification_echoes_back(
-    notification: &Notification,
-    timestamp: i64,
-    user_id: &Id,
-    device_id: &Id,
-) -> Result<bool> {
-    if notification.source() != *user_id || !is_channel_notification(notification.body()) {
-        return Ok(false);
-    }
-    Ok(notification.id() == RpcServer::message_id(device_id, timestamp)?)
-}
+use crate::internal::notification::{
+    Body as NotificationBody,
+    Notification,
+};
 
 impl RpcServer {
+    pub(super) async fn dispatch(
+        &self,
+        topic: Topic,
+        message: PhotonMessage
+    ) -> Result<()> {
+        if message.version != MESSAGE_VERSION {
+            return Err(ProtocolError::new(
+                message.version as i32,"Unsupported message version",
+            ));
+        }
+        let from = message.from().copied().ok_or_else(
+            || EncodingError::new("Incoming message has no sender")
+        )?;
 
+        match (topic, message.message_type) {
+            (Topic::DeviceInbox, mt) if mt == MessageType::Control as u8
+                && (message.recipient == *self.user_id()
+                    || message.recipient == *self.device_id()) =>
+            {
+                self.on_device_rpc(message, &from).map_err(|e|e.into())
+            }
+            (Topic::DeviceInbox, _) => {
+                return Err(EncodingError::new("Invalid device RPC response").into());
+            }
+            (Topic::UserInbox, mt) if mt == MessageType::State as u8 => {
+                self.on_state_message(message, &from).await.map_err(|e|e.into())
+            }
+            (_, mt) if mt == MessageType::State as u8 => {
+                return Err(EncodingError::new("Invalid home-peer notification").into());
+            }
+            (_, mt) if mt == MessageType::Handshake as u8 => {
+                self.on_handshake(topic, message, from).await.map_err(|e|e.into())
+            }
+            (_, mt) if mt == MessageType::Content as u8 => {
+                self.on_content_message(topic, message, from).map_err(|e|e.into())
+            }
+            _ => return Err(EncodingError::new("Unsupported user message type").into()),
+        }
+    }
 
-    /// Decodes a service notification and dispatches it.
+    /// Handles a reply to a control RPC.
     ///
-    /// `sender` is the peer that published it, which for channel notifications
-    /// doubles as the channel id.
-    pub(super) fn handle_notification(&self, payload: &[u8], sender: &Id) -> Result<()> {
+    /// Replies from the service are sealed with the device key only.
+    /// Replies relayed on behalf of a channel peer carry a second layer that only this
+    /// user can open, so they are decrypted twice.
+    fn on_device_rpc(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+        let payload = match message.payload {
+            Value::Bytes(bytes) => Ok(bytes),
+            _ => Err(EncodingError::new(format!("Rpc response payload is not binary"))),
+        }?;
+        let payload = if from == self.peer_id() {
+            payload
+        } else {
+            self.user_identity.decrypt_into(from, &payload).map_err(|error| {
+                AuthenticationError::new(format!("Decrypting Rpc response failed: {error}"))
+            })?
+        };
+        self.on_rpc_response(&payload, from)
+    }
+
+    /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
+    fn on_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
+        self.pending_calls
+            .respond(
+                serde_cbor::from_slice(payload).map_err(|error|
+                    EncodingError::new(format!("Malformed RPC response: {error}"))
+                )?,
+                sender,
+            )
+            .map_err(|e| e.into())
+    }
+
+    async fn on_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
+        let payload = binary_payload(message.payload, "Notification")?;
+
+        let home = from == self.peer_id() && message.recipient == *self.user_id();
+        let recipient = message.recipient;
+        let payload = if home {
+            // Home-peer notifications are already sealed for this device.
+            payload
+        } else if recipient == *self.user_id() {
+            self.user_identity.decrypt_into(from, &payload).map_err(|error| {
+                AuthenticationError::new(format!("Decrypting notification error: {error}"))
+            })?
+        } else if recipient == *from {
+            let mut sessions = self.session_contexts.lock().unwrap();
+            let session = sessions.get_mut(from)
+                .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
+
+            session
+                .rx_crypto_context()?
+                .decrypt_into(&payload)
+                .map_err(|error| {
+                    AuthenticationError::new(format!(
+                        "Decrypting channel notification envelope failed: {error}"
+                    ))
+                })?
+        } else {
+            return Err(EncodingError::new("Invalid channel notification recipient"));
+        };
+
+        self.on_notification(&payload, from).map_err(|e| e.into())
+    }
+
+    fn on_notification(&self, payload: &[u8], from: &Id) -> Result<()> {
         let notification: Notification = decode_cbor_bytes(payload, "notification")?;
         let timestamp = i64::try_from(notification.timestamp())
             .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
 
-        // Channel changes we caused ourselves echo back through the service.
-        if notification_echoes_back(&notification, timestamp, self.user_id(), self.device_id())? {
+        if notification.source() == *self.user_id()
+            && is_channel_notification(notification.body())
+            && notification.id() == RpcServer::message_id(self.device_id(), timestamp)?
+        {
             return Ok(());
         }
 
+        if from == self.peer_id() {
+            self.handle_homepeer_notification(&notification)
+        } else {
+            self.handle_channel_notification(&notification, from)
+        }
+    }
+
+    fn handle_homepeer_notification(&self, notification: &Notification) -> Result<()> {
         match notification.body() {
             NotificationBody::SessionNew(session) => {
                 self.session_listener.on_new_session(session);
                 Ok(())
             }
-            // The initial contact sync is also the readiness signal: it is the
-            // last thing the service sends before the session is fully usable.
             NotificationBody::ContactSync(sync) => {
                 self.apply_contact_sync(sync)?;
                 if self.connected.get() && !self.stopping.get() && !self.ready.replace(true) {
@@ -64,50 +144,26 @@ impl RpcServer {
                 }
                 Ok(())
             }
-            body if is_channel_notification(body) => {
-                self.apply_channel_notification(&notification, sender)
+            NotificationBody::ChannelCreate(info) => {
+                self.upsert_channel(info, self.peer_id(), true)
             }
             body => Err(EncodingError::new(format!(
-                "Unsupported home-peer notification '{}'",
-                body.event().as_str()
+                "Unsupported home-peer notification: {body:?}"
             ))),
         }
     }
 
-    /// Applies a channel notification and fires the matching listener.
-    pub(super) fn apply_channel_notification(&self, notification: &Notification, sender: &Id) -> Result<()> {
-        let body = notification.body();
-        let event = body.event();
-        match body {
-            NotificationBody::ChannelCreate(info) | NotificationBody::ChannelJoin(info) => {
-                let (channel, session) = self.channel_from_info(info)?;
-                if (event == NotificationEvent::ChannelCreate && sender != self.peer_id())
-                    || (event == NotificationEvent::ChannelJoin && channel.id() != sender)
-                {
-                    return Err(EncodingError::new(
-                        "Channel notification has an unexpected source",
-                    ));
-                }
-                let id = *channel.id();
-                let known = self.channels_cache.borrow().contains_key(&id);
-                self.session_contexts.lock().unwrap().insert(id, session);
-                self.contacts_cache
-                    .borrow_mut()
-                    .entry(id)
-                    .or_insert_with(|| channel.contact_box());
-                self.channels_cache
-                    .borrow_mut()
-                    .entry(id)
-                    .or_insert_with(|| channel.clone());
-                if known {
-                    return Ok(());
-                }
-                if event == NotificationEvent::ChannelCreate {
-                    self.channel_listener.on_channel_created(&channel);
-                } else {
-                    self.channel_listener.on_joined_channel(&channel);
-                }
-                Ok(())
+    fn handle_channel_notification(
+        &self,
+        notification: &Notification,
+        sender: &Id,
+    ) -> Result<()> {
+        match notification.body() {
+            NotificationBody::ChannelCreate(info) => {
+                self.upsert_channel(info, sender, true)
+            }
+            NotificationBody::ChannelJoin(info) => {
+                self.upsert_channel(info, sender, false)
             }
             NotificationBody::ChannelDelete | NotificationBody::ChannelLeave => {
                 let Some(channel) = self.channels_cache.borrow_mut().remove(sender) else {
@@ -115,7 +171,7 @@ impl RpcServer {
                 };
                 self.contacts_cache.borrow_mut().remove(sender);
                 self.session_contexts.lock().unwrap().remove(sender);
-                if event == NotificationEvent::ChannelDelete {
+                if matches!(notification.body(), NotificationBody::ChannelDelete) {
                     self.channel_listener.on_channel_deleted(&channel);
                 } else {
                     self.channel_listener.on_left_channel(&channel);
@@ -246,10 +302,38 @@ impl RpcServer {
                 Ok(())
             }
             body => Err(EncodingError::new(format!(
-                "Unsupported channel notification '{}'",
-                body.event().as_str()
+                "Unsupported channel notification: {body:?}"
             ))),
         }
+    }
+
+    fn upsert_channel(&self, info: &ChannelInfo, sender: &Id, created: bool) -> Result<()> {
+        let (channel, session) = self.channel_from_info(info)?;
+        let id = *channel.id();
+        if !created && id != *sender {
+            return Err(EncodingError::new(
+                "Channel notification has an unexpected source",
+            ));
+        }
+        let known = self.channels_cache.borrow().contains_key(&id);
+        self.session_contexts.lock().unwrap().insert(id, session);
+        self.contacts_cache
+            .borrow_mut()
+            .entry(id)
+            .or_insert_with(|| channel.contact_box());
+        self.channels_cache
+            .borrow_mut()
+            .entry(id)
+            .or_insert_with(|| channel.clone());
+        if known {
+            return Ok(());
+        }
+        if created {
+            self.channel_listener.on_channel_created(&channel);
+        } else {
+            self.channel_listener.on_joined_channel(&channel);
+        }
+        Ok(())
     }
 
     /// Decodes a contact, keeping the session key and channel metadata that the
@@ -284,8 +368,7 @@ impl RpcServer {
         })
     }
 
-    /// Applies a contact sync, committing only if every revision check passed.
-    pub(super) fn apply_contact_sync(&self, sync: &ContactSync) -> Result<()> {
+    fn apply_contact_sync(&self, sync: &ContactSync) -> Result<()> {
         let revision = self.contacts_revision.get();
         if matches!(sync.kind(), SyncType::UpToDate) {
             if sync.revision() == revision {
@@ -509,156 +592,7 @@ impl RpcServer {
             || old.contact_type() != new.contact_type()
     }
 
-    /// Asks the service for everything that changed since our revision.
-    pub(super) async fn sync_contacts(&self) -> Result<()> {
-        // 1. Validate: nothing to check, the sync starts from our revision.
-        let revision = self.contacts_revision.get();
-
-        // 2. Build the request.
-        let request = RPCRequest::contact_sync(0, revision);
-
-        // 3. Send it to the home peer and 4. decode the delta it reports.
-        let result = self.send_control(self.peer_id(), request).await?;
-        let ResponseParams::ContactSync(document) = result else {
-            return Err(EncodingError::new("RPC result is not a contact sync").into());
-        };
-        let sync: ContactSync = decode_cbor(document, "contact sync response")?;
-
-        // 5. Apply the delta to the local state.
-        self.apply_contact_sync(&sync)
-    }
-
-    /// Sends a contact mutation document and adopts the revision it reports.
-    ///
-    /// `minimum` is the revision the caller needs to see: plain mutations only
-    /// require the current one, while `update_contact` insists on the revision
-    /// it computed so that a concurrent change cannot silently win.
-    pub(super) async fn commit_contact_mutation(
-        &self,
-        mutation: ContactMutation,
-        minimum: i32,
-        outdated: &str,
-    ) -> Result<i32> {
-        let request = RPCRequest::contact_mutate(0, mutation);
-        let result = self.send_control(self.peer_id(), request).await?;
-        let ResponseParams::Revision(revision) = result else {
-            return Err(EncodingError::new("RPC result is not a contact revision").into());
-        };
-        if revision < minimum || revision < self.contacts_revision.get() {
-            return Err(StateError::new(outdated));
-        }
-        self.contacts_revision.set(revision);
-        Ok(revision)
-    }
-
-    /// Encodes and sends a [`ContactMutation`].
-    pub(super) async fn apply_contact_mutation(
-        &self,
-        mutation: ContactMutation,
-        minimum: i32,
-        outdated: &str,
-    ) -> Result<i32> {
-        self.commit_contact_mutation(mutation, minimum, outdated)
-            .await
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Inbound dispatch
-// ---------------------------------------------------------------------------
-
-impl RpcServer {
-    pub(super) fn notify_connection(&self, callback: impl Fn(&dyn ConnectionListener)) {
-        callback(self.connection_listener.as_ref());
-    }
-
-    /// The transport has already opened the envelope (stage 1), so this validates
-    /// the sender, topic and message type and hands the message to the matching
-    /// handler, which unprotects, decodes and applies it.
-    pub(super) async fn dispatch(
-        &self,
-        topic: Topic,
-        message: PhotonMessage
-    ) -> Result<()> {
-        if message.version != MESSAGE_VERSION {
-            return Err(ProtocolError::new(
-                message.version as i32,"Unsupported message version",
-            ));
-        }
-        let from = message.from().copied().ok_or_else(
-            || EncodingError::new("Incoming message has no sender")
-        )?;
-
-        match (topic, message.message_type) {
-            (Topic::DeviceInbox, mt) if mt == MessageType::Control as u8
-                && (message.recipient == *self.user_id()
-                    || message.recipient == *self.device_id()) =>
-            {
-                self.handle_device_rpc(message, &from).map_err(|e|e.into())
-            }
-            (Topic::DeviceInbox, _) => {
-                return Err(EncodingError::new("Invalid device RPC response").into());
-            }
-            (Topic::UserInbox, mt) if mt == MessageType::State as u8 => {
-                self.on_state_message(message, &from).await.map_err(|e|e.into())
-            }
-            (_, mt) if mt == MessageType::State as u8 => {
-                return Err(EncodingError::new("Invalid home-peer notification").into());
-            }
-            (_, mt) if mt == MessageType::Handshake as u8 => {
-                self.on_handshake(topic, message, from).await.map_err(|e|e.into())
-            }
-            (_, mt) if mt == MessageType::Content as u8 => {
-                self.handle_content_message(topic, message, from).map_err(|e|e.into())
-            }
-            _ => return Err(EncodingError::new("Unsupported user message type").into()),
-        }
-    }
-
-    /// Handles a reply to a control RPC.
-    ///
-    /// Replies from the service are sealed with the device key only. Replies
-    /// relayed on behalf of a channel peer carry a second layer that only this
-    /// user can open, so they are decrypted twice.
-    pub(super) fn handle_device_rpc(&self, message: PhotonMessage, from: &Id) -> Result<()> {
-        let payload = binary_payload(message.payload, "RPC response")?;
-        let payload = if from == self.peer_id() {
-            payload
-        } else {
-            decrypt_payload(&self.user_identity, from, &payload, "channel RPC")?
-        };
-        self.handle_rpc_response(&payload, from)
-    }
-
-    pub(super) async fn on_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
-        let home = from == self.peer_id() && message.recipient == *self.user_id();
-        let recipient = message.recipient;
-        let payload = binary_payload(message.payload, "Notification")?;
-        let payload = if home {
-            payload
-        } else if recipient == *self.user_id() {
-            decrypt_payload(&self.user_identity, from, &payload, "notification")?
-        } else if recipient == *from {
-            let mut sessions = self.session_contexts.lock().unwrap();
-            let session = sessions
-                .get_mut(from)
-                .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
-            session
-                .rx_crypto_context()?
-                .decrypt_into(&payload)
-                .map_err(|error| {
-                    AuthenticationError::new(format!(
-                        "Decrypting channel notification envelope failed: {error}"
-                    ))
-                })?
-        } else {
-            return Err(EncodingError::new("Invalid channel notification recipient"));
-        };
-        self.handle_notification(&payload, from)
-            .map_err(|e| e.into())
-    }
-
-    pub(super) async fn on_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
+    async fn on_handshake(&self, topic: Topic, message: PhotonMessage, from: Id) -> Result<()> {
         let timestamp = i64::try_from(message.created_at)
             .map_err(|_| EncodingError::new("Message timestamp is out of range"))?;
         let originated_here = message.id == Self::message_id(self.device_identity.id(), timestamp)?;
@@ -704,12 +638,113 @@ impl RpcServer {
     }
 
     /// Inbound stages 3 and 4 for a handshake: unprotect and decode it.
-    pub(super) fn open_handshake(&self, payload: Value, friend_id: &Id, from: &Id) -> Result<Handshake> {
+    fn open_handshake(&self, payload: Value, friend_id: &Id, from: &Id) -> Result<Handshake> {
         let encrypted = binary_payload(payload, "Handshake")?;
         let bytes = decrypt_payload(&self.user_identity, friend_id, &encrypted, "handshake")?;
         let mut handshake: Handshake = decode_cbor_bytes(&bytes, "handshake")?;
         handshake.from = Some(*from);
         Ok(handshake)
+    }
+
+    pub(super) fn on_friend_request(
+        &self,
+        user_id: Id,
+        initiator_id: Id,
+        hello: String,
+        timestamp: i64,
+        notify: bool,
+    ) {
+        if timestamp < 0 {
+            warn!("Ignoring friend request from {user_id} with a negative timestamp");
+            return;
+        }
+        if let Some(contact) = self.contacts_cache.borrow().get(&user_id) {
+            if contact.is_blocked()
+                || contact.contact_type() == ContactType::Friend
+                || contact.contact_type() == ContactType::Channel
+            {
+                return;
+            }
+        }
+        let created_at = Self::timestamp(timestamp);
+        if self
+            .friend_requests_cache
+            .borrow()
+            .get(&user_id)
+            .is_some_and(|request| request.is_accepted() || request.created_at() >= created_at)
+        {
+            debug!("Ignoring duplicate or stale friend request from {user_id}");
+            return;
+        }
+        let request = FriendRequest::new(user_id, initiator_id, Some(hello.clone()), created_at);
+        if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
+            warn!("Persisting friend request failed: {error}");
+        }
+        self.friend_requests_cache.borrow_mut().insert(user_id, request);
+
+        if notify {
+            self.friend_request_listener
+                .on_friend_request(&user_id, Some(&hello));
+        }
+    }
+
+    pub(super) fn pending_friend_request(&self, user_id: &Id, initiator_id: &Id) -> Result<FriendRequest> {
+        let requests = self.friend_requests_cache.borrow();
+        let request = requests
+            .get(user_id)
+            .ok_or_else(|| ArgumentError::new(format!("No friend request found for {user_id}")))?;
+        if self.contacts_cache.borrow().get(user_id).is_some_and(|contact| {
+            contact.is_blocked() || contact.contact_type() == ContactType::Channel
+        }) {
+            return Err(ArgumentError::new(
+                "Cannot accept a friend request from a blocked user or channel",
+            ));
+        }
+        if request.initiator_id() != initiator_id {
+            return Err(ArgumentError::new(
+                "Friend request has an unexpected initiator",
+            ));
+        }
+        if request.is_accepted() {
+            return Err(ArgumentError::new(
+                "Friend request has already been accepted",
+            ));
+        }
+        if request.is_expired() {
+            return Err(ArgumentError::new("Friend request has expired"));
+        }
+        Ok(request.clone())
+    }
+
+    /// Records a friend locally, including their session key.
+    pub(super) async fn store_friend_contact(&self, user_id: &Id, session: &CryptoIdentity) -> Result<()> {
+        if self
+            .contacts_cache
+            .borrow()
+            .get(user_id)
+            .is_some_and(|contact| contact.contact_type() == ContactType::Friend)
+        {
+            return Ok(());
+        }
+        let revision = self.contacts_revision.get();
+        let mut data = ContactData::new(
+            *user_id,
+            ContactType::Friend as u8,
+            Self::current_timestamp()?,
+        );
+        data.set_session_key(self.user_identity.encrypt_into(
+            self.user_id(),
+            session.signature_key().private_key().as_ref(),
+        )?);
+        data.revision = revision;
+        let session_key = data.session_key().map(|key| key.to_vec());
+        let mutation = ContactMutation::add(revision, data.encode_into(&self.user_identity)?);
+        self.apply_contact_mutation(mutation, revision, "Friend contact revision is outdated")
+            .await?;
+        if let Some(contact) = self.contacts_cache.borrow().get(user_id).cloned() {
+            self.persist_contact(&contact, session_key.as_deref())?;
+        }
+        Ok(())
     }
 
     /// Completes an acceptance we did not initiate: the peer said yes.
@@ -756,7 +791,65 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(super) fn handle_content_message(
+    pub(super) fn on_friend_request_accepted(&self, user_id: Id, timestamp: i64, notify: bool) {
+        if timestamp < 0 {
+            warn!("Ignoring friend request acceptance from {user_id} with a negative timestamp");
+            return;
+        }
+
+        let accepted_at = Self::timestamp(timestamp);
+        {
+            let mut requests = self.friend_requests_cache.borrow_mut();
+            let Some(request) = requests.get_mut(&user_id) else {
+                return;
+            };
+            if request.is_accepted() || request.is_expired() {
+                return;
+            }
+            let initiator_id = if notify {
+                self.user_identity.id()
+            } else {
+                &user_id
+            };
+            if request.initiator_id() != initiator_id || accepted_at < request.created_at() {
+                warn!("Ignoring friend request acceptance from {user_id} that does not match the pending request");
+                return;
+            }
+            request.accept_at(accepted_at);
+        }
+        if let Some(request) = self.friend_requests_cache.borrow().get(&user_id).cloned() {
+            if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
+                warn!("Persisting accepted friend request failed: {error}");
+            }
+        }
+
+        if self
+            .contacts_cache
+            .borrow()
+            .get(&user_id)
+            .is_some_and(|contact| contact.contact_type() == ContactType::Friend)
+        {
+            if notify {
+                self.friend_request_listener
+                    .on_friend_request_accepted(&user_id);
+            }
+            return;
+        }
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0);
+        let mut contact = Box::new(PhotonContact::new(user_id, ContactType::Friend, now_ms)) as Contact;
+        contact.set_revision(self.contacts_revision.get());
+        self.contacts_cache.borrow_mut().insert(user_id, contact.clone());
+        if notify {
+            self.friend_request_listener
+                .on_friend_request_accepted(&user_id);
+        }
+        self.contact_listener.on_contact_added(&contact);
+    }
+
+    fn on_content_message(
         &self,
         topic: Topic,
         mut message: PhotonMessage,
@@ -873,165 +966,6 @@ impl RpcServer {
         UNIX_EPOCH + Duration::from_millis(timestamp as u64)
     }
 
-    pub(super) fn on_friend_request(
-        &self,
-        user_id: Id,
-        initiator_id: Id,
-        hello: String,
-        timestamp: i64,
-        notify: bool,
-    ) {
-        if timestamp < 0 {
-            warn!("Ignoring friend request from {user_id} with a negative timestamp");
-            return;
-        }
-        if let Some(contact) = self.contacts_cache.borrow().get(&user_id) {
-            if contact.is_blocked()
-                || contact.contact_type() == ContactType::Friend
-                || contact.contact_type() == ContactType::Channel
-            {
-                return;
-            }
-        }
-        let created_at = Self::timestamp(timestamp);
-        if self
-            .friend_requests_cache
-            .borrow()
-            .get(&user_id)
-            .is_some_and(|request| request.is_accepted() || request.created_at() >= created_at)
-        {
-            debug!("Ignoring duplicate or stale friend request from {user_id}");
-            return;
-        }
-        let request = FriendRequest::new(user_id, initiator_id, Some(hello.clone()), created_at);
-        if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
-            warn!("Persisting friend request failed: {error}");
-        }
-        self.friend_requests_cache.borrow_mut().insert(user_id, request);
-
-        if notify {
-            self.friend_request_listener
-                .on_friend_request(&user_id, Some(&hello));
-        }
-    }
-
-    pub(super) fn on_friend_request_accepted(&self, user_id: Id, timestamp: i64, notify: bool) {
-        if timestamp < 0 {
-            warn!("Ignoring friend request acceptance from {user_id} with a negative timestamp");
-            return;
-        }
-
-        let accepted_at = Self::timestamp(timestamp);
-        {
-            let mut requests = self.friend_requests_cache.borrow_mut();
-            let Some(request) = requests.get_mut(&user_id) else {
-                return;
-            };
-            if request.is_accepted() || request.is_expired() {
-                return;
-            }
-            let initiator_id = if notify {
-                self.user_identity.id()
-            } else {
-                &user_id
-            };
-            if request.initiator_id() != initiator_id || accepted_at < request.created_at() {
-                warn!("Ignoring friend request acceptance from {user_id} that does not match the pending request");
-                return;
-            }
-            request.accept_at(accepted_at);
-        }
-        if let Some(request) = self.friend_requests_cache.borrow().get(&user_id).cloned() {
-            if let Err(error) = self.repository.borrow_mut().put_friend_request(&request) {
-                warn!("Persisting accepted friend request failed: {error}");
-            }
-        }
-
-        if self
-            .contacts_cache
-            .borrow()
-            .get(&user_id)
-            .is_some_and(|contact| contact.contact_type() == ContactType::Friend)
-        {
-            if notify {
-                self.friend_request_listener
-                    .on_friend_request_accepted(&user_id);
-            }
-            return;
-        }
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as i64)
-            .unwrap_or(0);
-        let mut contact = Box::new(PhotonContact::new(user_id, ContactType::Friend, now_ms)) as Contact;
-        contact.set_revision(self.contacts_revision.get());
-        self.contacts_cache.borrow_mut().insert(user_id, contact.clone());
-        if notify {
-            self.friend_request_listener
-                .on_friend_request_accepted(&user_id);
-        }
-        self.contact_listener.on_contact_added(&contact);
-    }
-
-    pub(super) fn pending_friend_request(&self, user_id: &Id, initiator_id: &Id) -> Result<FriendRequest> {
-        let requests = self.friend_requests_cache.borrow();
-        let request = requests
-            .get(user_id)
-            .ok_or_else(|| ArgumentError::new(format!("No friend request found for {user_id}")))?;
-        if self.contacts_cache.borrow().get(user_id).is_some_and(|contact| {
-            contact.is_blocked() || contact.contact_type() == ContactType::Channel
-        }) {
-            return Err(ArgumentError::new(
-                "Cannot accept a friend request from a blocked user or channel",
-            ));
-        }
-        if request.initiator_id() != initiator_id {
-            return Err(ArgumentError::new(
-                "Friend request has an unexpected initiator",
-            ));
-        }
-        if request.is_accepted() {
-            return Err(ArgumentError::new(
-                "Friend request has already been accepted",
-            ));
-        }
-        if request.is_expired() {
-            return Err(ArgumentError::new("Friend request has expired"));
-        }
-        Ok(request.clone())
-    }
-
-    /// Records a friend locally, including their session key.
-    pub(super) async fn store_friend_contact(&self, user_id: &Id, session: &CryptoIdentity) -> Result<()> {
-        if self
-            .contacts_cache
-            .borrow()
-            .get(user_id)
-            .is_some_and(|contact| contact.contact_type() == ContactType::Friend)
-        {
-            return Ok(());
-        }
-        let revision = self.contacts_revision.get();
-        let mut data = ContactData::new(
-            *user_id,
-            ContactType::Friend as u8,
-            Self::current_timestamp()?,
-        );
-        data.set_session_key(self.user_identity.encrypt_into(
-            self.user_id(),
-            session.signature_key().private_key().as_ref(),
-        )?);
-        data.revision = revision;
-        let session_key = data.session_key().map(|key| key.to_vec());
-        let mutation = ContactMutation::add(revision, data.encode_into(&self.user_identity)?);
-        self.apply_contact_mutation(mutation, revision, "Friend contact revision is outdated")
-            .await?;
-        if let Some(contact) = self.contacts_cache.borrow().get(user_id).cloned() {
-            self.persist_contact(&contact, session_key.as_deref())?;
-        }
-        Ok(())
-    }
-
     pub(super) fn message_id(device_id: &Id, timestamp: i64) -> Result<Id> {
         let mut digest = Sha256::new();
         digest.update(device_id.as_bytes());
@@ -1040,11 +974,60 @@ impl RpcServer {
             .map_err(|error| EncodingError::new(error.to_string()).into())
     }
 
-    /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
-    fn handle_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
-        self.pending_calls
-            .respond(RPCResponseMessage::parse(payload)?, sender)
-            .map_err(|e| e.into())
+    pub(super) fn notify_connection(&self, callback: impl Fn(&dyn ConnectionListener)) {
+        callback(self.connection_listener.as_ref());
+    }
+
+    /// Asks the service for everything that changed since our revision.
+    pub(super) async fn sync_contacts(&self) -> Result<()> {
+        // 1. Validate: nothing to check, the sync starts from our revision.
+        let revision = self.contacts_revision.get();
+
+        // 2. Build the request.
+        let request = RPCRequest::contact_sync(0, revision);
+
+        // 3. Send it to the home peer and 4. decode the delta it reports.
+        let result = self.send_control(self.peer_id(), request).await?;
+        let ResponseParams::ContactSync(sync) = result else {
+            return Err(EncodingError::new("RPC result is not a contact sync").into());
+        };
+
+        // 5. Apply the delta to the local state.
+        self.apply_contact_sync(&sync)
+    }
+
+    /// Sends a contact mutation document and adopts the revision it reports.
+    ///
+    /// `minimum` is the revision the caller needs to see: plain mutations only
+    /// require the current one, while `update_contact` insists on the revision
+    /// it computed so that a concurrent change cannot silently win.
+    pub(super) async fn commit_contact_mutation(
+        &self,
+        mutation: ContactMutation,
+        minimum: i32,
+        outdated: &str,
+    ) -> Result<i32> {
+        let request = RPCRequest::contact_mutate(0, mutation);
+        let result = self.send_control(self.peer_id(), request).await?;
+        let ResponseParams::ContactMutate(revision) = result else {
+            return Err(EncodingError::new("RPC result is not a contact revision").into());
+        };
+        if revision < minimum || revision < self.contacts_revision.get() {
+            return Err(StateError::new(outdated));
+        }
+        self.contacts_revision.set(revision);
+        Ok(revision)
+    }
+
+    /// Encodes and sends a [`ContactMutation`].
+    pub(super) async fn apply_contact_mutation(
+        &self,
+        mutation: ContactMutation,
+        minimum: i32,
+        outdated: &str,
+    ) -> Result<i32> {
+        self.commit_contact_mutation(mutation, minimum, outdated)
+            .await
     }
 }
 
@@ -1064,4 +1047,23 @@ fn decrypt_payload(
     identity.decrypt_into(sender, cipher).map_err(|error| {
         AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into()
     })
+}
+
+fn is_channel_notification(body: &NotificationBody) -> bool {
+    matches!(
+        body,
+        NotificationBody::ChannelCreate(_)
+            | NotificationBody::ChannelJoin(_)
+            | NotificationBody::ChannelDelete
+            | NotificationBody::ChannelLeave
+            | NotificationBody::ChannelOwnershipTransfer(_)
+            | NotificationBody::ChannelSessionKeyRotate(_)
+            | NotificationBody::ChannelInfoUpdate(_)
+            | NotificationBody::ChannelMembersRoleUpdate(_)
+            | NotificationBody::ChannelMembersBan(_)
+            | NotificationBody::ChannelMembersUnban(_)
+            | NotificationBody::ChannelMembersRemove(_)
+            | NotificationBody::ChannelMemberJoin(_)
+            | NotificationBody::ChannelMemberLeave(_)
+    )
 }

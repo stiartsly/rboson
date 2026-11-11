@@ -166,17 +166,7 @@ pub mod bytes_opt {
     where
         D: Deserializer<'de>,
     {
-        if de.is_human_readable() {
-            Option::<String>::deserialize(de)?
-                .map(|v| {
-                    URL_SAFE_NO_PAD
-                        .decode(v.as_bytes())
-                        .map_err(D::Error::custom)
-                })
-                .transpose()
-        } else {
-            de.deserialize_option(OptionalBytesVisitor)
-        }
+        de.deserialize_option(OptionalBytesVisitor)
     }
 }
 
@@ -198,14 +188,7 @@ pub mod bytes {
     where
         D: Deserializer<'de>,
     {
-        if de.is_human_readable() {
-            let value = String::deserialize(de)?;
-            URL_SAFE_NO_PAD
-                .decode(value.as_bytes())
-                .map_err(D::Error::custom)
-        } else {
-            de.deserialize_any(BytesVisitor)
-        }
+        de.deserialize_any(BytesVisitor)
     }
 }
 
@@ -229,6 +212,22 @@ impl<'de> Visitor<'de> for BytesVisitor {
         E: Error,
     {
         Ok(value)
+    }
+
+    fn visit_str<E>(self, value: &str) -> StdResult<Self::Value, E>
+    where
+        E: Error,
+    {
+        URL_SAFE_NO_PAD
+            .decode(value.as_bytes())
+            .map_err(E::custom)
+    }
+
+    fn visit_string<E>(self, value: String) -> StdResult<Self::Value, E>
+    where
+        E: Error,
+    {
+        self.visit_str(&value)
     }
 
     fn visit_seq<A>(self, sequence: A) -> StdResult<Self::Value, A::Error>

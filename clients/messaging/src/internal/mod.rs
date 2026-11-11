@@ -52,11 +52,7 @@ pub(crate) use {
         Handshake,
         HandshakeType,
     },
-    notification::{
-        Body as NotificationBody,
-        Event as NotificationEvent,
-        Notification,
-    },
+    notification::Notification,
 
     channel_session_rotation::SessionKeyRotation as ChannelSessionKeyRotation,
     new_channel_info::NewChannelInfo,

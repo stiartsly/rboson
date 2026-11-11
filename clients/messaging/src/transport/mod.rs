@@ -134,7 +134,7 @@ impl RpcServer {
     }
 
     fn fail_pending_rpc(&self, reason: &str) {
-        self.pending_calls.fail_all(reason);
+        self.pending_calls.clear(reason);
     }
 
     /// Reclaims expired local records; run periodically by the verticle timer.

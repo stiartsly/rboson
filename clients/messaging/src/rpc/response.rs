@@ -18,268 +18,185 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde::{Serialize, Deserialize};
+use std::result::Result as StdResult;
+use serde::{de, Deserialize};
+use serde::de::DeserializeOwned;
 use serde_cbor::Value;
 
 use boson_api::{Id, Result};
 use crate::errors::EncodingError;
+use crate::internal::{
+    ChannelInfo,
+    ContactSync,
+};
+use crate::session_info::SessionInfo;
 use super::{
     error::RPCError,
     method::Method,
 };
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum Params {
-    /// Operations that return nothing.
-    Empty,
-    /// The session list returned by `SessionList`.
-    Sessions(Value),
-    /// The revision reached by a contact mutation.
-    Revision(i32),
-    /// The document returned by `ContactSync`.
-    ContactSync(Value),
-    /// The channel document returned by `ChannelCreate` or `ChannelJoin`.
-    Channel(Value),
-    /// The channel document returned by `ChannelInfo`.
-    ChannelInfo(Value),
-    /// The members a member-management operation actually touched.
-    Members(Vec<Id>),
+    SessionList(Vec<SessionInfo>),
+    SessionRevoke(()),
+    ContactMutate(i32),
+    ContactSync(ContactSync),
+    ChannelCreate(ChannelInfo),
+    ChannelDelete(()),
+    ChannelOwnershipTransfer(()),
+    ChannelSessionKeyRotate(()),
+    ChannelInfoUpdate(()),
+    ChannelMembersRoleUpdate(Vec<Id>),
+    ChannelMembersBan(Vec<Id>),
+    ChannelMembersUnban(Vec<Id>),
+    ChannelMembersRemove(Vec<Id>),
+    ChannelJoin(ChannelInfo),
+    ChannelLeave(()),
+    ChannelInfo(ChannelInfo),
 }
 
 impl Params {
-    /// Whether a successful reply for `method` carries no result body.
-    fn accepts_empty(method: Method) -> bool {
-        matches!(
-            method,
-            Method::SessionRevoke
-                | Method::ChannelDelete
-                | Method::ChannelLeave
-                | Method::ChannelOwnershipTransfer
-                | Method::ChannelSessionKeyRotate
-                | Method::ChannelInfoUpdate
+    fn empty(method: Method) -> Option<Self> {
+        match method {
+            Method::SessionRevoke => Some(Self::SessionRevoke(())),
+            Method::ChannelDelete => Some(Self::ChannelDelete(())),
+            Method::ChannelOwnershipTransfer => Some(Self::ChannelOwnershipTransfer(())),
+            Method::ChannelSessionKeyRotate => Some(Self::ChannelSessionKeyRotate(())),
+            Method::ChannelInfoUpdate => Some(Self::ChannelInfoUpdate(())),
+            Method::ChannelLeave => Some(Self::ChannelLeave(())),
+            _ => None,
+        }
+    }
+
+    fn decode<T: DeserializeOwned>(value: Value) -> Result<T> {
+        serde_cbor::value::from_value(value).map_err(|error|
+            EncodingError::new(format!("Malformed response parameters: {error}")).into()
         )
     }
 
-    /// Interprets the `r` field of a reply according to `method`.
-    fn decode(method: Method, value: Value) -> Result<Self> {
+    fn from_result(method: Method, value: Value) -> Result<Self> {
         let malformed = || EncodingError::new(format!("Malformed result for {method:?}"));
+
         match (method, value) {
-            (
-                Method::SessionRevoke
-                | Method::ChannelDelete
-                | Method::ChannelLeave
-                | Method::ChannelOwnershipTransfer
-                | Method::ChannelSessionKeyRotate
-                | Method::ChannelInfoUpdate,
-                Value::Null,
-            ) => Ok(Self::Empty),
+            (Method::SessionList, value @ Value::Array(_)) => {
+                Ok(Self::SessionList(Self::decode(value)?))
+            }
+            (Method::SessionRevoke, Value::Null) => Ok(Self::SessionRevoke(())),
             (Method::ContactMutate, Value::Integer(revision)) => {
                 let revision = i32::try_from(revision)
                     .ok()
                     .filter(|revision| *revision >= 0)
                     .ok_or_else(malformed)?;
-                Ok(Self::Revision(revision))
+                Ok(Self::ContactMutate(revision))
             }
-            (
-                Method::ChannelMembersRoleUpdate
-                | Method::ChannelMembersBan
-                | Method::ChannelMembersUnban
-                | Method::ChannelMembersRemove,
-                value,
-            ) => {
-                let members =
-                    serde_cbor::value::from_value::<Vec<Id>>(value).map_err(|_| malformed())?;
-                Ok(Self::Members(members))
+            (Method::ContactSync, value @ Value::Map(_)) => {
+                Ok(Self::ContactSync(Self::decode(value)?))
             }
-            (Method::SessionList, value @ Value::Array(_)) => Ok(Self::Sessions(value)),
-            (Method::ContactSync, value @ Value::Map(_)) => Ok(Self::ContactSync(value)),
-            (Method::ChannelCreate | Method::ChannelJoin, value @ Value::Map(_)) => {
-                Ok(Self::Channel(value))
+            (Method::ChannelCreate, value @ Value::Map(_)) => {
+                Ok(Self::ChannelCreate(Self::decode(value)?))
             }
-            (Method::ChannelInfo, value @ Value::Map(_)) => Ok(Self::ChannelInfo(value)),
-            _ => Err(malformed()),
-        }
-    }
-
-    /// Returns `None` for the wire form of an empty reply.
-    fn into_option(self) -> Option<Self> {
-        match self {
-            Self::Empty => None,
-            result => Some(result),
+            (Method::ChannelDelete, Value::Null) => Ok(Self::ChannelDelete(())),
+            (Method::ChannelOwnershipTransfer, Value::Null) => {
+                Ok(Self::ChannelOwnershipTransfer(()))
+            }
+            (Method::ChannelSessionKeyRotate, Value::Null) => {
+                Ok(Self::ChannelSessionKeyRotate(()))
+            }
+            (Method::ChannelInfoUpdate, Value::Null) => Ok(Self::ChannelInfoUpdate(())),
+            (Method::ChannelMembersRoleUpdate, value) => {
+                Ok(Self::ChannelMembersRoleUpdate(Self::decode(value)?))
+            }
+            (Method::ChannelMembersBan, value) => {
+                Ok(Self::ChannelMembersBan(Self::decode(value)?))
+            }
+            (Method::ChannelMembersUnban, value) => {
+                Ok(Self::ChannelMembersUnban(Self::decode(value)?))
+            }
+            (Method::ChannelMembersRemove, value) => {
+                Ok(Self::ChannelMembersRemove(Self::decode(value)?))
+            }
+            (Method::ChannelJoin, value @ Value::Map(_)) => {
+                Ok(Self::ChannelJoin(Self::decode(value)?))
+            }
+            (Method::ChannelLeave, Value::Null) => Ok(Self::ChannelLeave(())),
+            (Method::ChannelInfo, value @ Value::Map(_)) => {
+                Ok(Self::ChannelInfo(Self::decode(value)?))
+            }
+            _ => Err(malformed().into()),
         }
     }
 
     /// The touched members of a member-management result.
     pub(crate) fn into_members(self) -> Result<Vec<Id>> {
         match self {
-            Self::Members(ids) => Ok(ids),
+            Self::ChannelMembersRoleUpdate(ids)
+            | Self::ChannelMembersBan(ids)
+            | Self::ChannelMembersUnban(ids)
+            | Self::ChannelMembersRemove(ids) => Ok(ids),
             _ => Err(EncodingError::new("RPC result is not a member list").into()),
         }
     }
 }
 
-/// A response sent to another peer or to the service.
-///
-/// Outbound replies only need to be serialized.
-#[derive(Debug, Serialize)]
-pub(crate) struct RPCResponse {
-    pub(crate) id: i64,
-    #[serde(rename = "m")]
-    pub(crate) method: Method,
-    #[serde(rename = "r", skip_serializing_if = "Option::is_none")]
-    pub(crate) result: Option<Params>,
-    #[serde(rename = "e", skip_serializing_if = "Option::is_none")]
-    pub(crate) error: Option<RPCError>,
-}
-
-#[allow(dead_code)]
-impl RPCResponse {
-    fn new(id: i64, method: Method, result: Option<Params>) -> Self {
-        Self {
-            id,
-            method,
-            result,
-            error: None,
-        }
-    }
-
-    pub(crate) fn success(id: i64, method: Method, result: Params) -> Self {
-        Self::new(id, method, result.into_option())
-    }
-
-    pub(crate) fn empty(id: i64, method: Method) -> Self {
-        debug_assert!(Params::accepts_empty(method));
-        Self::new(id, method, None)
-    }
-
-    pub(crate) fn error(id: i64, method: Method, error: RPCError) -> Self {
-        Self {
-            id,
-            method,
-            result: None,
-            error: Some(error),
-        }
-    }
-
-    pub(crate) fn list_sessions(id: i64, sessions: Value) -> Self {
-        Self::success(id, Method::SessionList, Params::Sessions(sessions))
-    }
-
-    pub(crate) fn revoke_session(id: i64) -> Self {
-        Self::empty(id, Method::SessionRevoke)
-    }
-
-    pub(crate) fn contact_mutate(id: i64, revision: i32) -> Self {
-        Self::success(id, Method::ContactMutate, Params::Revision(revision))
-    }
-
-    pub(crate) fn contact_sync(id: i64, document: Value) -> Self {
-        Self::success(id, Method::ContactSync, Params::ContactSync(document))
-    }
-
-    pub(crate) fn create_channel(id: i64, channel: Value) -> Self {
-        Self::success(id, Method::ChannelCreate, Params::Channel(channel))
-    }
-
-    pub(crate) fn join_channel(id: i64, channel: Value) -> Self {
-        Self::success(id, Method::ChannelJoin, Params::Channel(channel))
-    }
-
-    pub(crate) fn delete_channel(id: i64) -> Self {
-        Self::empty(id, Method::ChannelDelete)
-    }
-
-    pub(crate) fn leave_channel(id: i64) -> Self {
-        Self::empty(id, Method::ChannelLeave)
-    }
-
-    pub(crate) fn get_channel_info(id: i64, info: Value) -> Self {
-        Self::success(id, Method::ChannelInfo, Params::ChannelInfo(info))
-    }
-
-    pub(crate) fn transfer_channel_ownership(id: i64) -> Self {
-        Self::empty(id, Method::ChannelOwnershipTransfer)
-    }
-
-    pub(crate) fn rotate_channel_session_key(id: i64) -> Self {
-        Self::empty(id, Method::ChannelSessionKeyRotate)
-    }
-
-    pub(crate) fn update_channel_info(id: i64) -> Self {
-        Self::empty(id, Method::ChannelInfoUpdate)
-    }
-
-    pub(crate) fn update_channel_members_role(id: i64, members: Vec<Id>) -> Self {
-        Self::success(
-            id,
-            Method::ChannelMembersRoleUpdate,
-            Params::Members(members),
-        )
-    }
-
-    pub(crate) fn ban_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(id, Method::ChannelMembersBan, Params::Members(members))
-    }
-
-    pub(crate) fn unban_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(id, Method::ChannelMembersUnban, Params::Members(members))
-    }
-
-    pub(crate) fn remove_channel_members(id: i64, members: Vec<Id>) -> Self {
-        Self::success(id, Method::ChannelMembersRemove, Params::Members(members))
-    }
-
-    pub(crate) fn error_with(
-        id: i64,
-        method: Method,
-        code: i32,
-        message: &str,
-        data: Option<String>,
-    ) -> Self {
-        Self::error(id, method, RPCError::new(code, message, data))
-    }
-
-    pub(crate) fn serialize1(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self).map_err(|error| {
-            EncodingError::new(format!("Encoding RPC response failed: {error}")).into()
-        })
-    }
-}
-
-/// A response received for a request sent earlier.
-///
-/// Inbound replies only need to be deserialized.
 #[derive(Debug, Deserialize)]
-pub(crate) struct RPCResponseMessage {
-    pub(crate) id: i64,
+#[serde(try_from = "RawResponse")]
+pub(crate) struct RpcResponse {
+    id: i64,
+    method: Method,
+    result: Option<Params>,
+    error: Option<RPCError>,
+}
+
+impl RpcResponse {
+    pub(crate) fn id(&self) -> i64 {
+        self.id
+    }
+
+    pub(crate) fn method(&self) -> Method {
+        self.method
+    }
+
+    pub(crate) fn result(self) -> Result<Params> {
+        if let Some(error) = self.error {
+            return Err(error.into());
+        }
+        match self.result {
+            Some(params) => Ok(params),
+            None => Params::empty(self.method)
+                .ok_or_else(|| EncodingError::new(format!("Missing result for {:?}", self.method)).into()),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RawResponse {
+    #[serde(rename = "id")]
+    id: i64,
     #[serde(rename = "m")]
-    pub(crate) method: Method,
+    method: Method,
     #[serde(rename = "r", default)]
     result: Option<Value>,
     #[serde(rename = "e", default)]
     error: Option<RPCError>,
 }
 
-impl RPCResponseMessage {
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        let response: Self = serde_cbor::from_slice(bytes)
-            .map_err(|error| EncodingError::new(format!("Malformed RPC response: {error}")))?;
-        if response.id < 0 {
-            return Err(EncodingError::new("Invalid RPC response ID").into());
-        }
-        Ok(response)
-    }
+impl TryFrom<RawResponse> for RpcResponse {
+    type Error = Box<dyn std::error::Error>;
 
-    /// Yields the decoded result, or the service's `RPCError` as a typed error.
-    pub(crate) fn into_result(self) -> Result<Params> {
-        if let Some(error) = self.error {
-            return Err(error.into());
+    fn try_from(raw: RawResponse) -> StdResult<Self, Self::Error> {
+        if raw.id < 0 {
+            return Err(EncodingError::new("Invalid RPC response id").into());
         }
-        match self.result {
-            Some(value) => Params::decode(self.method, value),
-            None if Params::accepts_empty(self.method) => Ok(Params::Empty),
-            None => Err(EncodingError::new(format!("Missing result for {:?}", self.method)).into()),
-        }
+        let result = match raw.result {
+            Some(value) => Some(Params::from_result(raw.method, value)?),
+            None => None,
+        };
+        Ok(Self {
+            id: raw.id,
+            method: raw.method,
+            result,
+            error: raw.error,
+        })
     }
 }

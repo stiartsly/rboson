@@ -73,9 +73,6 @@ pub(crate) use crate::internal::{
     PhotonContent,
     MutationData,
     NewChannelInfo,
-    Notification,
-    NotificationBody,
-    NotificationEvent,
     OpaqueContact,
     PhotonChannel,
     PhotonContact,
@@ -93,7 +90,7 @@ pub(crate) use crate::rpc::{
     request::RPCRequest,
     response::{
         Params as ResponseParams,
-        RPCResponseMessage,
+        RpcResponse,
     },
 };
 

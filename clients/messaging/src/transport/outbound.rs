@@ -134,12 +134,9 @@ impl RpcServer {
         let request = RPCRequest::list_sessions(0);
 
         let result = self.send_control(self.peer_id(), request).await?;
-        let ResponseParams::Sessions(sessions) = result else {
+        let ResponseParams::SessionList(sessions) = result else {
             return Err(EncodingError::new("RPC result is not a session list").into());
         };
-
-        let sessions: Vec<SessionInfo> = serde_cbor::value::from_value(sessions)
-            .map_err(|e| EncodingError::new(format!("Failed to decode sessions: {e}")))?;
 
         Ok(sessions)
     }
@@ -304,7 +301,7 @@ impl RpcServer {
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.send_control(self.peer_id(), request).await?;
         let confirmed = match result {
-            ResponseParams::Revision(confirmed) => confirmed,
+            ResponseParams::ContactMutate(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < next_revision || confirmed < self.contacts_revision.get() {
@@ -366,7 +363,7 @@ impl RpcServer {
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.send_control(self.peer_id(), request).await?;
         let confirmed = match result {
-            ResponseParams::Revision(confirmed) => confirmed,
+            ResponseParams::ContactMutate(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < next_revision || confirmed < self.contacts_revision.get() {
@@ -410,7 +407,7 @@ impl RpcServer {
         let request = RPCRequest::create_channel(0, new_channel_info);
 
         let result = self.send_control(self.peer_id(), request).await?;
-        let ResponseParams::Channel(result) = result else {
+        let ResponseParams::ChannelCreate(result) = result else {
             return Err(EncodingError::new("RPC result is not channel info").into());
         };
 
@@ -484,7 +481,7 @@ impl RpcServer {
         let request = RPCRequest::join_channel(0, params);
 
         let result = self.send_control(ticket.channel_id(), request).await?;
-        let ResponseParams::Channel(result) = result else {
+        let ResponseParams::ChannelJoin(result) = result else {
             return Err(EncodingError::new("RPC result is not channel info").into());
         };
         let (channel, returned_session) = self.decode_channel_info(result)?;
@@ -604,8 +601,7 @@ impl RpcServer {
         }
     }
 
-    fn decode_channel_info(&self, value: Value) -> Result<(Channel, SessionContext)> {
-        let info: ChannelInfo = decode_cbor(value, "channel info")?;
+    fn decode_channel_info(&self, info: ChannelInfo) -> Result<(Channel, SessionContext)> {
         self.channel_from_info(&info)
     }
 
@@ -1094,7 +1090,7 @@ impl RpcServer {
         // 3. Send it to the home peer and 4. decode the revision it reports.
         let result = self.send_control(self.peer_id(), request).await?;
         let confirmed = match result {
-            ResponseParams::Revision(confirmed) => confirmed,
+            ResponseParams::ContactMutate(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < next_revision || confirmed < self.contacts_revision.get() {
@@ -1141,7 +1137,7 @@ impl RpcServer {
 
         let result = self.send_control(self.peer_id(), request).await?;
         let confirmed = match result {
-            ResponseParams::Revision(confirmed) => confirmed,
+            ResponseParams::ContactMutate(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < revision || confirmed < self.contacts_revision.get() {
@@ -1171,7 +1167,7 @@ impl RpcServer {
 
         let result = self.send_control(self.peer_id(), request).await?;
         let confirmed = match result {
-            ResponseParams::Revision(confirmed) => confirmed,
+            ResponseParams::ContactMutate(confirmed) => confirmed,
             _ => return Err(EncodingError::new("RPC result is not a contact revision").into()),
         };
         if confirmed < revision || confirmed < self.contacts_revision.get() {

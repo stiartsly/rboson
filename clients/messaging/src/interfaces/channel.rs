@@ -61,8 +61,8 @@ pub trait Channel: ContactOps + Sync + Send {
     /// Clones this channel into a new boxed trait object.
     fn clone_box(&self) -> Box<dyn Channel>;
 
-    fn owner(&self) -> Id;
-    fn session_id(&self) -> Id;
+    fn owner(&self) -> &Id;
+    fn session_id(&self) -> &Id;
     fn contact_box(&self) -> Box<dyn crate::ContactOps>;
     fn set_contact_revision(&mut self, revision: i32);
     fn set_owner(&mut self, owner: Id);

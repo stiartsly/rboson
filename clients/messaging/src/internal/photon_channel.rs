@@ -194,12 +194,12 @@ impl ChannelOps for PhotonChannel {
         Box::new(self.clone())
     }
 
-    fn owner(&self) -> Id {
-        self.owner
+    fn owner(&self) -> &Id {
+        &self.owner
     }
 
-    fn session_id(&self) -> Id {
-        self.session_id
+    fn session_id(&self) -> &Id {
+        &self.session_id
     }
 
     fn contact_box(&self) -> Box<dyn ContactOps> {

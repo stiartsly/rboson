@@ -19,7 +19,7 @@
 // SOFTWARE.
 
 use std::result::Result as StdResult;
-use serde::{de, Deserialize};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_cbor::Value;
 

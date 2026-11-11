@@ -56,13 +56,6 @@ pub(super) fn seal_for(
     Ok((message, payload))
 }
 
-
-/// Decodes a CBOR document the service sent us.
-pub(crate) fn decode_cbor<T: DeserializeOwned>(value: Value, what: &str) -> Result<T> {
-    serde_cbor::value::from_value(value)
-        .map_err(|error| EncodingError::new(format!("Malformed {what}: {error}")).into())
-}
-
 /// Decodes a CBOR byte string the service, or a peer, sent us.
 pub(crate) fn decode_cbor_bytes<T: DeserializeOwned>(bytes: &[u8], what: &str) -> Result<T> {
     serde_cbor::from_slice(bytes)

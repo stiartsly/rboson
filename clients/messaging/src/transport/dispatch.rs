@@ -20,7 +20,7 @@ impl RpcServer {
         })
     }
 
-    pub(crate) fn handle_poll_error(&self, error: &str) {
+    pub(crate) fn poll_event_error(&self, error: &str) {
         self.on_transport_error(error);
     }
 
@@ -73,51 +73,47 @@ impl RpcServer {
         pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
     ) {
         debug!(
-            "Processing publish message on topic '{}', QoS: {:?}, payload size: {} bytes",
+            "Received publish message on topic '{}', QoS: {:?}, payload size: {} bytes",
             publish.topic,
             publish.qos,
             publish.payload.len()
         );
+
         if publish.payload.len() > MAX_INCOMING_PACKET_SIZE {
             warn!(
-                "Ignoring MQTT message on '{}': payload exceeds the incoming packet size limit",
+                "Ignored MQTT message on '{}': payload exceeds the incoming packet size limit",
                 publish.topic
             );
             return;
         }
         let Ok(topic) = publish.topic.parse::<Topic>() else {
-            warn!("Ignoring MQTT message on '{}': unexpected topic", publish.topic);
+            warn!("Ignored MQTT message on '{}': unexpected topic", publish.topic);
             return;
         };
 
-        let payload = publish.payload.as_ref();
         let envelope = self.device_identity
-            .decrypt_into(self.options.peer_id(), payload)
-            .map_err(|e|
-                AuthenticationError::new(format!("Decrypting packet failed: {e}"))
-            );
-
+            .decrypt_into(self.options.peer_id(), &publish.payload);
         let envelope = match envelope {
             Ok(v) => v,
             Err(error) => {
-                warn!("Ignoring MQTT message on '{}': {error}", publish.topic);
+                warn!("Ignored MQTT message on '{}': {error}", publish.topic);
                 return;
             }
         };
 
-        let message = match decode_cbor_bytes(&envelope, "messaging envelope") {
+        let message = match serde_cbor::from_slice(&envelope) {
             Ok(message) => message,
             Err(error) => {
-                warn!("Ignoring MQTT message on '{}': {error}", publish.topic);
+                warn!("Ignored MQTT message on '{}': {error}", publish.topic);
                 return;
             }
         };
 
-        let session = self.clone();
+        let rpc_server = self.clone();
         let name = topic.as_str();
         pending.push(
             async move {
-                if let Err(error) = session.dispatch(topic, message).await {
+                if let Err(error) = rpc_server.dispatch(topic, message).await {
                     warn!("Failed to process MQTT message on '{}': {error}", name);
                 }
             }
@@ -143,7 +139,7 @@ impl RpcServer {
             session_present
         );
         if !self.connected.replace(true) {
-            self.notify_connection(|l| l.on_connected());
+            self.connection_listener.as_ref().on_connected();
         }
         debug!(
             "Subscribing to topics: [{}, {}, {}]",
@@ -152,17 +148,17 @@ impl RpcServer {
             &Topic::DeviceInbox
         );
 
-        let session = self.clone();
+        let rpc_server = self.clone();
         pending.push(
             async move {
-                if !session.is_open() {
+                if !rpc_server.is_open() {
                     error!("MQTT transport disappeared before subscription");
-                    session.close_transport("MQTT transport disappeared before subscription");
+                    rpc_server.close_transport("MQTT transport disappeared before subscription");
                     return;
                 }
-                if let Err(error) = session.subscribe_topics().await {
+                if let Err(error) = rpc_server.subscribe_topics().await {
                     error!("Failed to subscribe topics: {error}");
-                    session.close_transport("MQTT topic subscription failed");
+                    rpc_server.close_transport("MQTT topic subscription failed");
                 }
             }
             .boxed_local(),
@@ -176,15 +172,18 @@ impl RpcServer {
             return;
         }
         if !self.connected.replace(true) {
-            self.notify_connection(|l| l.on_connected());
+            self.connection_listener.as_ref().on_connected();
         }
     }
 
     fn on_transport_error(&self, error: &str) {
         self.ready.set(false);
-        self.fail_pending_rpc(&format!("Messaging MQTT connection failed: {error}"));
+
+        let reason = format!("Messaging MQTT connection failed: {error}");
+        self.pending_calls.clear(&reason);
+
         if self.connected.replace(false) {
-            self.notify_connection(|l| l.on_disconnected());
+            self.connection_listener.as_ref().on_disconnected();
         }
         if !self.running.get() {
             return;
@@ -202,15 +201,5 @@ impl RpcServer {
         debug!("Waiting 2s before reconnecting...");
         self.reconnect_at
             .set(Some(tokio::time::Instant::now() + Duration::from_secs(2)));
-    }
-
-    fn open_envelope(&self, payload: &[u8]) -> Result<PhotonMessage> {
-        let envelope = self.device_identity
-            .decrypt_into(self.options.peer_id(), payload)
-            .map_err(|e|
-                AuthenticationError::new(format!("Decrypting packet failed: {e}"))
-            )?;
-
-        decode_cbor_bytes(&envelope, "messaging envelope")
     }
 }

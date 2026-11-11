@@ -460,7 +460,7 @@ fn channel_to_stored(channel: &Channel, session_key: &[u8]) -> StoredContact {
         updated_at: channel.updated_at(),
         channel: Some(StoredChannel {
             id: *channel.id(),
-            owner: channel.owner(),
+            owner: *channel.owner(),
             permission: channel.permission() as i32,
             notice: channel.notice().map(ToOwned::to_owned),
             announce: channel.is_announced(),

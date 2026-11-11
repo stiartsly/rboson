@@ -89,14 +89,12 @@ pub(crate) use crate::rpc::{
     error::RPCError,
     request::RPCRequest,
     response::{
-        Params as ResponseParams,
-        RpcResponse,
+        Params as ResponseParams
     },
 };
 
 pub(crate) use super::mqtt::ClientHandle;
 pub(crate) use super::transport::{
-    decode_cbor,
     decode_cbor_bytes,
     to_cbor,
     to_cbor_bytes,

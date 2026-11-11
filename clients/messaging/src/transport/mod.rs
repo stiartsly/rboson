@@ -133,10 +133,6 @@ impl RpcServer {
         timestamp
     }
 
-    fn fail_pending_rpc(&self, reason: &str) {
-        self.pending_calls.clear(reason);
-    }
-
     /// Reclaims expired local records; run periodically by the verticle timer.
     pub(crate) fn maintenance(&self) {
         let mut requests = self.friend_requests_cache.borrow_mut();
@@ -174,7 +170,7 @@ impl RpcServer {
 
     fn close_transport(&self, reason: &str) {
         self.running.set(false);
-        self.fail_pending_rpc(reason);
+        self.pending_calls.clear(reason);
         self.close();
         self.reconnect_at.set(None);
         self.ready.set(false);

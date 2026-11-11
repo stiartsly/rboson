@@ -25,7 +25,7 @@ use std::{
     pin::Pin,
     task::{Context,Poll}
 };
-use log::{debug, warn};
+use log::debug;
 
 use boson_api::{
     errors::StateError,

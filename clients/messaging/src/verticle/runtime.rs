@@ -102,7 +102,7 @@ impl Verticle {
                 event = &mut poll_event, if !quit && rpc.is_running() => {
                     match event {
                         Ok(event) => rpc.dispatch_event(event, &mut pending),
-                        Err(error) => rpc.handle_poll_error(&error.to_string()),
+                        Err(error) => rpc.poll_event_error(&error.to_string()),
                     }
                     poll_event = Box::pin(poll_rpc.poll_event());
                 }

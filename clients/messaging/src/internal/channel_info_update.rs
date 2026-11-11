@@ -1,7 +1,10 @@
-use serde::Serialize;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use crate::Permission;
 
-#[derive(Debug, Default,Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct ChannelInfoUpdate {
     #[serde(rename = "p", skip_serializing_if = "Option::is_none")]
     permission: Option<i32>,
@@ -36,6 +39,22 @@ impl ChannelInfoUpdate {
     pub(crate) fn announced(mut self, announced: bool) -> Self {
         self.announced = Some(announced);
         self
+    }
+
+    pub(crate) fn get_permission(&self) -> Option<Permission> {
+        self.permission.map(Permission::from_i32)
+    }
+
+    pub(crate) fn get_name(&self) -> Option<Option<&str>> {
+        self.name.as_ref().map(|name| name.as_deref())
+    }
+
+    pub(crate) fn get_notice(&self) -> Option<Option<&str>> {
+        self.notice.as_ref().map(|notice| notice.as_deref())
+    }
+
+    pub(crate) fn get_announced(&self) -> Option<bool> {
+        self.announced
     }
 
     pub(crate) fn is_empty(&self) -> bool {

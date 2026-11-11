@@ -2,7 +2,7 @@ use super::prelude::*;
 use super::outbound::update_conversation;
 
 use crate::internal::notification::{
-    Body as NotificationBody,
+    Body,
     Notification,
 };
 
@@ -67,36 +67,37 @@ impl RpcServer {
         self.on_rpc_response(&payload, from)
     }
 
-    /// Inbound stages 4 and 5 for an RPC reply: decode it and complete its call.
-    fn on_rpc_response(&self, payload: &[u8], sender: &Id) -> Result<()> {
+    fn on_rpc_response(&self, payload: &[u8], from: &Id) -> Result<()> {
         self.pending_calls
             .respond(
                 serde_cbor::from_slice(payload).map_err(|error|
                     EncodingError::new(format!("Malformed RPC response: {error}"))
                 )?,
-                sender,
+                from,
             )
             .map_err(|e| e.into())
     }
 
     async fn on_state_message(&self, message: PhotonMessage, from: &Id) -> Result<()> {
-        let payload = binary_payload(message.payload, "Notification")?;
+        let payload = match message.payload {
+            Value::Bytes(bytes) => Ok(bytes),
+            _ => Err(EncodingError::new(format!("Notification payload is not binary"))),
+        }?;
 
         let home = from == self.peer_id() && message.recipient == *self.user_id();
         let recipient = message.recipient;
         let payload = if home {
-            // Home-peer notifications are already sealed for this device.
             payload
-        } else if recipient == *self.user_id() {
+        } else if &recipient == self.user_id() {
             self.user_identity.decrypt_into(from, &payload).map_err(|error| {
                 AuthenticationError::new(format!("Decrypting notification error: {error}"))
             })?
-        } else if recipient == *from {
-            let mut sessions = self.session_contexts.lock().unwrap();
-            let session = sessions.get_mut(from)
-                .ok_or_else(|| StateError::new("Channel notification session is missing"))?;
-
-            session
+        } else if &recipient == from {
+            let mut contexts = self.session_contexts.lock().unwrap();
+            let Some(session_context) = contexts.get_mut(from) else {
+                return Err(StateError::new("Channel notification session mutex is missing"));
+            };
+            session_context
                 .rx_crypto_context()?
                 .decrypt_into(&payload)
                 .map_err(|error| {
@@ -105,38 +106,39 @@ impl RpcServer {
                     ))
                 })?
         } else {
-            return Err(EncodingError::new("Invalid channel notification recipient"));
+            return Err(EncodingError::new("Invalid channel notification recipient").into());
         };
 
         self.on_notification(&payload, from).map_err(|e| e.into())
     }
 
     fn on_notification(&self, payload: &[u8], from: &Id) -> Result<()> {
-        let notification: Notification = decode_cbor_bytes(payload, "notification")?;
-        let timestamp = i64::try_from(notification.timestamp())
-            .map_err(|_| EncodingError::new("Notification timestamp is out of range"))?;
+        let notification: Notification = serde_cbor::from_slice(payload).map_err(|error|
+            EncodingError::new(format!("Malformed notification: {error}"))
+        )?;
 
-        if notification.source() == *self.user_id()
-            && is_channel_notification(notification.body())
-            && notification.id() == RpcServer::message_id(self.device_id(), timestamp)?
+        let timestamp = notification.timestamp() as i64;
+        if notification.source() == self.user_id()
+            && notification.is_channel_notification()
+            && notification.id() == &RpcServer::message_id(self.device_id(), timestamp)?
         {
             return Ok(());
         }
 
-        if from == self.peer_id() {
-            self.handle_homepeer_notification(&notification)
+        if self.peer_id() == from {
+            self.on_homepeer_notification(&notification)
         } else {
-            self.handle_channel_notification(&notification, from)
+            self.on_channel_notification(&notification, from)
         }
     }
 
-    fn handle_homepeer_notification(&self, notification: &Notification) -> Result<()> {
+    fn on_homepeer_notification(&self, notification: &Notification) -> Result<()> {
         match notification.body() {
-            NotificationBody::SessionNew(session) => {
+            Body::SessionNew(session) => {
                 self.session_listener.on_new_session(session);
                 Ok(())
             }
-            NotificationBody::ContactSync(sync) => {
+            Body::ContactSync(sync) => {
                 self.apply_contact_sync(sync)?;
                 if self.connected.get() && !self.stopping.get() && !self.ready.replace(true) {
                     info!("Messaging session is ready");
@@ -144,46 +146,46 @@ impl RpcServer {
                 }
                 Ok(())
             }
-            NotificationBody::ChannelCreate(info) => {
+            Body::ChannelCreate(info) => {
                 self.upsert_channel(info, self.peer_id(), true)
             }
             body => Err(EncodingError::new(format!(
                 "Unsupported home-peer notification: {body:?}"
-            ))),
+            )))
         }
     }
 
-    fn handle_channel_notification(
+    fn on_channel_notification(
         &self,
         notification: &Notification,
         sender: &Id,
     ) -> Result<()> {
         match notification.body() {
-            NotificationBody::ChannelCreate(info) => {
+            Body::ChannelCreate(info) => {
                 self.upsert_channel(info, sender, true)
             }
-            NotificationBody::ChannelJoin(info) => {
+            Body::ChannelJoin(info) => {
                 self.upsert_channel(info, sender, false)
             }
-            NotificationBody::ChannelDelete | NotificationBody::ChannelLeave => {
+            Body::ChannelDelete | Body::ChannelLeave => {
                 let Some(channel) = self.channels_cache.borrow_mut().remove(sender) else {
                     return Ok(());
                 };
                 self.contacts_cache.borrow_mut().remove(sender);
                 self.session_contexts.lock().unwrap().remove(sender);
-                if matches!(notification.body(), NotificationBody::ChannelDelete) {
+                if matches!(notification.body(), Body::ChannelDelete) {
                     self.channel_listener.on_channel_deleted(&channel);
                 } else {
                     self.channel_listener.on_left_channel(&channel);
                 }
                 Ok(())
             }
-            NotificationBody::ChannelSessionKeyRotate(encrypted_key) => {
+            Body::ChannelSessionKeyRotate(encrypted_key) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 if notification.source() != channel.owner() {
                     return Err(EncodingError::new(
                         "Channel session key rotation has an unexpected source",
-                    ));
+                    ).into());
                 }
                 let session = self
                     .session_contexts
@@ -214,38 +216,34 @@ impl RpcServer {
                     .on_channel_session_key_rotated(&channel);
                 Ok(())
             }
-            NotificationBody::ChannelOwnershipTransfer(new_owner) => {
+            Body::ChannelOwnershipTransfer(new_owner) => {
                 let mut channel = self.channel_snapshot(sender)?;
-                let old_owner = channel.owner();
+                let old_owner = *channel.owner();
                 channel.set_owner(*new_owner);
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener
                     .on_channel_ownership_transferred(&channel, &old_owner, new_owner);
                 Ok(())
             }
-            NotificationBody::ChannelInfoUpdate(changes) => {
+            Body::ChannelInfoUpdate(changes) => {
                 let mut channel = self.channel_snapshot(sender)?;
-                for (key, value) in changes {
-                    let serde_cbor::Value::Text(key) = key else { continue; };
-                    match (key.as_str(), value) {
-                        ("p", serde_cbor::Value::Integer(permission)) =>
-                            channel.set_permission(Permission::from_i32(*permission as i32)),
-                        ("n", serde_cbor::Value::Text(name)) =>
-                            channel.set_name(Some(name.clone())),
-                        ("n", serde_cbor::Value::Null) => channel.set_name(None),
-                        ("nt", serde_cbor::Value::Text(notice)) =>
-                            channel.set_notice(Some(notice.clone())),
-                        ("nt", serde_cbor::Value::Null) => channel.set_notice(None),
-                        ("a", serde_cbor::Value::Bool(announced)) =>
-                            channel.set_announced(*announced),
-                        _ => {}
-                    }
+                if let Some(permission) = changes.get_permission() {
+                    channel.set_permission(permission);
+                }
+                if let Some(name) = changes.get_name() {
+                    channel.set_name(name.map(ToString::to_string));
+                }
+                if let Some(notice) = changes.get_notice() {
+                    channel.set_notice(notice.map(ToString::to_string));
+                }
+                if let Some(announced) = changes.get_announced() {
+                    channel.set_announced(announced);
                 }
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
                 self.channel_listener.on_channel_updated(&channel);
                 Ok(())
             }
-            NotificationBody::ChannelMembersRoleUpdate(update) => {
+            Body::ChannelMembersRoleUpdate(update) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let changed = channel.update_member_roles(update.member_ids(), update.role());
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
@@ -253,7 +251,7 @@ impl RpcServer {
                     .on_channel_members_role_updated(&channel, &changed);
                 Ok(())
             }
-            NotificationBody::ChannelMembersBan(ids) => {
+            Body::ChannelMembersBan(ids) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let changed = channel.update_member_roles(ids, Role::Banned);
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
@@ -261,7 +259,7 @@ impl RpcServer {
                     .on_channel_members_banned(&channel, &changed);
                 Ok(())
             }
-            NotificationBody::ChannelMembersUnban(ids) => {
+            Body::ChannelMembersUnban(ids) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let changed = channel.update_member_roles(ids, Role::Member);
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
@@ -269,7 +267,7 @@ impl RpcServer {
                     .on_channel_members_unbanned(&channel, &changed);
                 Ok(())
             }
-            NotificationBody::ChannelMembersRemove(ids) => {
+            Body::ChannelMembersRemove(ids) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let removed = channel.remove_members(ids);
                 self.channels_cache.borrow_mut().insert(*sender, channel.clone());
@@ -277,7 +275,7 @@ impl RpcServer {
                     .on_channel_members_removed(&channel, &removed);
                 Ok(())
             }
-            NotificationBody::ChannelMemberJoin(member) => {
+            Body::ChannelMemberJoin(member) => {
                 member.joined()
                     .duration_since(UNIX_EPOCH)
                     .map(|_| ())
@@ -290,7 +288,7 @@ impl RpcServer {
                     .on_channel_member_joined(&channel, &(Box::new(member.clone()) as ChannelMember));
                 Ok(())
             }
-            NotificationBody::ChannelMemberLeave(id) => {
+            Body::ChannelMemberLeave(id) => {
                 let mut channel = self.channel_snapshot(sender)?;
                 let member = channel.members().into_iter().find(|member| member.id() == id);
                 channel.remove_members(&[*id]);
@@ -1047,23 +1045,4 @@ fn decrypt_payload(
     identity.decrypt_into(sender, cipher).map_err(|error| {
         AuthenticationError::new(format!("Decrypting {what} failed: {error}")).into()
     })
-}
-
-fn is_channel_notification(body: &NotificationBody) -> bool {
-    matches!(
-        body,
-        NotificationBody::ChannelCreate(_)
-            | NotificationBody::ChannelJoin(_)
-            | NotificationBody::ChannelDelete
-            | NotificationBody::ChannelLeave
-            | NotificationBody::ChannelOwnershipTransfer(_)
-            | NotificationBody::ChannelSessionKeyRotate(_)
-            | NotificationBody::ChannelInfoUpdate(_)
-            | NotificationBody::ChannelMembersRoleUpdate(_)
-            | NotificationBody::ChannelMembersBan(_)
-            | NotificationBody::ChannelMembersUnban(_)
-            | NotificationBody::ChannelMembersRemove(_)
-            | NotificationBody::ChannelMemberJoin(_)
-            | NotificationBody::ChannelMemberLeave(_)
-    )
 }

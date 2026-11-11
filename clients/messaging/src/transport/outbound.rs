@@ -412,7 +412,7 @@ impl RpcServer {
         };
 
         let (channel, returned_session) = self.decode_channel_info(result)?;
-        if channel.owner() != *self.user_id() || channel.session_id() != *session.id() {
+        if channel.owner() != self.user_id() || channel.session_id() != session.id() {
             return Err(EncodingError::new(
                 "Created channel owner or session does not match",
             ));
@@ -427,7 +427,7 @@ impl RpcServer {
 
     pub(crate) async fn remove_channel(&self, channel_id: &Id) -> Result<()> {
         let channel = self.channel_snapshot(channel_id)?;
-        if channel.owner() != *self.user_id() {
+        if channel.owner() != self.user_id() {
             return Err(StateError::new("Only the owner can delete the channel"));
         }
 
@@ -486,7 +486,7 @@ impl RpcServer {
         };
         let (channel, returned_session) = self.decode_channel_info(result)?;
         if channel.id() != ticket.channel_id()
-            || channel.session_id() != *session.id()
+            || channel.session_id() != session.id()
             || !channel.has_member(self.user_id())
         {
             return Err(EncodingError::new(
@@ -504,7 +504,7 @@ impl RpcServer {
 
     pub(crate) async fn leave_channel(&self, channel_id: &Id) -> Result<()> {
         let channel = self.channel_snapshot(channel_id)?;
-        if channel.owner() == *self.user_id() {
+        if channel.owner() == self.user_id() {
             return Err(StateError::new("The owner cannot leave the channel"));
         }
 
@@ -575,7 +575,7 @@ impl RpcServer {
         InviteTicket::create(
             &self.user_identity,
             *channel_id,
-            channel.session_id(),
+            *channel.session_id(),
             invitee,
             expiration,
             key,
@@ -743,7 +743,7 @@ impl RpcServer {
         if target.is_banned() {
             return Err(StateError::new("The new owner is banned from the channel"));
         }
-        let old_owner = channel.owner();
+        let old_owner = *channel.owner();
         if new_owner == old_owner {
             return Err(ArgumentError::new("The new owner is already the channel owner").into());
         }
@@ -784,7 +784,7 @@ impl RpcServer {
             let current_session = sessions
                 .get_mut(channel_id)
                 .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-            if current_session.session_id() != &channel.session_id() {
+            if current_session.session_id() != channel.session_id() {
                 return Err(StateError::new(
                     "Channel session key does not match the channel",
                 ));
@@ -991,7 +991,7 @@ impl RpcServer {
         user_id: &Id,
         description: &str,
     ) -> Result<()> {
-        if channel.owner() != *user_id {
+        if channel.owner() != user_id {
             return Err(StateError::new(description));
         }
         Ok(())

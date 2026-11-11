@@ -18,19 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::collections::BTreeMap;
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Serialize, Deserialize};
 
-use boson_api::Id;
-use crate::{
-    errors::EncodingError,
-    SessionInfo,
-};
+use boson_api::{utils, Id};
+use crate::SessionInfo;
 use super::{
     ChannelInfo,
+    ChannelInfoUpdate,
     ChannelMembersRole,
     ContactSync,
     PhotonChannelMember,
@@ -54,11 +48,9 @@ pub(crate) enum Body {
     #[serde(rename = "cot")]
     ChannelOwnershipTransfer(Id),
     #[serde(rename = "csr")]
-    ChannelSessionKeyRotate(
-        #[serde(with = "serde_with::As::<serde_with::Bytes>")] Vec<u8>,
-    ),
+    ChannelSessionKeyRotate(#[serde(with = "utils::bytes")] Vec<u8>),
     #[serde(rename = "ciu")]
-    ChannelInfoUpdate(BTreeMap<serde_cbor::Value, serde_cbor::Value>),
+    ChannelInfoUpdate(ChannelInfoUpdate),
     #[serde(rename = "cru")]
     ChannelMembersRoleUpdate(ChannelMembersRole),
     #[serde(rename = "cmb")]
@@ -86,12 +78,12 @@ pub(crate) struct Notification {
 }
 
 impl Notification {
-    pub(crate) fn id(&self) -> Id {
-        self.id
+    pub(crate) fn id(&self) -> &Id {
+        &self.id
     }
 
-    pub(crate) fn source(&self) -> Id {
-        self.source
+    pub(crate) fn source(&self) -> &Id {
+        &self.source
     }
 
     pub(crate) fn timestamp(&self) -> u64 {
@@ -101,10 +93,27 @@ impl Notification {
     pub(crate) fn body(&self) -> &Body {
         &self.body
     }
+
+    pub(crate) fn is_channel_notification(&self) -> bool {
+        matches!(
+            &self.body,
+            Body::ChannelCreate(_)
+                | Body::ChannelJoin(_)
+                | Body::ChannelDelete
+                | Body::ChannelLeave
+                | Body::ChannelOwnershipTransfer(_)
+                | Body::ChannelSessionKeyRotate(_)
+                | Body::ChannelInfoUpdate(_)
+                | Body::ChannelMembersRoleUpdate(_)
+                | Body::ChannelMembersBan(_)
+                | Body::ChannelMembersUnban(_)
+                | Body::ChannelMembersRemove(_)
+                | Body::ChannelMemberJoin(_)
+                | Body::ChannelMemberLeave(_)
+        )
+    }
 }
 
-/*
 #[cfg(test)]
 #[path = "../unitests/test_notification.rs"]
 mod test_notification;
-*/

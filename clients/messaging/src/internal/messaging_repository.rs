@@ -95,17 +95,14 @@ impl MessagingRepository {
 
     pub(crate) fn put_message(&mut self, message: &mut PhotonMessage) -> Result<()> {
         let stored = message_to_stored(message)?;
-        message.rid = self.store.put_message(&stored)?;
+        message.set_rid(0);
+        message.set_rid(self.store.put_message(&stored)?);
         Ok(())
     }
 
     pub(crate) fn update_message_sent_time(&mut self, message: &PhotonMessage) -> Result<()> {
-        let sent_at = message
-            .sent_at
-            .map(time_to_millis)
-            .transpose()?
-            .unwrap_or(0);
-        self.store.update_message_sent_time(&message.id, sent_at)
+        let sent_at = message.sent_at_u64().unwrap_or(0) as i64;
+        self.store.update_message_sent_time(message.id(), sent_at)
     }
 
     pub(crate) fn messages_before(
@@ -369,29 +366,30 @@ fn message_to_stored(message: &PhotonMessage) -> Result<StoredMessage> {
         .conversation_id()
         .copied()
         .ok_or_else(|| StateError::new("Message has no conversation id"))?;
-    let created_at = i64::try_from(message.created_at)
-        .map_err(|_| StateError::new("Message timestamp is out of range"))?;
-    let sent_at = message.sent_at.map(time_to_millis).transpose()?.unwrap_or(0);
-    let received_at = message
-        .received_at
-        .map(time_to_millis)
-        .transpose()?
-        .unwrap_or(0);
+    let created_at = message.created_at_u64();
+    let sent_at = message.sent_at_u64();
+    let received_at = message.received_at_u64().unwrap_or(0);
 
     Ok(StoredMessage {
-        rid: message.rid,
-        id: message.id,
+        rid: message.rid(),
+        id: *message.id(),
         conversation_id,
-        version: i32::from(message.version),
-        recipient: message.recipient,
-        message_type: i32::from(message.message_type),
-        from: message.from,
-        created_at,
+        version: message.version(),
+        recipient: *message.recipient(),
+        message_type: message.message_type() as i32,
+        from: message.from().cloned(),
+        created_at: i64::try_from(created_at)
+            .map_err(|_| StateError::new("Message timestamp is out of range"))?,
         content_type,
         content_disposition,
         payload,
-        sent_at,
-        received_at,
+        sent_at: sent_at
+            .map(|timestamp| i64::try_from(timestamp)
+                .map_err(|_| StateError::new("Sent timestamp is out of range")))
+            .transpose()?
+            .unwrap_or(0),
+        received_at: i64::try_from(received_at)
+            .map_err(|_| StateError::new("Received timestamp is out of range"))?,
     })
 }
 
@@ -405,21 +403,21 @@ fn stored_to_message(stored: StoredMessage) -> Result<PhotonMessage> {
         .map_err(|_| StateError::new("Invalid message timestamp"))?;
 
     let mut message = PhotonMessage::new(
-        version,
+        version as i32,
         stored.id,
         stored.recipient,
-        message_type,
+        i32::from(message_type),
         stored.from,
         created_at,
         serde_cbor::Value::Bytes(payload.clone()),
     );
-    message.rid = stored.rid;
-    message.conversation_id = Some(stored.conversation_id);
+    message.set_rid(stored.rid);
+    message.set_converstation_id(stored.conversation_id);
     if stored.sent_at > 0 {
-        message.sent_at = Some(millis_to_time(stored.sent_at)?);
+        message.set_sent(stored.sent_at as u64);
     }
     if stored.received_at > 0 {
-        message.received_at = Some(millis_to_time(stored.received_at)?);
+        message.set_received_at(stored.received_at as u64);
     }
     message.payload_bytes = payload;
     if !message.payload_bytes.is_empty() {
@@ -609,13 +607,14 @@ mod tests {
             10,
             serde_cbor::Value::Bytes(Vec::new()),
         );
-        message.conversation_id = Some(contact_id);
+
+        message.set_converstation_id(contact_id);
         message.payload_bytes = Vec::new();
         repository.put_message(&mut message).unwrap();
-        assert!(message.rid > 0);
+        assert!(message.rid() > 0);
         let messages = repository.messages_before(&contact_id, i64::MAX, 10, 0).unwrap();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].rid, message.rid);
+        assert_eq!(messages[0].rid(), message.rid());
         let conversation = repository.conversation(&contact_id).unwrap().unwrap();
         assert_eq!(conversation.id(), &contact_id);
 

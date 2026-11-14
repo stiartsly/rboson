@@ -113,3 +113,5 @@ pub use interfaces::{
     MessageBuilderOps,
     MessageOps,
 };
+
+pub(crate) use interfaces::MessageOriginated;

@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::fmt;
 use boson_api::{
     errors::ArgumentError,
     Error,
@@ -58,6 +59,23 @@ impl TryFrom<i32> for MessageType {
             3 => Ok(MessageType::State),
             _ => Err(ArgumentError::new(format!("invalid message type: {}",value)))
         }
+    }
+}
+
+impl AsRef<str> for MessageType {
+    fn as_ref(&self) -> &str {
+        match self {
+            MessageType::Handshake => "handshake",
+            MessageType::Content => "content",
+            MessageType::Control => "control",
+            MessageType::State => "state",
+        }
+    }
+}
+
+impl fmt::Display for MessageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }
 

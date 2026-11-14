@@ -8,12 +8,7 @@ pub(crate) use std::{
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-pub(crate) use futures::{
-    stream::FuturesUnordered,
-    FutureExt,
-};
 pub(crate) use log::{debug, error, info, warn};
-pub(crate) use serde::Deserialize;
 pub(crate) use serde_cbor::Value;
 pub(crate) use sha2::{Digest, Sha256};
 pub(crate) use tokio::sync;
@@ -35,7 +30,6 @@ pub(crate) use crate::{
     errors::{
         AuthenticationError,
         EncodingError,
-        ProtocolError,
     },
     message::MessageType,
     options::Options,
@@ -56,10 +50,10 @@ pub(crate) use crate::interfaces::{
     ChannelMemberOps,
     ConversationOps,
     MessageBuilderOps,
-    MessageOps,
 };
 
 pub(crate) use crate::internal::{
+    async_cache::AsyncCache,
     ChannelInfo,
     ChannelSessionKeyRotation,
     ContactData,
@@ -95,7 +89,6 @@ pub(crate) use crate::rpc::{
 
 pub(crate) use super::mqtt::ClientHandle;
 pub(crate) use super::transport::{
-    decode_cbor_bytes,
     to_cbor,
     to_cbor_bytes,
 };

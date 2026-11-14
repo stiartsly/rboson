@@ -173,10 +173,6 @@ impl RpcServer {
         }
     }
 
-    /// Polls the event loop for the next event.
-    ///
-    /// The loop is kept behind the lock across `poll` so that selecting another
-    /// `select!` branch cannot drop the transport out from under it.
     pub(crate) async fn poll(&self) -> StdResult<Event, rumqttc::ConnectionError> {
         let mut transport = self.mqtt_eventloop.lock().await;
         match transport.as_mut() {
@@ -189,13 +185,12 @@ impl RpcServer {
     }
 
     pub(crate) async fn subscribe_topics(&self) -> Result<()> {
-        let client = self.client()?;
         let topics = [
             SubscribeFilter::new(Topic::UserInbox.to_string(), QoS::AtLeastOnce),
             SubscribeFilter::new(Topic::UserOutbox.to_string(), QoS::AtLeastOnce),
             SubscribeFilter::new(Topic::DeviceInbox.to_string(), QoS::AtLeastOnce),
         ];
-        client.subscribe_many(topics).await.map_err(|e|
+        self.client()?.subscribe_many(topics).await.map_err(|e|
             StateError::new(format!("Subscribing topics failed: {e}")).into()
         )
     }

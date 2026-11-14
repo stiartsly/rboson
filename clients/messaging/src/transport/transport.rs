@@ -39,10 +39,10 @@ pub(super) fn seal_for(
     let created_at = u64::try_from(timestamp)
         .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
     let message = PhotonMessage::new(
-        MESSAGE_VERSION,
+        MESSAGE_VERSION as i32,
         RpcServer::message_id(device_identity.id(), timestamp)?,
         *recipient,
-        message_type,
+        i32::from(message_type),
         None,
         created_at,
         Value::Bytes(body),
@@ -54,12 +54,6 @@ pub(super) fn seal_for(
             AuthenticationError::new(format!("Encrypting {what} failed: {error}"))
         })?;
     Ok((message, payload))
-}
-
-/// Decodes a CBOR byte string the service, or a peer, sent us.
-pub(crate) fn decode_cbor_bytes<T: DeserializeOwned>(bytes: &[u8], what: &str) -> Result<T> {
-    serde_cbor::from_slice(bytes)
-        .map_err(|error| EncodingError::new(format!("Malformed {what}: {error}")).into())
 }
 
 /// Converts a serialisable value into its CBOR data-model form.

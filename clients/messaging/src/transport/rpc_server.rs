@@ -28,10 +28,10 @@ pub(crate) struct RpcServer {
 
     pub(super) repository: Rc<RefCell<MessagingRepository>>,
 
-    pub(super) friend_requests_cache: RefCell<HashMap<Id, FriendRequest>>,
-    pub(super) channels_cache: RefCell<HashMap<Id, Channel>>,
-    pub(super) contacts_cache: RefCell<HashMap<Id, Contact>>,
-    pub(super) conversations_cache: Arc<Mutex<HashMap<Id, PhotonConversation>>>,
+    pub(super) friend_requests_cache: AsyncCache<FriendRequest>,
+    pub(super) channels_cache: AsyncCache<Channel>,
+    pub(super) contacts_cache: AsyncCache<Contact>,
+    pub(super) conversations_cache: AsyncCache<PhotonConversation>,
 
     pub(super) connection_listener: Arc<dyn ConnectionListener>,
     pub(super) message_listener: Arc<dyn MessageListener>,
@@ -48,7 +48,7 @@ impl RpcServer {
         let device_key = options.options.device_key().clone();
         let device_identity = CryptoIdentity::from(device_key);
 
-        let repository = MessagingRepository::new();
+        let repository = Rc::new(RefCell::new(MessagingRepository::new()));
 
         Ok(Rc::new(Self {
             options: options.options,
@@ -74,12 +74,12 @@ impl RpcServer {
             session_contexts: Arc::new(Mutex::new(HashMap::new())),
             blocked_contacts: Arc::new(Mutex::new(HashSet::new())),
 
-            repository: Rc::new(RefCell::new(repository)),
+            repository: repository.clone(),
 
-            friend_requests_cache: RefCell::new(HashMap::new()),
-            channels_cache: RefCell::new(HashMap::new()),
-            contacts_cache: RefCell::new(HashMap::new()),
-            conversations_cache: Arc::new(Mutex::new(HashMap::new())),
+            friend_requests_cache: AsyncCache::new(repository.clone()),
+            channels_cache: AsyncCache::new(repository.clone()),
+            contacts_cache: AsyncCache::new(repository.clone()),
+            conversations_cache: AsyncCache::new(repository),
 
             connection_listener: options.connection_listener.clone(),
             message_listener: options.message_listener.clone(),
@@ -125,7 +125,7 @@ impl RpcServer {
         let _lifecycle = self.lifecycle.lock().await;
         self.stopping.set(true);
         let result = self.stop_transport().await;
-        self.close_transport("Messaging session stopped");
+        self.close_transport();
         self.clear_eventloop();
         self.repository.borrow_mut().close();
         result

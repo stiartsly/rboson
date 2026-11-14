@@ -39,6 +39,7 @@ use boson_api::{
 use crate::{
     channel::{Channel, Permission,Role},
     ChannelListener,
+    ChannelMember,
     ConnectionListener,
     contact::Contact,
     ContactListener,
@@ -67,6 +68,185 @@ use crate::internal::{
 /// Default maximum number of messages returned by a range query.
 pub const DEFAULT_MESSAGES_LIMIT: usize = 100;
 
+struct ClientListeners {
+    connection: Arc<dyn ConnectionListener>,
+    message: Arc<dyn MessageListener>,
+    channel: Arc<dyn ChannelListener>,
+    contact: Arc<dyn ContactListener>,
+    session: Arc<dyn SessionListener>,
+    friend_request: Arc<dyn FriendRequestListener>,
+}
+
+fn dispatch<L, F>(listener: Arc<L>, callback: F)
+where
+    L: ?Sized + Send + Sync + 'static,
+    F: FnOnce(&L) + Send + 'static,
+{
+    tokio::task::spawn(async move {
+        callback(listener.as_ref());
+    });
+}
+
+impl ConnectionListener for ClientListeners {
+    fn on_connecting(&self) {
+        dispatch(self.connection.clone(), |listener| listener.on_connecting());
+    }
+
+    fn on_connected(&self) {
+        dispatch(self.connection.clone(), |listener| listener.on_connected());
+    }
+
+    fn on_ready(&self) {
+        dispatch(self.connection.clone(), |listener| listener.on_ready());
+    }
+
+    fn on_disconnected(&self) {
+        dispatch(self.connection.clone(), |listener| listener.on_disconnected());
+    }
+}
+
+impl MessageListener for ClientListeners {
+    fn on_message(&self, message: &Message) {
+        let message = message.clone_box();
+        dispatch(self.message.clone(), move |listener| listener.on_message(&message));
+    }
+
+    fn on_sent(&self, message: &Message) {
+        let message = message.clone_box();
+        dispatch(self.message.clone(), move |listener| listener.on_sent(&message));
+    }
+}
+
+impl ChannelListener for ClientListeners {
+    fn on_channel_created(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_created(&channel));
+    }
+
+    fn on_channel_deleted(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_deleted(&channel));
+    }
+
+    fn on_joined_channel(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_joined_channel(&channel));
+    }
+
+    fn on_left_channel(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_left_channel(&channel));
+    }
+
+    fn on_channel_ownership_transferred(&self, channel: &Channel, old_owner: &Id, new_owner: &Id) {
+        let channel = channel.clone();
+        let old_owner = *old_owner;
+        let new_owner = *new_owner;
+        dispatch(self.channel.clone(), move |listener| {
+            listener.on_channel_ownership_transferred(&channel, &old_owner, &new_owner)
+        });
+    }
+
+    fn on_channel_session_key_rotated(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_session_key_rotated(&channel));
+    }
+
+    fn on_channel_updated(&self, channel: &Channel) {
+        let channel = channel.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_updated(&channel));
+    }
+
+    fn on_channel_member_joined(&self, channel: &Channel, member: &ChannelMember) {
+        let channel = channel.clone();
+        let member = member.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_member_joined(&channel, &member));
+    }
+
+    fn on_channel_member_left(&self, channel: &Channel, member: &ChannelMember) {
+        let channel = channel.clone();
+        let member = member.clone();
+        dispatch(self.channel.clone(), move |listener| listener.on_channel_member_left(&channel, &member));
+    }
+
+    fn on_channel_members_removed(&self, channel: &Channel, members: &[ChannelMember]) {
+        let channel = channel.clone();
+        let members = members.iter().map(|member| member.clone()).collect::<Vec<_>>();
+        dispatch(self.channel.clone(), move |listener| {
+            listener.on_channel_members_removed(&channel, &members)
+        });
+    }
+
+    fn on_channel_members_banned(&self, channel: &Channel, members: &[ChannelMember]) {
+        let channel = channel.clone();
+        let members = members.iter().map(|member| member.clone()).collect::<Vec<_>>();
+        dispatch(self.channel.clone(), move |listener| {
+            listener.on_channel_members_banned(&channel, &members)
+        });
+    }
+
+    fn on_channel_members_unbanned(&self, channel: &Channel, members: &[ChannelMember]) {
+        let channel = channel.clone();
+        let members = members.iter().map(|member| member.clone()).collect::<Vec<_>>();
+        dispatch(self.channel.clone(), move |listener| {
+            listener.on_channel_members_unbanned(&channel, &members)
+        });
+    }
+
+    fn on_channel_members_role_updated(&self, channel: &Channel, members: &[ChannelMember]) {
+        let channel = channel.clone();
+        let members = members.iter().map(|member| member.clone()).collect::<Vec<_>>();
+        dispatch(self.channel.clone(), move |listener| {
+            listener.on_channel_members_role_updated(&channel, &members)
+        });
+    }
+}
+
+impl ContactListener for ClientListeners {
+    fn on_contact_added(&self, contact: &Contact) {
+        let contact = contact.clone();
+        dispatch(self.contact.clone(), move |listener| listener.on_contact_added(&contact));
+    }
+
+    fn on_contacts_updated(&self, contacts: &[Contact]) {
+        let contacts = contacts.iter().map(|contact| contact.clone()).collect::<Vec<_>>();
+        dispatch(self.contact.clone(), move |listener| listener.on_contacts_updated(&contacts));
+    }
+
+    fn on_contacts_removed(&self, contact_ids: &[Id]) {
+        let contact_ids = contact_ids.to_vec();
+        dispatch(self.contact.clone(), move |listener| listener.on_contacts_removed(&contact_ids));
+    }
+
+    fn on_contacts_cleared(&self) {
+        dispatch(self.contact.clone(), |listener| listener.on_contacts_cleared());
+    }
+}
+
+impl SessionListener for ClientListeners {
+    fn on_new_session(&self, session: &SessionInfo) {
+        let session = session.clone();
+        dispatch(self.session.clone(), move |listener| listener.on_new_session(&session));
+    }
+}
+
+impl FriendRequestListener for ClientListeners {
+    fn on_friend_request(&self, user_id: &Id, hello: Option<&str>) {
+        let user_id = *user_id;
+        let hello = hello.map(ToString::to_string);
+        dispatch(self.friend_request.clone(), move |listener| {
+            listener.on_friend_request(&user_id, hello.as_deref())
+        });
+    }
+
+    fn on_friend_request_accepted(&self, user_id: &Id) {
+        let user_id = *user_id;
+        dispatch(self.friend_request.clone(), move |listener| {
+            listener.on_friend_request_accepted(&user_id)
+        });
+    }
+}
+
 /// The Boson Messaging Client implementation.
 pub struct Client {
     options: Arc<Options>,
@@ -75,12 +255,7 @@ pub struct Client {
     connected: Arc<AtomicBool>,
     ready: Arc<AtomicBool>,
 
-    connection_listener: Arc<dyn ConnectionListener>,
-    message_listener: Arc<dyn MessageListener>,
-    channel_listener: Arc<dyn ChannelListener>,
-    contact_listener: Arc<dyn ContactListener>,
-    session_listener: Arc<dyn SessionListener>,
-    friend_request_listener: Arc<dyn FriendRequestListener>,
+    listeners: Arc<ClientListeners>,
 
     verticle: Cell<Option<VerticleClient>>,
     lifecycle: tokio::sync::Mutex<()>,
@@ -94,24 +269,21 @@ impl Client {
     pub fn new(options: Options) -> Self {
         Self::setup_logging(&options);
 
-        let connection_listener = options.connection_listener();
-        let message_listener = options.message_listener();
-        let channel_listener = options.channel_listener();
-        let contact_listener = options.contact_listener();
-        let session_listener = options.session_listener();
-        let friend_request_listener = options.friend_request_listener();
+        let listeners = Arc::new(ClientListeners {
+            connection: options.connection_listener(),
+            message: options.message_listener(),
+            channel: options.channel_listener(),
+            contact: options.contact_listener(),
+            session: options.session_listener(),
+            friend_request: options.friend_request_listener(),
+        });
 
         Self {
             options: Arc::new(options),
             running: AtomicBool::new(false),
             connected: Arc::new(AtomicBool::new(false)),
             ready: Arc::new(AtomicBool::new(false)),
-            connection_listener,
-            message_listener,
-            channel_listener,
-            contact_listener,
-            session_listener,
-            friend_request_listener,
+            listeners,
             verticle: Cell::new(None),
             lifecycle: tokio::sync::Mutex::new(()),
         }
@@ -302,7 +474,7 @@ impl Client {
         Box::new(internal::ClientMessageBuilder::new(
             recipient,
             sender,
-            self.message_listener.clone(),
+            self.listeners.message.clone(),
         ))
     }
 }
@@ -608,7 +780,7 @@ impl Client {
 
     fn verticle_options(&self) -> VerticleOptions {
         let connection_listener = Arc::new(ClientConnectionListener::new(
-            self.connection_listener.clone(),
+            self.listeners.clone(),
             self.connected.clone(),
             self.ready.clone(),
         ));
@@ -616,11 +788,11 @@ impl Client {
         VerticleOptions {
             options: self.options.clone(),
             connection_listener,
-            message_listener: self.message_listener.clone(),
-            channel_listener: self.channel_listener.clone(),
-            contact_listener: self.contact_listener.clone(),
-            session_listener: self.session_listener.clone(),
-            friend_request_listener: self.friend_request_listener.clone(),
+            message_listener: self.listeners.message.clone(),
+            channel_listener: self.listeners.channel.clone(),
+            contact_listener: self.listeners.contact.clone(),
+            session_listener: self.listeners.session.clone(),
+            friend_request_listener: self.listeners.friend_request.clone(),
         }
     }
 }

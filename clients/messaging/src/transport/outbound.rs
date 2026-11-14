@@ -149,7 +149,7 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(crate) async fn friend_request(
+    pub(crate) async fn send_friend_request(
         &self,
         user_id: &Id,
         hello: Option<String>
@@ -584,12 +584,11 @@ impl RpcServer {
     }
 
     pub(super) fn channel_snapshot(&self, id: &Id) -> Result<Channel> {
-        let channel = self.channels_cache.borrow().get(id).cloned();
-        if let Some(channel) = &channel {
-            Ok(channel.clone())
-        } else {
-            Err(StateError::new(format!("Channel {id} does not exist")).into())
-        }
+        self.channels_cache
+            .borrow()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| StateError::new(format!("Channel {id} does not exist")).into())
     }
 
     fn contact_snapshot(&self, id: &Id) -> Result<Contact> {
@@ -1195,7 +1194,7 @@ impl RpcServer {
             blocked_contacts: self.blocked_contacts.clone(),
             origin_clock: self.origin_clock.clone(),
             conversation_contact: recipient.and_then(|id| self.contacts_cache.borrow().get(&id).cloned()),
-            conversations: self.conversations_cache.clone(),
+            conversations: self.conversations_cache.shared(),
             peer_id: *self.peer_id(),
             content_type: None,
             content_disposition: None,
@@ -1271,6 +1270,14 @@ impl RpcServer {
         inner: Option<&Id>,
         what: &str,
     ) -> Result<()> {
+        if message_type == MessageType::State as u8 {
+            return Err(StateError::new(
+                "Messaging clients do not send state messages",
+            ).into());
+        }
+        if !self.is_open() {
+            return Err(StateError::new("Messaging client is not connected").into());
+        }
         let (_, payload) = super::transport::seal_for(
             &self.user_identity,
             &self.device_identity,
@@ -1461,11 +1468,11 @@ impl MessageBuilderOps for SessionMessageBuilder {
 
             // The returned message mirrors what a recipient would see, so the
             // caller can render it without a round trip.
-            wire.from = Some(*this.user_identity.id());
-            wire.sent_at = Some(SystemTime::now());
+            wire.set_from(*this.user_identity.id());
+            wire.set_sent(SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_millis() as u64).unwrap_or(0));
             wire.payload_bytes = content_bytes;
             wire.content = Some(content);
-            wire.conversation_id = Some(recipient);
+            wire.set_converstation_id(recipient);
             let contact = this
                 .conversation_contact
                 .unwrap_or_else(|| Box::new(PhotonContact::new(recipient, ContactType::Auto, timestamp)) as Contact);

@@ -40,7 +40,7 @@ pub(crate) enum Body {
     #[serde(rename = "cc")]
     ChannelCreate(ChannelInfo),
     #[serde(rename = "cd")]
-    ChannelDelete,
+    ChannelDeletion,
     #[serde(rename = "cj")]
     ChannelJoin(ChannelInfo),
     #[serde(rename = "cl")]
@@ -99,7 +99,7 @@ impl Notification {
             &self.body,
             Body::ChannelCreate(_)
                 | Body::ChannelJoin(_)
-                | Body::ChannelDelete
+                | Body::ChannelDeletion
                 | Body::ChannelLeave
                 | Body::ChannelOwnershipTransfer(_)
                 | Body::ChannelSessionKeyRotate(_)

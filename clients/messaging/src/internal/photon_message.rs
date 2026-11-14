@@ -18,17 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
+use std::time::SystemTime;
 use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
-use boson_api::{
-    utils,
-    Id,
-};
+use boson_api::{utils, Id};
 use crate::{
     MessageOps,
     MessageContentOps,
+    MessageOriginated,
     MessageType,
 };
 use super::photon_content::PhotonContent;
@@ -38,61 +36,56 @@ use super::photon_content::PhotonContent;
 // ---------------------------------------------------------------------------
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PhotonMessage {
-    #[serde(skip)]
-    pub(crate) rid: i64,
-
     #[serde(rename = "v")]
-    pub(crate) version: u8,
+    version: i32,
 
     #[serde(rename = "id", with = "utils::id")]
-    pub(crate) id: Id,
+    id: Id,
 
     #[serde(rename = "r", with = "utils::id")]
-    pub(crate) recipient: Id,
+    recipient: Id,
 
     #[serde(rename = "y")]
-    pub(crate) message_type: u8,
+    message_type: i32,
 
     #[serde(
         rename = "f",
         default,
         with = "utils::id_opt",
-        skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) from: Option<Id>,
+    from: Option<Id>,
 
     #[serde(
         rename = "c",
         default,
         skip_serializing_if = "utils::is_default"
     )]
-    pub(crate) created_at: u64,
+    created_at: u64,
 
     #[serde(rename = "p")]
     pub(crate) payload: Value,
 
-    #[serde(skip)]
-    pub(crate) received_at: Option<SystemTime>,
 
     #[serde(skip)]
-    pub(crate) sent_at: Option<SystemTime>,
-
+    rid: i64,
     #[serde(skip)]
-    pub(crate) payload_bytes: Vec<u8>,
-
+    received_at: Option<u64>,
+    #[serde(skip)]
+    sent_at: Option<u64>,
+    #[serde(skip)]
+    pub(crate)  payload_bytes: Vec<u8>,
     #[serde(skip)]
     pub(crate) content: Option<PhotonContent>,
-
     #[serde(skip)]
-    pub(crate) conversation_id: Option<Id>,
+    conversation_id: Option<Id>,
 }
 
 impl PhotonMessage {
     pub(crate) fn new(
-        version: u8,
+        version: i32,
         id: Id,
         recipient: Id,
-        message_type: u8,
+        message_type: i32,
         from: Option<Id>,
         created_at: u64,
         payload: Value,
@@ -113,6 +106,62 @@ impl PhotonMessage {
             conversation_id: None,
         }
     }
+
+    pub(crate) fn set_converstation_id(&mut self, conv_id: Id) {
+        self.conversation_id = Some(conv_id);
+    }
+
+    pub(crate) fn set_from(&mut self, from: Id) {
+        self.from = Some(from);
+    }
+
+    pub(crate) fn set_sent(&mut self, sent_at: u64) {
+        self.sent_at = Some(sent_at);
+    }
+
+    pub(crate) fn set_received_at(&mut self, received_at: u64) {
+        self.received_at = Some(received_at);
+    }
+
+    pub(crate) fn set_received(&mut self) {
+        self.received_at = Some(boson_api::as_ms!(SystemTime::now()) as u64);
+    }
+
+    pub(crate) fn set_rid(&mut self, rid: i64) {
+        self.rid = rid;
+    }
+
+    pub(crate) fn from_or_throw(&self) -> boson_api::Result<&Id> {
+        self.from.as_ref().ok_or_else(|| {
+            boson_api::errors::StateError::new("Message sender is not set").into()
+        })
+    }
+
+    pub(crate) fn version(&self) -> i32 {
+        self.version
+    }
+
+    pub(crate) fn created_at_u64(&self) -> u64 {
+        self.created_at
+    }
+
+    pub(crate) fn sent_at_u64(&self) -> Option<u64> {
+        self.sent_at
+    }
+
+    pub(crate) fn received_at_u64(&self) -> Option<u64> {
+        self.received_at
+    }
+}
+
+impl MessageOriginated for PhotonMessage {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.created_at
+    }
 }
 
 impl MessageOps for PhotonMessage {
@@ -125,13 +174,7 @@ impl MessageOps for PhotonMessage {
     }
 
     fn conversation_id(&self) -> Option<&Id> {
-        self.conversation_id.as_ref().or_else(|| {
-            if self.received_at.is_some() {
-                self.from.as_ref()
-            } else {
-                Some(&self.recipient)
-            }
-        })
+        self.conversation_id.as_ref()
     }
 
     fn recipient(&self) -> &Id {
@@ -139,8 +182,7 @@ impl MessageOps for PhotonMessage {
     }
 
     fn message_type(&self) -> MessageType {
-        // Only content messages are surfaced through the public listener API.
-        MessageType::Content
+        MessageType::try_from(self.message_type).unwrap()
     }
 
     fn from(&self) -> Option<&Id> {
@@ -148,15 +190,15 @@ impl MessageOps for PhotonMessage {
     }
 
     fn created_at(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(self.created_at)
+        boson_api::from_ms!(self.created_at)
     }
 
     fn received_at(&self) -> Option<SystemTime> {
-        self.received_at
+        self.received_at.map(|ts| boson_api::from_ms!(ts))
     }
 
     fn sent_at(&self) -> Option<SystemTime> {
-        self.sent_at
+        self.sent_at.map(|ts| boson_api::from_ms!(ts))
     }
 
     fn payload_as_bytes(&self) -> &[u8] {

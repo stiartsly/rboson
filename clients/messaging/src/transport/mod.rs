@@ -45,6 +45,8 @@ use crate::{
     channel::Channel,
     contact::Contact,
     internal::session_context::SessionContext,
+    Conversation,
+    FriendRequest,
 };
 
 pub(super) const MESSAGE_VERSION: u8 = 2;
@@ -168,9 +170,9 @@ impl RpcServer {
         }
     }
 
-    fn close_transport(&self, reason: &str) {
+    fn close_transport(&self) {
         self.running.set(false);
-        self.pending_calls.clear(reason);
+        self.pending_calls.clear("TODO");
         self.close();
         self.reconnect_at.set(None);
         self.ready.set(false);
@@ -180,17 +182,80 @@ impl RpcServer {
     }
 
     pub(crate) fn user_id(&self) -> &Id {
-        self.options.user_id()
+        self.user_identity.id()
     }
 
     pub(crate) fn device_id(&self) -> &Id {
-        self.options.device_id()
+        self.device_identity.id()
     }
 
     pub(crate) fn peer_id(&self) -> &Id {
         self.options.peer_id()
     }
 
+    pub(crate) fn session_context_for(&self, from: &Id) -> Option<SessionContext> {
+        self.session_contexts.lock().unwrap().get(from).cloned()
+    }
+
+    pub(crate) async fn channel(&self, id: &Id) -> Option<Channel> {
+        self.channels_cache.borrow().get(id).cloned()
+    }
+
+    pub(crate) async fn contact(&self, id: &Id) -> Option<Contact> {
+        self.contacts_cache
+            .get(id, |repository, id| {
+                let stored = repository
+                    .load_contacts()?
+                    .into_iter()
+                    .find(|contact| contact.id == *id);
+                stored
+                    .map(|contact| repository.contact_from_stored(&contact))
+                    .transpose()
+            })
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) async fn friend_request(&self, id: &Id) -> Option<FriendRequest> {
+        self.friend_requests_cache
+            .get(id, |repository, id| {
+                Ok(repository
+                    .load_friend_requests()?
+                    .into_iter()
+                    .find(|request| request.user_id() == id))
+            })
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) async fn conversation(&self, id: &Id) -> Option<Conversation> {
+        self.conversations_cache
+            .get(id, |repository, id| repository.conversation(id))
+            .ok()
+            .flatten()
+            .map(|conversation| Box::new(conversation) as Conversation)
+    }
+
+    pub(crate) async fn put_channel(&self, channel: &Channel) -> Result<()> {
+        let session_key = self.persisted_session_key(channel.id())?;
+        let revision = self.contacts_revision.get();
+        self.repository
+            .borrow_mut()
+            .put_channel(revision, channel, &session_key)?;
+        self.channels_cache
+            .borrow_mut()
+            .insert(*channel.id(), channel.clone());
+        self.contacts_cache
+            .borrow_mut()
+            .insert(*channel.id(), channel.contact_box());
+        Ok(())
+    }
+
+    pub(crate) async fn invalidate_channel(&self, channel_id: &Id) {
+        self.channels_cache.borrow_mut().remove(channel_id);
+        self.contacts_cache.borrow_mut().remove(channel_id);
+        self.session_contexts.lock().unwrap().remove(channel_id);
+    }
 }
 
 mod prelude;

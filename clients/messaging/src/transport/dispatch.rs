@@ -1,22 +1,28 @@
-use tokio::time;
+use tokio::time::{Instant, Duration};
 use log::trace;
 use rumqttc::{
-    Event,
+    Event as MqttEvent,
     Incoming,
     Outgoing,
     Publish,
 };
+pub(crate) use futures::{
+    stream::FuturesUnordered,
+    FutureExt,
+};
+
+use boson_api::errors::StateError;
 
 use super::prelude::*;
 use super::mqtt::MAX_INCOMING_PACKET_SIZE;
 
 impl RpcServer {
-    pub(crate) async fn poll_event(&self) -> Result<Event> {
+    pub(crate) async fn poll_event(&self) -> Result<MqttEvent> {
         if let Some(deadline) = self.reconnect_at.get() {
-            time::sleep_until(deadline).await;
+            tokio::time::sleep_until(deadline).await;
         }
         self.poll().await.map_err(|error| {
-            boson_api::errors::StateError::new(format!("MQTT polling failed: {error}")).into()
+            StateError::new(format!("MQTT polling failed: {error}")).into()
         })
     }
 
@@ -26,50 +32,113 @@ impl RpcServer {
 
     pub(crate) fn dispatch_event(
         self: &Rc<Self>,
-        event: Event,
+        event: MqttEvent,
         pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
     ) {
         match event {
-            Event::Incoming(Incoming::ConnAck(connack)) => {
-                self.on_connack(
-                    connack.code == rumqttc::ConnectReturnCode::Success,
-                    connack.session_present,
-                    pending,
-                );
+            MqttEvent::Incoming(Incoming::ConnAck(connack)) => {
+                self.on_connection_ack(connack, pending);
             }
-            Event::Incoming(Incoming::SubAck(suback)) => {
-                debug!(
-                    "Received SubAck for packet {:?}, return codes: {:?}",
-                    suback.pkid, suback.return_codes
-                );
-                let accepted = suback.return_codes.len() == 3
-                    && suback.return_codes.iter()
-                        .all(|code| matches!(code, rumqttc::SubscribeReasonCode::Success(_)));
-                self.on_suback(accepted);
+            MqttEvent::Incoming(Incoming::SubAck(suback)) => {
+                self.on_subscription_ack(suback);
             }
-            Event::Incoming(Incoming::Publish(publish)) => {
+            MqttEvent::Incoming(Incoming::Publish(publish)) => {
                 self.on_publish(publish, pending);
             }
-            Event::Incoming(Incoming::PubAck(puback)) => {
+            MqttEvent::Incoming(Incoming::PubAck(puback)) => {
                 trace!("Received PubAck for packet id {}", puback.pkid);
             }
-            Event::Incoming(Incoming::PingResp) => {
+            MqttEvent::Incoming(Incoming::PingResp) => {
                 trace!("Received ping response from messaging server.");
             }
-            Event::Incoming(Incoming::Disconnect) => {
+            MqttEvent::Incoming(Incoming::Disconnect) => {
                 warn!("Messaging server sent DISCONNECT");
+                // TODO: Handle server-initiated disconnect if necessary
             }
-            Event::Incoming(_) => {}
-            Event::Outgoing(Outgoing::Publish(packet_id)) => {
+            MqttEvent::Incoming(_) => {}
+            MqttEvent::Outgoing(Outgoing::Publish(packet_id)) => {
                 trace!("Sent outgoing MQTT publish packet id {}", packet_id);
             }
-            Event::Outgoing(_) => {}
+            MqttEvent::Outgoing(_) => {}
+        }
+    }
+
+    fn on_connection_ack(
+        self: &Rc<Self>,
+        conack: rumqttc::ConnAck,
+        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
+    ) {
+        debug!(
+            "Received ConnAck from messaging server with code {:?} and session present {}",
+            conack.code,
+            conack.session_present
+        );
+
+        if conack.code != rumqttc::ConnectReturnCode::Success {
+            warn!("Messaging MQTT connection was rejected with code {:?}", conack.code);
+            return;
+        }
+
+        self.ready.set(false);
+        info!(
+            "Connected to messaging server (session_present: {})",
+            conack.session_present
+        );
+        if !self.connected.replace(true) {
+            self.connection_listener.as_ref().on_connected();
+        }
+
+        debug!(
+            "Subscribing to topics: [{}, {}, {}]",
+            &Topic::UserInbox,
+            &Topic::UserOutbox,
+            &Topic::DeviceInbox
+        );
+
+        let cloned_server = self.clone();
+        pending.push(
+            async move {
+                if !cloned_server.is_open() {
+                    error!("MQTT transport disappeared before subscription");
+                    cloned_server.close_transport();
+                    return;
+                }
+                if let Err(error) = cloned_server.subscribe_topics().await {
+                    error!("Failed to subscribe topics: {error}");
+                    cloned_server.close_transport();
+                }
+            }
+            .boxed_local(),
+        );
+    }
+
+    fn on_subscription_ack(
+        self: &Rc<Self>,
+        suback: rumqttc::SubAck
+    ) {
+        debug!(
+            "Received SubAck for packet {:?}, return codes: {:?}",
+            suback.pkid, suback.return_codes
+        );
+
+        let accepted = suback.return_codes.len() == 3
+            && suback.return_codes.iter()
+                .all(|code| matches!(code, rumqttc::SubscribeReasonCode::Success(_)));
+
+        if !accepted {
+            error!("Messaging MQTT topic subscription was rejected");
+            self.close_transport();
+            return;
+        }
+
+        if !self.connected.replace(true) {
+            self.connection_listener.as_ref().on_connected();
         }
     }
 
     fn on_publish(
         self: &Rc<Self>,
-        publish: Publish,
+        publish: rumqttc::Publish,
         pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
     ) {
         debug!(
@@ -79,101 +148,63 @@ impl RpcServer {
             publish.payload.len()
         );
 
-        if publish.payload.len() > MAX_INCOMING_PACKET_SIZE {
-            warn!(
-                "Ignored MQTT message on '{}': payload exceeds the incoming packet size limit",
-                publish.topic
-            );
-            return;
-        }
-        let Ok(topic) = publish.topic.parse::<Topic>() else {
-            warn!("Ignored MQTT message on '{}': unexpected topic", publish.topic);
-            return;
-        };
-
-        let envelope = self.device_identity
-            .decrypt_into(self.options.peer_id(), &publish.payload);
-        let envelope = match envelope {
+        let (topic, message) = match self.try_on_publish(publish) {
             Ok(v) => v,
-            Err(error) => {
-                warn!("Ignored MQTT message on '{}': {error}", publish.topic);
+            Err(e) => {
+                warn!("Failed to decode publish: {}", e);
                 return;
             }
         };
 
-        let message = match serde_cbor::from_slice(&envelope) {
-            Ok(message) => message,
-            Err(error) => {
-                warn!("Ignored MQTT message on '{}': {error}", publish.topic);
-                return;
-            }
-        };
-
-        let rpc_server = self.clone();
-        let name = topic.as_str();
+        let cloned_server = self.clone();
         pending.push(
             async move {
-                if let Err(error) = rpc_server.dispatch(topic, message).await {
-                    warn!("Failed to process MQTT message on '{}': {error}", name);
-                }
-            }
-            .boxed_local(),
+                cloned_server.dispatch(topic, message).await;
+            }.boxed_local()
         );
     }
 
-    fn on_connack(
+    fn try_on_publish(
         self: &Rc<Self>,
-        accepted: bool,
-        session_present: bool,
-        pending: &mut FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>>,
-    ) {
-        if !accepted {
-            error!("Messaging MQTT connection was rejected");
-            self.close_transport("Messaging MQTT connection rejected");
-            return;
+        publish: Publish,
+    ) -> Result<(Topic, PhotonMessage)> {
+        if publish.payload.len() > MAX_INCOMING_PACKET_SIZE {
+            return Err(EncodingError::new(
+                &format!("Ignored MQTT message on '{}': payload exceeds incoming packet size limit",
+                 publish.topic
+            )));
+        }
+        let topic = publish
+            .topic
+            .parse::<Topic>()
+            .map_err(|_| {
+                EncodingError::new(
+                    &format!("Ignored MQTT message on '{}': unexpected topic", publish.topic)
+                )
+            })?;
+
+        let payload = self
+            .device_identity
+            .decrypt_into(self.options.peer_id(), &publish.payload)
+            .map_err(|_| {
+                EncodingError::new(
+                    &format!("Ignored MQTT message on '{}': decryption failed", publish.topic)
+                )
+            })?;
+
+        let message: PhotonMessage = serde_cbor::from_slice(&payload)
+            .map_err(|_| EncodingError::new(
+                &format!("Ignored MQTT message on '{}': deserialization of Photon message failed",
+                publish.topic
+            )))?;
+
+        if message.version() != MESSAGE_VERSION as i32 {
+            return Err(EncodingError::new(
+                &format!("Ignored MQTT message on '{}': unsupported message version", publish.topic)
+            ));
         }
 
-        self.ready.set(false);
-        info!(
-            "Connected to messaging server (session_present: {})",
-            session_present
-        );
-        if !self.connected.replace(true) {
-            self.connection_listener.as_ref().on_connected();
-        }
-        debug!(
-            "Subscribing to topics: [{}, {}, {}]",
-            &Topic::UserInbox,
-            &Topic::UserOutbox,
-            &Topic::DeviceInbox
-        );
-
-        let rpc_server = self.clone();
-        pending.push(
-            async move {
-                if !rpc_server.is_open() {
-                    error!("MQTT transport disappeared before subscription");
-                    rpc_server.close_transport("MQTT transport disappeared before subscription");
-                    return;
-                }
-                if let Err(error) = rpc_server.subscribe_topics().await {
-                    error!("Failed to subscribe topics: {error}");
-                    rpc_server.close_transport("MQTT topic subscription failed");
-                }
-            }
-            .boxed_local(),
-        );
-    }
-
-    fn on_suback(&self, accepted: bool) {
-        if !accepted {
-            error!("Messaging MQTT topic subscription was rejected");
-            self.close_transport("Messaging MQTT topic subscription was rejected");
-            return;
-        }
-        if !self.connected.replace(true) {
-            self.connection_listener.as_ref().on_connected();
-        }
+        Ok((topic, message))
     }
 
     fn on_transport_error(&self, error: &str) {
@@ -193,13 +224,13 @@ impl RpcServer {
             Ok(password) => self.refresh_credentials(&password),
             Err(error) => {
                 error!("Failed to refresh MQTT credentials: {error}");
-                self.close_transport("Failed to refresh MQTT credentials");
+                self.close_transport();
                 return;
             }
         }
         warn!("Messaging MQTT connection error: {error}");
         debug!("Waiting 2s before reconnecting...");
         self.reconnect_at
-            .set(Some(tokio::time::Instant::now() + Duration::from_secs(2)));
+            .set(Some(Instant::now() + Duration::from_secs(2)));
     }
 }

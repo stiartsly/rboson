@@ -22,6 +22,7 @@ mod channel;
 mod contact;
 mod conversation;
 mod message;
+mod message_originated;
 
 pub use {
     channel::Channel as ChannelOps,
@@ -35,4 +36,8 @@ pub use {
     message::Message as MessageOps,
     message::MessageContent as MessageContentOps,
     message::MessageBuilder as MessageBuilderOps,
+};
+
+pub(crate) use {
+    message_originated::MessageOriginated,
 };

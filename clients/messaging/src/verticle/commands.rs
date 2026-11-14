@@ -149,7 +149,7 @@ pub(super) fn handle(
             result: promise,
         }) => {
             respond(pending, promise, async move {
-                rpc.friend_request(&params.user_id, params.hello).await
+                rpc.send_friend_request(&params.user_id, params.hello).await
             });
         }
         Event::FriendAccept(Body {

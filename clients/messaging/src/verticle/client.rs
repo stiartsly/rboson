@@ -38,6 +38,7 @@ use crate::internal::{
     ChannelMembersRole,
     PhotonConversation,
     PhotonFriendRequest,
+    PhotonContact,
     NewChannelInfo
 };
 use super::{
@@ -265,20 +266,21 @@ impl VerticleClient {
         notice: Option<String>,
         announcement: bool,
     ) -> Result<Channel> {
-        let keypair = signature::KeyPair::random();
-        let id = Id::from(keypair.public_key());
-        let session_key = keypair.private_key().as_bytes().to_vec();
-        let ci = NewChannelInfo::new(
-            id,
-            session_key,
+        let session_key = signature::KeyPair::random();
+        let session_id = Id::from(session_key.public_key());
+        let session_sk = session_key.private_key().as_bytes().to_vec();
+        let new_ci = NewChannelInfo::new(
+            session_id,
+            session_sk,
             permission,
             Some(name),
             notice,
             announcement
         );
         self.call(|promise| {
-            Event::CreateChannel(Body(ci, promise))
+            Event::CreateChannel(Body(new_ci, promise))
         }).await
+        .map(Into::into)
     }
 
     pub(crate) async fn remove_channel(&self, channel_id: Id) -> Result<()> {
@@ -291,6 +293,7 @@ impl VerticleClient {
         self.call(|promise| {
             Event::JoinChannel(Body(ticket, promise))
         }).await
+        .map(Into::into)
     }
 
     pub(crate) async fn leave_channel(&self, channel_id: Id) -> Result<()> {
@@ -311,9 +314,9 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn rotate_channel_session_key(&self, id: Id) -> Result<()> {
+    pub(crate) async fn rotate_channel_session_key(&self, id: Id, new_key: Option<Vec<u8>>) -> Result<()> {
         self.call(|promise| {
-            Event::RotateChannelSessionKey(Body(id, promise))
+            Event::RotateChannelSessionKey(Body((id, new_key), promise))
         }).await
     }
 
@@ -348,20 +351,20 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn get_contact(&self, id: Id) -> Result<Option<Contact>> {
+    pub(crate) async fn get_contact(&self, id: &Id) -> Result<Option<PhotonContact>> {
         let contacts = self.call(|promise| {
-            Event::GetContacts(Body(Some(id), promise))
+            Event::GetContacts(Body(Some(*id), promise))
         }).await?;
         Ok(contacts.into_iter().next())
     }
 
-    pub(crate) async fn get_contacts(&self) -> Result<Vec<Contact>> {
+    pub(crate) async fn get_contacts(&self) -> Result<Vec<PhotonContact>> {
         self.call(|promise| {
             Event::GetContacts(Body(None, promise))
         }).await
     }
 
-    pub(crate) async fn update_contact(&self, contact: Contact) -> Result<()> {
+    pub(crate) async fn update_contact(&self, contact: PhotonContact) -> Result<()> {
         self.call(|promise| {
             Event::UpdateContact(Body(contact, promise))
         }).await

@@ -30,8 +30,7 @@ fn test_friend_request() {
     assert_eq!(handshake.body, HandshakeType::FriendRequest(hello.clone()));
     assert!(handshake.from.is_none());
 
-    let encoded = handshake.serialize()
-            .expect("friend request should serialize");
+    let encoded = handshake.serialize();
     let decoded = Handshake::deserialize(&encoded)
             .expect("friend request should deserialize");
 
@@ -53,8 +52,7 @@ fn test_friend_request_accept() {
     );
     assert!(handshake.from.is_none());
 
-    let encoded = handshake.serialize()
-            .expect("friend request accept should serialize");
+    let encoded = handshake.serialize();
     let decoded = Handshake::deserialize(&encoded)
             .expect("friend request accept should deserialize");
 

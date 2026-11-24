@@ -18,21 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::{fmt, hash};
 use serde::{Serialize, Deserialize};
 use serde_cbor::Value;
 
-use boson_api::{
-    utils,
-    CryptoIdentity,
-    Id,
-    Identity,
-    Result,
-};
-use crate::errors::{
-    AuthenticationError,
-    EncodingError,
-};
-use super::ContactData;
+use boson_api::{utils, CryptoIdentity, Id, Identity, Result};
+use crate::errors::{AuthenticationError, EncodingError};
+use super::PhotonContact;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct OpaqueContact {
@@ -42,12 +34,12 @@ pub(crate) struct OpaqueContact {
     #[serde(rename = "v")]
     revision: i32,
 
-    #[serde(rename = "d")]
-    data: Value,
+    #[serde(rename = "d", with = "utils::bytes")]
+    data: Vec<u8>
 }
 
 impl OpaqueContact {
-    pub(crate) fn new(id: Id, revision: i32, data: Value) -> Self {
+    pub(crate) fn new(id: Id, revision: i32, data: Vec<u8>) -> Self {
         Self { id, revision, data }
     }
 
@@ -60,20 +52,17 @@ impl OpaqueContact {
     }
 
     /// Decrypts the envelope and validates the contact document inside it.
-    pub(crate) fn decode_into(&self, identity: &CryptoIdentity) -> Result<(ContactData, Vec<u8>)> {
+    pub(crate) fn decode_into(&self, identity: &CryptoIdentity) -> Result<(PhotonContact, Vec<u8>)> {
         if self.revision < 0 {
             return Err(EncodingError::new(format!(
                 "Contact revision is negative {}",
                 self.revision
             )));
         }
-        let Value::Bytes(encrypted) = &self.data else {
-            return Err(EncodingError::new("Opaque contact data is not binary"));
-        };
 
         // 1. Decrypt: the envelope that was sealed for ourselves.
         let encoded = identity
-            .decrypt_into(identity.id(), encrypted)
+            .decrypt_into(identity.id(), &self.data)
             .map_err(|error| AuthenticationError::new(format!("Decrypting contact failed: {error}")))?;
 
         // 2. Decode: the CBOR bytes back into a document.
@@ -88,14 +77,42 @@ impl OpaqueContact {
             .entry(Value::Text("v".into()))
             .or_insert(Value::Integer(self.revision.into()));
 
-        let data: ContactData = serde_cbor::value::from_value(Value::Map(decoded))
+        let mut contact: PhotonContact = serde_cbor::value::from_value(Value::Map(decoded))
             .map_err(|error| EncodingError::new(format!("Malformed contact data: {error}")))?;
 
-        if data.id != self.id {
+        if contact.id != self.id {
             return Err(EncodingError::new("Contact ID mismatch"));
         }
-        data.contact(self.revision)?;
+        contact.set_revision(self.revision);
 
-        Ok((data, encoded))
+        Ok((contact, encoded))
+    }
+}
+
+impl Eq for OpaqueContact {}
+impl PartialEq for OpaqueContact {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id &&
+        self.revision == other.revision &&
+        self.data == other.data
+    }
+}
+
+impl hash::Hash for OpaqueContact {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.revision.hash(state);
+        self.data.hash(state);
+    }
+}
+
+impl fmt::Display for OpaqueContact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f,
+            "OpaqueContact={{ id: {}, revision: {}, data: {:?} }}",
+            self.id,
+            self.revision,
+            self.data
+        )
     }
 }

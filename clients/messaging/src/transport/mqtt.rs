@@ -111,10 +111,15 @@ impl RpcServer {
         let user_id   = self.user_identity.id().to_string();
 
         let mut opts = MqttOptions::new(client_id.clone(), host, port);
+        let advertised_revision = if contacts_revision == 0 {
+            i32::MAX
+        } else {
+            contacts_revision
+        };
         let credentials = format!(
             "{}?contactsRevision={}",
             self.password()?,
-            contacts_revision
+            advertised_revision
         );
         opts.set_credentials(&user_id, &credentials);
         opts.set_keep_alive(Duration::from_secs(30));

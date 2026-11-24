@@ -1,10 +1,8 @@
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use std::fmt;
+use serde::{Serialize, Deserialize};
 use crate::Permission;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub(crate) struct ChannelInfoUpdate {
     #[serde(rename = "p", skip_serializing_if = "Option::is_none")]
     permission: Option<i32>,
@@ -62,5 +60,24 @@ impl ChannelInfoUpdate {
             && self.name.is_none()
             && self.notice.is_none()
             && self.announced.is_none()
+    }
+}
+
+impl fmt::Display for ChannelInfoUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ChannelInfoUpdate {{ ")?;
+        if let Some(permission) = self.get_permission() {
+            write!(f, "permission: {:?}, ", permission)?;
+        }
+        if let Some(name) = self.get_name() {
+            write!(f, "name: {:?}, ", name)?;
+        }
+        if let Some(notice) = self.get_notice() {
+            write!(f, "notice: {:?}, ", notice)?;
+        }
+        if let Some(announced) = self.get_announced() {
+            write!(f, "announced: {:?}, ", announced)?;
+        }
+        write!(f, "}}")
     }
 }

@@ -1,6 +1,51 @@
 use std::sync::atomic::AtomicI64;
 
-use super::prelude::*;
+use boson_api::CryptoContext;
+
+
+
+use crate::{ContactHandler, FriendRequestHandler};
+use std::{
+    cell::{Cell, RefCell},
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Arc,
+    sync::Mutex,
+};
+use log::{debug, info, warn};
+use sha2::Digest;
+use tokio::sync;
+
+use boson_api::{
+    Result,
+    CryptoIdentity,
+    Id,
+    Identity,
+};
+
+use crate::{
+    contact::ContactType,
+    options::Options,
+    ChannelListener,
+    ConnectionListener,
+    ContactListener,
+    FriendRequestListener,
+    MessageListener,
+    SessionListener,
+    ChannelMemberHandler
+};
+
+
+use crate::internal::{
+    SessionContext,
+    MessagingRepository,
+};
+
+use crate::rpc::call::Calls;
+
+use super::mqtt::ClientHandle;
+use crate::internal::verticle::VerticleOptions;
+
 
 pub(crate) struct RpcServer {
     pub(super) options: Arc<Options>,
@@ -22,8 +67,10 @@ pub(crate) struct RpcServer {
     pub(super) contacts_revision: Cell<i32>,
     pub(super) contact_sync_needed: Cell<bool>,
 
-    pub(super) user_identity: CryptoIdentity,
+    pub(super) user_identity:   CryptoIdentity,
     pub(super) device_identity: CryptoIdentity,
+    pub(crate) service_context: Rc<RefCell<CryptoContext>>,
+    pub(crate) self_context:    Rc<RefCell<CryptoContext>>,
 
     pub(super) session_contexts: Arc<Mutex<HashMap<Id, SessionContext>>>,
     pub(super) blocked_contacts: Arc<Mutex<HashSet<Id>>>,
@@ -40,10 +87,18 @@ pub(crate) struct RpcServer {
 impl RpcServer {
     pub(crate) fn new(options: VerticleOptions) -> Result<Rc<Self>> {
         let user_key = options.options.user_key().clone();
-        let user_identity = CryptoIdentity::from(user_key);
-
         let device_key = options.options.device_key().clone();
+
+        let user_identity = CryptoIdentity::from(user_key);
         let device_identity = CryptoIdentity::from(device_key);
+
+        let peer_id = options.options.peer_id();
+        let self_context = Rc::new(RefCell::new(
+            user_identity.create_crypto_context(user_identity.id())?
+        ));
+        let service_context = Rc::new(RefCell::new(
+            device_identity.create_crypto_context(peer_id)?
+        ));
 
         let repository = RefCell::new(MessagingRepository::new());
 
@@ -65,8 +120,11 @@ impl RpcServer {
 
             contacts_revision: Cell::new(0),
             contact_sync_needed: Cell::new(false),
+
             user_identity,
             device_identity,
+            self_context,
+            service_context,
 
             session_contexts: Arc::new(Mutex::new(HashMap::new())),
             blocked_contacts: Arc::new(Mutex::new(HashSet::new())),

@@ -22,7 +22,6 @@ pub(crate) mod serde;
 pub(crate) mod handshake;
 pub(crate) mod notification;
 pub(crate) mod photon_content;
-pub(crate) mod contact_data;
 pub(crate) mod contact_mutation;
 pub(crate) mod contact_sync;
 pub(crate) mod contact_opaque;
@@ -32,7 +31,6 @@ pub(crate) mod channel_info_update;
 pub(crate) mod channel_members_role;
 pub(crate) mod channel_session_rotation;
 pub(crate) mod new_channel_info;
-pub(crate) mod join_channel;
 pub(crate) mod session_context;
 pub(crate) mod connection_listener;
 
@@ -45,6 +43,7 @@ pub(crate) mod verticle;
 pub(crate) mod photon_message;
 pub(crate) mod photon_channel;
 pub(crate) mod photon_contact;
+pub(crate) mod photon_friend;
 pub(crate) mod photon_conversation;
 pub(crate) mod photon_friend_request;
 
@@ -54,6 +53,7 @@ pub(crate) use {
         HandshakeType,
     },
     notification::Notification,
+    photon_friend::PhotonFriend,
     photon_friend_request::PhotonFriendRequest,
 
     channel_session_rotation::SessionKeyRotation as ChannelSessionKeyRotation,
@@ -62,12 +62,10 @@ pub(crate) use {
     channel_members_role::ChannelMembersRole,
     channel_info_update::ChannelInfoUpdate,
 
-    contact_data::ContactData,
     contact_sync::{ContactSync, SyncType},
     contact_mutation::{ContactMutation, MutationData},
     contact_opaque::OpaqueContact,
 
-    join_channel::JoinChannel,
 
     photon_channel::PhotonChannel,
     photon_contact::PhotonContact,

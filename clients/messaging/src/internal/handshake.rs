@@ -70,10 +70,8 @@ impl Handshake {
         self.from = Some(from);
     }
 
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self).map_err(|e|
-            EncodingError::new(&format!("Serialize handshake error: {e}")).into()
-        )
+    pub(crate) fn serialize(&self) -> Vec<u8> {
+        serde_cbor::to_vec(self).expect("Serializing handshake failed")
     }
 
     pub(crate) fn deserialize(payload: &[u8]) -> Result<Self> {

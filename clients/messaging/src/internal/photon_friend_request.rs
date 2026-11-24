@@ -28,20 +28,37 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct PhotonFriendRequest {
-    user_id: Id,
+    user_id     : Id,
     initiator_id: Id,
-    hello: Option<String>,
-    accepted: bool,
+    hello       : Option<String>,
+    accepted    : bool,
 
-    created_at: i64,
-    accepted_at: Option<i64>,
-    updated_at: i64,
+    created_at  : i64,
+    accepted_at : Option<i64>,
+    updated_at  : i64,
 }
 
 impl PhotonFriendRequest {
     const EXPIRATION: Duration = Duration::from_secs(60 * 60 * 24 * 7); // 1 week
 
     pub(crate) fn new(
+        user_id: Id,
+        initiator_id: Id,
+        hello: Option<String>,
+        created_at: i64,
+    ) -> Self {
+        Self {
+            user_id,
+            initiator_id,
+            hello,
+            accepted: false,
+            created_at,
+            accepted_at: None,
+            updated_at: created_at,
+        }
+    }
+
+    pub(crate) fn restore(
         user_id: Id,
         initiator_id: Id,
         hello: Option<String>,
@@ -61,40 +78,26 @@ impl PhotonFriendRequest {
         }
     }
 
-    pub(crate) fn create(
-        user_id: Id,
-        initiator_id: Id,
-        hello: Option<String>,
-        created_at: i64,
-    ) -> Self {
-        Self::new(
-            user_id,
-            initiator_id,
-            hello,
-            false,
-            created_at,
-            None,
-            created_at,
-        )
-    }
-
-    /// Creates a record for a request received in a handshake.
     pub(crate) fn received(
         user_id: Id,
         initiator_id: Id,
         hello: Option<String>,
         sent_at: i64,
-        now: i64,
+        updated_at: i64,
     ) -> Self {
         Self {
             user_id,
             initiator_id,
             hello,
             accepted: false,
-            created_at: sent_at.min(now),
+            created_at: sent_at.min(updated_at),
             accepted_at: None,
-            updated_at: now,
+            updated_at: updated_at,
         }
+    }
+
+    pub(crate) fn not_in_the_future(time: i64, now: i64) -> i64 {
+        time.min(now)
     }
 
     pub(crate) fn accept_now(&mut self) {

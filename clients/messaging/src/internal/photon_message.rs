@@ -86,30 +86,34 @@ impl PhotonMessage {
         version: i32,
         id: Id,
         recipient: Id,
-        message_type: i32,
+        message_type: MessageType,
         from: Option<Id>,
         created_at: i64,
         payload: Value,
     ) -> Self {
+        let payload_bytes = match &payload {
+            Value::Bytes(bytes) => bytes.clone(),
+            _ => Vec::new(),
+        };
         Self {
             rid: 0,
             version,
             id,
             recipient,
-            message_type,
+            message_type: message_type as i32,
             from,
             created_at,
             payload,
             received_at: None,
             sent_at: None,
-            payload_bytes: Vec::new(),
+            payload_bytes,
             content: None,
             conversation_id: None,
         }
     }
 
     pub(crate) fn set_payload(&mut self, payload: Vec<u8>) {
-        self.payload = Value::Bytes(payload.clone());
+        self.payload = Value::Bytes(payload);
     }
 
     pub(crate) fn set_converstation_id(&mut self, conv_id: Id) {

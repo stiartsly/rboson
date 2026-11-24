@@ -1,5 +1,4 @@
 
-use crate::ContactHandler;
 // Copyright (c) 2023 -      bosonnetwork.io
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,10 +33,7 @@ use boson_api::{
 use crate::{ChannelHandler, ConversationHandler};
 use crate::internal::photon_channel::PhotonChannel;
 use crate::{
-    channel::{
-        Channel,
-        ChannelMember,
-    },
+    channel::ChannelMember,
     contact::{
         Contact,
         ContactType,
@@ -54,6 +50,7 @@ use crate::{
     Message,
     FriendRequest,
     Conversation,
+    MessageType
 };
 
 use crate::interfaces::{
@@ -62,7 +59,6 @@ use crate::interfaces::{
 };
 
 use crate::internal::{
-    ContactData,
     PhotonChannelMember,
     PhotonContact,
     PhotonContent,
@@ -196,7 +192,7 @@ impl MessagingRepository {
     pub(crate) fn store_channel(
         &mut self,
         revision: i32,
-        channel: &Channel,
+        channel: &dyn ChannelHandler,
         session_key: &[u8],
     ) -> Result<()> {
         let stored = channel_to_photon(channel, session_key);
@@ -209,15 +205,14 @@ impl MessagingRepository {
         self.store.refill_channel_members(channel.id(), &members)
     }
 
-    pub(crate) fn put_channel(&mut self, channel: PhotonChannel) -> Result<()> {
+    pub(crate) fn put_channel(&mut self, channel: &PhotonChannel) -> Result<()> {
         let session_key = channel
             .photon_contact()
             .session_key()
             .map(ToOwned::to_owned)
             .unwrap_or_default();
         let revision = self.store.get_contacts_revision()?;
-        let boxed: Channel = Box::new(channel);
-        self.store_channel(revision, &boxed, &session_key)
+        self.store_channel(revision, channel, &session_key)
     }
 
     pub(crate) fn contact(&mut self, contact_id: &Id) -> Result<Option<PhotonContact>> {
@@ -488,18 +483,14 @@ fn stored_to_message(stored: StoredMessage) -> Result<PhotonMessage> {
     let payload = stored.payload.unwrap_or_default();
     let version = u8::try_from(stored.version)
         .map_err(|_| StateError::new("Invalid message version"))?;
-    let message_type = u8::try_from(stored.message_type)
-        .map_err(|_| StateError::new("Invalid message type"))?;
-    let created_at = i64::try_from(stored.created_at)
-        .map_err(|_| StateError::new("Invalid message timestamp"))?;
 
     let mut message = PhotonMessage::new(
         version as i32,
         stored.id,
         stored.recipient,
-        i32::from(message_type),
+        MessageType::try_from(stored.message_type)?,
         stored.from,
-        created_at,
+        stored.created_at,
         serde_cbor::Value::Bytes(payload.clone()),
     );
     message.set_rid(stored.rid);
@@ -536,7 +527,7 @@ fn contact_to_photon(contact: &Contact, session_key: Option<&[u8]>) -> PhotonCon
     photon
 }
 
-fn channel_to_photon(channel: &Channel, session_key: &[u8]) -> PhotonContact {
+fn channel_to_photon(channel: &dyn ChannelHandler, session_key: &[u8]) -> PhotonContact {
     let mut contact = PhotonContact::new(
         *channel.id(),
         ContactType::Channel,

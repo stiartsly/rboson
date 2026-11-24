@@ -212,9 +212,9 @@ pub(super) fn handle(
             });
         }
 
-        Event::RotateChannelSessionKey(Body(channel_id, promise)) => {
+        Event::RotateChannelSessionKey(Body(input, promise)) => {
             respond(pending, promise, async move {
-                rpc.rotate_channel_session_key(&channel_id).await
+                rpc.rotate_channel_session_key(input.0, input.1).await
             });
         }
 
@@ -246,12 +246,15 @@ pub(super) fn handle(
         }
         Event::GetContacts(Body(id_opt, promise)) => {
             respond(pending, promise, async move {
-                rpc.get_contacts(id_opt.as_ref()).await
+                match id_opt {
+                    Some(id) => Ok(rpc.get_contact(&id).await.into_iter().collect()),
+                    None => Ok(rpc.get_contacts().await),
+                }
             });
         }
         Event::UpdateContact(Body(contact, promise)) => {
             respond(pending, promise, async move {
-                rpc.update_contact(&contact).await
+                rpc.update_contact(contact).await
             });
         }
         Event::RemoveContacts(Body(ids, promise)) => {

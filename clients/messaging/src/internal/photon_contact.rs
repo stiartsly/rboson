@@ -23,17 +23,17 @@ use serde::{Serialize, Deserialize};
 use boson_api::{
     utils,
     Id,
+    Identity,
     Result,
     Error,
 };
 use crate::{
-    ContactHandler,
-    ContactEditorHandler,
-    errors::EncodingError,
-    internal::ContactData,
-    contact::ContactType,
+    Contact, ContactEditorHandler, ContactHandler, contact::ContactType, errors::{AuthenticationError, EncodingError}
 };
-use super::ChannelInfo;
+use super::{
+    ChannelInfo,
+    contact_opaque::OpaqueContact,
+};
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct PhotonContact {
@@ -43,7 +43,10 @@ pub struct PhotonContact {
     #[serde(rename = "t")]
     pub(crate) contact_type: u8,
 
-    #[serde(rename = "sk", default, with = "utils::bytes_opt")]
+    #[serde(
+        rename = "sk",
+        default, with = "utils::bytes_opt"
+    )]
     pub(crate) session_key: Option<Vec<u8>>,
 
     #[serde(
@@ -113,6 +116,23 @@ impl PhotonContact {
         }
     }
 
+    pub(crate) fn from(ci: &ChannelInfo, session_key: Option<Vec<u8>>) -> Self {
+        Self {
+            id: *ci.channel_id(),
+            contact_type: ContactType::Channel as u8,
+            session_key,
+            name: ci.name().map(ToString::to_string),
+            remark: None,
+            tags: None,
+            muted: false,
+            blocked: false,
+            created_at: ci.created_at(),
+            updated_at: ci.updated_at(),
+            revision: 0,
+            channel: None,
+        }
+    }
+
     pub(crate) fn session_key(&self) -> Option<&[u8]> {
         self.session_key.as_deref()
     }
@@ -123,6 +143,22 @@ impl PhotonContact {
 
     pub(crate) fn set_name(&mut self, name: Option<String>) {
         self.name = name;
+    }
+
+    pub(crate) fn set_remark(&mut self, remark: Option<String>) {
+        self.remark = remark;
+    }
+
+    pub(crate) fn set_tags(&mut self, tags: Option<String>) {
+        self.tags = tags;
+    }
+
+    pub(crate) fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+    }
+
+    pub(crate) fn set_blocked(&mut self, blocked: bool) {
+        self.blocked = blocked;
     }
 
     pub(crate) fn set_revision(&mut self, revision: i32) {
@@ -136,6 +172,41 @@ impl PhotonContact {
     pub fn is(&self, other: &Self) -> bool {
         self.id == other.id
     }
+
+    pub(crate) fn session(&self, identity: &boson_api::CryptoIdentity) -> Result<Option<boson_api::CryptoIdentity>> {
+        let Some(encrypted) = self.session_key.as_deref() else {
+            return if self.contact_type == ContactType::Auto as u8 {
+                Ok(None)
+            } else {
+                Err(EncodingError::new("Contact session key is missing or malformed"))
+            };
+        };
+
+        let key = identity
+            .decrypt_into(identity.id(), encrypted)
+            .map_err(|error| {
+                AuthenticationError::new(format!(
+                    "Decrypting contact session key failed: {error}"
+                ))
+            })?;
+        let session = boson_api::CryptoIdentity::try_from(key.as_slice()).map_err(|error| {
+            AuthenticationError::new(format!("Invalid contact session key: {error}"))
+        })?;
+        Ok(Some(session))
+    }
+
+    pub(crate) fn to_opaque(&self, data: Vec<u8>) -> OpaqueContact {
+        OpaqueContact::new(
+            self.id,
+            self.revision,
+            data
+        )
+    }
+
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self).map_err(|e|
+            EncodingError::new(format!("Serialization error: {e}")).into())
+    }
 }
 
 impl PartialEq for PhotonContact {
@@ -144,58 +215,31 @@ impl PartialEq for PhotonContact {
     }
 }
 
-impl TryFrom<&ChannelInfo> for PhotonContact {
-    type Error = Error;
-
-    fn try_from(info: &ChannelInfo) -> Result<Self> {
-        Ok(Self {
-            id: *info.channel_id(),
-            contact_type: ContactType::Channel as u8,
-            session_key: None,
-            name: info.name().map(ToString::to_string),
-            remark: None,
-            tags: None,
-            muted: false,
-            blocked: false,
-            created_at: info.created_at(),
-            updated_at: info.updated_at(),
-            revision: 0,
+impl PhotonContact {
+    pub(crate) fn from_contact(contact: &crate::Contact) -> Self {
+        Self {
+            id: *contact.id(),
+            contact_type: contact.contact_type() as u8,
+            session_key: contact.session_key().map(|key| key.to_vec()),
+            name: contact.name().map(ToString::to_string),
+            remark: contact.remark().map(ToString::to_string),
+            tags: contact.tags().map(ToString::to_string),
+            muted: contact.is_muted(),
+            blocked: contact.is_blocked(),
+            created_at: contact.created_at(),
+            updated_at: contact.updated_at(),
+            revision: contact.revision(),
             channel: None,
-        })
-    }
-}
-
-impl TryFrom<ContactData> for PhotonContact {
-    type Error = Error;
-
-    fn try_from(data: ContactData) -> Result<Self> {
-        let contact_type = match data.kind {
-            0 => ContactType::Auto,
-            1 => ContactType::Friend,
-            2 => ContactType::Channel,
-            _ => return Err(EncodingError::new("Unknown contact type")),
-        };
-
-        if data.created_at < 0 ||
-            data.updated_at < data.created_at ||
-            data.revision < 0 {
-            return Err(EncodingError::new("Invalid contact timestamps or revision"));
         }
+    }
 
-        Ok(Self {
-            id: data.id,
-            contact_type: contact_type as u8,
-            session_key: data.session_key().map(|key| key.to_vec()),
-            name: data.name,
-            remark: data.remark,
-            tags: data.tags,
-            muted: data.muted,
-            blocked: data.blocked,
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-            revision: data.revision,
-            channel: None,
-        })
+    pub(crate) fn to_opaque_document(&self, identity: &boson_api::CryptoIdentity) -> Result<OpaqueContact> {
+        let encoded = serde_cbor::to_vec(self)
+            .map_err(|error| EncodingError::new(format!("Encoding contact failed: {error}")))?;
+        let encrypted = identity
+            .encrypt_into(identity.id(), &encoded)
+            .map_err(|error| EncodingError::new(format!("Encrypting contact failed: {error}")))?;
+        Ok(self.to_opaque(encrypted))
     }
 }
 
@@ -240,6 +284,10 @@ impl ContactHandler for PhotonContact {
         self.revision
     }
 
+    fn session_key(&self) -> Option<&[u8]> {
+        self.session_key.as_deref()
+    }
+
     fn edit(&self) -> Box<dyn ContactEditorHandler> {
         Box::new(PhotonContactEditor(self.clone())) as Box<dyn ContactEditorHandler>
     }
@@ -253,26 +301,58 @@ impl ContactHandler for PhotonContact {
     }
 }
 
+impl Into<Contact> for PhotonContact {
+    fn into(self) -> Contact {
+        Box::new(self)
+    }
+}
+
+impl From<Contact> for PhotonContact {
+    fn from(contact: Contact) -> Self {
+        Self::from_contact(&contact)
+    }
+}
+
 pub struct PhotonContactEditor(PhotonContact);
 
 impl ContactEditorHandler for PhotonContactEditor {
-    fn remark(mut self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditorHandler> {
+    fn set_name(mut self: Box<Self>, name: Option<String>) -> Box<dyn ContactEditorHandler> {
+        self.0.name = name;
+        self
+    }
+
+    fn set_remark(mut self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditorHandler> {
         self.0.remark = remark;
         self
     }
 
-    fn tags(mut self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditorHandler> {
+    fn set_tags(mut self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditorHandler> {
         self.0.tags = tags;
         self
     }
 
-    fn muted(mut self: Box<Self>, muted: bool) -> Box<dyn ContactEditorHandler> {
+    fn set_muted(mut self: Box<Self>, muted: bool) -> Box<dyn ContactEditorHandler> {
         self.0.muted = muted;
         self
     }
 
-    fn blocked(mut self: Box<Self>, blocked: bool) -> Box<dyn ContactEditorHandler> {
+    fn set_blocked(mut self: Box<Self>, blocked: bool) -> Box<dyn ContactEditorHandler> {
         self.0.blocked = blocked;
+        self
+    }
+
+    fn set_session_key(mut self: Box<Self>, session_key: Option<Vec<u8>>) -> Box<dyn ContactEditorHandler> {
+        self.0.session_key = session_key;
+        self
+    }
+
+    fn set_updated_at(mut self: Box<Self>, updated_at: i64) -> Box<dyn ContactEditorHandler> {
+        self.0.updated_at = updated_at;
+        self
+    }
+
+    fn set_revision(mut self: Box<Self>, revision: i32) -> Box<dyn ContactEditorHandler> {
+        self.0.revision = revision;
         self
     }
 

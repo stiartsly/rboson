@@ -140,6 +140,9 @@ impl fmt::Display for Role {
 ///
 /// Extends [`ContactHandler`] with channel-specific information.
 pub trait ChannelHandler: ContactHandler + Sync + Send {
+    /// The ID of the channel owner.
+    fn owner(&self) -> &Id;
+
     /// The channel's join / invite permission policy.
     fn permission(&self) -> Permission;
 
@@ -170,21 +173,20 @@ pub trait ChannelHandler: ContactHandler + Sync + Send {
 
     /// Clones this channel into a new boxed trait object.
     fn clone_box(&self) -> Box<dyn ChannelHandler>;
-
+/*
     fn owner(&self) -> &Id;
-    fn session_id(&self) -> &Id;
     fn contact_box(&self) -> Box<dyn crate::ContactHandler>;
     fn set_contact_revision(&mut self, revision: i32);
     fn set_owner(&mut self, owner: Id);
-    fn set_session_id(&mut self, session_id: Id);
     fn set_permission(&mut self, permission: Permission);
     fn set_notice(&mut self, notice: Option<String>);
-    fn set_announced(&mut self, announced: bool);
+    fn set_announced(&mut self, announce: bool);
     fn set_name(&mut self, name: Option<String>);
     fn set_updated_at(&mut self, updated_at: i64);
     fn upsert_member(&mut self, id: Id, role: Role, joined: SystemTime);
     fn update_member_roles(&mut self, ids: &[Id], role: Role) -> Vec<Box<dyn ChannelMemberHandler>>;
     fn remove_members(&mut self, ids: &[Id]) -> Vec<Box<dyn ChannelMemberHandler>>;
+*/
 }
 
 impl Clone for Box<dyn ChannelHandler> {
@@ -231,17 +233,29 @@ impl Clone for Box<dyn ChannelMemberHandler> {
 /// Builder for an immutable channel update.
 pub trait ChannelEditorHandler: Send + Sync {
     /// Update the channel permission.
-    fn permission(self: Box<Self>, permission: Permission) -> Box<dyn ChannelEditorHandler>;
+    fn set_permission(self: Box<Self>, permission: Permission) -> Box<dyn ChannelEditorHandler>;
 
     /// Update the channel's display name.
-    fn name(self: Box<Self>, name: String) -> Box<dyn ChannelEditorHandler>;
+    fn set_name(self: Box<Self>, name: String) -> Box<dyn ChannelEditorHandler>;
 
     /// Update the channel notice.
-    fn notice(self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditorHandler>;
+    fn set_notice(self: Box<Self>, notice: Option<String>) -> Box<dyn ChannelEditorHandler>;
 
     /// Update whether the channel is announced.
-    fn announced(self: Box<Self>, announced: bool) -> Box<dyn ChannelEditorHandler>;
+    fn set_announce(self: Box<Self>, announce: bool) -> Box<dyn ChannelEditorHandler>;
 
+    fn set_remark(self: Box<Self>, remark: Option<String>) -> Box<dyn ChannelEditorHandler>;
+
+    /// Set the user-defined tags.
+    fn set_tags(self: Box<Self>, tags: Option<String>) -> Box<dyn ChannelEditorHandler>;
+
+    /// Toggle the muted state.
+    fn set_muted(self: Box<Self>, muted: bool) -> Box<dyn ChannelEditorHandler>;
+
+    /// Toggle the blocked state.
+    fn set_blocked(self: Box<Self>, blocked: bool) -> Box<dyn ChannelEditorHandler>;
+
+    fn set_revision(self: Box<Self>, revision: i32) -> Box<dyn ChannelEditorHandler>;
     /// Build the updated immutable channel.
     fn build(self: Box<Self>) -> Box<dyn ChannelHandler>;
 }

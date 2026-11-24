@@ -38,7 +38,7 @@ fn test_serde() {
         channel_id,
         session_id,
         Some(invitee),
-        expiration as u64,
+        expiration as i64,
         vec![7; 64],
     )
     .unwrap();
@@ -67,12 +67,12 @@ fn test_revise() {
         Id::random(),
         Id::random(),
         None,
-        u64::MAX,
+        i64::MAX,
         vec![1; 64],
     )
     .unwrap();
 
-    let revised = ticket.revise(vec![2; 64]).unwrap();
+    let revised = ticket.revise(vec![2; 64]);
     assert!(revised.is_bearer_ticket());
     assert!(revised.is_genuine());
     assert_eq!(revised.session_key(), &[2; 64]);

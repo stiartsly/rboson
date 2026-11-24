@@ -25,16 +25,20 @@ use boson_api::{
     Id,
     Result
 };
-use crate::channel::Role;
-use crate::errors::EncodingError;
 use crate::internal::{
     ChannelSessionKeyRotation,
     ContactMutation,
     NewChannelInfo,
     ChannelMembersRole,
     ChannelInfoUpdate,
-    JoinChannel,
 };
+use crate::{
+    invite_ticket::InviteTicket,
+    channel::Role,
+    errors::EncodingError
+};
+
+
 use super::method::Method;
 
 #[derive(Debug, Serialize)]
@@ -53,7 +57,7 @@ pub(crate) enum Value {
     ChannelMembersBan(Vec<Id>),
     ChannelMembersUnban(Vec<Id>),
     ChannelMembersRemove(Vec<Id>),
-    ChannelJoin(JoinChannel),
+    ChannelJoin(InviteTicket),
     ChannelLeave(()),
     ChannelInfo(()),
 }
@@ -126,7 +130,7 @@ impl RPCRequest {
         Self::new(id, Method::ChannelCreate, params)
     }
 
-    pub(crate) fn join_channel(id: i64, params: JoinChannel) -> Self {
+    pub(crate) fn join_channel(id: i64, params: InviteTicket) -> Self {
         let params = Value::ChannelJoin(params);
         Self::new(id, Method::ChannelJoin, params)
     }

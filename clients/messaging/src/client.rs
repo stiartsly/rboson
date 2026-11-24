@@ -58,6 +58,7 @@ use crate::internal::{
         VerticleClient,
         VerticleOptions,
     },
+    PhotonContact,
     ClientConnectionListener
 };
 
@@ -605,17 +606,23 @@ impl Client {
 impl Client {
     /// Looks up a single contact.
     pub async fn contact(&self, id: &Id) -> Result<Option<Contact>> {
-        self.verticle_client()?.get_contact(*id).await
+        self.verticle_client()?
+            .get_contact(id)
+            .await
+            .map(|v| v.map(Into::into))
     }
 
     /// Lists every known contact.
     pub async fn contacts(&self) -> Result<Vec<Contact>> {
-        self.verticle_client()?.get_contacts().await
+        self.verticle_client()?
+            .get_contacts()
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
     }
 
     /// Overwrites a contact's locally stored metadata.
     pub async fn update_contact(&self, contact: Contact) -> Result<()> {
-        self.verticle_client()?.update_contact(contact).await
+        self.verticle_client()?.update_contact(PhotonContact::from_contact(&contact)).await
     }
 
     /// Removes a single contact; sugar for a one-element [`Client::remove_contacts`].
@@ -708,7 +715,7 @@ impl Client {
     /// Rotates the channel session key.
     pub async fn rotate_channel_session_key(&self, channel_id: &Id) -> Result<()> {
         self.verticle_client()?
-            .rotate_channel_session_key(*channel_id)
+            .rotate_channel_session_key(*channel_id, None)
             .await
     }
 

@@ -18,36 +18,38 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use serde_cbor::Value;
-
 use boson_api::Id;
 use crate::{
-    internal::{ContactData, PhotonContact},
+    contact::ContactType,
+    internal::PhotonContact,
     ContactHandler,
 };
 
-fn new_contact_data(kind: u8, revision: i32) -> ContactData {
-    let mut data = ContactData::new(Id::random(), kind, 100);
-    data.name = Some("Alice".into());
-    data.remark = Some("friend".into());
-    data.tags = Some("test".into());
-    data.muted = true;
-    data.blocked = true;
-    data.updated_at = 200;
-    data.revision = revision;
-    data
+fn new_contact(kind: u8, revision: i32) -> PhotonContact {
+    let contact_type = match kind {
+        0 => ContactType::Auto,
+        1 => ContactType::Friend,
+        2 => ContactType::Channel,
+        _ => panic!("Unknown contact type"),
+    };
+    let contact = PhotonContact::new(Id::random(), contact_type, 100)
+        .edit()
+        .set_name(Some("Alice".into()))
+        .set_remark(Some("friend".into()))
+        .set_tags(Some("test".into()))
+        .set_muted(true)
+        .set_blocked(true)
+        .set_updated_at(200)
+        .set_revision(revision - 1)
+        .build();
+    PhotonContact::from_contact(&contact)
 }
 
 #[test]
 fn test_serde() {
     for kind in 0..=2 {
-        let contact_data = new_contact_data(kind, 7);
-        let contact = PhotonContact::try_from(contact_data.clone()).unwrap();
+        let contact = new_contact(kind, 7);
         let encoded = serde_cbor::to_vec(&contact).unwrap();
-        assert_eq!(
-            serde_cbor::from_slice::<Value>(&encoded).unwrap(),
-            serde_cbor::value::to_value(&contact_data).unwrap(),
-        );
 
         let decoded = serde_cbor::from_slice::<PhotonContact>(&encoded).unwrap();
         assert_eq!(decoded.id(), contact.id());
@@ -65,12 +67,12 @@ fn test_serde() {
 
 #[test]
 fn test_contact_editor() {
-    let contact = PhotonContact::try_from(new_contact_data(1, 0)).unwrap();
+    let contact = new_contact(1, 0);
     let editor = contact.edit();
-    let editor = editor.remark(Some("updated".into()));
-    let editor = editor.tags(None);
-    let editor = editor.muted(false);
-    let editor = editor.blocked(false);
+    let editor = editor.set_remark(Some("updated".into()));
+    let editor = editor.set_tags(None);
+    let editor = editor.set_muted(false);
+    let editor = editor.set_blocked(false);
     let edited = editor.build();
 
     assert_eq!(edited.id(), contact.id());

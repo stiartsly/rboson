@@ -89,6 +89,10 @@ pub trait ContactHandler: Send + Sync {
     /// Monotonically increasing revision counter for sync purposes.
     fn revision(&self) -> i32;
 
+    fn session_key(&self) -> Option<&[u8]> {
+        None
+    }
+
     /// Creates an editor that builds a new contact without mutating this one.
     fn edit(&self) -> Box<dyn ContactEditorHandler>;
 
@@ -107,17 +111,28 @@ impl Clone for Box<dyn ContactHandler> {
 
 // Builder for an immutable contact update.
 pub trait ContactEditorHandler: Send + Sync {
+    /// Set the display name.
+    fn set_name(self: Box<Self>, name: Option<String>) -> Box<dyn ContactEditorHandler>;
+
     /// Set the user-defined remark (alias).
-    fn remark(self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditorHandler>;
+    fn set_remark(self: Box<Self>, remark: Option<String>) -> Box<dyn ContactEditorHandler>;
 
     /// Set the user-defined tags.
-    fn tags(self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditorHandler>;
+    fn set_tags(self: Box<Self>, tags: Option<String>) -> Box<dyn ContactEditorHandler>;
 
     /// Toggle the muted state.
-    fn muted(self: Box<Self>, muted: bool) -> Box<dyn ContactEditorHandler>;
+    fn set_muted(self: Box<Self>, muted: bool) -> Box<dyn ContactEditorHandler>;
 
     /// Toggle the blocked state.
-    fn blocked(self: Box<Self>, blocked: bool) -> Box<dyn ContactEditorHandler>;
+    fn set_blocked(self: Box<Self>, blocked: bool) -> Box<dyn ContactEditorHandler>;
+
+    /// Set the encrypted session key.
+    fn set_session_key(self: Box<Self>, session_key: Option<Vec<u8>>) -> Box<dyn ContactEditorHandler>;
+
+    /// Set the updated timestamp.
+    fn set_updated_at(self: Box<Self>, updated_at: i64) -> Box<dyn ContactEditorHandler>;
+
+    fn set_revision(self: Box<Self>, revision: i32) -> Box<dyn ContactEditorHandler>;
 
     /// Build the updated immutable contact.
     fn build(self: Box<Self>) -> Box<dyn ContactHandler>;

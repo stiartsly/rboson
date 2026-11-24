@@ -213,12 +213,6 @@ impl PhotonContent {
         self.as_object()
     }
 
-    /// Serializes this content into CBOR.
-    pub fn serialize(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self)
-            .map_err(|error| ArgumentError::new(error.to_string()).into())
-    }
-
     /// Parses CBOR content.
     pub fn parse(data: &[u8]) -> Result<Self> {
         let content: Self = serde_cbor::from_slice(data)
@@ -234,6 +228,12 @@ impl PhotonContent {
             .into());
         }
         Ok(())
+    }
+
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+        serde_cbor::to_vec(self)
+            .map_err(|error| ArgumentError::new(
+                format!("Serialize Photon Content error: {}", error)).into())
     }
 }
 

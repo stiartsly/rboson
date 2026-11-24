@@ -482,7 +482,7 @@ fn channel_member_from_row(row: ChannelMemberRow) -> Result<StoredChannelMember>
 }
 
 fn friend_request_from_row(row: FriendRequestRow) -> Result<PhotonFriendRequest> {
-    Ok(PhotonFriendRequest::new(
+    Ok(PhotonFriendRequest::restore(
         id_from(&row.id)?,
         id_from(&row.initiator)?,
         row.hello,

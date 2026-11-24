@@ -19,19 +19,20 @@
 // SOFTWARE.
 
 use std::collections::HashMap;
-
 use boson_api::Id;
 use crate::{
     channel::Channel,
     contact::Contact,
-    invite_ticket::InviteTicket,
+    InviteTicket,
     message::Message,
-    session_info::SessionInfo,
+    SessionInfo,
 };
 use crate::internal::{
     ChannelMembersRole,
+    PhotonChannel,
     PhotonConversation,
     PhotonFriendRequest,
+    PhotonContact,
     NewChannelInfo,
 };
 use super::promise::Promise;
@@ -63,14 +64,14 @@ pub(crate) enum Event {
     RegisterFriendSession(Body<(Id, Vec<u8>, Option<String>), ()>),
     BlockUser(Body<Id, Contact>),
 
-    CreateChannel(Body<NewChannelInfo, Channel>),
+    CreateChannel(Body<NewChannelInfo, PhotonChannel>),
     RemoveChannel(Body<Id, ()>),
-    JoinChannel(Body<InviteTicket, Channel>),
+    JoinChannel(Body<InviteTicket, PhotonChannel>),
     LeaveChannel(Body<Id, ()>),
 
     CreateInviteTicket(Body<(Id, Option<Id>), InviteTicket>),
     TransferChannelOwnership(Body<(Id, Id), ()>),
-    RotateChannelSessionKey(Body<Id, ()>),
+    RotateChannelSessionKey(Body<(Id, Option<Vec<u8>>), ()>),
 
     UpdateChannelInfo(Body<Channel, ()>),
     SetChannelMembersRole(Body<(Id, ChannelMembersRole), ()>),
@@ -78,8 +79,8 @@ pub(crate) enum Event {
     UnbanChannelMembers(Body<(Id, Vec<Id>), ()>),
     RemoveChannelMembers(Body<(Id, Vec<Id>), ()>),
 
-    GetContacts(Body<Option<Id>, Vec<Contact>>),
-    UpdateContact(Body<Contact, ()>),
+    GetContacts(Body<Option<Id>, Vec<PhotonContact>>),
+    UpdateContact(Body<PhotonContact, ()>),
     RemoveContacts(Body<Vec<Id>, ()>),
     ClearContacts(Body<(), ()>)
 }

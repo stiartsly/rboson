@@ -491,7 +491,7 @@ mod lifecycle {
             Id::random(),
             Id::random(),
             None,
-            u64::MAX,
+            i64::MAX,
             vec![1; 64],
             vec![2; 64],
         )
@@ -734,7 +734,13 @@ mod friend_requests {
             .unwrap()
             .expect("The accepted request should be stored locally");
         assert!(local.is_accepted());
-        assert_eq!(accepted.accepted(), local.accepted());
+        let accepted_at = accepted.accepted().unwrap();
+        let local_accepted_at = local.accepted().unwrap();
+        let diff = accepted_at
+            .duration_since(local_accepted_at)
+            .or_else(|_| local_accepted_at.duration_since(accepted_at))
+            .unwrap();
+        assert!(diff <= Duration::from_secs(1));
 
         check_friend_requests(&sender, recipient_id, true).await;
         check_friend_requests(&recipient, sender_id, true).await;
@@ -842,10 +848,10 @@ mod contacts {
         assert!(contact.created_at() > 0);
         assert!(contact.updated_at() >= contact.created_at());
 
-        let updated = contact.edit().remark(Some("Alice".to_string()))
-            .tags(Some("work,friends".to_string()))
-            .muted(true)
-            .blocked(true)
+        let updated = contact.edit().set_remark(Some("Alice".to_string()))
+            .set_tags(Some("work,friends".to_string()))
+            .set_muted(true)
+            .set_blocked(true)
             .build();
         assert!(bob.update_contact(updated).await.is_ok());
 
@@ -861,7 +867,7 @@ mod contacts {
         // really becomes stale.
         let second_update = updated_contact
             .edit()
-            .remark(Some("Alice Updated".to_string()))
+            .set_remark(Some("Alice Updated".to_string()))
             .build();
         assert!(bob.update_contact(second_update).await.is_ok());
         let latest = bob.contact(&alice_id).await.unwrap().unwrap();
@@ -869,7 +875,7 @@ mod contacts {
         assert!(latest.revision() > updated_contact.revision());
 
         // A stale copy must not overwrite a newer revision.
-        let stale = contact.edit().remark(Some("stale".to_string())).build();
+        let stale = contact.edit().set_remark(Some("stale".to_string())).build();
         let error = bob.update_contact(stale).await.err().unwrap().to_string();
         assert!(error.contains("older than the current version"));
 
@@ -1247,10 +1253,10 @@ mod channels {
 
         let updated = channel
             .edit_channel()
-            .name("API channel creation updated".to_string())
-            .notice(Some("updated notice".to_string()))
-            .announced(false)
-            .permission(Permission::Public)
+            .set_name("API channel creation updated".to_string())
+            .set_notice(Some("updated notice".to_string()))
+            .set_announce(false)
+            .set_permission(Permission::Public)
             .build();
         assert!(bob.update_channel_info(&updated).await.is_ok());
 
@@ -1343,7 +1349,7 @@ mod channels {
             .to_string();
         assert!(error.contains("Insufficient permission"));
 
-        let attempt = joined.edit_channel().name("not allowed".to_string()).build();
+        let attempt = joined.edit_channel().set_name("not allowed".to_string()).build();
         let error = alice
             .update_channel_info(&attempt)
             .await

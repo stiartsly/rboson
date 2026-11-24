@@ -136,7 +136,7 @@ pub(crate) trait MessagingStore {
         new_owner_id: &Id,
     ) -> Result<()>;
     fn put_channel_member(&mut self, channel_id: &Id, member: &StoredChannelMember) -> Result<()> {
-        self.put_channel_members(channel_id, &[member.clone()])
+        self.put_channel_members(channel_id, std::slice::from_ref(member))
     }
     fn put_channel_members(
         &mut self,

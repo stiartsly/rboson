@@ -48,17 +48,24 @@ pub enum MessageType {
     State = 3,
 }
 
+impl MessageType {
+    pub fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(MessageType::Handshake),
+            1 => Some(MessageType::Content),
+            2 => Some(MessageType::Control),
+            3 => Some(MessageType::State),
+            _ => None,
+        }
+    }
+}
+
 impl TryFrom<i32> for MessageType {
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self> {
-        match value {
-            0 => Ok(MessageType::Handshake),
-            1 => Ok(MessageType::Content),
-            2 => Ok(MessageType::Control),
-            3 => Ok(MessageType::State),
-            _ => Err(ArgumentError::new(format!("invalid message type: {}",value)))
-        }
+        Self::from_i32(value).ok_or_else(||
+            ArgumentError::new(format!("invalid message type: {}", value)).into())
     }
 }
 

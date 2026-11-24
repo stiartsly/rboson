@@ -1,20 +1,43 @@
-use serde::{
-    de::DeserializeOwned,
-    Serialize,
-};
-use serde_cbor::Value;
+use serde::Serialize;
 use rumqttc::{
     AsyncClient,
     QoS,
 };
 
-use boson_api::errors::{
+
+use crate::ContactHandler;
+use serde_cbor::Value;
+use sha2::Digest;
+
+use boson_api::{
     Result,
-    ArgumentError,
-    StateError,
+    errors::{ArgumentError, StateError},
+    CryptoIdentity,
+    Id,
+    Identity,
 };
 
-use super::prelude::*;
+use crate::{
+    errors::{
+        AuthenticationError,
+        EncodingError,
+    },
+    ChannelMemberHandler,
+    MessageType,
+};
+
+
+use crate::internal::{
+    PhotonMessage,
+    Topic,
+};
+
+
+use super::{
+    RpcServer,
+    MESSAGE_VERSION
+};
+
 use super::mqtt::MAX_MESSAGE_SIZE;
 
 pub(super) fn seal_for(
@@ -22,7 +45,7 @@ pub(super) fn seal_for(
     device_identity: &CryptoIdentity,
     peer_id: &Id,
     recipient: &Id,
-    message_type: u8,
+    message_type: i32,
     timestamp: i64,
     body: Vec<u8>,
     inner: Option<&Id>,
@@ -42,30 +65,18 @@ pub(super) fn seal_for(
         MESSAGE_VERSION as i32,
         RpcServer::message_id(device_identity.id(), timestamp)?,
         *recipient,
-        i32::from(message_type),
+        MessageType::from_i32(message_type).unwrap(),
         None,
         created_at,
         Value::Bytes(body),
     );
-    let encoded = to_cbor_bytes(&message, what)?;
+    let encoded = message.serialize()?;
     let payload = device_identity
         .encrypt_into(peer_id, &encoded)
         .map_err(|error| {
             AuthenticationError::new(format!("Encrypting {what} failed: {error}"))
         })?;
     Ok((message, payload))
-}
-
-/// Converts a serialisable value into its CBOR data-model form.
-pub(crate) fn to_cbor<T: Serialize>(value: &T, what: &str) -> Result<Value> {
-    serde_cbor::value::to_value(value)
-        .map_err(|error| EncodingError::new(format!("Encoding {what} failed: {error}")).into())
-}
-
-/// Encodes a serialisable value as CBOR bytes.
-pub(crate) fn to_cbor_bytes<T: Serialize>(value: &T, what: &str) -> Result<Vec<u8>> {
-    serde_cbor::to_vec(value)
-        .map_err(|error| EncodingError::new(format!("Encoding {what} failed: {error}")).into())
 }
 
 /// Publishes an already sealed payload to the device outbox.

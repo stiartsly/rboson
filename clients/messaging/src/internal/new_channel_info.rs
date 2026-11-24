@@ -61,16 +61,19 @@ impl NewChannelInfo {
         }
     }
 
+    pub(crate) fn revised(&self, session_id: Id, session_key: Vec<u8>) -> Self {
+        let mut revised = self.clone();
+        revised.session_id = session_id;
+        revised.session_key = session_key;
+        revised
+    }
+
     pub(crate) fn session_id(&self) -> Id {
         self.session_id
     }
 
     pub(crate) fn session_key(&self) -> &[u8] {
         &self.session_key
-    }
-
-    pub(crate) fn set_session_key(&mut self, session_key: Vec<u8>) {
-        self.session_key = session_key;
     }
 
     pub(crate) fn permission(&self) -> Permission {

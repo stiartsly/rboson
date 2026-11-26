@@ -1,6 +1,26 @@
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::{
     collections::{HashMap, HashSet},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime},
     slice,
 };
 use serde::Deserialize;
@@ -271,14 +291,6 @@ impl RpcServer {
         }
     }
 
-    /*
-    async fn on_handshake(&self, topic: Topic, message: PhotonMessage, from: &Id) {
-        self.try_on_handshake(topic, message, *from)
-            .await
-            .map_err(|error| warn!("{error}"))
-            .ok();
-    }*/
-
     fn on_outbox_content_message(&self, message: PhotonMessage, from: &Id) {
         if from != self.user_id() {
             warn!("Outbox message has an unexpected sender");
@@ -481,7 +493,7 @@ impl RpcServer {
             Body::ChannelLeave => {
                 trace!("Channel {} left", channel_id);
 
-                self.repository
+                let _ = self.repository
                     .borrow_mut()
                     .remove_channel_locally(&channel_id);
                 // TODO: invalidate channel members cache for this channel
@@ -491,7 +503,7 @@ impl RpcServer {
             Body::ChannelOwnershipTransfer(new_owner_id) => {
                 trace!("Channel {} ownership transfer to {}", channel_id, new_owner_id);
 
-                let result = channel.try_load_members();
+                let _ = channel.try_load_members();
                 let old_owner_id = *channel.owner();
 
                 let old_owner = channel.member(channel.owner());
@@ -505,7 +517,7 @@ impl RpcServer {
                         .borrow_mut()
                         .update_channel_ownership(&channel_id, &old_owner_id, new_owner_id);
 
-                    if let Err(error) = result {
+                    if let Err(_) = result {
                         warn!("Update channel ownership failed, looks like channel {} is outdated, try to refresh", channel_id);
                         let _ = self.refresh_channel(&channel).await?;
                         return Ok(());
@@ -516,7 +528,7 @@ impl RpcServer {
                         .set_owner(*new_owner_id)
                         .build();
 
-                    self.repository.borrow_mut()
+                    let _ = self.repository.borrow_mut()
                         .put_channel_locally(&updated);
 
                     updated.invalidate_members();
@@ -563,7 +575,7 @@ impl RpcServer {
                     .unwrap()
                     .insert(channel_id, self.session_context(channel_id, session, true));
 
-                self.repository
+                let _ = self.repository
                     .borrow_mut()
                     .put_channel_locally(&updated);
 

@@ -1,16 +1,34 @@
-pub(crate) use std::{
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use std::{
     collections::{HashMap, HashSet},
+    time::{Duration, SystemTime},
     future::Future,
     pin::Pin,
-    sync::Arc,
-    sync::Mutex,
-    time::{Duration, SystemTime},
+    sync::{Arc, Mutex},
 };
-pub(crate) use serde_cbor::Value;
+use serde_cbor::Value;
 use log::{warn, info, debug, error};
 
 use super::mqtt;
-
 
 pub(crate) use boson_api::{
     Result,
@@ -20,10 +38,9 @@ pub(crate) use boson_api::{
     Id,
     Identity,
 };
-
 use crate::{
     ChannelHandler,
-    channel::{Channel, Permission, Role},
+    channel::{Permission, Role},
     contact::{Contact, ContactType, ContactHandler},
     content_disposition::ContentDisposition,
     content_type,
@@ -32,15 +49,13 @@ use crate::{
         EncodingError,
     },
     message::MessageType,
+    MessageBuilderHandler,
     session_info::SessionInfo,
     FriendRequestHandler,
     InviteTicket,
     Message,
 };
-
-pub(crate) use crate::MessageBuilderHandler;
-
-pub(crate) use crate::internal::{
+use crate::internal::{
     ChannelSessionKeyRotation,
     ContactMutation,
     ContentFormat,
@@ -56,18 +71,15 @@ pub(crate) use crate::internal::{
     PhotonFriend,
     SessionContext,
 };
-
 use crate::rpc::{
     response,
     response::Value as RValue,
     error::RPCError,
     request::RPCRequest,
 };
-
-pub(crate) use super::mqtt::ClientHandle;
-pub(crate) use super::{
+use super::{
+    mqtt::ClientHandle,
     RpcServer,
-    MESSAGE_VERSION,
     RPC_TIMEOUT
 };
 

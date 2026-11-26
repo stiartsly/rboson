@@ -1,50 +1,60 @@
-use std::sync::atomic::AtomicI64;
+// Copyright (c) 2023 -      bosonnetwork.io
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
-use boson_api::CryptoContext;
-
-
-
-use crate::{ContactHandler, FriendRequestHandler};
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
-    sync::Arc,
-    sync::Mutex,
+    sync::{Arc, Mutex},
+    sync::atomic::AtomicI64,
 };
 use log::{debug, info, warn};
-use sha2::Digest;
 use tokio::sync;
 
 use boson_api::{
+    CryptoContext,
     Result,
     CryptoIdentity,
     Id,
     Identity,
 };
-
 use crate::{
     contact::ContactType,
     options::Options,
     ChannelListener,
+    ContactHandler,
     ConnectionListener,
     ContactListener,
     FriendRequestListener,
+    FriendRequestHandler,
     MessageListener,
     SessionListener,
     ChannelMemberHandler
 };
-
-
 use crate::internal::{
     SessionContext,
     MessagingRepository,
+    verticle::VerticleOptions,
 };
-
 use crate::rpc::call::Calls;
-
 use super::mqtt::ClientHandle;
-use crate::internal::verticle::VerticleOptions;
 
 
 pub(crate) struct RpcServer {
@@ -59,7 +69,6 @@ pub(crate) struct RpcServer {
     pub(super) stopping: Cell<bool>,
 
     pub(super) lifecycle: sync::Mutex<()>,
-    pub(super) requests: sync::Mutex<()>,
 
     pub(super) origin_timestamp: AtomicI64,
 
@@ -113,7 +122,6 @@ impl RpcServer {
             sync_running: Cell::new(false),
             stopping: Cell::new(false),
             lifecycle: tokio::sync::Mutex::new(()),
-            requests: tokio::sync::Mutex::new(()),
             origin_timestamp: AtomicI64::new(0),
 
             pending_calls: Calls::default(),

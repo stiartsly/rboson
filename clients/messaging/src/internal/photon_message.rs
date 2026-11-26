@@ -66,22 +66,88 @@ pub(crate) struct PhotonMessage {
     #[serde(rename = "p")]
     pub(crate) payload: Value,
 
-
     #[serde(skip)]
     rid: i64,
     #[serde(skip)]
-    received_at: Option<i64>,
+    conversation_id: Option<Id>,
     #[serde(skip)]
     sent_at: Option<i64>,
+    #[serde(skip)]
+    received_at: Option<i64>,
+
+
     #[serde(skip)]
     pub(crate)  payload_bytes: Vec<u8>,
     #[serde(skip)]
     pub(crate) content: Option<PhotonContent>,
-    #[serde(skip)]
-    conversation_id: Option<Id>,
+
 }
 
 impl PhotonMessage {
+    pub(crate) const VERSION: i32 = 2;
+
+    pub(crate) fn outgoing(
+        id: Id,
+        recipient: Id,
+        message_type: MessageType,
+        created_at: i64,
+        payload: Value,
+    ) -> Self {
+        Self::new(
+            Self::VERSION,
+            id,
+            recipient,
+            message_type,
+            None,
+            created_at,
+            payload,
+        )
+    }
+
+    pub(crate) fn restore(
+        rid: i64,
+        conversation_id: Option<Id>,
+        version: i32,
+        id: Id,
+        recipient: Id,
+        message_type: MessageType,
+        from: Option<Id>,
+        created_at: i64,
+        payload: Value,
+        sent_at: i64,
+        received_at: i64,
+    ) -> boson_api::Result<Self> {
+        if version != Self::VERSION {
+            return Err(EncodingError::new(
+                format!("Unsupported message version: {version}")
+            ).into());
+        }
+        let mut message = Self::new(
+            version,
+            id,
+            recipient,
+            message_type,
+            from,
+            created_at,
+            payload,
+        );
+        message.rid = rid;
+        message.conversation_id = conversation_id;
+        if sent_at > 0 {
+            message.sent_at = Some(sent_at);
+        }
+        if received_at > 0 {
+            message.received_at = Some(received_at);
+        }
+        Ok(message)
+    }
+
+    pub(crate) fn with_payload(message: &Self, payload: Value) -> Self {
+        let mut message = message.clone();
+        message.set_payload_value(payload);
+        message
+    }
+
     pub(crate) fn new(
         version: i32,
         id: Id,
@@ -113,7 +179,20 @@ impl PhotonMessage {
     }
 
     pub(crate) fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload_bytes = payload.clone();
         self.payload = Value::Bytes(payload);
+    }
+
+    pub(crate) fn set_payload_value(&mut self, payload: Value) {
+        self.payload_bytes = match &payload {
+            Value::Bytes(bytes) => bytes.clone(),
+            _ => Vec::new(),
+        };
+        self.payload = payload;
+    }
+
+    pub(crate) fn set_conversation_id(&mut self, conversation_id: Id) {
+        self.conversation_id = Some(conversation_id);
     }
 
     pub(crate) fn set_converstation_id(&mut self, conv_id: Id) {

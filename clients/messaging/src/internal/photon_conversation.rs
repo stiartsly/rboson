@@ -28,39 +28,47 @@ use boson_api::{
     Id,
 };
 use crate::{
-    conversation::{Conversation, ConversationHandler},
-    invite_ticket::InviteTicket,
+    InviteTicket,
+    Conversation,
+    ConversationHandler,
     message::Message,
-    contact::{Contact, ContactHandler, ContactType},
+    contact::{Contact, ContactType},
+    ContactHandler,
 };
-
 use super::{
+    PhotonContact,
     SessionContext,
 };
 
 #[derive(Clone)]
 pub struct PhotonConversation {
-    contact         : Contact,
+    contact         : PhotonContact,
+    session_context : SessionContext,
+
     last_message    : Option<Message>,
     preview         : Option<String>,
-    session_context : Option<SessionContext>,
-
-   // session_context_factory: Arc<FactoryHandler<PhotonContact, SessionContext>>,
 }
 
 impl PhotonConversation {
     pub(crate) const MAX_SNIPPET_LENGTH: usize = 128;
 
-    pub(crate) fn new(contact: Contact) -> Self {
-        Self::with_message(contact, None)
+    pub(crate) fn new(
+        contact: PhotonContact,
+        session_context: SessionContext
+    ) -> Self {
+        Self::with_message(contact, None, session_context)
     }
 
-    pub(crate) fn with_message(contact: Contact, message: Option<Message>) -> Self {
+    pub(crate) fn with_message(
+        contact: PhotonContact,
+        message: Option<Message>,
+        session_context: SessionContext
+    ) -> Self {
         let mut conversation = Self {
             contact,
             last_message: None,
             preview: None,
-            session_context: None,
+            session_context,
         };
 
         if let Some(message) = message {
@@ -113,12 +121,8 @@ impl PhotonConversation {
         Ok(())
     }
 
-    pub(crate) fn set_session_context(&mut self, context: SessionContext) {
-        self.session_context = Some(context);
-    }
-
-    pub(crate) fn session_context(&self) -> Option<&SessionContext> {
-        self.session_context.as_ref()
+    pub(crate) fn session_context(&self) -> &SessionContext {
+        &self.session_context
     }
 }
 
@@ -140,8 +144,8 @@ impl ConversationHandler for PhotonConversation {
         self.contact.id()
     }
 
-    fn contact(&self) -> &Contact {
-        &self.contact
+    fn contact(&self) -> Contact {
+        self.contact.clone().into()
     }
 
     fn is_channel(&self) -> bool {

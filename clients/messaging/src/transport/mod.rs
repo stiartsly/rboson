@@ -158,11 +158,7 @@ impl RpcServer {
     }
 
     pub(crate) fn get_channel(&self, id: &Id) -> Option<PhotonChannel> {
-        let mut channel = self.repository.borrow_mut().load_channel(id).ok().flatten()?;
-        if let Some(session) = self.session_contexts.lock().unwrap().get(id) {
-            channel.set_session_id(*session.session_id());
-        }
-        Some(channel)
+        self.repository.borrow_mut().load_channel(id).ok().flatten()
     }
 
     pub(crate) fn put_channel(&self, channel: &PhotonChannel) -> Result<()> {

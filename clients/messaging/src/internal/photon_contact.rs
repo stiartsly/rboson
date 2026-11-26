@@ -25,15 +25,26 @@ use boson_api::{
     Id,
     Identity,
     Result,
-    Error,
 };
 use crate::{
-    Contact, ContactEditorHandler, ContactHandler, contact::ContactType, errors::{AuthenticationError, EncodingError}
+    contact::{Contact, ContactType},
+    ContactEditorHandler,
+    ContactHandler,
+    errors::{AuthenticationError, EncodingError}
 };
 use super::{
     ChannelInfo,
     contact_opaque::OpaqueContact,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChannelMetadata {
+    pub(crate) id: Id,
+    pub(crate) owner: Id,
+    pub(crate) permission: i32,
+    pub(crate) notice: Option<String>,
+    pub(crate) announce: bool,
+}
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct PhotonContact {
@@ -41,7 +52,7 @@ pub struct PhotonContact {
     pub(crate) id: Id,
 
     #[serde(rename = "t")]
-    pub(crate) contact_type: u8,
+    pub(crate) contact_type: i32,
 
     #[serde(
         rename = "sk",
@@ -94,14 +105,14 @@ pub struct PhotonContact {
     pub(crate) revision: i32,
 
     #[serde(skip)]
-    pub(crate) channel: Option<crate::database::StoredChannel>,
+    pub(crate) channel: Option<ChannelMetadata>,
 }
 
 impl PhotonContact {
     pub(crate) fn new(id: Id, contact_type: ContactType, created_at: i64) -> Self {
         Self {
             id,
-            contact_type: contact_type as u8,
+            contact_type: contact_type as i32,
             session_key: None,
             created_at,
             updated_at: created_at,
@@ -119,7 +130,7 @@ impl PhotonContact {
     pub(crate) fn from(ci: &ChannelInfo, session_key: Option<Vec<u8>>) -> Self {
         Self {
             id: *ci.channel_id(),
-            contact_type: ContactType::Channel as u8,
+            contact_type: ContactType::Channel as i32,
             session_key,
             name: ci.name().map(ToString::to_string),
             remark: None,
@@ -175,7 +186,7 @@ impl PhotonContact {
 
     pub(crate) fn session(&self, identity: &boson_api::CryptoIdentity) -> Result<Option<boson_api::CryptoIdentity>> {
         let Some(encrypted) = self.session_key.as_deref() else {
-            return if self.contact_type == ContactType::Auto as u8 {
+            return if self.contact_type == ContactType::Auto as i32 {
                 Ok(None)
             } else {
                 Err(EncodingError::new("Contact session key is missing or malformed"))
@@ -219,7 +230,7 @@ impl PhotonContact {
     pub(crate) fn from_contact(contact: &crate::Contact) -> Self {
         Self {
             id: *contact.id(),
-            contact_type: contact.contact_type() as u8,
+            contact_type: contact.contact_type() as i32,
             session_key: contact.session_key().map(|key| key.to_vec()),
             name: contact.name().map(ToString::to_string),
             remark: contact.remark().map(ToString::to_string),
@@ -249,7 +260,7 @@ impl ContactHandler for PhotonContact {
     }
 
     fn contact_type(&self) -> ContactType {
-        ContactType::from_i32(self.contact_type.into())
+        ContactType::from_i32(self.contact_type)
     }
 
     fn name(&self) -> Option<&str> {

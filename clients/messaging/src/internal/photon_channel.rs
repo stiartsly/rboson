@@ -18,7 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Serialize, Deserialize};
 
@@ -26,6 +30,7 @@ use boson_api::{
     utils,
     Id,
     Result,
+    errors::StateError,
 };
 use crate::{
     channel::{Permission, Role},
@@ -50,17 +55,10 @@ use super::{
 };
 
 /// Channel implementation backed by a local contact and its membership list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PhotonChannel {
     #[serde(rename = "o", with = "utils::id")]
     owner: Id,
-
-    // Not part of the wire format: the session identity is recovered from the
-    // (self-encrypted) session key, not persisted or synced on its own. Kept
-    // here as a runtime overlay so callers can read it off the channel
-    // (see `RpcServer::channel`/`channels` in transport/mod.rs).
-    #[serde(skip, default)]
-    session_id: Id,
 
     #[serde(rename = "p")]
     permission: i32,
@@ -84,7 +82,11 @@ pub struct PhotonChannel {
     contact: PhotonContact,
 
     #[serde(skip)]
-    members: Vec<PhotonChannelMember>,
+    members: HashMap<Id, PhotonChannelMember>,
+    #[serde(skip)]
+    members_loader: Option<Arc<dyn Fn() -> Vec<PhotonChannelMember> + Send + Sync>> ,
+    #[serde(skip)]
+    members_epoch: u64,
 }
 
 impl PhotonChannel {
@@ -92,35 +94,43 @@ impl PhotonChannel {
         self.contact.clone()
     }
 
+    pub(crate) fn photon_members(&self) -> Vec<PhotonChannelMember> {
+        self.members.values().cloned().collect()
+    }
+
     pub(crate) fn new(
         contact: PhotonContact,
         owner: Id,
-        session_id: Id,
         permission: Permission,
         notice: Option<String>,
         announce: bool,
-        members: Vec<PhotonChannelMember>,
     ) -> Self {
         Self {
             owner,
-            session_id,
             permission: permission as i32,
             notice,
             announce,
             contact,
-            members,
+            members: HashMap::new(),
+            members_loader: None,
+            members_epoch: 0,
         }
     }
 
     pub(crate) fn from(info: &ChannelInfo, session_key: Option<Vec<u8>>) -> Self {
+        let mut members = HashMap::new();
+        for member in info.members() {
+            members.insert(*member.id(), member.clone());
+        }
         Self {
-            contact: PhotonContact::from(info, session_key),
-            owner: *info.owner_id(),
-            session_id: *info.session_id(),
-            permission: info.permission() as i32,
-            notice: info.notice().map(ToString::to_string),
-            announce: info.announce(),
-            members: info.members().to_vec(),
+            contact     : PhotonContact::from(info, session_key),
+            owner       : *info.owner_id(),
+            permission  : info.permission() as i32,
+            notice      : info.notice().map(ToString::to_string),
+            announce    : info.announce(),
+            members,
+            members_loader: None,
+            members_epoch: 0,
         }
     }
 
@@ -144,74 +154,66 @@ impl PhotonChannel {
             .expect("INTERNAL ERROR: channel sessionKey not set")
     }
 
-    pub(crate) fn session_id(&self) -> &Id {
-        &self.session_id
+    pub(crate) fn try_load_members(&mut self) -> Result<()> {
+        // TODO:
+        // Try loading members by using loader, which is trying load channel members from database.
+        Ok(())
     }
 
-    pub(crate) fn set_session_id(&mut self, session_id: Id) {
-        self.session_id = session_id;
+    pub(crate) fn set_channel_members(&mut self, members: Vec<PhotonChannelMember>) -> Result<()> {
+        let mut members_map = HashMap::new();
+        for member in members {
+            members_map.insert(*member.id(), member);
+        }
+
+        if !members_map.contains_key(&self.owner) {
+            return Err(StateError::new("Owner is not present in the members list"));
+        }
+
+        self.members = members_map;
+        Ok(())
     }
 
-    /// Adds or replaces a member's entry, keyed by member id.
     pub(crate) fn upsert_member(&mut self, id: Id, role: Role, joined: SystemTime) {
-        let joined = joined
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0);
-        self.members.retain(|member| member.id() != &id);
-        self.members.push(PhotonChannelMember::new(id, role, joined));
+        let joined = boson_api::as_ms!(joined) as u64;
+        self.members.insert(id, PhotonChannelMember::new(id, role, joined));
     }
 
-    /// Sets `role` on every member in `ids`, returning the members that changed.
     pub(crate) fn update_member_roles(&mut self, ids: &[Id], role: Role) -> Vec<ChannelMember> {
         let mut changed = Vec::new();
-        for member in &mut self.members {
-            if ids.contains(member.id()) {
-                let joined = member
-                    .joined()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|duration| duration.as_millis() as u64)
-                    .unwrap_or(0);
-                *member = PhotonChannelMember::new(*member.id(), role, joined);
+        for id in ids {
+            if let Some(member) = self.members.get_mut(id) {
+                let joined = boson_api::as_ms!(member.joined()) as u64;
+                *member = PhotonChannelMember::new(*id, role, joined);
                 changed.push(Box::new(member.clone()) as ChannelMember);
             }
         }
         changed
     }
 
-    /// Removes every member in `ids`, returning the members that were removed.
     pub(crate) fn remove_members(&mut self, ids: &[Id]) -> Vec<ChannelMember> {
         let mut removed = Vec::new();
-        self.members.retain(|member| {
-            if ids.contains(member.id()) {
-                removed.push(Box::new(member.clone()) as ChannelMember);
-                false
-            } else {
-                true
+        for id in ids {
+            if let Some(member) = self.members.remove(id) {
+                removed.push(Box::new(member) as ChannelMember);
             }
-        });
+        }
         removed
+    }
+
+    pub(crate) fn invalidate_members(&mut self) {
+        self.members.clear();
+        self.members_epoch += 1;
     }
 
     pub(crate) fn to_opaque(&self, data: Vec<u8>) -> OpaqueContact {
         self.contact.to_opaque(data)
     }
 
-    /// Serializes the whole channel (contact fields flattened with the
-    /// channel-only fields) for use as an opaque contact document.
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self).map_err(|e|
-            EncodingError::new(format!("Serialization error: {e}")).into())
+    pub(crate) fn serialize(&self) -> Vec<u8> {
+        serde_cbor::to_vec(self).expect("Serializing PhotonChannel error")
     }
 
-    /// An unboxed, crate-internal editor: unlike [`ChannelHandler::edit_channel`]
-    /// (the public, Java `Channel.Editor`-equivalent surface, which only exposes
-    /// `permission`/`name`/`notice`/`announce`), this also exposes the fields the
-    /// Java port keeps on its *concrete* `ChannelEditor`/`ContactEditor` classes
-    /// instead of the public `Channel.Editor`/`Contact.Editor` interfaces (owner,
-    /// session key, revision, and the wire-format `patch`). An inherent method of
-    /// the same name takes priority over the trait method when called directly on
-    /// a concrete `PhotonChannel`, same as `set_revision` below.
     pub(crate) fn edit_channel(&self) -> PhotonChannelEditor {
         PhotonChannelEditor(self.clone())
     }
@@ -311,17 +313,20 @@ impl ChannelHandler for PhotonChannel {
     }
 
     fn banned(&self) -> usize {
-        self.members.iter().filter(|member| member.role() == crate::channel::Role::Banned).count()
+        self.members.values().filter(|member|
+            member.role() == crate::channel::Role::Banned
+        ).count()
     }
 
     fn members(&self) -> Vec<Box<dyn ChannelMemberHandler>> {
-        self.members.iter().cloned().map(|m| Box::new(m) as Box<dyn ChannelMemberHandler>).collect()
+        self.members.values().cloned().map(|m|
+            Box::new(m) as Box<dyn ChannelMemberHandler>
+        ).collect()
     }
 
     fn member(&self, member_id: &Id) -> Option<Box<dyn ChannelMemberHandler>> {
         self.members
-            .iter()
-            .find(|member| member.id() == member_id)
+            .get(member_id)
             .cloned()
             .map(|m| Box::new(m) as Box<dyn ChannelMemberHandler>)
     }

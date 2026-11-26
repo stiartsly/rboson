@@ -9,7 +9,7 @@ use log::{debug, error, info, warn, trace};
 
 use boson_api::{
     Result,
-    errors::{ArgumentError, StateError},
+    errors::{StateError},
     signature,
     CryptoIdentity,
     Id,
@@ -17,7 +17,7 @@ use boson_api::{
 };
 
 use crate::{
-    ChannelHandler, ChannelMember, ChannelMemberHandler, ConnectionListener, FriendRequest, FriendRequestHandler, Message, MessageOps, MessageOriginated, channel::{Channel, Permission, Role}, contact::{Contact, ContactHandler, ContactType}, errors::{
+    ChannelHandler, ChannelMember, ChannelMemberHandler, ConnectionListener, FriendRequestHandler, Message, MessageOps, MessageOriginated, channel::{Channel, Permission, Role}, contact::{Contact, ContactHandler, ContactType}, errors::{
         AuthenticationError,
         EncodingError,
     }, message::MessageType
@@ -451,14 +451,9 @@ impl RpcServer {
                 }
 
                 if !info.members().is_empty() {
-                    let members: Vec<ChannelMember> = info.members()
-                        .iter()
-                        .cloned()
-                        .map(|member| Box::new(member) as ChannelMember)
-                        .collect();
                     if let Err(error) = self.repository
                         .borrow_mut()
-                        .put_channel_members(channel_id, &members)
+                        .put_channel_members(channel_id, info.members())
                     {
                         warn!("Failed to store channel members for {channel_id}: {error}");
                     }
@@ -535,8 +530,7 @@ impl RpcServer {
                 // members via the old session's tx crypto context).
                 self.self_context.borrow_mut().reset_nonce();
                 let encrypted_for_self = self.self_context.borrow_mut().encrypt_into(&key)?;
-                let mut updated = channel.edit_channel().set_session_key(encrypted_for_self).build();
-                updated.set_session_id(*session.id());
+                let updated = channel.edit_channel().set_session_key(encrypted_for_self).build();
 
                 self.session_contexts
                     .lock()
@@ -667,15 +661,14 @@ impl RpcServer {
         let mut contact = channel.photon_contact();
         contact.set_name(ci.name().map(ToString::to_string));
         contact.set_updated_at(ci.updated_at());
-        let updated = PhotonChannel::new(
+        let mut updated = PhotonChannel::new(
             contact,
             *ci.owner_id(),
-            *channel.session_id(),
             ci.permission(),
             ci.notice().map(ToString::to_string),
             ci.announce(),
-            ci.members().to_vec(),
         );
+        updated.set_channel_members(ci.members().to_vec())?;
         self.put_channel(&updated)?;
         Ok(updated)
     }
@@ -688,18 +681,12 @@ impl RpcServer {
         let channel = match contact.contact_type() {
             ContactType::Channel => {
                 let info: ChannelContactInfo = serde_cbor::from_slice(&plaintext).map_err(|e| EncodingError::new(format!("Malformed channel contact: {e}")))?;
-                let session_id = *session
-                    .as_ref()
-                    .ok_or_else(|| EncodingError::new("Channel session is missing"))?
-                    .id();
                 Some(PhotonChannel::new(
                     contact.clone(),
                     info.owner,
-                    session_id,
                     Permission::try_from(info.permission)?,
                     info.notice,
                     info.announced,
-                    Vec::new(),
                 ))
             }
             _ => None,
@@ -1139,7 +1126,7 @@ impl RpcServer {
                 let _ = self.put_friend_request(&request);
                 return Ok(());
             }
-            HandshakeType::FriendRequestAccept(session_key) => {
+            HandshakeType::FriendRequestAccept(_session_key) => {
                 trace!("Acecept friend request from {}", message.recipient());
 
                 let from = message.recipient();
@@ -1175,7 +1162,15 @@ impl RpcServer {
             .get_contact(id)
             .await
             .ok_or_else(|| StateError::new(format!("No contact found for {id}")))?;
-        Ok(PhotonConversation::new(Box::new(contact) as Contact))
+        let session = contact
+            .session(&self.user_identity)?
+            .ok_or_else(|| StateError::new("Contact session key is missing"))?;
+        let session_context = self.session_context(
+            *contact.id(),
+            session,
+            contact.contact_type == ContactType::Channel as i32,
+        );
+        Ok(PhotonConversation::new(contact, session_context))
     }
 
     async fn process_incoming_content_message(

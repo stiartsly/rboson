@@ -52,7 +52,7 @@ impl PhotonFriend {
         Self {
             contact: PhotonContact {
                 id,
-                contact_type: ContactType::Friend as u8,
+                contact_type: ContactType::Friend as i32,
                 session_key: Some(session_key),
                 name,
                 remark,

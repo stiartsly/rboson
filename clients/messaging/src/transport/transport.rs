@@ -61,12 +61,10 @@ pub(super) fn seal_for(
     };
     let created_at = i64::try_from(timestamp)
         .map_err(|_| EncodingError::new("Message timestamp is negative"))?;
-    let message = PhotonMessage::new(
-        MESSAGE_VERSION as i32,
+    let message = PhotonMessage::outgoing(
         RpcServer::message_id(device_identity.id(), timestamp)?,
         *recipient,
         MessageType::from_i32(message_type).unwrap(),
-        None,
         created_at,
         Value::Bytes(body),
     );

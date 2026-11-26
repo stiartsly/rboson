@@ -30,7 +30,7 @@ pub trait ConversationHandler: Send + Sync {
     fn id(&self) -> &Id;
 
     /// The contact representing the other participant.
-    fn contact(&self) -> &Contact;
+    fn contact(&self) -> Contact;
 
     /// Whether this is a channel (group) conversation.
     fn is_channel(&self) -> bool;

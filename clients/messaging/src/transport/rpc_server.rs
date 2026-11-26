@@ -100,7 +100,7 @@ impl RpcServer {
             device_identity.create_crypto_context(peer_id)?
         ));
 
-        let repository = RefCell::new(MessagingRepository::new());
+        let repository = RefCell::new(MessagingRepository::new(Arc::new(user_identity.clone())));
 
         Ok(Rc::new(Self {
             options: options.options,
@@ -224,7 +224,7 @@ impl RpcServer {
                     self.session_context(
                         stored.id,
                         identity,
-                        stored.contact_type == ContactType::Channel as u8,
+                        stored.contact_type == ContactType::Channel as i32,
                     ),
                 );
             }

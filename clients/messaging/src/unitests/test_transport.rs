@@ -128,7 +128,12 @@ fn conversation(user_id: Id) -> PhotonConversation {
         crate::contact::ContactType::Friend,
         1,
     );
-    PhotonConversation::new(Box::new(contact) as Contact)
+    let session_context = SessionContext::for_user(
+        user_id,
+        Arc::new(CryptoIdentity::new()),
+        Arc::new(CryptoIdentity::new()),
+    );
+    PhotonConversation::new(contact, session_context)
 }
 
 #[tokio::test]
@@ -230,21 +235,22 @@ async fn contacts_merge_repository_and_cache() {
     assert!(contacts.iter().any(|contact| contact.id() == second.id()));
 }*/
 
-fn channel(user_id: Id, owner: Id, session_id: Id) -> crate::internal::PhotonChannel {
+fn channel(user_id: Id, owner: Id) -> crate::internal::PhotonChannel {
     let contact = crate::internal::photon_contact::PhotonContact::new(
         user_id,
         crate::contact::ContactType::Channel,
         1,
     );
-    let channel = crate::internal::PhotonChannel::new(
+    let mut channel = crate::internal::PhotonChannel::new(
         contact,
         owner,
-        session_id,
         crate::channel::Permission::Public,
         None,
         false,
-        Vec::new(),
     );
+    channel.set_channel_members(vec![
+        crate::internal::PhotonChannelMember::new(owner, crate::channel::Role::Owner, 0)
+    ]).unwrap();
     channel
 }
 
@@ -262,7 +268,7 @@ async fn channel_put_get_and_remove() {
     let user_id = *CryptoIdentity::new().id();
     let owner = *CryptoIdentity::new().id();
     let session_id = *CryptoIdentity::new().id();
-    let channel = channel(user_id, owner, session_id);
+    let channel = channel(user_id, owner);
     install_channel(&server, &channel);
 
     server.put_channel(&channel).unwrap();
@@ -282,10 +288,8 @@ async fn channels_lists_cached_channels() {
     let first = channel(
         *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
-        *CryptoIdentity::new().id(),
     );
     let second = channel(
-        *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
     );
@@ -307,10 +311,8 @@ async fn remove_channels_clears_cached_channels() {
     let first = channel(
         *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
-        *CryptoIdentity::new().id(),
     );
     let second = channel(
-        *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
         *CryptoIdentity::new().id(),
     );

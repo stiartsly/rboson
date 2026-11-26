@@ -198,12 +198,10 @@ impl RpcServer {
         self.put_friend_request(&fr)?;
 
         let message_id  = Self::message_id(self.device_id(), timestamp)?;
-        let message = PhotonMessage::new(
-            MESSAGE_VERSION as i32,
+        let message = PhotonMessage::outgoing(
             message_id,
             *user_id,
             MessageType::Handshake,
-            None,
             timestamp,
             Value::Bytes(payload.clone()),
         );
@@ -251,12 +249,10 @@ impl RpcServer {
         let timestamp = self.origin_timestamp();
         let handshake = Handshake::friend_request_accept(session_sk.clone(), timestamp);
         let payload = handshake.serialize();
-        let message = PhotonMessage::new(
-            MESSAGE_VERSION as i32,
+        let message = PhotonMessage::outgoing(
             Self::message_id(self.device_id(), timestamp)?,
             *user_id,
             MessageType::Handshake,
-            None,
             timestamp,
             Value::Bytes(payload.clone()),
         );
@@ -516,7 +512,7 @@ impl RpcServer {
         self.put_channel(&channel)?;
 
         // 3. Add the channel as a new contact (sync cross all devices)
-        let opaque_data = channel.serialize()?;
+        let opaque_data = channel.serialize();
         let opaque_contact = channel.to_opaque(opaque_data);
         let mutation = ContactMutation::add(self.contacts_revision.get(), opaque_contact);
         let request = RPCRequest::contact_mutate(0, mutation);
@@ -545,7 +541,7 @@ impl RpcServer {
         let result = self.send_rpccall(channel_id, request).await?;
         let response::Value::ChannelDelete(_) = &result else {
             return Err(EncodingError::new(
-                "The response is not for delete channel RPC"));
+                "The response is not for delete channel RPC").into());
         };
 
         let mutation = ContactMutation::remove(
@@ -633,7 +629,7 @@ impl RpcServer {
                         return Ok(channel);
                     }
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
         let response::Value::ChannelJoin(ci) = result else {
@@ -665,7 +661,7 @@ impl RpcServer {
         self.put_channel(&channel)?;
 
         // Add the channel as a new contact (to sync cross all devices)
-        let opaque_data = channel.serialize()?;
+        let opaque_data = channel.serialize();
         let opaque_contact = channel.to_opaque(opaque_data);
         let mutation = ContactMutation::add(self.contacts_revision.get(), opaque_contact);
         let request = RPCRequest::contact_mutate(0, mutation);
@@ -765,7 +761,7 @@ impl RpcServer {
             .map_err(|e| {
                 EncodingError::new(&format!("Failed to create session key: {}", e))
             })?;
-        let session_id = *channel.session_id();
+        let session_id = Id::from(session_key.public_key());
         let session_sk = if let Some(ref invitee) = invitee {
             self.user_identity.encrypt_into(invitee, session_sk.as_slice())?
         } else {
@@ -779,7 +775,7 @@ impl RpcServer {
             invitee,
             boson_api::as_ms!(SystemTime::now() + Duration::from_millis(InviteTicket::DEFAULT_EXPIRATION_MS)) as i64,
             session_sk,
-        )
+        ).map_err(|e| e.into())
     }
 
     pub(crate) async fn transfer_channel_ownership(
@@ -840,11 +836,6 @@ impl RpcServer {
             let current_session = sessions
                 .get_mut(&channel_id)
                 .ok_or_else(|| StateError::new("Channel session key is missing"))?;
-            if current_session.session_id() != channel.session_id() {
-                return Err(StateError::new(
-                    "Channel session key does not match the channel",
-                ));
-            }
             current_session
                 .tx_crypto_context()?
                 .encrypt_into(keypair.private_key().as_ref())?
@@ -866,7 +857,6 @@ impl RpcServer {
         let mut updated = channel.edit_channel()
             .set_session_key(stored_key)
             .build();
-        updated.set_session_id(session_id);
         self.session_contexts.lock().unwrap().insert(
             channel_id,
             self.session_context(channel_id, CryptoIdentity::from(keypair), true),
@@ -1267,12 +1257,12 @@ impl MessageBuilderOps for SessionMessageBuilder {
                 },
             };
             let content_bytes = content.serialize()?;
-            let encrypted = {
+            let (encrypted, session_context) = {
                 let mut sessions = this.friend_sessions.lock().unwrap();
                 let session = sessions
                     .get_mut(&recipient)
                     .ok_or_else(|| StateError::new(format!("No friend session for {recipient}")))?;
-                session.tx_crypto_context()?.encrypt_into(&content_bytes)?
+                (session.tx_crypto_context()?.encrypt_into(&content_bytes)?, session.clone())
             };
             let (mut wire, payload) = super::transport::seal_for(
                 &this.user_identity,
@@ -1298,7 +1288,7 @@ impl MessageBuilderOps for SessionMessageBuilder {
                 .conversation_contact
                 .unwrap_or_else(|| Box::new(PhotonContact::new(recipient, ContactType::Auto, timestamp)) as Contact);
             let boxed_message: Message = Box::new(wire);
-            update_conversation(&this.conversations, contact, boxed_message.clone())?;
+            update_conversation(&this.conversations, contact, session_context, boxed_message.clone())?;
             Ok(boxed_message)
         })
     }
@@ -1358,12 +1348,15 @@ fn headers_to_cbor(headers: &HashMap<String, serde_json::Value>) -> Result<HashM
 pub(super) fn update_conversation(
     conversations: &Arc<Mutex<HashMap<Id, PhotonConversation>>>,
     contact: Contact,
+    session_context: SessionContext,
     message: Message,
 ) -> Result<()> {
     let mut conversations = conversations.lock().unwrap();
+    let contact_id = *contact.id();
+    let contact = PhotonContact::from_contact(&contact);
     let conversation = conversations
-        .entry(*contact.id())
-        .or_insert_with(|| PhotonConversation::new(contact));
+        .entry(contact_id)
+        .or_insert_with(|| PhotonConversation::new(contact, session_context));
     conversation.update(message)
 }
 
@@ -1451,16 +1444,13 @@ impl RpcServer {
             .register(timestamp, method, *recipient)?;
 
         let message_id = crate::interfaces::generate_id(self.device_identity.id(), timestamp);
-        let mut message = PhotonMessage::new(
-            MESSAGE_VERSION as i32,
+        let message = PhotonMessage::outgoing(
             message_id,
             *recipient,
             MessageType::Control,
-            None,
             timestamp,
-            Value::Bytes(payload.clone()),
+            Value::Bytes(payload),
         );
-        message.payload_bytes = payload;
 
         tokio::time::timeout(RPC_TIMEOUT, async {
             self.send_message_internal(message).await?;

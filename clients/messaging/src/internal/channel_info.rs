@@ -126,12 +126,9 @@ impl ChannelInfo {
         &self.members
     }
 
-     pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self).map_err(|e|
-            EncodingError::new(&format!("serializing channel info error: {e}")).into()
-        )
+     pub(crate) fn serialize(&self) -> Vec<u8> {
+        serde_cbor::to_vec(self).expect("serializing channel info error")
     }
-
     pub(crate) fn deserialize(payload: &[u8]) -> Result<Self> {
         serde_cbor::from_slice(payload).map_err(|e|
             EncodingError::new(&format!("deserializing channel info error: {e}")).into()

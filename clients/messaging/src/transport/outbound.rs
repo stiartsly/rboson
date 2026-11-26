@@ -38,9 +38,7 @@ use crate::{
     Message,
 };
 
-pub(crate) use crate::interfaces::{
-    MessageBuilderOps,
-};
+pub(crate) use crate::MessageBuilderHandler;
 
 pub(crate) use crate::internal::{
     ChannelSessionKeyRotation,
@@ -1134,7 +1132,7 @@ impl RpcServer {
         Ok(())
     }
 
-    pub(crate) fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilderOps> {
+    pub(crate) fn message(&self, recipient: Option<Id>) -> Box<dyn MessageBuilderHandler> {
         Box::new(SessionMessageBuilder {
             recipient,
             client: self.client_handle(),
@@ -1186,30 +1184,30 @@ pub(crate) struct SessionMessageBuilder {
     text: bool,
 }
 
-impl MessageBuilderOps for SessionMessageBuilder {
-    fn with_content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilderOps> {
+impl MessageBuilderHandler for SessionMessageBuilder {
+    fn with_content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilderHandler> {
         self.content_type = Some(content_type.to_string());
         self
     }
 
-    fn with_content_disposition(mut self: Box<Self>, disposition: ContentDisposition) -> Box<dyn MessageBuilderOps> {
+    fn with_content_disposition(mut self: Box<Self>, disposition: ContentDisposition) -> Box<dyn MessageBuilderHandler> {
         self.content_disposition = Some(disposition);
         self
     }
 
-    fn with_text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilderOps> {
+    fn with_text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilderHandler> {
         self.body = Some(text.as_bytes().to_vec());
         self.text = true;
         self
     }
 
-    fn with_binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilderOps> {
+    fn with_binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilderHandler> {
         self.body = Some(data);
         self.text = false;
         self
     }
 
-    fn with_header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilderOps> {
+    fn with_header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilderHandler> {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }
@@ -1362,7 +1360,7 @@ pub(super) fn update_conversation(
 
 impl RpcServer {
     async fn send_message_internal(&self, mut message: PhotonMessage) -> Result<()> {
-        use crate::MessageOps;
+        use crate::MessageHandler;
 
         let payload = message.payload_as_bytes();
         let encrypted = if payload.is_empty() {

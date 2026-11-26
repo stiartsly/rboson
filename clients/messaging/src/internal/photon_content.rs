@@ -14,7 +14,7 @@ use boson_api::{
     Result,
 };
 
-use crate::MessageContentOps;
+use crate::MessageContentHandler;
 
 /// Encoding of the message body carried by [`MessageContent`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl Default for PhotonContent {
     }
 }
 
-impl MessageContentOps for PhotonContent {
+impl MessageContentHandler for PhotonContent {
     fn headers(&self) -> HashMap<String, serde_json::Value> {
         self.headers
             .iter()

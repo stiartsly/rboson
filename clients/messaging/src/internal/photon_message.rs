@@ -24,8 +24,8 @@ use serde_cbor::Value;
 
 use boson_api::{utils, Id};
 use crate::{
-    MessageOps,
-    MessageContentOps,
+    MessageHandler,
+    MessageContentHandler,
     MessageOriginated,
     MessageType,
     errors::EncodingError,
@@ -259,7 +259,7 @@ impl MessageOriginated for PhotonMessage {
     }
 }
 
-impl MessageOps for PhotonMessage {
+impl MessageHandler for PhotonMessage {
     fn id(&self) -> &Id {
         &self.id
     }
@@ -300,11 +300,11 @@ impl MessageOps for PhotonMessage {
         &self.payload_bytes
     }
 
-    fn payload_as_content(&self) -> Option<Box<dyn MessageContentOps>> {
-        self.content.clone().map(|content| Box::new(content) as Box<dyn MessageContentOps>)
+    fn payload_as_content(&self) -> Option<Box<dyn MessageContentHandler>> {
+        self.content.clone().map(|content| Box::new(content) as Box<dyn MessageContentHandler>)
     }
 
-    fn clone_box(&self) -> Box<dyn MessageOps> {
+    fn clone_box(&self) -> Box<dyn MessageHandler> {
         Box::new(self.clone())
     }
 }

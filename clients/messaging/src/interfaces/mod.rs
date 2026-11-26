@@ -18,14 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-mod message;
 mod message_originated;
-
-pub use {
-    message::Message as MessageOps,
-    message::MessageContent as MessageContentOps,
-    message::MessageBuilder as MessageBuilderOps,
-};
 
 pub(crate) use {
     message_originated::{MessageOriginated, generate_id},

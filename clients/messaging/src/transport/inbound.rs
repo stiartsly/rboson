@@ -17,7 +17,7 @@ use boson_api::{
 };
 
 use crate::{
-    ChannelHandler, ChannelMember, ChannelMemberHandler, ConnectionListener, FriendRequestHandler, Message, MessageOps, MessageOriginated, channel::{Channel, Permission, Role}, contact::{Contact, ContactHandler, ContactType}, errors::{
+    ChannelHandler, ChannelMember, ChannelMemberHandler, ConnectionListener, FriendRequestHandler, Message, MessageHandler, MessageOriginated, channel::{Channel, Permission, Role}, contact::{Contact, ContactHandler, ContactType}, errors::{
         AuthenticationError,
         EncodingError,
     }, message::MessageType
@@ -1108,7 +1108,7 @@ impl RpcServer {
     async fn process_outgoing_handshake(&self, message: PhotonMessage, from: &Id) -> Result<()> {
         if message.is_originated(self.device_id()) {
             trace!("The handshake {} to {} is redundant (or originated from self), ignoring it.",
-                MessageOps::id(&message), from);
+                MessageHandler::id(&message), from);
             return Ok(());
         }
 
@@ -1195,7 +1195,7 @@ impl RpcServer {
         if let Err(error) = self.repository.borrow_mut().put_message(&mut message) {
             error!(
                 "Failed to persist incoming message {}: {error}",
-                MessageOps::id(&message)
+                MessageHandler::id(&message)
             );
         }
 
@@ -1236,7 +1236,7 @@ impl RpcServer {
         if message.is_originated(self.device_id()) {
             trace!(
                 "Message {} sent to {} originated from this device",
-                MessageOps::id(&message),
+                MessageHandler::id(&message),
                 contact_id
             );
             self.message_listener.on_sent(&(Box::new(message) as Message));
@@ -1245,7 +1245,7 @@ impl RpcServer {
 
         trace!(
             "Message {} sent to {} originated from another device",
-            MessageOps::id(&message),
+            MessageHandler::id(&message),
             contact_id
         );
         if let Err(error) = self.repository.borrow_mut().put_message(&mut message) {

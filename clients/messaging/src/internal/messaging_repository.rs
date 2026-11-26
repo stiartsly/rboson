@@ -51,9 +51,9 @@ use crate::{
     },
 };
 
-use crate::interfaces::{
-    MessageContentOps,
-    MessageOps,
+use crate::{
+    MessageContentHandler,
+    MessageHandler,
 };
 use crate::internal::{
     PhotonChannelMember,

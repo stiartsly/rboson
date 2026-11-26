@@ -111,10 +111,10 @@ pub use {
     },
 };
 
-pub use interfaces::{
-    MessageContentOps,
-    MessageBuilderOps,
-    MessageOps,
+pub use message::{
+    MessageContentHandler,
+    MessageBuilderHandler,
+    MessageHandler,
 };
 
 pub(crate) use interfaces::MessageOriginated;

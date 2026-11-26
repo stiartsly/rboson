@@ -42,7 +42,7 @@ use crate::{
     CONTENT_DISPOSITION_HEADER,
 };
 
-use crate::interfaces::MessageBuilderOps;
+use crate::MessageBuilderHandler;
 
 use super::{
     verticle,
@@ -80,30 +80,30 @@ impl ClientMessageBuilder {
 }
 
 
-impl MessageBuilderOps for ClientMessageBuilder {
-    fn with_content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilderOps> {
+impl MessageBuilderHandler for ClientMessageBuilder {
+    fn with_content_type(mut self: Box<Self>, content_type: &str) -> Box<dyn MessageBuilderHandler> {
         self.content_type = Some(content_type.to_string());
         self
     }
 
-    fn with_content_disposition(mut self: Box<Self>, disposition: ContentDisposition) -> Box<dyn MessageBuilderOps> {
+    fn with_content_disposition(mut self: Box<Self>, disposition: ContentDisposition) -> Box<dyn MessageBuilderHandler> {
         self.content_disposition = Some(disposition);
         self
     }
 
-    fn with_text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilderOps> {
+    fn with_text_body(mut self: Box<Self>, text: &str) -> Box<dyn MessageBuilderHandler> {
         self.body = Some(text.as_bytes().to_vec());
         self.text = true;
         self
     }
 
-    fn with_binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilderOps> {
+    fn with_binary_body(mut self: Box<Self>, data: Vec<u8>) -> Box<dyn MessageBuilderHandler> {
         self.body = Some(data);
         self.text = false;
         self
     }
 
-    fn with_header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilderOps> {
+    fn with_header(mut self: Box<Self>, key: &str, value: &str) -> Box<dyn MessageBuilderHandler> {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }

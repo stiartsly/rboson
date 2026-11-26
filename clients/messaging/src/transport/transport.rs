@@ -68,7 +68,7 @@ pub(super) fn seal_for(
         created_at,
         Value::Bytes(body),
     );
-    let encoded = message.serialize()?;
+    let encoded = message.serialize();
     let payload = device_identity
         .encrypt_into(peer_id, &encoded)
         .map_err(|error| {

@@ -220,28 +220,28 @@ pub(super) fn handle(
 
         Event::UpdateChannelInfo(Body(channel, promise)) => {
             respond(pending, promise, async move {
-                rpc.update_channel_info(&channel).await
+                rpc.update_channel_info(channel).await
             });
         }
 
-        Event::SetChannelMembersRole(Body((id, role), promise)) => {
+        Event::SetChannelMembersRole(Body((id, mut role), promise)) => {
             respond(pending, promise, async move {
-                rpc.set_channel_members_role(&id, role.member_ids(), role.role()).await
+                rpc.set_channel_members_role(&id, role.ids_take(), role.role()).await
             });
         }
         Event::BanChannelMembers(Body((id, ids), promise)) => {
             respond(pending, promise, async move {
-                rpc.ban_channel_members(&id, &ids).await
+                rpc.ban_channel_members(&id, ids).await
             });
         }
         Event::UnbanChannelMembers(Body((id, ids), promise)) => {
             respond(pending, promise, async move {
-                rpc.unban_channel_members(&id, &ids).await
+                rpc.unban_channel_members(&id, ids).await
             });
         }
         Event::RemoveChannelMembers(Body((id, ids), promise)) => {
             respond(pending, promise, async move {
-                rpc.remove_channel_members(&id, &ids).await
+                rpc.remove_channel_members(&id, ids).await
             });
         }
         Event::GetContacts(Body(id_opt, promise)) => {

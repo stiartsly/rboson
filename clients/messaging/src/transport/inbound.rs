@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     time::{SystemTime, UNIX_EPOCH},
+    slice,
 };
 use serde::Deserialize;
 use serde_cbor::Value;
@@ -9,7 +10,7 @@ use log::{debug, error, info, warn, trace};
 
 use boson_api::{
     Result,
-    errors::{StateError},
+    errors::{DBError, StateError},
     signature,
     CryptoIdentity,
     Id,
@@ -32,6 +33,7 @@ use crate::internal::{
     MutationData,
     OpaqueContact,
     PhotonChannel,
+    PhotonChannelMember,
     PhotonContact,
     PhotonMessage,
     PhotonConversation,
@@ -426,98 +428,123 @@ impl RpcServer {
         }
     }
 
-    async fn process_channel_notification(&self, notif: Notification, mut channel: PhotonChannel) -> Result<()> {
-        let channel_id = channel.id();
-        match notif.body() {
+    async fn process_channel_notification(
+        &self,
+        notification: Notification,
+        mut channel: PhotonChannel
+    ) -> Result<()> {
+        let channel_id = *channel.id();
+        match notification.body() {
             Body::ChannelDeletion => {
                 trace!("Channel {} deleted", channel_id);
-                // TODO: remove contact locally;
-                self.remove_channel(channel.id()).await;
-                self.channel_listener.on_channel_deleted(&Box::new(channel).into());
+
+                let _ = self.repository
+                    .borrow_mut()
+                    .remove_contact_locally(&channel_id);
+
+                // TODO: contact_cache invalidate.
+
+                let _ = self.remove_contacts_internal(&[channel_id])
+                    .await
+                    .map(|_| debug!("Synced channel {} remove on CHANNEL_DELETE cross devices", channel_id))
+                    .map_err(|_| debug!("Failed to sync channel {} removal on CHANNEL_DELETE cross devices", channel_id));
+
+                self.channel_listener
+                    .on_channel_deleted(&channel.into());
             }
             Body::ChannelJoin(info) => {
                 trace!("Channel {} joined", channel_id);
-                if self.get_channel(channel_id).is_none() {
+                if self.get_channel(&channel_id).is_none() {
                     // Save the channel to the local database immediately to provide a responsive UI.
 					// We bypass the official 'contactsRevision' update here because this is a local-only
 					// optimistic insert. The server will later broadcast a CONTACT_MUTATE notification
 					// triggered by the device that initiated the original CHANNEL_CREATE request,
 					// which will perform the formal, synchronized update of the contact list and revision state.
 
-                    let _ = self.put_channel(&channel);
+                    let _ = self.repository
+                        .borrow_mut()
+                        .put_channel_locally(&channel);
                 } else {
                     // ready synced the channel contact.
                     // placeholder.
                 }
 
                 if !info.members().is_empty() {
-                    if let Err(error) = self.repository
+                    let _ = self.repository
                         .borrow_mut()
-                        .put_channel_members(channel_id, info.members())
-                    {
-                        warn!("Failed to store channel members for {channel_id}: {error}");
-                    }
+                        .put_channel_members(&channel_id, info.members());
                 }
-                self.channel_listener.on_joined_channel(&Box::new(channel).into());
+
+                self.channel_listener
+                    .on_joined_channel(&channel.into());
             }
             Body::ChannelLeave => {
                 trace!("Channel {} left", channel_id);
-                self.remove_channel(channel.id()).await;
+
+                self.repository
+                    .borrow_mut()
+                    .remove_channel_locally(&channel_id);
                 // TODO: invalidate channel members cache for this channel
-                self.channel_listener.on_left_channel(&Box::new(channel).into());
+                self.channel_listener
+                    .on_left_channel(&channel.into());
             }
-            Body::ChannelOwnershipTransfer(new_owner) => {
-                trace!("Channel {} ownership transfer to {}", channel_id, new_owner);
+            Body::ChannelOwnershipTransfer(new_owner_id) => {
+                trace!("Channel {} ownership transfer to {}", channel_id, new_owner_id);
 
-                let old_owner = *channel.owner();
-                let channel = if !channel.has_member(&old_owner) || !channel.has_member(new_owner) {
-                    // Not up-to-date: repair the gap by re-fetching the channel.
+                let result = channel.try_load_members();
+                let old_owner_id = *channel.owner();
+
+                let old_owner = channel.member(channel.owner());
+                let new_owner = channel.member(new_owner_id);
+
+                if old_owner.is_none() || new_owner.is_none() {
                     warn!("Looks like channel {} is outdated, try to refresh", channel_id);
-                    self.refresh_channel(&channel).await?
+                    let _ = self.refresh_channel(&channel).await?;
                 } else {
-                    match self.repository.borrow_mut().update_channel_ownership(channel_id, &old_owner, new_owner) {
-                        Ok(()) => {
-                            let updated = channel.edit_channel().set_owner(*new_owner).build();
-                            self.put_channel(&updated)?;
-                            updated
-                        }
-                        Err(error) => {
-                            warn!("Update channel ownership failed, looks like channel {} is outdated, try to refresh: {error}", channel_id);
-                            self.refresh_channel(&channel).await?
-                        }
-                    }
-                };
-                self.channel_listener.on_channel_ownership_transferred(
-                    &(Box::new(channel) as Box<dyn ChannelHandler>),
-                    &old_owner,
-                    new_owner,
-                );
-            }
-            Body::ChannelSessionKeyRotate(encrypted_key) => {
-                trace!("Channel {} session key rotation", channel_id);
+                    let result = self.repository
+                        .borrow_mut()
+                        .update_channel_ownership(&channel_id, &old_owner_id, new_owner_id);
 
-                let channel = match self.get_channel(&channel_id) {
-                    Some(channel) => channel,
-                    None => {
-                        warn!("Failed to get channel snapshot");
+                    if let Err(error) = result {
+                        warn!("Update channel ownership failed, looks like channel {} is outdated, try to refresh", channel_id);
+                        let _ = self.refresh_channel(&channel).await?;
                         return Ok(());
                     }
-                };
-                if notif.source() != channel.owner() {
-                    warn!("Channel session key rotation has an unauthorized source");
-                    return Ok(());
+
+                    let mut updated = channel
+                        .edit_channel()
+                        .set_owner(*new_owner_id)
+                        .build();
+
+                    self.repository.borrow_mut()
+                        .put_channel_locally(&updated);
+
+                    updated.invalidate_members();
+                    // TODO: invalidate cache contact.
                 }
+
+                self.channel_listener
+                    .on_channel_ownership_transferred(
+                        &channel.into(),
+                        &old_owner_id,
+                        &new_owner_id
+                    );
+            }
+            Body::ChannelSessionKeyRotate(encrypted_key) => {
+                trace!("Channel {} session key rotated", channel_id);
+
                 let Some(context) = self.session_context_for(&channel_id) else {
                     warn!("Channel session key is missing");
                     return Ok(());
                 };
-                let key = match context.decrypt_into(&notif.source(), encrypted_key) {
+                let key = match context.decrypt_into(&notification.source(), encrypted_key) {
                     Ok(key) => key,
                     Err(error) => {
                         warn!("Decrypting rotated channel session key failed: {error}");
                         return Ok(());
                     }
                 };
+
                 let session = match CryptoIdentity::try_from(key.as_slice()) {
                     Ok(session) => session,
                     Err(error) => {
@@ -525,21 +552,24 @@ impl RpcServer {
                         return Ok(());
                     }
                 };
-                // Store the rotated key self-encrypted, same as every other persisted
-                // session key, not the form it arrived in (encrypted for channel
-                // members via the old session's tx crypto context).
-                self.self_context.borrow_mut().reset_nonce();
-                let encrypted_for_self = self.self_context.borrow_mut().encrypt_into(&key)?;
-                let updated = channel.edit_channel().set_session_key(encrypted_for_self).build();
+
+                let updated = channel
+                    .edit_channel()
+                    .set_session_key(key)
+                    .build();
 
                 self.session_contexts
                     .lock()
                     .unwrap()
-                    .insert(*channel_id, self.session_context(*channel_id, session, true));
+                    .insert(channel_id, self.session_context(channel_id, session, true));
 
-                self.put_channel(&updated)?;
-                self.channel_listener.on_channel_session_key_rotated(&(Box::new(updated) as Box<dyn ChannelHandler>));
-                return Ok(());
+                self.repository
+                    .borrow_mut()
+                    .put_channel_locally(&updated);
+
+                // TODO: invalidate contact cache.
+                self.channel_listener
+                    .on_channel_session_key_rotated(&updated.into());
             }
 
             Body::ChannelInfoUpdate(changes) => {
@@ -550,10 +580,13 @@ impl RpcServer {
                     .patch(changes)
                     .build();
 
-                self.put_channel(&updated)?;
-                // TODO: put channel locally
+                self.repository
+                    .borrow_mut()
+                    .put_channel_locally(&updated)?;
+
                 // invalidate cached channel.
-                self.channel_listener.on_channel_updated(&Box::new(updated).into());
+                self.channel_listener
+                    .on_channel_updated(&updated.into());
             }
             Body::ChannelMembersRoleUpdate(update) => {
                 trace!("Channel {} members role updated: {} - {:?}",
@@ -562,33 +595,71 @@ impl RpcServer {
                     update.member_ids()
                 );
 
-                let changed = channel.update_member_roles(update.member_ids(), update.role());
-                self.put_channel(&channel)?;
+                self.repository
+                    .borrow_mut()
+                    .update_channel_members_role(&channel_id, update.member_ids(), update.role() as i32)
+                    .map_err(|e| DBError::new(
+                        &format!("Persist channel member role error: {e}")))?;
+
+                channel.invalidate_members();
+
+                let members = self.repository
+                    .borrow_mut()
+                    .load_channel_members(&channel_id, update.member_ids())
+                    .map_err(|e| DBError::new(
+                        &format!("Load channel members error: {e}")))?
+                    .into_iter()
+                    .map(|member| Box::new(member) as ChannelMember)
+                    .collect::<Vec<_>>();
+
                 self.channel_listener
-                    .on_channel_members_role_updated(&Box::new(channel).into(), &changed);
-                return Ok(());
+                    .on_channel_members_role_changed(&channel.into(), &members);
             }
             Body::ChannelMembersBan(ids) => {
                 trace!("Channel {} members banned: {:?}", channel_id, ids);
-                let changed = channel.update_member_roles(ids, Role::Banned);
-                self.put_channel(&channel)?;
+
+                self.repository
+                    .borrow_mut()
+                    .update_channel_members_role(&channel_id, ids.as_slice(), Role::Banned as i32)
+                    .map_err(|e| DBError::new(
+                        &format!("Persist channel member role error: {e}")))?;
+
+                channel.invalidate_members();
+
+                let members = self.repository
+                    .borrow_mut()
+                    .load_channel_members(&channel_id, ids.as_slice())
+                    .map_err(|e| DBError::new(
+                        &format!("Load channel members error: {e}")))?
+                    .into_iter()
+                    .map(|member| Box::new(member) as ChannelMember)
+                    .collect::<Vec<_>>();
+
                 self.channel_listener
-                    .on_channel_members_banned(&Box::new(channel).into(), &changed);
-                return Ok(());
+                    .on_channel_members_banned(&channel.into(), &members);
             }
             Body::ChannelMembersUnban(ids) => {
                 trace!("Channel {} members unbanned: {:?}", channel_id, ids);
-                let mut channel = match self.get_channel(&channel_id) {
-                    Some(channel) => channel,
-                    None => {
-                        warn!("Failed to get channel snapshot");
-                        return Ok(());
-                    }
-                };
-                let changed = channel.update_member_roles(ids, Role::Member);
-                self.put_channel(&channel)?;
+
+                self.repository
+                .borrow_mut()
+                    .update_channel_members_role(&channel_id, ids.as_slice(), Role::Member as i32)
+                    .map_err(|e| DBError::new(
+                        &format!("Persist channel member role error: {e}")))?;
+
+                channel.invalidate_members();
+
+                let members = self.repository
+                    .borrow_mut()
+                    .load_channel_members(&channel_id, ids.as_slice())
+                    .map_err(|e| DBError::new(
+                        &format!("Load channel members error: {e}")))?
+                    .into_iter()
+                    .map(|member| Box::new(member) as ChannelMember)
+                    .collect::<Vec<_>>();
+
                 self.channel_listener
-                    .on_channel_members_unbanned(&Box::new(channel).into(), &changed);
+                    .on_channel_members_unbanned(&channel.into(), &members);
                 return Ok(());
             }
             Body::ChannelMembersRemove(ids) => {
@@ -602,48 +673,68 @@ impl RpcServer {
                 let removed = channel.remove_members(ids);
                 self.put_channel(&channel)?;
                 self.channel_listener
-                    .on_channel_members_removed(&Box::new(channel).into(), &removed);
-                return Ok(());
+                    .on_channel_members_removed(&channel.into(), &removed);
             }
             Body::ChannelMemberJoin(member) => {
-                if member.joined().duration_since(UNIX_EPOCH).is_err() {
-                    warn!("Channel member timestamp is out of range");
-                    return Ok(());
-                }
+                trace!("Channel {} members joined: {:?}", channel_id, member);
+                self.repository.borrow_mut()
+                    .put_channel_members(channel.id(), slice::from_ref(member))
+                    .map_err(|e| DBError::new(
+                        &format!("Persisting channel members error: {e}")))?;
 
-                let mut channel = match self.get_channel(&channel_id) {
-                    Some(channel) => channel,
-                    None => {
-                        warn!("Failed to get channel snapshot");
-                        return Ok(());
-                    }
-                };
-                channel.upsert_member(*member.id(), member.role(), member.joined());
-                self.put_channel(&channel)?;
+                channel.invalidate_members();
                 self.channel_listener
-                    .on_channel_member_joined(&(Box::new(channel) as Channel), &(Box::new(member.clone()) as ChannelMember));
-                return Ok(());
+                    .on_channel_member_joined(&channel.into(), &(Box::new(member.clone()) as ChannelMember));
             }
             Body::ChannelMemberLeave(id) => {
-                let mut channel = match self.get_channel(&channel_id) {
-                    Some(channel) => channel,
-                    None => {
-                        warn!("Failed to get channel snapshot");
-                        return Ok(());
+                trace!("Channel {} member left: {:?}", channel_id, id);
+
+                let result = self.repository.borrow_mut()
+                    .load_channel_member(&channel_id, id)
+                    .map_err(|e| DBError::new(
+                        &format!("Loading channel member error: {e}"))
+                    );
+
+                let member = match result {
+                    Ok(Some(member)) => {
+                        self.repository.borrow_mut()
+                            .remove_channel_members(&channel_id, &[*member.id()])
+                            .map_err(|e| DBError::new(
+                                &format!("Removing channel member error: {e}"))
+                            )?;
+                        member
                     }
+                    _ => PhotonChannelMember::new(*id, Role::Member, 0)
                 };
-                let member = channel.members().into_iter().find(|member| member.id() == id);
-                channel.remove_members(&[*id]);
-                self.put_channel(&channel)?;
-                if let Some(member) = member {
-                    self.channel_listener
-                        .on_channel_member_left(&(Box::new(channel) as Channel), &member);
-                }
-                return Ok(());
+
+                channel.invalidate_members();
+                self.channel_listener
+                    .on_channel_member_left(&channel.into(), &(Box::new(member) as ChannelMember));
             }
             body => warn!("Unsupported channel notification: {body:?}"),
         }
 
+        Ok(())
+    }
+
+    async fn remove_contacts_internal(&self, contact_ids: &[Id]) -> Result<()>{
+        let mutation = ContactMutation::remove(
+            self.contacts_revision.get(),
+            contact_ids.to_vec()
+        );
+        let request = RPCRequest::contact_mutate(0, mutation);
+        let result = self.send_rpccall(&Id::default(), request).await?;
+        let response::Value::ContactMutate(revision) = result else {
+            return Err(EncodingError::new("RPC result is not contact mutate").into());
+        };
+
+        self.repository.borrow_mut()
+            .remove_contacts(revision, contact_ids)
+            .map_err(|e| DBError::new(
+                &format!("Removing contacts error: {e}"))
+            )?;
+
+        self.advance_contacts_revision(revision);
         Ok(())
     }
 
@@ -923,9 +1014,19 @@ impl RpcServer {
                         None => Vec::new(),
                     },
                 };
+                let mut contact = channel.photon_contact();
+                contact.set_session_key(Some(session_key));
+                let mut stored_channel = PhotonChannel::new(
+                    contact,
+                    *channel.owner(),
+                    channel.permission(),
+                    channel.notice().map(ToString::to_string),
+                    channel.is_announced(),
+                );
+                stored_channel.set_channel_members(channel.photon_members())?;
                 self.repository
                     .borrow_mut()
-                    .store_channel(state.revision, channel, &session_key)?;
+                    .put_channel(state.revision, &stored_channel)?;
                 continue;
             }
             let mut editor = contact.edit().set_revision(state.revision);

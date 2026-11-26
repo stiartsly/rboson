@@ -59,6 +59,7 @@ use crate::internal::{
         VerticleOptions,
     },
     PhotonContact,
+    PhotonChannel,
     ClientConnectionListener
 };
 
@@ -190,11 +191,11 @@ impl ChannelListener for ClientListeners {
         });
     }
 
-    fn on_channel_members_role_updated(&self, channel: &Channel, members: &[ChannelMember]) {
+    fn on_channel_members_role_changed(&self, channel: &Channel, members: &[ChannelMember]) {
         let channel = channel.clone();
         let members = members.iter().map(|member| member.clone()).collect::<Vec<_>>();
         dispatch(self.channel.clone(), move |listener| {
-            listener.on_channel_members_role_updated(&channel, &members)
+            listener.on_channel_members_role_changed(&channel, &members)
         });
     }
 }
@@ -722,7 +723,7 @@ impl Client {
     /// Updates channel metadata.
     pub async fn update_channel_info(&self, channel: &Channel) -> Result<()> {
         self.verticle_client()?
-            .update_channel_info(channel.edit_channel().build())
+            .update_channel_info(channel.try_into()?)
             .await
     }
 

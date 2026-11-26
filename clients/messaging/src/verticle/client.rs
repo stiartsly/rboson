@@ -38,6 +38,7 @@ use crate::internal::{
     ChannelMembersRole,
     PhotonConversation,
     PhotonFriendRequest,
+    PhotonChannel,
     PhotonContact,
     NewChannelInfo
 };
@@ -320,7 +321,7 @@ impl VerticleClient {
         }).await
     }
 
-    pub(crate) async fn update_channel_info(&self, channel: Channel) -> Result<()> {
+    pub(crate) async fn update_channel_info(&self, channel: PhotonChannel) -> Result<()> {
         self.call(|promise| {
             Event::UpdateChannelInfo(Body(channel, promise))
         }).await

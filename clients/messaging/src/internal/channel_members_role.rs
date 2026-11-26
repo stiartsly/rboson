@@ -33,6 +33,13 @@ pub(crate) struct ChannelMembersRole {
 }
 
 impl ChannelMembersRole {
+    pub(crate) fn new(member_ids: Vec<Id>, role: Role) -> Self {
+        Self {
+            member_ids,
+            role: role as i32
+        }
+    }
+
     pub(crate) fn member_ids(&self) -> &[Id] {
         &self.member_ids
     }
@@ -41,11 +48,8 @@ impl ChannelMembersRole {
         Role::from_i32(self.role)
     }
 
-    pub(crate) fn new(member_ids: Vec<Id>, role: Role) -> Self {
-        Self {
-            member_ids,
-            role: role as i32
-        }
+    pub(crate) fn ids_take(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.member_ids)
     }
 }
 

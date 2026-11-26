@@ -21,7 +21,7 @@
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 
 use serde::{Serialize, Deserialize};
@@ -35,7 +35,6 @@ use boson_api::{
 use crate::{
     channel::{Permission, Role},
     contact::ContactType,
-    errors::EncodingError,
     internal::OpaqueContact,
     ChannelMember,
 };
@@ -219,6 +218,18 @@ impl PhotonChannel {
     }
 }
 
+impl Eq for PhotonChannel {}
+impl PartialEq for PhotonChannel {
+    fn eq(&self, other: &Self) -> bool {
+        self.owner == other.owner &&
+        self.permission == other.permission &&
+        self.notice == other.notice &&
+        self.announce == other.announce &&
+        self.members == other.members &&
+        self.contact == other.contact
+    }
+}
+
 impl From<PhotonChannel> for Box<dyn ChannelHandler> {
     fn from(channel: PhotonChannel) -> Self {
         Box::new(channel)
@@ -234,6 +245,32 @@ impl From<Box<PhotonChannel>> for Box<dyn ChannelHandler> {
 impl AsRef<dyn ChannelHandler> for PhotonChannel {
     fn as_ref(&self) -> &(dyn ChannelHandler + 'static) {
         self
+    }
+}
+
+impl TryFrom<&crate::channel::Channel> for PhotonChannel {
+    type Error = boson_api::Error;
+
+    fn try_from(channel: &crate::channel::Channel) -> Result<Self> {
+        let contact = PhotonContact::from_channel(channel.as_ref());
+        let mut result = Self::new(
+            contact,
+            *channel.owner(),
+            channel.permission(),
+            channel.notice().map(ToString::to_string),
+            channel.is_announced(),
+        );
+        let members = channel
+            .members()
+            .iter()
+            .map(|member| PhotonChannelMember::new(
+                *member.id(),
+                member.role(),
+                boson_api::as_ms!(member.joined()) as u64,
+            ))
+            .collect();
+        result.set_channel_members(members)?;
+        Ok(result)
     }
 }
 
@@ -276,6 +313,10 @@ impl ContactHandler for PhotonChannel {
 
     fn revision(&self) -> i32 {
         self.contact.revision()
+    }
+
+    fn session_key(&self) -> Option<&[u8]> {
+        self.contact.session_key()
     }
 
     fn edit(&self) -> Box<dyn ContactEditorHandler> {
@@ -398,14 +439,6 @@ impl ChannelEditorHandler for PhotonChannelEditor {
 }
 
 impl PhotonChannelEditor {
-    /// The following are crate-internal (`pub(crate)`) mirrors of the trait
-    /// methods above, plus the fields the Java port only exposes on its
-    /// concrete `ChannelEditor`/`ContactEditor` (not on the public
-    /// `Channel.Editor`/`Contact.Editor` interfaces): owner, session key,
-    /// revision, and the wire-format `patch`. They take and return `Self` by
-    /// value rather than `Box<dyn ChannelEditorHandler>`, so transport code can
-    /// chain both public and internal-only edits before converting back to a
-    /// concrete [`PhotonChannel`] with [`Self::build`], without boxing.
     pub(crate) fn set_owner(mut self, owner: Id) -> Self {
         self.0.owner = owner;
         self
@@ -451,11 +484,6 @@ impl PhotonChannelEditor {
         self
     }
 
-    /// Mirrors Java's `channel.edit().setSessionKey(sessionKey)`: the Java port
-    /// rotates a channel's session key through the base `Contact.Editor`, but
-    /// Rust's `PhotonChannel` only wraps (rather than extends) `PhotonContact`,
-    /// so routing it through the channel editor instead keeps the owner/
-    /// permission/notice/announce/members fields intact across the rebuild.
     pub(crate) fn set_session_key(mut self, session_key: Vec<u8>) -> Self {
         self.0.contact.set_session_key(Some(session_key));
         self
@@ -466,26 +494,22 @@ impl PhotonChannelEditor {
         self
     }
 
-    /// Applies a `CHANNEL_INFO_UPDATE` notification's delta, mirroring Java's
-    /// `ChannelEditor.patch(JsonNode)`.
     pub(crate) fn patch(mut self, changes: &ChannelInfoUpdate) -> Self {
-        if let Some(permission) = changes.get_permission() {
+        if let Some(permission) = changes.permission() {
             self = self.set_permission(permission);
         }
-        if let Some(name) = changes.get_name() {
+        if let Some(name) = changes.name() {
             self = self.set_name(name.map(ToString::to_string));
         }
-        if let Some(notice) = changes.get_notice() {
+        if let Some(notice) = changes.notice() {
             self = self.set_notice(notice.map(ToString::to_string));
         }
-        if let Some(announced) = changes.get_announced() {
-            self = self.set_announce(announced);
+        if let Some(announce) = changes.announce() {
+            self = self.set_announce(announce);
         }
         self
     }
 
-    /// Unboxed counterpart of [`ChannelEditorHandler::build`]: returns the
-    /// concrete [`PhotonChannel`] directly instead of `Box<dyn ChannelHandler>`.
     pub(crate) fn build(self) -> PhotonChannel {
         self.0
     }

@@ -254,6 +254,21 @@ impl PhotonContact {
     }
 }
 
+impl PhotonContact {
+    pub(crate) fn from_channel(channel: &dyn crate::ChannelHandler) -> Self {
+        let mut contact = Self::new(*channel.id(), ContactType::Channel, channel.created_at());
+        contact.session_key = channel.session_key().map(|key| key.to_vec());
+        contact.name = channel.name().map(ToString::to_string);
+        contact.remark = channel.remark().map(ToString::to_string);
+        contact.tags = channel.tags().map(ToString::to_string);
+        contact.muted = channel.is_muted();
+        contact.blocked = channel.is_blocked();
+        contact.revision = channel.revision();
+        contact.updated_at = channel.updated_at();
+        contact
+    }
+}
+
 impl ContactHandler for PhotonContact {
     fn id(&self) -> &Id {
         &self.id

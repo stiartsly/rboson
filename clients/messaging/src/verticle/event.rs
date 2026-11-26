@@ -73,7 +73,7 @@ pub(crate) enum Event {
     TransferChannelOwnership(Body<(Id, Id), ()>),
     RotateChannelSessionKey(Body<(Id, Option<Vec<u8>>), ()>),
 
-    UpdateChannelInfo(Body<Channel, ()>),
+    UpdateChannelInfo(Body<PhotonChannel, ()>),
     SetChannelMembersRole(Body<(Id, ChannelMembersRole), ()>),
     BanChannelMembers(Body<(Id, Vec<Id>), ()>),
     UnbanChannelMembers(Body<(Id, Vec<Id>), ()>),

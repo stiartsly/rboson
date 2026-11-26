@@ -229,23 +229,20 @@ impl PhotonMessage {
         self.version
     }
 
-    pub(crate) fn created_at_u64(&self) -> i64 {
+    pub(crate) fn created_ms(&self) -> i64 {
         self.created_at
     }
 
-    pub(crate) fn sent_at_u64(&self) -> Option<i64> {
+    pub(crate) fn sent_ms(&self) -> Option<i64> {
         self.sent_at
     }
 
-    pub(crate) fn received_at_u64(&self) -> Option<i64> {
+    pub(crate) fn received_ms(&self) -> Option<i64> {
         self.received_at
     }
 
-    pub(crate) fn serialize(&self) -> boson_api::Result<Vec<u8>> {
-        serde_cbor::to_vec(self)
-            .map_err(|error| EncodingError::new(
-                format!("Serializing photon message failed: {error}")
-            ).into())
+    pub(crate) fn serialize(&self) -> Vec<u8> {
+        serde_cbor::to_vec(self).expect("Serializing user PhotonMessage failed")
     }
 }
 

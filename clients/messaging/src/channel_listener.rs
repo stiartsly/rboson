@@ -88,7 +88,7 @@ pub trait ChannelListener: Send + Sync {
     ) {}
 
     /// Called when member roles were updated.
-    fn on_channel_members_role_updated(
+    fn on_channel_members_role_changed(
         &self,
         _channel: &Channel,
         _members: &[ChannelMember],

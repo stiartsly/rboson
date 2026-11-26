@@ -18,10 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{
-    path::Path,
-    slice,
-};
+use std::path::Path;
 
 mod sqlite;
 mod dialect;
@@ -46,7 +43,7 @@ pub(crate) trait MessagingStore {
 
     fn get_friend_request(&mut self, user_id: &Id) -> Result<Option<RecordFriendRequest>>;
     fn get_friend_requests(&mut self) -> Result<Vec<RecordFriendRequest>>;
-    fn put_friend_request(&mut self, request: &RecordFriendRequest) -> Result<()>;
+    fn put_friend_request(&mut self, request: RecordFriendRequest) -> Result<()>;
     fn remove_friend_request(&mut self, user_id: &Id) -> Result<bool>;
     fn remove_friend_requests(&mut self, user_ids: &[Id]) -> Result<bool>;
     fn clear_friend_requests(&mut self) -> Result<()>;
@@ -55,9 +52,9 @@ pub(crate) trait MessagingStore {
     fn get_contacts(&mut self, contact_ids: &[Id]) -> Result<Vec<RecordContact>>;
     fn get_all_contacts(&mut self) -> Result<Vec<RecordContact>>;
     fn exists_contact(&mut self, contact_id: &Id) -> Result<bool>;
-    fn put_contact(&mut self, revision: i32, contact: &RecordContact) -> Result<()>;
-    fn put_contacts(&mut self, revision: i32, contacts: &[RecordContact]) -> Result<()>;
-    fn put_contact_locally(&mut self, contact: &RecordContact) -> Result<()>;
+    fn put_contact(&mut self, revision: i32, contact: RecordContact) -> Result<()>;
+    fn put_contacts(&mut self, revision: i32, contacts: Vec<RecordContact>) -> Result<()>;
+    fn put_contact_locally(&mut self, contact: RecordContact) -> Result<()>;
     fn remove_contact_locally(&mut self, contact_id: &Id) -> Result<bool>;
     fn remove_contact(&mut self, revision: i32, contact_id: &Id) -> Result<bool>;
     fn remove_contacts(&mut self, revision: i32, contact_ids: &[Id]) -> Result<bool>;
@@ -72,14 +69,14 @@ pub(crate) trait MessagingStore {
     fn put_channel_member(
         &mut self,
         channel_id: &Id,
-        member: &RecordChannelMember
+        member: RecordChannelMember
     ) -> Result<()> {
-        self.put_channel_members(channel_id, slice::from_ref(member))
+        self.put_channel_members(channel_id, vec![member])
     }
     fn put_channel_members(
         &mut self,
         channel_id: &Id,
-        members: &[RecordChannelMember],
+        members: Vec<RecordChannelMember>,
     ) -> Result<()>;
     fn refill_channel_members(
         &mut self,
@@ -134,7 +131,7 @@ pub(crate) trait MessagingStore {
         conversation_ids: &[Id]
     ) -> Result<bool>;
 
-    fn put_message(&mut self, message: &RecordMessage) -> Result<i64>;
+    fn put_message(&mut self, message: RecordMessage) -> Result<i64>;
     fn update_message_sent_time(
         &mut self,
         message_id: &Id,

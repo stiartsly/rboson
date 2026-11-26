@@ -262,7 +262,7 @@ fn upsert_revision(conn: &mut SqliteConnection, revision: i32) -> diesel::result
 
 fn put_contact_row(
     conn: &mut SqliteConnection,
-    contact: &RecordContact,
+    contact: RecordContact,
 ) -> diesel::result::QueryResult<()> {
     sql_query(UPSERT_CONTACT)
     .bind::<Binary, _>(&contact.id)
@@ -399,7 +399,7 @@ impl MessagingStore for SqliteStore {
         Ok(row.map(|row| row.revision).unwrap_or(0))
     }
 
-    fn put_contact(&mut self, revision: i32, contact: &RecordContact) -> Result<()> {
+    fn put_contact(&mut self, revision: i32, contact: RecordContact) -> Result<()> {
         let conn = self.conn()?;
         conn.transaction::<_, diesel::result::Error, _>(|conn| {
             put_contact_row(conn, contact)?;
@@ -409,7 +409,7 @@ impl MessagingStore for SqliteStore {
         .map_err(db_err)
     }
 
-    fn put_contacts(&mut self, revision: i32, contacts: &[RecordContact]) -> Result<()> {
+    fn put_contacts(&mut self, revision: i32, contacts: Vec<RecordContact>) -> Result<()> {
         let conn = self.conn()?;
         conn.transaction::<_, diesel::result::Error, _>(|conn| {
             for contact in contacts {
@@ -421,7 +421,7 @@ impl MessagingStore for SqliteStore {
         .map_err(db_err)
     }
 
-    fn put_contact_locally(&mut self, contact: &RecordContact) -> Result<()> {
+    fn put_contact_locally(&mut self, contact: RecordContact) -> Result<()> {
         let conn = self.conn()?;
         conn.transaction::<_, diesel::result::Error, _>(|conn|
             put_contact_row(conn, contact)
@@ -512,7 +512,7 @@ impl MessagingStore for SqliteStore {
         Ok(row.exists != 0)
     }
 
-    fn put_friend_request(&mut self, request: &RecordFriendRequest) -> Result<()> {
+    fn put_friend_request(&mut self, request: RecordFriendRequest) -> Result<()> {
         let conn = self.conn()?;
         conn.transaction::<_, diesel::result::Error, _>(|conn| {
             sql_query(UPSERT_FRIEND_REQUEST)
@@ -559,7 +559,7 @@ impl MessagingStore for SqliteStore {
     fn put_channel_members(
         &mut self,
         channel_id: &Id,
-        members: &[RecordChannelMember],
+        members: Vec<RecordChannelMember>,
     ) -> Result<()> {
         if members.is_empty() {
             return Ok(());
@@ -752,7 +752,7 @@ impl MessagingStore for SqliteStore {
         Ok(rows)
     }
 
-    fn put_message(&mut self, message: &RecordMessage) -> Result<i64> {
+    fn put_message(&mut self, message: RecordMessage) -> Result<i64> {
         let conn = self.conn()?;
         conn.transaction::<_, diesel::result::Error, _>(|conn| {
             let row = sql_query(INSERT_MESSAGE)

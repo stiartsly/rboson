@@ -32,8 +32,8 @@ use boson_api::{
     CryptoIdentity,
 };
 use crate::{
-    channel::{self, ChannelMember, Permission},
-    contact::{Contact, ContactType},
+    channel::ChannelMember,
+    contact::ContactType,
     FriendRequestHandler,
     ChannelHandler,
     ChannelMemberHandler,
@@ -148,8 +148,74 @@ impl MessagingRepository {
         self.store.is_open()
     }
 
-    pub(crate) fn contacts_revision(&mut self) -> Result<i32> {
-        self.store.get_contacts_revision()
+    pub(crate) fn put_message(&mut self, message: &mut PhotonMessage) -> Result<()> {
+        let record: RecordMessage = RecordMessage::from(&*message);
+        let result = self.store.put_message(record)
+            .map_err(|e| DBError::new(format!("Put message failed {e}")))?;
+
+        message.set_rid(result);
+        Ok(())
+    }
+
+    pub(crate) fn update_message_sent_time(&mut self, message: &PhotonMessage) -> Result<()> {
+        self.store.update_message_sent_time(
+            message.id(),
+            message.sent_ms().unwrap_or(0)
+        )
+    }
+
+    pub(crate) fn messages_before(
+        &mut self,
+        conversation_id: &Id,
+        until: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<PhotonMessage>> {
+        Ok(self.store
+            .get_messages_before(conversation_id, until, limit, offset)?
+            .into_iter()
+            .map(|record| {
+                let message: PhotonMessage = record.into();
+                message
+            })
+            .collect())
+    }
+
+    pub(crate) fn messages_in_range(
+        &mut self,
+        conversation_id: &Id,
+        begin: i64,
+        end: i64,
+    ) -> Result<Vec<PhotonMessage>> {
+        Ok(self.store
+            .get_messages_in_range(conversation_id, begin, end)?
+            .into_iter()
+            .map(|record| {
+                let message: PhotonMessage = record.into();
+                message
+            })
+            .collect())
+    }
+
+    pub(crate) fn remove_message(&mut self, rid: i64) -> Result<bool> {
+        self.store.remove_message(rid)
+    }
+
+    pub(crate) fn remove_messages(&mut self, rids: &[i64]) -> Result<bool> {
+        self.store.remove_messages(rids)
+    }
+
+    pub(crate) fn remove_messages_in_conversation(&mut self, conversation_id: &Id) -> Result<bool> {
+        self.remove_messages_by_conversation(conversation_id)
+    }
+
+    pub(crate) fn remove_messages_by_conversation(&mut self, conversation_id: &Id) -> Result<bool> {
+        self.conversations.lock().unwrap().remove(conversation_id);
+        self.store.remove_messages_by_conversation(conversation_id)
+    }
+
+    pub(crate) fn clear_messages(&mut self) -> Result<()> {
+        self.store.clear_messages()
     }
 
     pub(crate) fn load_friend_request(&mut self, user_id: &Id) -> Result<Option<PhotonFriendRequest>> {
@@ -167,7 +233,7 @@ impl MessagingRepository {
     }
 
     pub(crate) fn put_friend_request(&mut self, request: &PhotonFriendRequest) -> Result<()> {
-        self.store.put_friend_request(&request.into())
+        self.store.put_friend_request(RecordFriendRequest::from(request))
     }
 
     pub(crate) fn remove_friend_request(&mut self, user_id: &Id) -> Result<bool> {
@@ -176,6 +242,10 @@ impl MessagingRepository {
 
     pub(crate) fn clear_friend_requests(&mut self) -> Result<()> {
         self.store.clear_friend_requests()
+    }
+
+    pub(crate) fn contacts_revision(&mut self) -> Result<i32> {
+        self.store.get_contacts_revision()
     }
 
     pub(crate) fn load_contact(&mut self, contact_id: &Id) -> Result<Option<PhotonContact>> {
@@ -208,7 +278,7 @@ impl MessagingRepository {
     ) -> Result<()> {
         let mut record: RecordContact = contact.into();
         record.session_key = session_key.map(ToOwned::to_owned);
-        self.store.put_contact(revision, &record)
+        self.store.put_contact(revision, record)
     }
 
     pub(crate) fn put_contact_locally(
@@ -218,7 +288,7 @@ impl MessagingRepository {
     ) -> Result<()> {
         let mut record: RecordContact = contact.into();
         record.session_key = session_key.map(ToOwned::to_owned);
-        self.store.put_contact_locally(&record)
+        self.store.put_contact_locally(record)
     }
 
     pub(crate) fn remove_contact(&mut self, revision: i32, contact_id: &Id) -> Result<bool> {
@@ -260,41 +330,71 @@ impl MessagingRepository {
         Ok(channels)
     }
 
-    pub(crate) fn store_channel(
+    pub(crate) fn put_channel(
         &mut self,
         revision: i32,
-        channel: &PhotonChannel,
-        session_key: &[u8],
+        channel: &PhotonChannel
     ) -> Result<()> {
-        let (mut record_contact, record_members): (RecordContact, Vec<RecordChannelMember>) = channel.try_into()?;
-        record_contact.session_key = Some(session_key.to_vec());
-        self.store.put_contact(revision, &record_contact)?;
-        self.store.refill_channel_members(&channel.contact().id, &record_members)
-    }
-
-    pub(crate) fn put_channel(&mut self, channel: &PhotonChannel) -> Result<()> {
-        let revision = self.store.get_contacts_revision()?;
         let (record_contact, record_members): (RecordContact, Vec<RecordChannelMember>) = channel.try_into()?;
-        self.store.put_contact(revision, &record_contact)?;
+        self.store.put_contact(revision, record_contact)?;
         self.store.refill_channel_members(&channel.contact().id, &record_members)?;
         Ok(())
     }
 
-    pub(crate) fn remove_channel(&mut self, channel_id: &Id) -> Result<()> {
-        let revision = self.store.get_contacts_revision()?;
+    pub(crate) fn put_channel_locally(
+        &mut self,
+        channel: &PhotonChannel
+    ) -> Result<()> {
+        let (record_contact, record_members): (RecordContact, Vec<RecordChannelMember>) = channel.try_into()?;
+        self.store.put_contact_locally(record_contact)?;
+        self.store.refill_channel_members(&channel.contact().id, &record_members)?;
+        Ok(())
+    }
+
+    pub(crate) fn remove_channel(
+        &mut self,
+        revision: i32,
+        channel_id: &Id
+    ) -> Result<()> {
         self.remove_contact(revision, channel_id).map(|_| ())
     }
 
-    pub(crate) fn remove_channels(&mut self) -> Result<()> {
+    pub(crate) fn remove_channel_locally(&mut self, channel_id: &Id) -> Result<()> {
+        self.store.remove_contact_locally(channel_id).map(|_| ())
+    }
+
+    pub(crate) fn remove_channels(&mut self, revision: i32) -> Result<()> {
         let ids = self
             .stored_channels()?
             .into_iter()
             .map(|channel| channel.id)
             .collect::<Vec<_>>();
         for id in &ids {
-            self.remove_channel(id)?;
+            self.remove_channel(revision, id)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn load_channel_members(
+        &mut self,
+        channel_id: &Id,
+        member_ids: &[Id],
+    ) -> Result<Vec<PhotonChannelMember>> {
+        Ok(self.store
+            .get_channel_members(channel_id, member_ids)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    pub(crate) fn load_channel_member(
+        &mut self,
+        channel_id: &Id,
+        member_id: &Id,
+    ) -> Result<Option<PhotonChannelMember>> {
+        Ok(self.store
+            .get_channel_member(channel_id, member_id)?
+            .map(Into::into))
     }
 
     pub(crate) fn put_channel_members(
@@ -306,7 +406,7 @@ impl MessagingRepository {
             .iter()
             .map(|member| (member, channel_id).into())
             .collect();
-        self.store.put_channel_members(channel_id, &record)
+        self.store.put_channel_members(channel_id, record)
     }
 
     pub(crate) fn refill_channel_members(
@@ -345,62 +445,6 @@ impl MessagingRepository {
         members: &[Id],
     ) -> Result<bool> {
         self.store.remove_channel_members(channel_id, members)
-    }
-
-    pub(crate) fn put_message(&mut self, message: &mut PhotonMessage) -> Result<()> {
-        let stored = RecordMessage::try_from(&*message)?;
-        message.set_rid(0);
-        message.set_rid(self.store.put_message(&stored)?);
-        Ok(())
-    }
-
-    pub(crate) fn update_message_sent_time(&mut self, message: &PhotonMessage) -> Result<()> {
-        let sent_at = message.sent_at_u64().unwrap_or(0) as i64;
-        self.store.update_message_sent_time(message.id(), sent_at)
-    }
-
-    pub(crate) fn messages_before(
-        &mut self,
-        conversation_id: &Id,
-        until: i64,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Vec<PhotonMessage>> {
-        self.store
-            .get_messages_before(conversation_id, until, limit, offset)?
-            .into_iter()
-            .map(PhotonMessage::try_from)
-            .collect()
-    }
-
-    pub(crate) fn messages_in_range(
-        &mut self,
-        conversation_id: &Id,
-        begin: i64,
-        end: i64,
-    ) -> Result<Vec<PhotonMessage>> {
-        self.store
-            .get_messages_in_range(conversation_id, begin, end)?
-            .into_iter()
-            .map(PhotonMessage::try_from)
-            .collect()
-    }
-
-    pub(crate) fn remove_message(&mut self, rid: i64) -> Result<bool> {
-        self.store.remove_message(rid)
-    }
-
-    pub(crate) fn remove_messages(&mut self, rids: &[i64]) -> Result<bool> {
-        self.store.remove_messages(rids)
-    }
-
-    pub(crate) fn remove_messages_in_conversation(&mut self, conversation_id: &Id) -> Result<bool> {
-        self.conversations.lock().unwrap().remove(conversation_id);
-        self.store.remove_messages_by_conversation(conversation_id)
-    }
-
-    pub(crate) fn clear_messages(&mut self) -> Result<()> {
-        self.store.clear_messages()
     }
 
     pub(crate) fn put_conversation(&mut self, conversation: PhotonConversation) -> Result<()> {
@@ -633,14 +677,12 @@ impl TryFrom<&PhotonChannel> for (RecordContact, Vec<RecordChannelMember>) {
     }
 }
 
-impl TryFrom<&PhotonMessage> for RecordMessage {
-    type Error = boson_api::Error;
-
-    fn try_from(message: &PhotonMessage) -> Result<Self> {
+impl From<&PhotonMessage> for RecordMessage {
+    fn from(message: &PhotonMessage) -> Self {
         let payload = if !message.payload_bytes.is_empty() {
             Some(message.payload_bytes.clone())
         } else if let Some(content) = &message.content {
-            Some(content.serialize()?)
+            Some(content.serialize().unwrap())
         } else {
             None
         };
@@ -657,11 +699,11 @@ impl TryFrom<&PhotonMessage> for RecordMessage {
         let conversation_id = message
             .conversation_id()
             .copied()
-            .ok_or_else(|| StateError::new("Message has no conversation id"))?;
-        let created_at = message.created_at_u64();
-        let sent_at = message.sent_at_u64();
-        let received_at = message.received_at_u64().unwrap_or(0);
-        Ok(Self {
+            .unwrap();
+        let created_at = message.created_ms();
+        let sent_at = message.sent_ms();
+        let received_at = message.received_ms().unwrap_or(0);
+        Self {
             rid: message.rid(),
             id: message.id().as_bytes().to_vec(),
             conversation_id: conversation_id.as_bytes().to_vec(),
@@ -669,46 +711,36 @@ impl TryFrom<&PhotonMessage> for RecordMessage {
             recipient: message.recipient().as_bytes().to_vec(),
             message_type: message.message_type() as i32,
             from_id: message.from().map(|id| id.as_bytes().to_vec()),
-            created_at: i64::try_from(created_at)
-                .map_err(|_| StateError::new("Message timestamp is out of range"))?,
+            created_at: created_at,
             content_type,
             content_disposition,
             payload,
-            sent_at: sent_at
-                .map(|timestamp| i64::try_from(timestamp)
-                    .map_err(|_| StateError::new("Sent timestamp is out of range")))
-                .transpose()?
-                .unwrap_or(0),
-            received_at: i64::try_from(received_at)
-                .map_err(|_| StateError::new("Received timestamp is out of range"))?,
-        })
+            sent_at: sent_at.unwrap_or(0),
+            received_at,
+        }
     }
 }
 
-impl TryFrom<RecordMessage> for PhotonMessage {
-    type Error = boson_api::Error;
-
-    fn try_from(stored: RecordMessage) -> Result<Self> {
-        let payload = stored.payload.unwrap_or_default();
-        let version = u8::try_from(stored.version)
-            .map_err(|_| StateError::new("Invalid message version"))?;
+impl From<RecordMessage> for PhotonMessage {
+    fn from(record: RecordMessage) -> Self {
+        let payload = record.payload.unwrap_or_default();
         let mut message = PhotonMessage::restore(
-            stored.rid,
-            Some(identifier(&stored.conversation_id)),
-            version as i32,
-            identifier(&stored.id),
-            identifier(&stored.recipient),
-            MessageType::try_from(stored.message_type)?,
-            stored.from_id.as_deref().map(identifier),
-            stored.created_at,
+            record.rid,
+            Some(identifier(&record.conversation_id)),
+            record.version,
+            identifier(&record.id),
+            identifier(&record.recipient),
+            MessageType::try_from(record.message_type).unwrap(),
+            record.from_id.as_deref().map(identifier),
+            record.created_at,
             serde_cbor::Value::Bytes(payload.clone()),
-            stored.sent_at,
-            stored.received_at,
-        )?;
+            record.sent_at,
+            record.received_at,
+        ).unwrap();
         message.payload_bytes = payload;
         if !message.payload_bytes.is_empty() {
-            message.content = Some(PhotonContent::parse(&message.payload_bytes)?);
+            message.content = Some(PhotonContent::parse(&message.payload_bytes).unwrap());
         }
-        Ok(message)
+        message
     }
 }

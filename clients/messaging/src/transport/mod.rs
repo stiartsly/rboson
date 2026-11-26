@@ -144,6 +144,10 @@ impl RpcServer {
         self.options.peer_id()
     }
 
+    fn advance_contacts_revision(&self, revision: i32) {
+        self.contacts_revision.set(revision);
+    }
+
     pub(crate) fn session_context_for(&self, from: &Id) -> Option<SessionContext> {
         self.session_contexts.lock().unwrap().get(from).cloned()
     }
@@ -157,17 +161,19 @@ impl RpcServer {
         Ok(())
     }
 
+
     pub(crate) fn get_channel(&self, id: &Id) -> Option<PhotonChannel> {
         self.repository.borrow_mut().load_channel(id).ok().flatten()
     }
 
     pub(crate) fn put_channel(&self, channel: &PhotonChannel) -> Result<()> {
         let _ = self.persisted_session_key(channel.id())?;
-        self.repository.borrow_mut().put_channel(channel)
+        let revision = self.contacts_revision.get();
+        self.repository.borrow_mut().put_channel(revision, channel)
     }
 
     pub(crate) async fn remove_channel(&self, channel_id: &Id) {
-        if let Err(error) = self.repository.borrow_mut().remove_channel(channel_id) {
+        if let Err(error) = self.repository.borrow_mut().remove_channel_locally(channel_id) {
             warn!("Failed to remove channel {channel_id}: {error}");
         }
         self.session_contexts.lock().unwrap().remove(channel_id);
@@ -181,13 +187,13 @@ impl RpcServer {
         {
             warn!("Failed to remove contact {contact_id}: {error}");
         }
-        self.repository.borrow_mut().remove_channel(contact_id).ok();
+        self.repository.borrow_mut().remove_channel_locally(contact_id).ok();
         self.session_contexts.lock().unwrap().remove(contact_id);
         self.blocked_contacts.lock().unwrap().remove(contact_id);
     }
 
     pub(crate) async fn remove_channels(&self) {
-        if let Err(error) = self.repository.borrow_mut().remove_channels() {
+        if let Err(error) = self.repository.borrow_mut().remove_channels(self.contacts_revision.get()) {
             warn!("Failed to remove channels: {error}");
         }
     }
